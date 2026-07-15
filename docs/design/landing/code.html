@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>UniLearn.ai - Grounded Intelligence for Academic Excellence</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;family=Source+Serif+4:wght@400;600;700&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+                "primary-fixed": "#e3dfff",
+                "on-error-container": "#ffdad6",
+                "on-surface": "#e2e2e8",
+                "on-primary-fixed": "#130166",
+                "on-secondary-fixed": "#0f0069",
+                "primary": "#c5c0ff",
+                "inverse-on-surface": "#2f3035",
+                "surface-container-high": "#282a2e",
+                "inverse-surface": "#e2e2e8",
+                "secondary": "#c3c0ff",
+                "surface-container-highest": "#333539",
+                "on-secondary": "#1d00a5",
+                "surface-variant": "#333539",
+                "on-secondary-container": "#b3b1ff",
+                "tertiary-fixed": "#c9e6ff",
+                "on-secondary-fixed-variant": "#3323cc",
+                "surface-bright": "#37393e",
+                "on-error": "#690005",
+                "tertiary-container": "#003954",
+                "on-surface-variant": "#c8c4d3",
+                "primary-fixed-dim": "#c5c0ff",
+                "surface-container": "#1e2024",
+                "tertiary-fixed-dim": "#89ceff",
+                "secondary-fixed": "#e2dfff",
+                "tertiary": "#89ceff",
+                "inverse-primary": "#5953aa",
+                "surface-tint": "#c5c0ff",
+                "outline": "#928f9d",
+                "error-container": "#93000a",
+                "secondary-fixed-dim": "#c3c0ff",
+                "outline-variant": "#474551",
+                "background": "#111318",
+                "primary-container": "#2f277e",
+                "surface-container-lowest": "#0c0e12",
+                "on-primary": "#2a2179",
+                "on-tertiary-fixed-variant": "#004c6e",
+                "secondary-container": "#3626ce",
+                "surface": "#111318",
+                "on-tertiary": "#00344d",
+                "on-background": "#e2e2e8",
+                "surface-dim": "#111318",
+                "surface-container-low": "#1a1c20",
+                "on-primary-fixed-variant": "#413a91",
+                "on-primary-container": "#9993f0",
+                "error": "#ffb4ab",
+                "on-tertiary-fixed": "#001e2f",
+                "on-tertiary-container": "#17a8ec"
+        },
+        "borderRadius": {
+                "DEFAULT": "0.125rem",
+                "lg": "0.25rem",
+                "xl": "0.5rem",
+                "full": "0.75rem"
+        },
+        "spacing": {
+                "md": "24px",
+                "xs": "8px",
+                "base": "4px",
+                "lg": "40px",
+                "xl": "64px",
+                "margin-desktop": "48px",
+                "gutter": "24px",
+                "margin-mobile": "16px",
+                "sm": "16px"
+        },
+        "fontFamily": {
+                "label-sm": [
+                        "JetBrains Mono"
+                ],
+                "display-lg": [
+                        "\"Source Serif 4\""
+                ],
+                "label-md": [
+                        "JetBrains Mono"
+                ],
+                "headline-lg": [
+                        "\"Source Serif 4\""
+                ],
+                "headline-md": [
+                        "\"Source Serif 4\""
+                ],
+                "body-lg": [
+                        "Inter"
+                ],
+                "headline-lg-mobile": [
+                        "\"Source Serif 4\""
+                ],
+                "body-md": [
+                        "Inter"
+                ]
+        },
+        "fontSize": {
+                "label-sm": [
+                        "12px",
+                        {
+                                "lineHeight": "16px",
+                                "letterSpacing": "0.05em",
+                                "fontWeight": "500"
+                        }
+                ],
+                "display-lg": [
+                        "48px",
+                        {
+                                "lineHeight": "56px",
+                                "letterSpacing": "-0.02em",
+                                "fontWeight": "700"
+                        }
+                ],
+                "label-md": [
+                        "14px",
+                        {
+                                "lineHeight": "20px",
+                                "letterSpacing": "0.05em",
+                                "fontWeight": "500"
+                        }
+                ],
+                "headline-lg": [
+                        "32px",
+                        {
+                                "lineHeight": "40px",
+                                "fontWeight": "600"
+                        }
+                ],
+                "headline-md": [
+                        "24px",
+                        {
+                                "lineHeight": "32px",
+                                "fontWeight": "600"
+                        }
+                ],
+                "body-lg": [
+                        "18px",
+                        {
+                                "lineHeight": "28px",
+                                "fontWeight": "400"
+                        }
+                ],
+                "headline-lg-mobile": [
+                        "24px",
+                        {
+                                "lineHeight": "32px",
+                                "fontWeight": "600"
+                        }
+                ],
+                "body-md": [
+                        "16px",
+                        {
+                                "lineHeight": "24px",
+                                "fontWeight": "400"
+                        }
+                ]
+        }
+},
+    },
+  }
+</script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md antialiased min-h-screen flex flex-col">
+<!-- TopNavBar (Shared Component) -->
+<nav class="bg-surface-container-lowest dark:bg-surface-container-lowest border-b border-outline-variant dark:border-outline-variant fixed top-0 w-full z-50">
+<div class="flex justify-between items-center px-lg py-sm max-w-[1440px] mx-auto">
+<div class="font-headline-lg text-headline-lg font-bold text-primary dark:text-primary-fixed">
+                UniLearn.ai
+            </div>
+<div class="hidden md:flex gap-lg items-center">
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:text-secondary dark:hover:text-secondary-container transition-colors cursor-pointer active:opacity-80 font-body-md text-body-md" href="#">Dashboard</a>
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:text-secondary dark:hover:text-secondary-container transition-colors cursor-pointer active:opacity-80 font-body-md text-body-md" href="#">Subjects</a>
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:text-secondary dark:hover:text-secondary-container transition-colors cursor-pointer active:opacity-80 font-body-md text-body-md" href="#">Analytics</a>
+</div>
+<div class="flex items-center gap-sm">
+<button class="text-primary dark:text-primary-fixed hover:text-secondary transition-colors cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+<button class="text-primary dark:text-primary-fixed hover:text-secondary transition-colors cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined" data-icon="help_outline">help_outline</span>
+</button>
+<img alt="Student Profile Avatar" class="w-8 h-8 rounded-full border border-outline-variant object-cover" data-alt="A clean, professional minimalist academic avatar for a student profile." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBNyO8Qu3Eldrrgc7daN9HcI7nKO3tvoKljfNPrDnr1UjxhqrvaANM_YzWLVXKOeDVCJ_iW1iVuK9ZT6fihaG87ASVVT5oO4b8RERSCFgQR69rycYNsH4R633bIuo62tqFtLzMFjyHPD4M0fVfMm7ot346girZqHKUvOKm0ZYnN7EJ-QfTHq8bHReBUyh2Hvq-WeXMb2R_ZSYvPrd3gLVdYo7dBsgoRmu5rdwMBc0ug_wfdr9q677LHpQ"/>
+</div>
+</div>
+</nav>
+<!-- Main Content Canvas -->
+<main class="flex-grow pt-[80px]"> <!-- pt offsets fixed nav -->
+<!-- Hero Section -->
+<section class="max-w-[1440px] mx-auto px-lg py-[48px] md:py-[120px] flex flex-col md:flex-row items-center gap-[48px]">
+<div class="flex-1 space-y-md">
+<div class="inline-flex items-center gap-xs px-sm py-base bg-surface-container-high rounded-full border border-outline-variant">
+<span class="material-symbols-outlined text-[16px] text-secondary" data-icon="school">school</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase">Universitatea Politehnica Timișoara</span>
+</div>
+<h1 class="font-display-lg text-display-lg text-primary">
+                    Grounded Intelligence for Academic Excellence.
+                </h1>
+<p class="font-body-lg text-body-lg text-on-surface-variant max-w-2xl">
+                    The NotebookLM-style platform engineered for UPT. Upload your lecture slides, PDF syllabi, and lab guides to construct a private, authoritative subject knowledge base. Every answer is backed by verifiable citations directly to your uploaded materials.
+                </p>
+<div class="flex flex-col sm:flex-row gap-sm pt-sm">
+<button class="bg-primary-container text-white font-headline-md text-[18px] font-semibold px-lg py-sm rounded hover:opacity-90 transition-opacity">
+                        Get Started
+                    </button>
+<button class="border border-outline bg-surface text-primary font-headline-md text-[18px] font-semibold px-lg py-sm rounded flex items-center justify-center gap-xs hover:bg-surface-container-low transition-colors">
+<span class="material-symbols-outlined" data-icon="play_circle">play_circle</span>
+                        Watch Demo
+                    </button>
+</div>
+</div>
+<div class="flex-1 w-full relative">
+<!-- Academic Bento Grid / Decorative Hero Element -->
+<div class="grid grid-cols-2 gap-md p-md bg-surface-container-lowest border border-outline-variant rounded-xl shadow-sm relative z-10">
+<div class="col-span-2 bg-surface-container-low p-md border border-outline-variant rounded-lg">
+<div class="flex items-center gap-sm mb-sm text-primary">
+<span class="material-symbols-outlined" data-icon="picture_as_pdf">picture_as_pdf</span>
+<span class="font-headline-md text-[20px] font-semibold">Physics_Lab_04.pdf</span>
+</div>
+<p class="font-label-md text-label-md text-on-surface-variant text-sm">Extracting key concepts regarding thermodynamics...</p>
+<div class="h-2 bg-outline-variant rounded mt-sm w-full overflow-hidden">
+<div class="h-full bg-secondary w-2/3"></div>
+</div>
+</div>
+<div class="bg-surface-bright p-md border border-outline-variant rounded-lg flex flex-col items-start gap-xs">
+<span class="material-symbols-outlined text-secondary" data-icon="format_quote">format_quote</span>
+<p class="font-body-md text-[14px] text-on-surface-variant">"The first law establishes the conservation of energy." <span class="text-secondary cursor-pointer hover:underline">[1]</span></p>
+</div>
+<div class="bg-surface-bright p-md border border-outline-variant rounded-lg flex flex-col items-start gap-xs">
+<span class="material-symbols-outlined text-secondary" data-icon="insights">insights</span>
+<span class="font-headline-md text-[20px] font-semibold text-primary">94%</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase">Concept Mastery</span>
+</div>
+</div>
+<div class="absolute -top-xl -right-xl w-64 h-64 bg-surface-container-high rounded-full blur-3xl opacity-50 -z-10"></div>
+<div class="absolute -bottom-xl -left-xl w-48 h-48 bg-primary-container rounded-full blur-3xl opacity-20 -z-10"></div>
+</div>
+</section>
+<!-- Features Section -->
+<section class="bg-surface py-[48px] md:py-[100px] border-t border-outline-variant">
+<div class="max-w-[1440px] mx-auto px-lg">
+<div class="text-center mb-[48px] max-w-3xl mx-auto">
+<h2 class="font-headline-lg text-headline-lg text-primary mb-sm">Rigorous Tools for Complex Studies</h2>
+<p class="font-body-lg text-body-lg text-on-surface-variant">Built on a foundation of structural clarity, avoiding the 'magic' tropes of AI to focus on source-backed analytical power.</p>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-lg">
+<!-- Feature 1 -->
+<div class="bg-surface-container-lowest border border-outline-variant p-lg rounded-xl hover:shadow-[0px_2px_4px_rgba(26,54,93,0.05)] hover:border-secondary transition-all duration-300">
+<div class="w-12 h-12 bg-surface-container-low rounded-lg flex items-center justify-center mb-md text-primary">
+<span class="material-symbols-outlined" data-icon="quick_reference">quick_reference</span>
+</div>
+<h3 class="font-headline-md text-[20px] font-semibold text-primary mb-xs">Grounded Q&amp;A</h3>
+<p class="font-body-md text-[14px] text-on-surface-variant">Every response is strictly bounded by your uploaded documents, eliminating hallucinations with precise inline citations.</p>
+</div>
+<!-- Feature 2 -->
+<div class="bg-surface-container-lowest border border-outline-variant p-lg rounded-xl hover:shadow-[0px_2px_4px_rgba(26,54,93,0.05)] hover:border-secondary transition-all duration-300">
+<div class="w-12 h-12 bg-surface-container-low rounded-lg flex items-center justify-center mb-md text-primary">
+<span class="material-symbols-outlined" data-icon="source">source</span>
+</div>
+<h3 class="font-headline-md text-[20px] font-semibold text-primary mb-xs">Source Tiers</h3>
+<p class="font-body-md text-[14px] text-on-surface-variant">Organize materials by hierarchical importance: prioritize Professor Slides over supplementary textbook chapters.</p>
+</div>
+<!-- Feature 3 -->
+<div class="bg-surface-container-lowest border border-outline-variant p-lg rounded-xl hover:shadow-[0px_2px_4px_rgba(26,54,93,0.05)] hover:border-secondary transition-all duration-300">
+<div class="w-12 h-12 bg-surface-container-low rounded-lg flex items-center justify-center mb-md text-primary">
+<span class="material-symbols-outlined" data-icon="quiz">quiz</span>
+</div>
+<h3 class="font-headline-md text-[20px] font-semibold text-primary mb-xs">Mock Test Generator</h3>
+<p class="font-body-md text-[14px] text-on-surface-variant">Automatically construct rigorous practice exams based exclusively on the syllabus and emphasized lecture topics.</p>
+</div>
+<!-- Feature 4 -->
+<div class="bg-surface-container-lowest border border-outline-variant p-lg rounded-xl hover:shadow-[0px_2px_4px_rgba(26,54,93,0.05)] hover:border-secondary transition-all duration-300">
+<div class="w-12 h-12 bg-surface-container-low rounded-lg flex items-center justify-center mb-md text-primary">
+<span class="material-symbols-outlined" data-icon="monitoring">monitoring</span>
+</div>
+<h3 class="font-headline-md text-[20px] font-semibold text-primary mb-xs">Professor Analytics</h3>
+<p class="font-body-md text-[14px] text-on-surface-variant">For educators: view aggregated, anonymized queries to identify structural gaps in lecture comprehension.</p>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- Footer (Shared Component) -->
+<footer class="w-full py-xl bg-surface-container-highest dark:bg-tertiary-container mt-auto">
+<div class="flex flex-col md:flex-row justify-between items-center px-lg max-w-[1440px] mx-auto gap-md">
+<div class="font-headline-md text-[20px] font-bold text-primary dark:text-primary-fixed">
+                UniLearn.ai
+            </div>
+<div class="font-body-md text-[14px] text-on-surface-variant dark:text-on-tertiary-container text-center md:text-left">
+                © 2024 UniLearn.ai - Universitatea Politehnica Timișoara. Grounded Intelligence for Academic Excellence.
+            </div>
+<div class="flex flex-wrap justify-center gap-md">
+<a class="font-body-md text-[14px] text-on-surface-variant dark:text-on-tertiary-container hover:text-secondary dark:hover:text-secondary-fixed transition-colors cursor-pointer" href="#">Terms of Service</a>
+<a class="font-body-md text-[14px] text-on-surface-variant dark:text-on-tertiary-container hover:text-secondary dark:hover:text-secondary-fixed transition-colors cursor-pointer" href="#">Privacy Policy</a>
+<a class="font-body-md text-[14px] text-on-surface-variant dark:text-on-tertiary-container hover:text-secondary dark:hover:text-secondary-fixed transition-colors cursor-pointer" href="#">Institutional Access</a>
+<a class="font-body-md text-[14px] text-on-surface-variant dark:text-on-tertiary-container hover:text-secondary dark:hover:text-secondary-fixed transition-colors cursor-pointer" href="#">Research Citations</a>
+</div>
+</div>
+</footer>
+</body></html>

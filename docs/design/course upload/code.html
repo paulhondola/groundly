@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Professor Dashboard - UniLearn.ai</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=JetBrains+Mono:wght@400&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+                "primary-fixed": "#e3dfff",
+                "on-error-container": "#ffdad6",
+                "on-surface": "#e2e2e8",
+                "on-primary-fixed": "#130166",
+                "on-secondary-fixed": "#0f0069",
+                "primary": "#c5c0ff",
+                "inverse-on-surface": "#2f3035",
+                "surface-container-high": "#282a2e",
+                "inverse-surface": "#e2e2e8",
+                "secondary": "#c3c0ff",
+                "surface-container-highest": "#333539",
+                "on-secondary": "#1d00a5",
+                "surface-variant": "#333539",
+                "on-secondary-container": "#b3b1ff",
+                "tertiary-fixed": "#c9e6ff",
+                "on-secondary-fixed-variant": "#3323cc",
+                "surface-bright": "#37393e",
+                "on-error": "#690005",
+                "tertiary-container": "#003954",
+                "on-surface-variant": "#c8c4d3",
+                "primary-fixed-dim": "#c5c0ff",
+                "surface-container": "#1e2024",
+                "tertiary-fixed-dim": "#89ceff",
+                "secondary-fixed": "#e2dfff",
+                "tertiary": "#89ceff",
+                "inverse-primary": "#5953aa",
+                "surface-tint": "#c5c0ff",
+                "outline": "#928f9d",
+                "error-container": "#93000a",
+                "secondary-fixed-dim": "#c3c0ff",
+                "outline-variant": "#474551",
+                "background": "#111318",
+                "primary-container": "#2f277e",
+                "surface-container-lowest": "#0c0e12",
+                "on-primary": "#2a2179",
+                "on-tertiary-fixed-variant": "#004c6e",
+                "secondary-container": "#3626ce",
+                "surface": "#111318",
+                "on-tertiary": "#00344d",
+                "on-background": "#e2e2e8",
+                "surface-dim": "#111318",
+                "surface-container-low": "#1a1c20",
+                "on-primary-fixed-variant": "#413a91",
+                "on-primary-container": "#9993f0",
+                "error": "#ffb4ab",
+                "on-tertiary-fixed": "#001e2f",
+                "on-tertiary-container": "#17a8ec"
+        },
+        "borderRadius": {
+                "DEFAULT": "0.125rem",
+                "lg": "0.25rem",
+                "xl": "0.5rem",
+                "full": "0.75rem"
+        },
+        "spacing": {
+                "md": "24px",
+                "xs": "8px",
+                "base": "4px",
+                "lg": "40px",
+                "xl": "64px",
+                "margin-desktop": "48px",
+                "gutter": "24px",
+                "margin-mobile": "16px",
+                "sm": "16px",
+                "container-max": "1440px",
+                "sidebar-width": "280px"
+        },
+        "fontFamily": {
+                "label-sm": [
+                        "JetBrains Mono"
+                ],
+                "display-lg": [
+                        "\"Source Serif 4\""
+                ],
+                "label-md": [
+                        "JetBrains Mono"
+                ],
+                "headline-lg": [
+                        "\"Source Serif 4\""
+                ],
+                "headline-md": [
+                        "\"Source Serif 4\""
+                ],
+                "body-lg": [
+                        "Inter"
+                ],
+                "headline-lg-mobile": [
+                        "\"Source Serif 4\""
+                ],
+                "body-md": [
+                        "Inter"
+                ],
+                "body-sm": ["Inter"],
+                "title-md": ["Inter"],
+                "label-caps": ["Inter"],
+                "code-snippet": ["JetBrains Mono"]
+        },
+        "fontSize": {
+                "label-sm": [
+                        "12px",
+                        {
+                                "lineHeight": "16px",
+                                "letterSpacing": "0.05em",
+                                "fontWeight": "500"
+                        }
+                ],
+                "display-lg": [
+                        "48px",
+                        {
+                                "lineHeight": "56px",
+                                "letterSpacing": "-0.02em",
+                                "fontWeight": "700"
+                        }
+                ],
+                "label-md": [
+                        "14px",
+                        {
+                                "lineHeight": "20px",
+                                "letterSpacing": "0.05em",
+                                "fontWeight": "500"
+                        }
+                ],
+                "headline-lg": [
+                        "32px",
+                        {
+                                "lineHeight": "40px",
+                                "fontWeight": "600"
+                        }
+                ],
+                "headline-md": [
+                        "24px",
+                        {
+                                "lineHeight": "32px",
+                                "fontWeight": "600"
+                        }
+                ],
+                "body-lg": [
+                        "18px",
+                        {
+                                "lineHeight": "28px",
+                                "fontWeight": "400"
+                        }
+                ],
+                "headline-lg-mobile": [
+                        "24px",
+                        {
+                                "lineHeight": "32px",
+                                "fontWeight": "600"
+                        }
+                ],
+                "body-md": [
+                        "16px",
+                        {
+                                "lineHeight": "24px",
+                                "fontWeight": "400"
+                        }
+                ],
+                "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                "title-md": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "700"}],
+                "code-snippet": ["14px", {"lineHeight": "20px", "fontWeight": "400"}]
+        }
+},
+    },
+  }
+</script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .material-symbols-outlined.fill {
+            font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        
+        /* Minimalist Scrollbar for content areas */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #474551;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #928f9d;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface font-body-md min-h-screen flex antialiased">
+<nav class="fixed left-0 top-0 h-full w-sidebar-width border-r border-outline-variant bg-surface flex flex-col p-md gap-sm z-40">
+<div class="flex items-center gap-md px-md py-lg mb-sm">
+<div class="w-12 h-12 rounded-full bg-surface-container-high flex items-center justify-center overflow-hidden border border-outline-variant">
+<span class="material-symbols-outlined text-primary" style="font-size: 24px;">account_balance</span>
+</div>
+<div class="flex flex-col">
+<span class="font-headline-lg text-headline-lg font-bold text-primary" style="font-size: 18px; line-height: 24px; letter-spacing: 0;">Politehnica Timișoara</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Engineering Faculty</span>
+</div>
+</div>
+<button class="w-full bg-primary-container text-on-primary-container font-title-md text-title-md py-sm px-md rounded-xl flex items-center justify-center gap-sm mb-md hover:bg-primary hover:text-on-primary transition-colors border border-outline-variant">
+<span class="material-symbols-outlined">upload</span>
+            Upload Material
+        </button>
+<div class="flex-1 flex flex-col gap-xs font-label-caps text-label-caps">
+<a class="flex items-center gap-md px-md py-sm rounded-xl text-on-surface-variant hover:bg-surface-container-low transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+                Home
+            </a>
+<a class="flex items-center gap-md px-md py-sm rounded-xl text-on-surface-variant hover:bg-surface-container-low transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">auto_stories</span>
+                My Library
+            </a>
+<a class="flex items-center gap-md px-md py-sm rounded-xl text-on-surface-variant hover:bg-surface-container-low transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">quiz</span>
+                Flashcards
+            </a>
+<a class="flex items-center gap-md px-md py-sm rounded-xl bg-surface-container-high text-primary transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined fill">analytics</span>
+                Insights
+            </a>
+<a class="flex items-center gap-md px-md py-sm rounded-xl text-on-surface-variant hover:bg-surface-container-low transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">settings</span>
+                Settings
+            </a>
+</div>
+<div class="mt-auto flex flex-col gap-xs pt-md border-t border-outline-variant font-label-caps text-label-caps">
+<a class="flex items-center gap-md px-md py-sm rounded-xl text-on-surface-variant hover:bg-surface-container-low transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">contact_support</span>
+                Help Center
+            </a>
+<a class="flex items-center gap-md px-md py-sm rounded-xl text-on-surface-variant hover:bg-surface-container-low transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">logout</span>
+                Logout
+            </a>
+</div>
+</nav>
+<main class="flex-1 ml-sidebar-width flex flex-col lg:flex-row h-screen overflow-hidden bg-background">
+<div class="flex-1 overflow-y-auto px-lg py-xl flex flex-col gap-xl">
+<header class="flex flex-col gap-xs mb-md">
+<div class="flex items-center gap-sm text-on-surface-variant font-label-caps text-label-caps">
+<span>CS401</span>
+<span class="w-1 h-1 rounded-full bg-outline"></span>
+<span>Fall Semester</span>
+</div>
+<h1 class="font-display-lg text-display-lg text-on-surface">Introduction to AI</h1>
+<p class="font-body-lg text-body-lg text-on-surface-variant max-w-3xl">Course Analytics &amp; Insights Dashboard. Monitoring student comprehension and content alignment.</p>
+</header>
+<section class="bg-surface-container-low border border-outline-variant rounded-xl p-lg flex flex-col gap-md shadow-sm">
+<div class="flex justify-between items-center border-b border-outline-variant pb-sm">
+<h2 class="font-title-md text-title-md text-on-surface flex items-center gap-sm">
+<span class="material-symbols-outlined text-secondary">donut_large</span>
+                        Material Gap Analysis
+                    </h2>
+<span class="font-body-sm text-body-sm text-on-surface-variant bg-surface-container px-sm py-xs rounded-lg">Syllabus vs. Grounded Corpus</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-x-xl gap-y-md pt-sm">
+<div class="flex flex-col gap-xs">
+<div class="flex justify-between font-body-sm text-body-sm">
+<span class="text-on-surface font-medium">Neural Networks Basics</span>
+<span class="text-on-surface-variant">92% Covered</span>
+</div>
+<div class="h-2 w-full bg-surface-variant rounded-full overflow-hidden flex">
+<div class="h-full bg-secondary w-[92%] rounded-full"></div>
+</div>
+<p class="font-label-caps text-label-caps text-on-surface-variant mt-1 text-right">High Corpus Alignment</p>
+</div>
+<div class="flex flex-col gap-xs">
+<div class="flex justify-between font-body-sm text-body-sm">
+<span class="text-on-surface font-medium">Reinforcement Learning</span>
+<span class="text-on-surface-variant">45% Covered</span>
+</div>
+<div class="h-2 w-full bg-surface-variant rounded-full overflow-hidden flex relative">
+<div class="h-full bg-primary-container w-[85%] rounded-full absolute"></div>
+<div class="h-full bg-secondary w-[45%] rounded-full relative z-10"></div>
+</div>
+<p class="font-label-caps text-label-caps text-error mt-1 text-right flex items-center justify-end gap-1">
+<span class="material-symbols-outlined" style="font-size: 14px;">warning</span> Gap Detected: Corpus has 40% more depth
+                        </p>
+</div>
+<div class="flex flex-col gap-xs">
+<div class="flex justify-between font-body-sm text-body-sm">
+<span class="text-on-surface font-medium">Search Algorithms (A*)</span>
+<span class="text-on-surface-variant">100% Covered</span>
+</div>
+<div class="h-2 w-full bg-surface-variant rounded-full overflow-hidden flex">
+<div class="h-full bg-secondary w-full rounded-full"></div>
+</div>
+</div>
+<div class="flex flex-col gap-xs">
+<div class="flex justify-between font-body-sm text-body-sm">
+<span class="text-on-surface font-medium">Ethical AI Frameworks</span>
+<span class="text-on-surface-variant">20% Covered</span>
+</div>
+<div class="h-2 w-full bg-surface-variant rounded-full overflow-hidden flex relative">
+<div class="h-full bg-primary-container w-[90%] rounded-full absolute"></div>
+<div class="h-full bg-secondary w-[20%] rounded-full relative z-10"></div>
+</div>
+<p class="font-label-caps text-label-caps text-error mt-1 text-right flex items-center justify-end gap-1">
+<span class="material-symbols-outlined" style="font-size: 14px;">warning</span> Gap Detected: Missing crucial citations
+                        </p>
+</div>
+</div>
+</section>
+<section class="flex flex-col gap-md">
+<h2 class="font-title-md text-title-md text-on-surface flex items-center gap-sm">
+<span class="material-symbols-outlined text-secondary">grid_view</span>
+                    Misconception Analytics
+                </h2>
+<div class="grid grid-cols-2 md:grid-cols-4 gap-sm">
+<div class="bg-error-container border border-error rounded-xl p-md flex flex-col justify-between h-32 hover:shadow-sm transition-shadow cursor-pointer relative overflow-hidden">
+<div class="absolute top-0 right-0 w-16 h-16 bg-error opacity-10 rounded-bl-full"></div>
+<span class="font-body-sm text-body-sm text-on-error-container font-medium z-10">Backpropagation Calculus</span>
+<div class="flex items-end justify-between z-10">
+<span class="font-headline-lg text-headline-lg text-on-error-container">68%</span>
+<span class="font-label-caps text-label-caps text-on-error-container">Error Rate</span>
+</div>
+</div>
+<div class="bg-[#3e0002] border border-error rounded-xl p-md flex flex-col justify-between h-32 hover:shadow-sm transition-shadow cursor-pointer">
+<span class="font-body-sm text-body-sm text-[#ffb4ab] font-medium">Markov Decision Processes</span>
+<div class="flex items-end justify-between">
+<span class="font-headline-lg text-headline-lg text-[#ffb4ab]">42%</span>
+<span class="font-label-caps text-label-caps text-[#ffb4ab]">Error Rate</span>
+</div>
+</div>
+<div class="bg-surface-container border border-outline-variant rounded-xl p-md flex flex-col justify-between h-32 hover:shadow-sm transition-shadow cursor-pointer">
+<span class="font-body-sm text-body-sm text-on-surface font-medium">Support Vector Machines</span>
+<div class="flex items-end justify-between">
+<span class="font-headline-lg text-headline-lg text-on-surface">15%</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant">Error Rate</span>
+</div>
+</div>
+<div class="bg-surface border border-outline-variant rounded-xl p-md flex flex-col justify-between h-32 hover:shadow-sm transition-shadow cursor-pointer">
+<span class="font-body-sm text-body-sm text-on-surface font-medium">Decision Trees</span>
+<div class="flex items-end justify-between">
+<span class="font-headline-lg text-headline-lg text-on-surface">5%</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant">Error Rate</span>
+</div>
+</div>
+</div>
+</section>
+<section class="bg-surface-container-low border border-outline-variant rounded-xl flex flex-col overflow-hidden shadow-sm mt-md">
+<div class="p-lg border-b border-outline-variant flex justify-between items-start bg-surface-bright">
+<div class="flex flex-col gap-xs">
+<h2 class="font-title-md text-title-md text-on-surface flex items-center gap-sm">
+<span class="material-symbols-outlined text-secondary">psychology</span>
+                            Question Bank Curation
+                        </h2>
+<p class="font-body-sm text-body-sm text-on-surface-variant">AI-drafted exam questions targeting high-error rate topics (Backpropagation &amp; MDPs).</p>
+</div>
+<button class="bg-surface-container text-primary font-label-caps text-label-caps px-md py-sm rounded-lg hover:bg-surface-container-high transition-colors border border-outline-variant">Generate More</button>
+</div>
+<div class="divide-y divide-outline-variant">
+<div class="p-lg flex flex-col gap-md hover:bg-surface-container transition-colors">
+<div class="flex items-start justify-between gap-md">
+<div class="flex-1 flex flex-col gap-sm">
+<div class="flex gap-2">
+<span class="bg-error-container text-on-error-container font-label-caps text-label-caps px-2 py-1 rounded-md">Hard</span>
+<span class="bg-surface-container-high text-on-surface font-label-caps text-label-caps px-2 py-1 rounded-md">Backpropagation</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface leading-relaxed">
+                                    Explain the vanishing gradient problem in deep feedforward neural networks. Provide a mathematical justification using the chain rule and suggest two architectural modifications to mitigate it.
+                                </p>
+</div>
+<div class="flex flex-col gap-sm min-w-[120px]">
+<button class="w-full bg-primary-container text-on-primary-container font-body-sm text-body-sm py-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors border border-outline-variant">Approve</button>
+<button class="w-full bg-surface border border-outline text-on-surface font-body-sm text-body-sm py-2 rounded-lg hover:bg-surface-container transition-colors">Edit Draft</button>
+</div>
+</div>
+</div>
+<div class="p-lg flex flex-col gap-md hover:bg-surface-container transition-colors">
+<div class="flex items-start justify-between gap-md">
+<div class="flex-1 flex flex-col gap-sm">
+<div class="flex gap-2">
+<span class="bg-[#3e0002] text-[#ffb4ab] font-label-caps text-label-caps px-2 py-1 rounded-md border border-error">Medium</span>
+<span class="bg-surface-container-high text-on-surface font-label-caps text-label-caps px-2 py-1 rounded-md">MDPs</span>
+</div>
+<p class="font-body-md text-body-md text-on-surface leading-relaxed">
+                                    Given a grid world environment with a terminal state, compare and contrast Value Iteration and Policy Iteration. Under what specific conditions might one converge faster than the other?
+                                </p>
+</div>
+<div class="flex flex-col gap-sm min-w-[120px]">
+<button class="w-full bg-primary-container text-on-primary-container font-body-sm text-body-sm py-2 rounded-lg hover:bg-primary hover:text-on-primary transition-colors border border-outline-variant">Approve</button>
+<button class="w-full bg-surface border border-outline text-on-surface font-body-sm text-body-sm py-2 rounded-lg hover:bg-surface-container transition-colors">Edit Draft</button>
+</div>
+</div>
+</div>
+</div>
+</section>
+</div>
+<aside class="w-full lg:w-[360px] border-l border-outline-variant bg-surface flex flex-col h-full shrink-0">
+<div class="p-md border-b border-outline-variant bg-surface-bright sticky top-0 z-10 flex justify-between items-center">
+<h3 class="font-title-md text-title-md text-on-surface flex items-center gap-sm">
+<span class="material-symbols-outlined text-secondary">fact_check</span>
+                    Feedback Queue
+                </h3>
+<span class="bg-primary-container text-on-primary-container font-label-caps text-label-caps px-2 py-1 rounded-full">12 Pending</span>
+</div>
+<div class="flex-1 overflow-y-auto p-md flex flex-col gap-sm">
+<div class="bg-surface-container-low border border-outline-variant rounded-lg p-md flex flex-col gap-sm hover:border-secondary hover:shadow-sm transition-all cursor-pointer group">
+<div class="flex justify-between items-start">
+<div class="flex flex-col">
+<span class="font-body-sm text-body-sm font-semibold text-on-surface">Assignment 3: A* Search Implementation</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant mt-1">Student: Andrei Popescu</span>
+</div>
+<span class="material-symbols-outlined text-outline-variant group-hover:text-secondary transition-colors" style="font-size: 20px;">chevron_right</span>
+</div>
+<div class="flex items-center gap-2 mt-2">
+<span class="flex items-center gap-1 bg-surface-container-high text-primary font-label-caps text-label-caps px-2 py-1 rounded-md">
+<span class="material-symbols-outlined" style="font-size: 12px;">robot_2</span> AI Pre-scored: 85/100
+                        </span>
+<span class="w-2 h-2 rounded-full bg-error ml-auto"></span>
+</div>
+</div>
+<div class="bg-surface-container-low border border-outline-variant rounded-lg p-md flex flex-col gap-sm hover:border-secondary hover:shadow-sm transition-all cursor-pointer group">
+<div class="flex justify-between items-start">
+<div class="flex flex-col">
+<span class="font-body-sm text-body-sm font-semibold text-on-surface">Lab Report: Heuristic Functions</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant mt-1">Student: Maria Ionescu</span>
+</div>
+<span class="material-symbols-outlined text-outline-variant group-hover:text-secondary transition-colors" style="font-size: 20px;">chevron_right</span>
+</div>
+<div class="flex items-center gap-2 mt-2">
+<span class="flex items-center gap-1 bg-surface-container-high text-primary font-label-caps text-label-caps px-2 py-1 rounded-md">
+<span class="material-symbols-outlined" style="font-size: 12px;">robot_2</span> AI Pre-scored: 92/100
+                        </span>
+</div>
+</div>
+<div class="bg-surface-container-low border border-outline-variant rounded-lg p-md flex flex-col gap-sm hover:border-secondary hover:shadow-sm transition-all cursor-pointer group opacity-70">
+<div class="flex justify-between items-start">
+<div class="flex flex-col">
+<span class="font-body-sm text-body-sm font-semibold text-on-surface">Assignment 3: A* Search Implementation</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant mt-1">Student: Ion Vasile</span>
+</div>
+<span class="material-symbols-outlined text-outline-variant group-hover:text-secondary transition-colors" style="font-size: 20px;">chevron_right</span>
+</div>
+<div class="flex items-center gap-2 mt-2">
+<span class="font-label-caps text-label-caps text-on-surface-variant flex items-center gap-1">
+<span class="material-symbols-outlined" style="font-size: 14px;">hourglass_empty</span> Processing AI Rubric...
+                         </span>
+</div>
+</div>
+</div>
+</aside>
+</main>
+</body></html>

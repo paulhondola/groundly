@@ -1,0 +1,22 @@
+:root {
+	--bg: #111318;
+	--surface: #1a1c20;
+	--primary: #c5c0ff;
+	--primary-contrast: #2a2179;
+	--button-primary: #2f277e;
+	--button-primary-hover: #413a91;
+	--secondary: #89ceff;
+	--secondary-contrast: #00344d;
+	--error: #ffb4ab;
+	--success: #6ee7b7;
+	--warning: #fcd34d;
+	--text: #e2e2e8;
+	--text-secondary: #c8c4d3;
+	--divider: #474551;
+
+	--font-body: "Inter", system-ui, sans-serif;
+	--font-heading: "Source Serif 4", Georgia, serif;
+	--font-mono: "JetBrains Mono", monospace;
+	--radius: 4px;
+	--radius-card: 8px;
+}
