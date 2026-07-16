@@ -10,7 +10,7 @@
 - Python ≥3.11; typer CLI; FastAPI only inside `unilearn serve`; Pydantic v2 + pydantic-settings; type hints on public functions.
 - SQLite schema versioned via `PRAGMA user_version` (checked on open; refuse newer-than-known). Integrity rules as constraints where SQLite allows (unique hashes, FKs), not app code.
 - pytest for tests (no service containers — SQLite files + stub providers); ruff for lint + format.
-- Pin `graphrag`, `llama-index`, `docling`, `sentence-transformers` exactly at P1 start; record pins in thesis + export manifest.
+- Pin `graphrag`, `llama-index`, `docling`, `sentence-transformers`, `FlagEmbedding` exactly at P1 start; record pins in thesis + export manifest.
 
 ## Product surfaces
 

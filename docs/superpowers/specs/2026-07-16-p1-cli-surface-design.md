@@ -59,12 +59,14 @@ table: filename, status (`indexed` / `extraction_failed` / …), pages, chunks. 
 
 - **Flags: none.** (No `--json`; agents get MCP, not CLI scraping.)
 
-### `unilearn remove <SUBJECT> <MATERIAL>`
+### `unilearn remove <SUBJECT> [MATERIAL]`
 
 UC-03. `MATERIAL` = filename as shown by `list`. Deletes chunks/vectors/sparse/FTS rows and the
 file under `materials/` in one transaction; manifest counts re-synced. Prints the
 graph-staleness note when a graph exists (harmless no-op until P5).
 
+- `MATERIAL` omitted → removes the **whole subject directory** (materials, index, progress,
+  notes). Runs before any store.db access, so a damaged subject is still removable.
 - `--yes` / `-y` — skip the confirmation prompt (destructive op; only P1 flag besides config's
   arguments).
 - Ambiguous/unknown material name → error listing candidates.

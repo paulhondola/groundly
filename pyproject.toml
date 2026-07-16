@@ -6,9 +6,9 @@ readme = "README.md"
 requires-python = ">=3.11,<3.13"
 license = { file = "LICENSE" }
 
-# Version pinning policy (docs/tech-stack/tech-stack.md): pin EXACT versions of
-# llama-index, graphrag, docling, and sentence-transformers at P1 start and
-# record them in the thesis + manifest. Until P1, floors only.
+# Version pinning policy (docs/tech-stack/tech-stack.md): EXACT pins for the
+# interchange-relevant stack, set at P1 start (2026-07-16). These are recorded in
+# the thesis + every export manifest; upgrades are deliberate events, never tweaks.
 dependencies = [
 	"typer>=0.12",
 	"rich>=13",
@@ -18,13 +18,18 @@ dependencies = [
 	"uvicorn>=0.30",
 	"fastmcp>=2.0",
 	"sqlite-vec>=0.1",
-	"sentence-transformers>=3.0",   # bge-m3 dense + learned sparse
-	"docling>=2.0",                 # NO ocr extras — digital documents only (pivot #3)
-	"llama-index>=0.11",
-	"graphrag>=1.0",
+	"sentence-transformers==5.6.0",
+	"FlagEmbedding==1.3.5",         # bge-m3 dense + learned sparse, one forward pass
+	"docling==2.113.0",             # NO ocr extras — digital documents only (pivot #3)
+	"llama-index==0.14.23",
+	"graphrag==3.1.0",
 	"genanki>=0.13",                # verified decks → .apkg (final review)
 	"httpx>=0.27",
 ]
+
+[tool.uv]
+# FlagEmbedding 1.3.5 predates transformers 5.x (removed is_torch_fx_available)
+constraint-dependencies = ["transformers>=4.51,<5"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5"]
@@ -47,3 +52,5 @@ target-version = "py311"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = ["slow: needs model downloads / real documents; excluded by default, run with -m slow"]
+addopts = "-m 'not slow'"

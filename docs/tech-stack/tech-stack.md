@@ -9,7 +9,7 @@ Expands [`unilearn-spec.md`](../unilearn-spec.md) §4. Every row is a **decision
 | MCP surface | **FastMCP** | stdio + streamable HTTP from one tool set; tools, resources, prompts | — |
 | Storage | **SQLite (WAL) + sqlite-vec + FTS5**, files on disk | Zero services; export = zip; exact KNN at 5k–50k chunks/subject | LanceDB/IVF if a corpus ever outgrows brute force |
 | Document extraction | **Docling, no OCR extras** — digital documents only | Professor decision (pivot #3); layout/table/reading-order on digital PDFs; HybridChunker for structure-aware chunks | none — scanned files fail cleanly |
-| Embeddings | **`bge-m3` local** (sentence-transformers), pinned incl. **hf_revision**; dense + learned sparse from one forward pass | Quality over performance (Paul); RO/EN cross-lingual; the pin is the interchange compatibility contract. Changing it = full re-index migration, never a tweak | ColBERT vectors rejected (~100× storage) |
+| Embeddings | **`bge-m3` local** (FlagEmbedding — sentence-transformers' SparseEncoder does not expose bge-m3's learned-sparse head), pinned incl. **hf_revision**; dense + learned sparse from one forward pass | Quality over performance (Paul); RO/EN cross-lingual; the pin is the interchange compatibility contract. Changing it = full re-index migration, never a tweak | ColBERT vectors rejected (~100× storage) |
 | Rerank | **`bge-reranker-v2-m3`**, default ON | Quality-first; same model family as the embedder | `--no-rerank` for weak hardware |
 | Graph engine | **Microsoft `graphrag`** (batch, per subject, parquet on disk) | Canonical GraphRAG — Leiden + community summaries + local/global search | timeboxed; vector-only operation is first-class |
 | Retrieval orchestration | **LlamaIndex** | One `Retriever` interface across all four evaluation arms — the comparison's fairness depends on it | — |
@@ -47,4 +47,4 @@ Rules that make this real:
 
 ## Version pinning policy
 
-Pin **exact** versions of `graphrag`, `llama-index`, `docling`, and `sentence-transformers` (and bge-m3's hf_revision) at P1 start; record them in the thesis and in every export manifest. The graphrag and embedding pins are **interchange compatibility contracts**, not just hygiene — an import built with different pins is a different experimental condition. Upgrades are deliberate events.
+Pin **exact** versions of `graphrag`, `llama-index`, `docling`, `sentence-transformers`, and `FlagEmbedding` (and bge-m3's hf_revision) at P1 start; record them in the thesis and in every export manifest. Pinned 2026-07-16: `docling==2.113.0`, `llama-index==0.14.23`, `graphrag==3.1.0`, `sentence-transformers==5.6.0`, `FlagEmbedding==1.3.5`, bge-m3 hf_revision `5617a9f61b028005a4858fdac845db406aefb181`. The graphrag and embedding pins are **interchange compatibility contracts**, not just hygiene — an import built with different pins is a different experimental condition. Upgrades are deliberate events.

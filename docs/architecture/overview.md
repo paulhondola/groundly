@@ -8,7 +8,7 @@ There is no server to deploy. The product is a local **core library** with three
 
 ```
 unilearn/
-├── cli/         # typer verbs: init, index, import, export, ask, config, mcp, serve
+├── cli/         # typer verbs: init, index, list, remove, import, export, ask, config, mcp, serve
 ├── mcp/         # FastMCP tool definitions over the core (stdio + streamable HTTP)
 ├── web/         # static mastery dashboard, served by `serve`
 ├── agents/      # ask pipeline (trust layers → gen → citation check); exam verifier gate

@@ -48,7 +48,7 @@ Traces contain every question the student ever asked — which is exactly why th
   "embedding": { "model": "BAAI/bge-m3", "hf_revision": "<pin>", "dim": 1024,
                   "dtype": "float32", "normalized": true },
   "graphrag":  { "version": "<exact pin>", "extraction_model": "<model used>" },
-  "chunking":  { "strategy": "docling-hybrid", "max_tokens": 512, "overlap": 64 },
+  "chunking":  { "strategy": "docling-hybrid", "max_tokens": 512, "overlap": 0 },
   "counts":    { "materials": 0, "chunks": 0 },
   "tool_version": "<unilearn version>"
 }

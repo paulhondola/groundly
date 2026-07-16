@@ -13,6 +13,7 @@ dist/
 
 # User data (never in the repo)
 .unilearn/
+fixtures/
 
 # OS
 .DS_Store

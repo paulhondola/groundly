@@ -1,45 +1,205 @@
-"""CLI skeleton: the P1 command surface exists with the designed grammar.
-
-Bodies are stubs (exit 1) until their phase lands; these tests pin the surface,
-not behavior — see docs/superpowers/specs/2026-07-16-p1-cli-surface-design.md.
-"""
+"""CLI: grammar pinned by the P1 surface design; init/list/remove exercised for real
+against a temp UNILEARN_HOME. Heavy index logic is covered in test_pipeline.py; the
+CLI index test stubs the pipeline entry point."""
 
 import pytest
 from typer.testing import CliRunner
 
 from unilearn.cli import app
+from unilearn.core.paths import subject_dir
+from unilearn.ingestion import pipeline
 
 runner = CliRunner()
 
 
-def test_version_flag() -> None:
+@pytest.fixture(autouse=True)
+def home(monkeypatch, tmp_path):
+    monkeypatch.setenv("UNILEARN_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    return tmp_path / "home"
+
+
+def test_version_flag():
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
     assert result.output.strip() == "0.1.0"
 
 
-def test_no_args_shows_help() -> None:
-    result = runner.invoke(app, [])
-    assert "Usage" in result.output
+def test_no_args_shows_help():
+    assert "Usage" in runner.invoke(app, []).output
 
 
-@pytest.mark.parametrize(
-    "args",
-    [
-        ["init", "PDSS"],
-        ["index", "PDSS", "lecture1.pdf"],
-        ["index", "PDSS", "a.pdf", "b.pdf"],  # PATHS is variadic
-        ["list"],  # subject optional
-        ["list", "PDSS"],
-        ["remove", "PDSS", "lecture1.pdf", "--yes"],
-        ["remove", "PDSS", "lecture1.pdf", "-y"],
-        ["config"],  # bare config = show
-        ["config", "set", "chat.model", "llama-3.3-70b"],
-    ],
-)
-def test_verb_registered_and_stubbed(args: list[str]) -> None:
+def test_init_creates_layout_and_is_idempotent(home):
+    result = runner.invoke(app, ["init", "PDSS"])
+    assert result.exit_code == 0, result.output
+    sdir = home / "PDSS"
+    for expected in ["manifest.json", "materials", "store.db", "progress.db"]:
+        assert (sdir / expected).exists(), expected
+    assert (home / "config.toml").exists()
+
+    result = runner.invoke(app, ["init", "PDSS"])
+    assert result.exit_code == 0
+    assert "already initialized" in result.output
+
+
+def test_init_rejects_bad_name():
+    result = runner.invoke(app, ["init", "../evil"])
+    assert result.exit_code == 1
+    assert "invalid subject name" in result.output
+
+
+def test_list_all_subjects():
+    runner.invoke(app, ["init", "PDSS"])
+    runner.invoke(app, ["init", "ML"])
+    result = runner.invoke(app, ["list"])
+    assert result.exit_code == 0
+    assert "PDSS" in result.output and "ML" in result.output
+
+
+def test_list_unknown_subject_names_the_fix():
+    result = runner.invoke(app, ["list", "NOPE"])
+    assert result.exit_code == 1
+    assert "unilearn init NOPE" in result.output
+
+
+def test_index_reports_results(monkeypatch, tmp_path):
+    runner.invoke(app, ["init", "PDSS"])
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+
+    def fake_index_paths(subject, paths, embedder=None, on_event=None):
+        return [pipeline.FileResult(f, pipeline.INDEXED, chunks=3)]
+
+    monkeypatch.setattr(pipeline, "index_paths", fake_index_paths)
+    result = runner.invoke(app, ["index", "PDSS", str(f)])
+    assert result.exit_code == 0, result.output
+    assert "1 indexed" in result.output and "(3 chunks)" in result.output
+
+
+def test_index_uninitialized_subject_fails_with_fix(tmp_path):
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    result = runner.invoke(app, ["index", "NOPE", str(f)])
+    assert result.exit_code == 1
+    assert "unilearn init NOPE" in result.output
+
+
+@pytest.mark.parametrize("args", [["list", "../evil"], ["remove", "../evil", "x.pdf", "-y"]])
+def test_bad_subject_name_fails_cleanly_not_traceback(args):
     result = runner.invoke(app, args)
-    assert result.exit_code == 1, result.output
+    assert result.exit_code == 1
+    assert "invalid subject name" in result.output
+
+
+def test_remove_unknown_material():
+    runner.invoke(app, ["init", "PDSS"])
+    result = runner.invoke(app, ["remove", "PDSS", "ghost.pdf", "-y"])
+    assert result.exit_code == 1
+    assert "no material" in result.output
+
+
+def test_remove_deletes_rows_and_file(home):
+    from unilearn.core import store
+
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    (sdir / "materials" / "lec.txt").write_text("x")
+    conn = store.connect(sdir / "store.db")
+    with conn:
+        conn.execute(
+            "INSERT INTO materials (filename, sha256, status) VALUES ('lec.txt', ?, 'indexed')",
+            ("c" * 64,),
+        )
+    conn.close()
+
+    result = runner.invoke(app, ["remove", "PDSS", "lec.txt", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert not (sdir / "materials" / "lec.txt").exists()
+    conn = store.connect(sdir / "store.db")
+    assert conn.execute("SELECT COUNT(*) FROM materials").fetchone()[0] == 0
+    conn.close()
+
+
+def test_list_missing_store_db_names_cause_not_traceback():
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    (sdir / "store.db").unlink()
+    result = runner.invoke(app, ["list", "PDSS"])
+    assert result.exit_code == 1
+    assert "store.db is missing" in result.output
+    assert not (sdir / "store.db").exists()  # regression: connect() created an empty db
+
+
+def test_list_empty_store_db_names_cause_not_traceback():
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    (sdir / "store.db").unlink()
+    (sdir / "store.db").touch()  # exists but schema-less (e.g. interrupted init)
+    result = runner.invoke(app, ["list", "PDSS"])
+    assert result.exit_code == 1
+    assert "corrupt or incomplete" in result.output
+
+
+def test_list_all_skips_corrupt_manifest_with_warning():
+    runner.invoke(app, ["init", "PDSS"])
+    runner.invoke(app, ["init", "ML"])
+    (subject_dir("PDSS") / "manifest.json").write_text("{ truncated")
+    result = runner.invoke(app, ["list"])
+    assert result.exit_code == 0  # one damaged subject must not take down the listing
+    assert "ML" in result.output
+    assert "PDSS" in result.output and "corrupt" in result.output
+
+
+def test_remove_failed_row_keeps_indexed_siblings_file(home):
+    """A failed row records the original filename with no collision suffix — removing
+    it must not delete a same-named indexed material's stored file (citation target)."""
+    from unilearn.core import store
+
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    (sdir / "materials" / "lec.pdf").write_text("indexed copy")
+    conn = store.connect(sdir / "store.db")
+    with conn:
+        conn.execute(
+            "INSERT INTO materials (filename, sha256, status) VALUES ('lec.pdf', ?, 'indexed')",
+            ("a" * 64,),
+        )
+        conn.execute(
+            "INSERT INTO materials (filename, sha256, status, error) "
+            "VALUES ('lec.pdf', ?, 'extraction_failed', 'scanned PDF — not supported')",
+            ("b" * 64,),
+        )
+    conn.close()
+
+    result = runner.invoke(app, ["remove", "PDSS", "b" * 8, "--yes"])
+    assert result.exit_code == 0, result.output
+    assert (sdir / "materials" / "lec.pdf").exists()  # indexed material's file survives
+    conn = store.connect(sdir / "store.db")
+    rows = conn.execute("SELECT status FROM materials").fetchall()
+    assert [r["status"] for r in rows] == ["indexed"]
+    conn.close()
+
+
+def test_remove_whole_subject_deletes_directory():
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    (sdir / "store.db").unlink()  # even a damaged subject must be removable
+    result = runner.invoke(app, ["remove", "PDSS", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert not sdir.exists()
+
+
+def test_remove_whole_subject_aborts_without_confirmation():
+    runner.invoke(app, ["init", "PDSS"])
+    result = runner.invoke(app, ["remove", "PDSS"], input="n\n")
+    assert result.exit_code != 0
+    assert subject_dir("PDSS").exists()
+
+
+@pytest.mark.parametrize("args", [["config"], ["config", "set", "chat.model", "x"]])
+def test_config_still_stubbed(args):
+    result = runner.invoke(app, args)
+    assert result.exit_code == 1
     assert "not implemented yet" in result.output
 
 
@@ -48,11 +208,9 @@ def test_verb_registered_and_stubbed(args: list[str]) -> None:
     [
         ["init"],  # subject required
         ["index", "PDSS"],  # paths required
-        ["remove", "PDSS"],  # material required
         ["config", "set", "chat.model"],  # value required
         ["ask", "PDSS", "q"],  # P3 verb must NOT exist yet
     ],
 )
-def test_bad_usage_is_usage_error(args: list[str]) -> None:
-    result = runner.invoke(app, args)
-    assert result.exit_code == 2, result.output
+def test_bad_usage_is_usage_error(args):
+    assert runner.invoke(app, args).exit_code == 2
