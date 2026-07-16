@@ -1,8 +1,17 @@
+"""UniLearn CLI — batch lifecycle verbs; the host agent is the interactive surface.
+
+Command surface per docs/superpowers/specs/2026-07-16-p1-cli-surface-design.md.
+Later phases add verbs: P2 import/export · P3 ask · P4 mcp/serve · P6 export-deck.
+"""
+
 from importlib.metadata import version as _package_version
 from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
+from rich.console import Console
+from rich.markup import escape
+from rich.table import Table
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -12,9 +21,28 @@ app = typer.Typer(
 config_app = typer.Typer()
 app.add_typer(config_app, name="config")
 
+console = Console()
+
+
+def _fail(message: str) -> None:
+    console.print(f"[red]error:[/red] {escape(message)}")
+    raise typer.Exit(code=1)
+
+
+def _subject_dir_checked(subject: str) -> Path:
+    from unilearn.core.paths import subject_dir
+
+    try:
+        sdir = subject_dir(subject)
+    except ValueError as exc:
+        _fail(str(exc))
+    if not (sdir / "manifest.json").exists():
+        _fail(f"subject '{subject}' is not initialized — run: unilearn init {subject}")
+    return sdir
+
 
 def _not_implemented(verb: str) -> None:
-    typer.echo(f"unilearn {verb}: not implemented yet — CLI skeleton (P1 in progress)")
+    typer.echo(f"unilearn {verb}: not implemented yet — arrives in a later phase")
     raise typer.Exit(code=1)
 
 
@@ -41,7 +69,16 @@ def init(
     subject: Annotated[str, typer.Argument(help="Subject name; becomes ~/.unilearn/<SUBJECT>/.")],
 ) -> None:
     """Create a subject: manifest.json, materials/, store.db, progress.db."""
-    _not_implemented("init")
+    from unilearn.core.subject import init_subject
+
+    try:
+        sdir, created = init_subject(subject)
+    except ValueError as exc:
+        _fail(str(exc))
+    if created:
+        console.print(f"initialized [bold]{subject}[/bold] at {sdir}")
+    else:
+        console.print(f"[bold]{subject}[/bold] already initialized at {sdir}")
 
 
 @app.command()
@@ -50,7 +87,39 @@ def index(
     paths: Annotated[list[Path], typer.Argument(help="Files or directories to index.")],
 ) -> None:
     """Index course materials: hash-skip idempotent, per-file progress, resumable."""
-    _not_implemented("index")
+    from unilearn.ingestion import pipeline
+
+    labels = {
+        pipeline.INDEXED: "[green]indexed[/green]",
+        pipeline.SKIPPED_DUPLICATE: "[dim]skipped (already indexed)[/dim]",
+        pipeline.SKIPPED_UNSUPPORTED: "[yellow]skipped[/yellow]",
+        pipeline.SKIPPED_FAILED: "[yellow]skipped[/yellow]",
+        pipeline.EXTRACTION_FAILED: "[red]failed[/red]",
+        pipeline.ERROR: "[red]error[/red]",
+    }
+
+    with console.status("indexing…") as status:
+
+        def on_event(path: Path, stage: str) -> None:
+            if stage in ("extracting", "embedding"):
+                status.update(f"{path.name}: {stage}…")
+
+        try:
+            results = pipeline.index_paths(subject, paths, on_event=on_event)
+        except (RuntimeError, ValueError) as exc:
+            _fail(str(exc))
+
+    for r in results:
+        # filenames and parser errors are document-influenced — never live markup
+        detail = f" — {escape(r.detail)}" if r.detail else ""
+        chunks = f" ({r.chunks} chunks)" if r.status == pipeline.INDEXED else ""
+        console.print(f"  {escape(r.path.name)}: {labels[r.status]}{chunks}{detail}")
+
+    indexed = sum(r.status == pipeline.INDEXED for r in results)
+    failed = sum(r.status in (pipeline.EXTRACTION_FAILED, pipeline.ERROR) for r in results)
+    console.print(f"{indexed} indexed, {len(results) - indexed - failed} skipped, {failed} failed")
+    if failed:
+        raise typer.Exit(code=1)
 
 
 @app.command(name="list")
@@ -61,17 +130,76 @@ def list_(
     ] = None,
 ) -> None:
     """List subjects, or one subject's materials with status, pages, chunks."""
-    _not_implemented("list")
+    from unilearn.core import store
+    from unilearn.core.manifest import Manifest
+    from unilearn.core.paths import discover_subjects, subject_dir
+
+    if subject is None:
+        table = Table("subject", "materials", "chunks")
+        for name in discover_subjects():
+            manifest = Manifest.load(subject_dir(name) / "manifest.json")
+            table.add_row(name, str(manifest.counts.materials), str(manifest.counts.chunks))
+        console.print(table)
+        return
+
+    sdir = _subject_dir_checked(subject)
+    conn = store.connect(sdir / "store.db")
+    try:
+        table = Table("material", "status", "pages", "chunks", "detail")
+        for row in store.list_materials(conn):
+            table.add_row(
+                escape(row["filename"]),
+                row["status"],
+                str(row["pages"] or "—"),
+                str(row["chunk_count"]),
+                escape(row["error"] or ""),
+            )
+        console.print(table)
+    finally:
+        conn.close()
 
 
 @app.command()
 def remove(
     subject: Annotated[str, typer.Argument(help="Subject the material belongs to.")],
-    material: Annotated[str, typer.Argument(help="Material filename as shown by `unilearn list`.")],
+    material: Annotated[
+        str,
+        typer.Argument(help="Material filename (or sha256 prefix) as shown by `unilearn list`."),
+    ],
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
 ) -> None:
     """Remove a material and all its indexed data (chunks, vectors, sparse, FTS)."""
-    _not_implemented("remove")
+    from unilearn.core import store
+    from unilearn.core.manifest import sync_counts
+
+    sdir = _subject_dir_checked(subject)
+    conn = store.connect(sdir / "store.db")
+    try:
+        matches = store.find_materials(conn, material)
+        if not matches:
+            _fail(f"no material {material!r} in {subject} — see: unilearn list {subject}")
+        if len(matches) > 1:
+            candidates = ", ".join(f"{m['filename']} ({m['sha256'][:8]})" for m in matches)
+            _fail(f"{material!r} is ambiguous — candidates: {candidates}; use a sha256 prefix")
+        target = matches[0]
+        if not yes:
+            typer.confirm(
+                f"remove {target['filename']} and all its indexed data from {subject}?",
+                abort=True,
+            )
+        store.remove_material(conn, target["id"])
+        sync_counts(conn, sdir / "manifest.json")
+        stored = sdir / "materials" / target["filename"]
+        if stored.exists():
+            stored.unlink()
+        console.print(f"removed [bold]{escape(target['filename'])}[/bold] from {subject}")
+        if (sdir / "graph").exists():
+            console.print(
+                "[dim]note: the graph is now stale — it rebuilds on the next"
+                " corpus-hash-triggered index run[/dim]"
+            )
+    finally:
+        conn.close()
 
 
 @config_app.callback(invoke_without_command=True)
