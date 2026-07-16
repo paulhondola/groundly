@@ -1,10 +1,11 @@
 [project]
 name = "groundly"
-version = "0.3.2"
 description = "Local-first course knowledge bases for AI agents: index your materials, study grounded, share the index."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 license = { file = "LICENSE" }
+dynamic = ["version"]
+
 
 # Version pinning policy (docs/tech-stack/tech-stack.md): EXACT pins for the
 # interchange-relevant stack, set at P1 start (2026-07-16). These are recorded in
@@ -39,8 +40,11 @@ eval = ["ragas>=0.2"]
 groundly = "groundly.cli:app"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["groundly"]
