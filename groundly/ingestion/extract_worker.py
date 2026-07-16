@@ -13,28 +13,10 @@ import json
 import sys
 from pathlib import Path
 
+from groundly.ingestion.formats import DOCLING_FORMATS, DOCLING_SUFFIXES
+
 EXIT_NO_TEXT = 3
 EXIT_MODEL_UNAVAILABLE = 4
-
-DOCLING_FORMATS = {
-    ".pdf": "pdf",
-    ".docx": "docx",
-    ".pptx": "pptx",
-    ".md": "md",
-    ".html": "html",
-    ".htm": "html",
-    ".xhtml": "html",
-    ".tex": "latex",
-    ".latex": "latex",
-    ".adoc": "asciidoc",
-    ".asciidoc": "asciidoc",
-    ".csv": "csv",
-    ".xlsx": "xlsx",
-    ".epub": "epub",
-}
-DOCLING_SUFFIXES = set(DOCLING_FORMATS)
-# Everything else on the pipeline allowlist (txt + source code) is read as plain
-# text and chunked by token windows — docling's converter does not accept it.
 
 
 def _bge_m3_tokenizer():
