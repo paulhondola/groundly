@@ -46,11 +46,7 @@ misreport, invalid-subject-name tracebacks in list/remove.
   every subsequent run — network restored, models cached — reports
   "failed previously … remove to retry" forever. One offline `groundly index` on a course
   folder requires a manual `remove` per document to recover. The recorded error message is
-  also a raw huggingface_hub traceback line, not a named cause (conventions violation).
 - Evidence: reproduced — ran the worker on a real PDF with `HF_HOME=<empty>` +
-  `HF_HUB_OFFLINE=1`: exit code 1 (`LocalEntryNotFoundError` on stderr); same environment
-  with a `.txt`: exit code 4. The 60ecf19 fix covers only the bge-m3 tokenizer load.
-- Fix shape: wrap the docling import/convert model-acquisition failure classes (or probe
   the artifact cache) in the same EXIT_MODEL_UNAVAILABLE path.
 
 ### F3 — The `extraction_failed` INSERT still loses the concurrent-run race and aborts the whole run [severity: medium]

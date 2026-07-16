@@ -95,11 +95,7 @@ convention, plus one false-success report.
 
 ### F8 — File copy and DB row are not atomic; crash windows leave orphan files [severity: low]
 - Where: `groundly/ingestion/pipeline.py:147-148` (copy before the transaction); `groundly/cli/__init__.py` remove path (unlink after commit)
-- Failure scenario: kill between copy and commit → orphan file in `materials/`
   (self-heals on re-run of the original path, but see F3 for how the orphan can then
-  crash a run); kill in `remove` between commit and unlink → deleted material's file
-  still ships in a later export. No DB corruption in either window.
-- Evidence: code-traced; unverified — plausible.
 
 ### F9 — UC-01 main-flow step 4 (corpus-hash graph offer + cost estimate) is absent, but `remove` already prints a note referencing it [severity: low]
 - Where: `groundly/ingestion/pipeline.py` (no corpus-hash logic); `groundly/cli/__init__.py` remove ("the graph rebuilds on the next corpus-hash-triggered index run")
