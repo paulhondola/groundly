@@ -11,6 +11,8 @@ from unilearn.core.paths import subject_dir
 from unilearn.core.subject import init_subject
 from unilearn.ingestion import pipeline
 
+pytestmark = pytest.mark.slow
+
 
 class StubEmbedder:
     def __init__(self, fail_on: str | None = None):
