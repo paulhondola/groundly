@@ -81,11 +81,41 @@ graph-staleness note when a graph exists (harmless no-op until P5).
 - P1 needs zero keys (embeddings are local) — `config` exists so provider setup is ready before
   `ask` lands.
 
+### `groundly models install [--force]`
+
+Eagerly downloads bge-m3 into the local Hugging Face cache, instead of relying on the implicit
+first-`index` download. Useful before going offline or before wiring up an MCP host, so the first
+real tool call doesn't pay the download cost.
+
+- Cache hit (weights already present): prints "already cached — nothing to do" and exits 0
+  without calling `snapshot_download` again.
+- Cache miss: prints the same "(one-time, ~2.3 GB)" lead-in `index` already shows on a lazy
+  download, then fetches. `snapshot_download` writes its own progress to stderr.
+- `--force`: skips the cache-hit fast path and always re-fetches; HF's own cache dedupes
+  unchanged files, so this re-verifies rather than wiping and refetching.
+- Download failure (network/HF error) → named cause via `_fail()`, never a raw traceback.
+- Zero-key: doesn't touch `config.toml` or any LLM provider — foundation-layer download only.
+  Scoped to bge-m3 only; the reranker (`bge-reranker-v2-m3`) has no code yet (`retrieval/` is an
+  empty stub) so it isn't covered — `models` is its own sub-app so adding it later is one more
+  sub-command, not a restructuring.
+
+### `groundly models uninstall [--yes]`
+
+Removes bge-m3 from the local Hugging Face cache (all cached revisions, via
+`huggingface_hub.scan_cache_dir()` — not just the pinned revision's snapshot). Frees the ~2.3 GB
+the model occupies when a student wants to reclaim disk space; re-running `index` or `models
+install` re-downloads it.
+
+- Not cached: prints "is not cached — nothing to do" and exits 0.
+- Cached: confirmation prompt (destructive, same `--yes`/`-y` pattern as `remove`), then deletes
+  and prints "removed ... from the cache".
+
 ## Module layout
 
 Client layer thin, logic in services (architecture invariants):
 
-- `groundly/cli/__init__.py` — typer `app`, the five verbs, rich output. No business logic.
+- `groundly/cli/__init__.py` — typer `app`, the six verb groups (`init`, `index`, `list`,
+  `remove`, `config`, `models`), rich output. No business logic.
 - `groundly/core/paths.py` — home resolution (`GROUNDLY_HOME`), subject dir layout,
   subject-name validation.
 - `groundly/core/store.py` — SQLite open helper (WAL + busy_timeout on every connection,
@@ -93,6 +123,9 @@ Client layer thin, logic in services (architecture invariants):
   read/write.
 - `groundly/core/config.py` — pydantic-settings model for `config.toml` per call class;
   load/save/mask.
+- `groundly/llm/embeddings.py` — owns bge-m3 cache/download logic (`cached_snapshot`,
+  `ensure_downloaded`, `remove_cached`); `BgeM3Embedder._load()` (lazy) and `groundly models
+  install`/`uninstall` (eager) all call it.
 - `groundly/ingestion/` — the index pipeline (hash-skip, Docling subprocess, chunker, embedder,
   per-file transaction). The pipeline is the bulk of P1 and gets its own detailed implementation
   plan; the CLI wires `index` to its entry point.

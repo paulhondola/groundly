@@ -10,7 +10,7 @@ curl -fsSL https://groundly.ai/install.sh | sh
 
 The script does two things: install `uv` if absent, then `uv tool install groundly`. Equivalent by hand: `uv tool install groundly`. Python ≥3.11 is provisioned by uv itself.
 
-**Honest footprint** (documented trade-off, decided): the dependency tree includes torch; first `index` run downloads bge-m3 (~2.2GB) and, on first query, bge-reranker (~0.5GB) into the Hugging Face cache. This is the price of local, pinned, quality-first embeddings — Groundly cannot match a single-binary tool's footprint and does not pretend to. Models load lazily (never at MCP spawn).
+**Honest footprint** (documented trade-off, decided): the dependency tree includes torch; first `index` run downloads bge-m3 (~2.2GB) and, on first query, bge-reranker (~0.5GB) into the Hugging Face cache. This is the price of local, pinned, quality-first embeddings — Groundly cannot match a single-binary tool's footprint and does not pretend to. Models load lazily (never at MCP spawn). Run `groundly models install` to fetch bge-m3 eagerly instead — useful before going offline or before wiring up an MCP host, so the first real tool call doesn't pay the download cost. `groundly models uninstall` reclaims the disk space by removing it from the cache again.
 
 ## Host wiring (MCP)
 

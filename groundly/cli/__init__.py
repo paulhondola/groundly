@@ -21,6 +21,10 @@ app = typer.Typer(
 config_app = typer.Typer()
 app.add_typer(config_app, name="config")
 
+models_app = typer.Typer(no_args_is_help=True)
+app.add_typer(models_app, name="models")
+
+
 console = Console()
 
 
@@ -259,3 +263,45 @@ def config_set(
 ) -> None:
     """Set a provider config value in ~/.groundly/config.toml."""
     _not_implemented("config set")
+
+
+@models_app.command()
+def install(
+    force: Annotated[
+        bool, typer.Option("--force", help="Re-download and re-verify even if already cached.")
+    ] = False,
+) -> None:
+    """Download the bge-m3 embedding model into the local Hugging Face cache."""
+    from groundly.core.manifest import EMBEDDING_MODEL
+    from groundly.llm import embeddings
+
+    if not force and embeddings.cached_snapshot() is not None:
+        console.print(
+            f"{EMBEDDING_MODEL} already cached — nothing to do (use --force to re-verify)"
+        )
+        return
+
+    try:
+        embeddings.ensure_downloaded(force=force)
+    except embeddings.ModelDownloadError as exc:
+        _fail(str(exc))
+    console.print(f"{EMBEDDING_MODEL} ready")
+
+
+@models_app.command()
+def uninstall(
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
+) -> None:
+    """Remove the bge-m3 embedding model from the local Hugging Face cache."""
+    from groundly.core.manifest import EMBEDDING_MODEL
+    from groundly.llm import embeddings
+
+    if embeddings.cached_snapshot() is None:
+        console.print(f"{EMBEDDING_MODEL} is not cached — nothing to do")
+        return
+
+    if not yes:
+        typer.confirm(f"remove {EMBEDDING_MODEL} from the local Hugging Face cache?", abort=True)
+
+    embeddings.remove_cached()
+    console.print(f"removed {EMBEDDING_MODEL} from the cache")
