@@ -1,13 +1,13 @@
 # Architecture Overview
 
-Expands [`unilearn-spec.md`](../unilearn-spec.md) §4. Companions: [`data-model.md`](data-model.md), [`retrieval.md`](retrieval.md), [`agents.md`](agents.md), [`../infrastructure/distribution.md`](../infrastructure/distribution.md).
+Expands [`groundly-spec.md`](../groundly-spec.md) §4. Companions: [`data-model.md`](data-model.md), [`retrieval.md`](retrieval.md), [`agents.md`](agents.md), [`../infrastructure/distribution.md`](../infrastructure/distribution.md).
 
 ## Shape: one package, core with interchangeable clients
 
 There is no server to deploy. The product is a local **core library** with three thin clients over it. In MCP's stdio transport the "server" is a subcommand *spawned by the host agent* — there is no daemon for the student to manage.
 
 ```
-unilearn/
+groundly/
 ├── cli/         # typer verbs: init, index, list, remove, import, export, ask, config, mcp, serve
 ├── mcp/         # FastMCP tool definitions over the core (stdio + streamable HTTP)
 ├── web/         # static mastery dashboard, served by `serve`
@@ -29,9 +29,9 @@ unilearn/
 
 | Mode | Process | Lifecycle |
 |---|---|---|
-| CLI verbs | `unilearn index/import/export/ask/...` | one-shot, core in-process, exits |
-| MCP stdio | `unilearn mcp` | **spawned and killed by the host agent** |
-| Optional HTTP | `unilearn serve` | user-run; MCP-over-HTTP + dashboard; binds **127.0.0.1 only**; exists so multiple hosts share one bge-m3 load |
+| CLI verbs | `groundly index/import/export/ask/...` | one-shot, core in-process, exits |
+| MCP stdio | `groundly mcp` | **spawned and killed by the host agent** |
+| Optional HTTP | `groundly serve` | user-run; MCP-over-HTTP + dashboard; binds **127.0.0.1 only**; exists so multiple hosts share one bge-m3 load |
 
 Multiple processes may open the same `store.db` (an `index` run while a host-spawned MCP process answers queries). Rules from day one: **WAL + busy_timeout** on every connection; **lazy model loading** (never at MCP spawn — hosts expect fast handshakes; load on first search); generation jobs **serialized when the provider is a local runtime** (GPU contention with interactive use).
 

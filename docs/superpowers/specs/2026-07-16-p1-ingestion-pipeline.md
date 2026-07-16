@@ -15,18 +15,18 @@ Setup
 
 Modules (layering: cli → ingestion → core; ingestion writes stores, never serves queries)
 
-unilearn/core/paths.py
+groundly/core/paths.py
 
-- unilearn_home() -> Path — $UNILEARN_HOME or ~/.unilearn.
+- groundly_home() -> Path — $GROUNDLY_HOME or ~/.groundly.
 - validate_subject_name(name) — alnum/-/_ only (path component + MCP id); specific error otherwise.
 - subject_dir(name), discover_subjects() -> list[str] — scan */manifest.json (no registry DB, data-model.md).
 
-unilearn/core/manifest.py
+groundly/core/manifest.py
 
 - Constants: FORMAT_VERSION=1, EMBEDDING_MODEL="BAAI/bge-m3", HF_REVISION="<pinned sha>", DIM=1024, CHUNK_MAX_TOKENS=512, CHUNK_OVERLAP=64.
 - Pydantic model mirroring the manifest.json contract in data-model.md; load/save; sync_counts(store) after every mutation (UC-03 AC).
 
-unilearn/core/store.py
+groundly/core/store.py
 
 - connect(path) — every connection: WAL, busy_timeout=5000, foreign_keys=ON, sqlite-vec extension loaded, PRAGMA user_version checked (refuse newer than known).
 - create_store(path) — DDL at user_version=1:
@@ -38,17 +38,17 @@ unilearn/core/store.py
 - create_progress(path) — valid SQLite file, user_version=1, no tables (nothing writes it in P1; it never travels, so schema can grow locally in P3 without interchange impact).
 - Queries for the CLI: list_materials(conn), indexed_hashes(conn), remove_material(conn, ...) (one transaction: cascades cover chunks/sparse/FTS; vectors deleted by chunk rowids explicitly), failed-row replace for retries.
 
-unilearn/ingestion/extract_worker.py (runs as python -m unilearn.ingestion.extract_worker <in-file> <out-json>)
+groundly/ingestion/extract_worker.py (runs as python -m groundly.ingestion.extract_worker <in-file> <out-json>)
 
 - Docling convert + HybridChunker (bge-m3 tokenizer, max 512, overlap per constants); heading path from chunk meta; page from doc-item provenance.
 - Writes JSON: {pages: N, chunk
 
-unilearn/ingestion/embed.py
+groundly/ingestion/embed.py
 
 - Embedder protocol: encode(texts) -> (dense: list[list[float]], sparse: list[dict[int, float]]).
 - BgeM3Embedder — lazy singleton (never load at import; rules/architecture.md), BGEM3FlagModel(EMBEDDING_MODEL, revision=HF_REVISION), return_dense=True, return_sparse=True. First-run note about the one-time ~2.3 GB model download (conventions: long ops announce cost).
 
-unilearn/ingestion/pipeline.py
+groundly/ingestion/pipeline.py
 
 - index_paths(subject, paths, embedder=None, on_event=...) -> list[FileResult]:
   a. Expand dirs recursively; extension allowlist pdf docx pptx txt md py c cpp h java js ts (unsupported → reported as skipped, per spec).
@@ -56,13 +56,13 @@ unilearn/ingestion/pipeline.py
   c. Per file: copy into materials/ (name collision with different content → suffix with short hash) → extract → embed → one transaction writing materials/chunks/vectors/sparse rows (+FTS via triggers) → commit → sync_counts. Failure → terminal extraction_failed row + delete the materials/ copy; run continues. Ctrl-C loses at most the in-flight file (A4).
   d. on_event callback drives the CLI's queued → extracting → embedding → indexed per-file progress.
 
-unilearn/cli/__init__.py
+groundly/cli/__init__.py
 
 - Replace the four stubs: init (create dirs + manifest + both DBs + config.toml if absent; idempotent), index (rich per-file progress from on_event), list (subjects table / materials table), remove (confirm unless --yes; ambiguous filename → error listing candidates with sha prefixes; accept a sha prefix as the identifier too). Grammar unchanged — tests in tests/test_cli.py keep passing except stub-exit assertions, which move to real behavior.
 
 Doc updates (same change set)
 
-- docs/tech-stack/tech-stack.md embeddings row: sentence-transformers → FlagEmbedding (one forward pass, dense+sparse); note in the pinning section that FlagEmbedding is pinned too. Mirror the one cell in docs/unilearn-spec.md §4 if it names the library.
+- docs/tech-stack/tech-stack.md embeddings row: sentence-transformers → FlagEmbedding (one forward pass, dense+sparse); note in the pinning section that FlagEmbedding is pinned too. Mirror the one cell in docs/groundly-spec.md §4 if it names the library.
 - Record the four exact pins + hf_revision where the pinning policy says (pyproject + core/manifest.py constants).
 
 Tests (pytest; SQLite tmp files + stub providers — no model downloads in CI)
@@ -76,9 +76,9 @@ Tests (pytest; SQLite tmp files + stub providers — no model downloads in CI)
 Verification (UC-01/UC-03 acceptance, end-to-end)
 
 1. uv sync --extra dev && uv run pytest — green.
-2. uv run unilearn init PDSS → tree exists; rerun no-op.
-3. uv run unilearn index PDSS <real lecture PDF> → progress, indexed; unilearn list PDSS shows pages/chunks; spot-check a chunk's page + heading path against the PDF (sqlite3 store.db).
+2. uv run groundly init PDSS → tree exists; rerun no-op.
+3. uv run groundly index PDSS <real lecture PDF> → progress, indexed; groundly list PDSS shows pages/chunks; spot-check a chunk's page + heading path against the PDF (sqlite3 store.db).
 4. Scanned PDF → extraction_failed, "scanned PDF — not supported"; run continues.
 5. Re-run on unchanged folder → all skips; Ctrl-C mid-index → re-run resumes cleanly.
-6. uv run unilearn remove PDSS <file> -y → list empty; no rows in any channel; manifest counts synced.
+6. uv run groundly remove PDSS <file> -y → list empty; no rows in any channel; manifest counts synced.
 7. uv run ruff check . && uv run ruff format --check . (CI parity). Changes stay in the working tree — Paul commits.

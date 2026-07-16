@@ -8,11 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from unilearn.core import store
-from unilearn.core.manifest import EMBEDDING_DIM, Manifest
-from unilearn.core.paths import subject_dir
-from unilearn.core.subject import init_subject
-from unilearn.ingestion import pipeline
+from groundly.core import store
+from groundly.core.manifest import EMBEDDING_DIM, Manifest
+from groundly.core.paths import subject_dir
+from groundly.core.subject import init_subject
+from groundly.ingestion import pipeline
 
 slow = pytest.mark.slow  # real extract worker: tokenizer download on a cold cache
 
@@ -32,7 +32,7 @@ class StubEmbedder:
 
 @pytest.fixture
 def subject(monkeypatch, tmp_path):
-    monkeypatch.setenv("UNILEARN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
     (tmp_path / "home").mkdir()
     init_subject("TEST")
     return "TEST"
@@ -150,7 +150,7 @@ def test_extractor_unavailable_is_transient_then_retries(subject, course, monkey
     """A tokenizer/model load failure in the worker is environmental, not a bad document:
     it must be a retryable `error` with no terminal row (unlike no-text), so the next run
     succeeds without the user having to `remove` a wrongly-failed file."""
-    from unilearn.ingestion.extract import ModelUnavailable
+    from groundly.ingestion.extract import ModelUnavailable
 
     real_extract = pipeline.extract
     calls = {"n": 0}
@@ -172,7 +172,7 @@ def test_extractor_unavailable_is_transient_then_retries(subject, course, monkey
 
 
 def _stub_extraction():
-    from unilearn.ingestion.extract import ChunkData, Extraction
+    from groundly.ingestion.extract import ChunkData, Extraction
 
     return Extraction(pages=None, chunks=[ChunkData("stub text", None, None, 2)])
 
@@ -180,7 +180,7 @@ def _stub_extraction():
 def test_concurrent_failure_race_does_not_abort_run(subject, course, monkeypatch):
     """Another process recording the same failing content between our hash check and
     the failure INSERT must not abort the run (regression: raw IntegrityError)."""
-    from unilearn.ingestion.extract import ExtractionFailure
+    from groundly.ingestion.extract import ExtractionFailure
 
     def always_fail(path, *args, **kwargs):
         raise ExtractionFailure("scanned PDF — not supported")
@@ -233,7 +233,7 @@ def test_docling_model_fetch_failure_exits_retryable(monkeypatch, tmp_path):
     recorded as the PDF's terminal parse failure."""
     from docling.document_converter import DocumentConverter
 
-    from unilearn.ingestion import extract_worker
+    from groundly.ingestion import extract_worker
 
     def offline_init(self, format):
         raise OSError("couldn't connect to huggingface.co")
@@ -288,6 +288,6 @@ def test_concurrent_index_race_reports_duplicate_not_crash(subject, course, monk
 
 
 def test_uninitialized_subject_names_the_fix(monkeypatch, tmp_path, course):
-    monkeypatch.setenv("UNILEARN_HOME", str(tmp_path / "home2"))
-    with pytest.raises(RuntimeError, match="unilearn init NOPE"):
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home2"))
+    with pytest.raises(RuntimeError, match="groundly init NOPE"):
         pipeline.index_paths("NOPE", [course], embedder=StubEmbedder())

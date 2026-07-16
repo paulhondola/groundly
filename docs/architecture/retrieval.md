@@ -1,6 +1,6 @@
 # Retrieval Architecture (Hybrid RAG + GraphRAG)
 
-Expands [`unilearn-spec.md`](../unilearn-spec.md) §5. This layer is the thesis's scientific core — every design choice must remain measurable and reproducible. Directive on file: **quality over performance** (Paul, 2026-07-15).
+Expands [`groundly-spec.md`](../groundly-spec.md) §5. This layer is the thesis's scientific core — every design choice must remain measurable and reproducible. Directive on file: **quality over performance** (Paul, 2026-07-15).
 
 ## The four arms (evaluation frame)
 
@@ -31,9 +31,9 @@ Chunking: **Docling HybridChunker** — section-aligned chunks with the heading 
 
 ### Graph backend (arm 2)
 
-MS `graphrag` as a **per-subject batch indexer**: entity/relation extraction → Leiden communities → hierarchical summaries, artifacts as parquet in `graph/`. Rebuild trigger = corpus-hash check inside `unilearn index`. Local search (entity-anchored) for multi-hop; global search (community summaries) for synthesis.
+MS `graphrag` as a **per-subject batch indexer**: entity/relation extraction → Leiden communities → hierarchical summaries, artifacts as parquet in `graph/`. Rebuild trigger = corpus-hash check inside `groundly index`. Local search (entity-anchored) for multi-hop; global search (community summaries) for synthesis.
 
-- **Extraction cost lands on the student** — mid-tier cloud model rule stands (a bad graph silently invalidates the comparison; never a small local model). `unilearn index` shows the estimated cost before building; graph build is skippable — the vector baseline works with zero API key.
+- **Extraction cost lands on the student** — mid-tier cloud model rule stands (a bad graph silently invalidates the comparison; never a small local model). `groundly index` shows the estimated cost before building; graph build is skippable — the vector baseline works with zero API key.
 - Mitigation is the sharing feature: the graph is the most expensive *and* most portable artifact (no embedding coupling) — one student builds, the course imports.
 - **Global search is the cost hazard**: map-reduce over community summaries can mean dozens of LLM calls per query. It fires only via the router (arm 3) or explicitly (`overview` tool) — never as a default path.
 
@@ -58,5 +58,5 @@ MS `graphrag` runs its own chunking/extraction — the two backends do not share
 - **Gold set** per pilot subject from past exams, stratified by query class (factoid / multi-hop / global synthesis), RO and EN, **cross-lingual queries as a separate slice**. Professor spot-checks. Collection starts before implementation — it needs the professor, not code.
 - **Metrics per arm × class:** retrieval hit rate, RAGAS groundedness/faithfulness, citation accuracy, router accuracy, cost, latency — all from the traces table, all offline.
 - **Grounding-fidelity experiment:** the same gold questions answered (a) through the enforced `ask` pipeline and (b) host-composed from raw `search` results — compared on faithfulness + citation accuracy. Measures enforced vs agent-mediated grounding, the design's biggest real-world tension.
-- **Reproducibility:** a frozen `~/.unilearn/<SUBJECT>/` directory is the experimental artifact — hashable, shippable with the thesis; all four arms re-runnable anywhere.
+- **Reproducibility:** a frozen `~/.groundly/<SUBJECT>/` directory is the experimental artifact — hashable, shippable with the thesis; all four arms re-runnable anywhere.
 - Expected result shape: per-class deltas ("hybrid matches the baseline on factoids at ~equal cost; improves multi-hop by X% at Y% cost"). GraphRAG is timeboxed; a negative result is a finding, not a failure.

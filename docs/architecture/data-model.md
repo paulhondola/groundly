@@ -5,7 +5,7 @@ The storage backbone for [`overview.md`](overview.md). SQLite (WAL) per subject;
 ## Layout
 
 ```
-~/.unilearn/                 # global (UNILEARN_HOME overrides) — MCP hosts spawn
+~/.groundly/                 # global (GROUNDLY_HOME overrides) — MCP hosts spawn
   config.toml                # with arbitrary cwd, so discovery must not be per-project
   <SUBJECT>/
     manifest.json            # the interchange contract (below)
@@ -15,7 +15,7 @@ The storage backbone for [`overview.md`](overview.md). SQLite (WAL) per subject;
     graph/                   # MS graphrag parquet artifacts → exported
 ```
 
-`list_subjects` = a scan of `~/.unilearn/*/manifest.json`. No registry database.
+`list_subjects` = a scan of `~/.groundly/*/manifest.json`. No registry database.
 
 ## store.db (exported)
 
@@ -50,7 +50,7 @@ Traces contain every question the student ever asked — which is exactly why th
   "graphrag":  { "version": "<exact pin>", "extraction_model": "<model used>" },
   "chunking":  { "strategy": "docling-hybrid", "max_tokens": 512, "overlap": 0 },
   "counts":    { "materials": 0, "chunks": 0 },
-  "tool_version": "<unilearn version>"
+  "tool_version": "<groundly version>"
 }
 ```
 
@@ -58,7 +58,7 @@ Semantics: vectors transfer **as-is only on exact embedding match** (model + rev
 
 ## Export / import
 
-- **Export** = zip the subject dir **minus `progress.db`** → `PDSS.unilearn`. Original files included by default (importer's citations must open the right page); `--no-materials` to shrink. The export UX states plainly: "this bundle contains everything indexed in this subject."
+- **Export** = zip the subject dir **minus `progress.db`** → `PDSS.groundly`. Original files included by default (importer's citations must open the right page); `--no-materials` to shrink. The export UX states plainly: "this bundle contains everything indexed in this subject."
 - **Import** = validate manifest → zip-slip-safe extraction → fresh empty `progress.db`. Name collision → import-as-new-name or replace-with-confirm. **No merge in v1**; honest merge = import the materials and re-index the union.
 - Imported chunks, summaries, and profiles are **untrusted layer-4 content** (subject profiles additionally size-capped, no authority).
 

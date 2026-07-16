@@ -1,4 +1,4 @@
-# Project Specification: UniLearn — Local-First Course Knowledge Bases for AI Agents
+# Project Specification: Groundly — Local-First Course Knowledge Bases for AI Agents
 ### Bachelor Thesis Project · Universitatea Politehnica Timișoara, AC
 
 > **Document map** — this file is the master overview; detail lives in:
@@ -9,7 +9,7 @@
 
 ## 1. Vision
 
-**UniLearn turns a folder of course materials into a portable, agent-consumable knowledge base.** A student runs `unilearn index ./slides/` once; from then on, any MCP-capable agent (Claude Code, Claude Desktop, Codex) can answer questions grounded in the actual course content with page-level citations, generate execution-verified tests and flashcards, quiz weak areas, and track mastery. The knowledge base — vectors, graph, verified decks — is a file that can be shared with any other UniLearn user and used directly.
+**Groundly turns a folder of course materials into a portable, agent-consumable knowledge base.** A student runs `groundly index ./slides/` once; from then on, any MCP-capable agent (Claude Code, Claude Desktop, Codex) can answer questions grounded in the actual course content with page-level citations, generate execution-verified tests and flashcards, quiz weak areas, and track mastery. The knowledge base — vectors, graph, verified decks — is a file that can be shared with any other Groundly user and used directly.
 
 Everything runs on the student's machine. There is no server, no account, no upload. The only external dependency is an optional OpenAI-compatible LLM endpoint (the student's own cloud key, or LM Studio/Ollama).
 
@@ -31,13 +31,13 @@ One human role: the **student** (owner of the machine and the data). The other "
 - **UC-12 Graph study formats** — topic overviews and drill-downs from community summaries. [Detail](use-cases/student-modes.md)
 - **UC-13 Coding challenges** — generated from course content, reference solutions execution-verified. [Detail](use-cases/student-modes.md)
 - **UC-14 Mastery & study memory** — per-community mastery from quiz results; cross-session continuity tools. [Detail](use-cases/student-modes.md)
-- **UC-30 Share knowledge bases** — export/import `.unilearn` bundles with manifest-pinned compatibility. [Detail](use-cases/sharing.md)
+- **UC-30 Share knowledge bases** — export/import `.groundly` bundles with manifest-pinned compatibility. [Detail](use-cases/sharing.md)
 
 Dropped from the v1 spec: professor modes UC-20–24, the code sandbox, photo notes UC-15, OCR, tiers, auth.
 
 ## 4. System Architecture
 
-One Python package (`uv tool install unilearn`), three runtime modes, zero services:
+One Python package (`uv tool install groundly`), three runtime modes, zero services:
 
 ```
   Claude Code / Codex / Desktop        terminal (student)         browser
@@ -45,8 +45,8 @@ One Python package (`uv tool install unilearn`), three runtime modes, zero servi
         ▼                                   ▼                          ▼
   ┌──────────────────────── client layer ─────────────────────────────────┐
   │ mcp/ FastMCP tools     cli/ typer verbs      web/ mastery dashboard   │
-  │ stdio: `unilearn mcp`  (index/import/export/ (static page, served     │
-  │ HTTP: `unilearn serve`  ask/config)           by `serve`)             │
+  │ stdio: `groundly mcp`  (index/import/export/ (static page, served     │
+  │ HTTP: `groundly serve`  ask/config)           by `serve`)             │
   └──────────────┬───────────────┬──────────────────────┬─────────────────┘
                  ▼               ▼                      ▼
   ┌──────────────────────── service layer ────────────────────────────────┐
@@ -62,13 +62,13 @@ One Python package (`uv tool install unilearn`), three runtime modes, zero servi
   │ core/ stores (SQLite WAL), manifest│    │  Ollama)                     │
   └──────────────┬─────────────────────┘    └──────────────────────────────┘
                  ▼                           bge-m3 + reranker in-process,
-  ~/.unilearn/<SUBJECT>/                     lazy-loaded
+  ~/.groundly/<SUBJECT>/                     lazy-loaded
 ```
 
-### Storage (`~/.unilearn/`, global; `UNILEARN_HOME` overrides)
+### Storage (`~/.groundly/`, global; `GROUNDLY_HOME` overrides)
 
 ```
-~/.unilearn/
+~/.groundly/
   config.toml          # provider config per call class, preferences
   <SUBJECT>/           # e.g. PDSS/ — one dir per subject
     manifest.json      # format + model pins (the interchange contract)
@@ -95,8 +95,8 @@ The **privacy boundary is a file**: `store.db` travels, `progress.db` (your quer
 | Retrieval orchestration | LlamaIndex `Retriever` interface | One interface across four evaluation arms |
 | Agent loops | **Plain async functions** (LangGraph dropped) | Post-pivot roster is a pipeline + two bounded loops |
 | LLM access | OpenAI-compatible `base_url` + key per call class (`chat`, `generation`, `extraction`, `router`) | One code path for cloud keys and LM Studio/Ollama; no subscription-OAuth piggybacking |
-| Flashcard delivery | `.apkg` export via genanki | Anki owns daily review; UniLearn owns verified generation |
-| Dashboard | One static HTML page served by `unilearn serve` | React toolchain for one page was unjustifiable |
+| Flashcard delivery | `.apkg` export via genanki | Anki owns daily review; Groundly owns verified generation |
+| Dashboard | One static HTML page served by `groundly serve` | React toolchain for one page was unjustifiable |
 
 ## 5. Hybrid Retrieval Strategy
 
@@ -113,8 +113,8 @@ Four arms behind one LlamaIndex `Retriever` interface — see [`architecture/ret
 
 Governing rule: agents only where the system must decide, iterate, or use tools mid-task — everything else is a pipeline. See [`architecture/agents.md`](architecture/agents.md). Roster of two:
 
-1. **Ask pipeline** (interactive): router → retrieval → trust-layered prompt → generation → citation resolution → cited answer or "not covered". Exposed as the MCP `ask` tool and the `unilearn ask` CLI verb — the same function is the product tool and the evaluation instrument.
-2. **Exam verifier** (the identity of generation): every question entering `store.db` passes verification — answerable from cited chunks (re-retrieval), answer key correct, distractors wrong, code executed in a subprocess with timeout. Generators are pluggable: **thick** (`generate_*`, UniLearn's provider key) or **thin** (`submit_*`, the host agent generates, same verifier gates). Rejections carry machine-readable reasons so hosts regenerate conversationally.
+1. **Ask pipeline** (interactive): router → retrieval → trust-layered prompt → generation → citation resolution → cited answer or "not covered". Exposed as the MCP `ask` tool and the `groundly ask` CLI verb — the same function is the product tool and the evaluation instrument.
+2. **Exam verifier** (the identity of generation): every question entering `store.db` passes verification — answerable from cited chunks (re-retrieval), answer key correct, distractors wrong, code executed in a subprocess with timeout. Generators are pluggable: **thick** (`generate_*`, Groundly's provider key) or **thin** (`submit_*`, the host agent generates, same verifier gates). Rejections carry machine-readable reasons so hosts regenerate conversationally.
 
 **Trust layers** (prompt assembly, low never overrides high): 1 immutable system rules · 2 subject profile (user-editable, shippable in exports; trusted content never trusted authority, size-capped, cannot disable grounding) · 3 task params · 4 retrieved content + imported KB content + user input — **data, never instructions**, delimited and inert.
 
@@ -131,8 +131,8 @@ Governing rule: agents only where the system must decide, iterate, or use tools 
 One-line register:
 
 1. **Local-first, hard pivot** from the multi-tenant platform (professor, 2026-07-15); old repo archived.
-2. **MCP-first**: UniLearn is an MCP server for external agents; CLI for lifecycle; no TUI (professor).
-3. **Embedded storage**: SQLite WAL + sqlite-vec + FTS5 + parquet under `~/.unilearn/`; no Postgres/Redis/Celery/Docker.
+2. **MCP-first**: Groundly is an MCP server for external agents; CLI for lifecycle; no TUI (professor).
+3. **Embedded storage**: SQLite WAL + sqlite-vec + FTS5 + parquet under `~/.groundly/`; no Postgres/Redis/Celery/Docker.
 4. **bge-m3 local, pinned (incl. hf_revision)**, dense + learned sparse; reranker default ON; ColBERT rejected (storage). Quality over performance (Paul).
 5. **No OCR** — digital documents only; vision fallback and photo notes dropped (professor).
 6. **Verifier-gate generation**: server-side verifier mandatory; generators pluggable (thick/thin). Flashcards delivered as Anki `.apkg`.
@@ -147,9 +147,9 @@ One-line register:
 
 | Phase | Deliverable | Verify by |
 |---|---|---|
-| P1 | `unilearn init/index`: Docling (subprocess, digital-only) → HybridChunker → bge-m3 dense+sparse → sqlite-vec/FTS5; resumable (hash-skip); WAL | Index a real course incl. one scanned PDF (fails cleanly) + one Ctrl-C resume; page attribution correct |
+| P1 | `groundly init/index`: Docling (subprocess, digital-only) → HybridChunker → bge-m3 dense+sparse → sqlite-vec/FTS5; resumable (hash-skip); WAL | Index a real course incl. one scanned PDF (fails cleanly) + one Ctrl-C resume; page attribution correct |
 | P2 | Import/export: zip + manifest validation + re-embed path | Export on machine A, import on machine B, citations open the right page |
-| P3 | Grounded core + `unilearn ask`: four arms, trust layers, citations, refusal, traces | Gold-set eval starts; "not covered" path proven |
+| P3 | Grounded core + `groundly ask`: four arms, trust layers, citations, refusal, traces | Gold-set eval starts; "not covered" path proven |
 | P4 | MCP v1: `list_subjects`/`search`/`ask`/`get_page` over stdio + HTTP; citation resources | Demo inside Claude Code: search, ask, open a cited page |
 | P5 | GraphRAG: batch build (cost estimate, skippable) + `drill_down`/`overview` tools | Timeboxed; graph arms measured on the gold set |
 | P6 | Study toolset: verifier gate (thick + thin), `export_deck` (.apkg), adaptive quiz, mastery report, study memory | Verified deck imports into Anki; rejection reasons round-trip through a host agent |

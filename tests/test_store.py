@@ -3,8 +3,8 @@ import sqlite3
 import pytest
 import sqlite_vec
 
-from unilearn.core import store
-from unilearn.core.manifest import EMBEDDING_DIM, Manifest, sync_counts
+from groundly.core import store
+from groundly.core.manifest import EMBEDDING_DIM, Manifest, sync_counts
 
 
 @pytest.fixture
@@ -51,7 +51,7 @@ def test_refuses_newer_schema(tmp_path):
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA user_version = 99")
     conn.close()
-    with pytest.raises(RuntimeError, match="newer than this unilearn"):
+    with pytest.raises(RuntimeError, match="newer than this groundly"):
         store.connect(path)
 
 

@@ -14,8 +14,8 @@ convention, plus one false-success report.
 ## Findings
 
 ### F1 — Concurrent index of the same file crashes the whole run with an unhandled IntegrityError [severity: high]
-- Where: `unilearn/ingestion/pipeline.py:149-152` (and the `extraction_failed` insert at 131-136); `unilearn/cli/__init__.py` catches only `(RuntimeError, ValueError)`
-- Failure scenario: two `unilearn index` runs (or CLI + a future MCP writer — the rules
+- Where: `groundly/ingestion/pipeline.py:149-152` (and the `extraction_failed` insert at 131-136); `groundly/cli/__init__.py` catches only `(RuntimeError, ValueError)`
+- Failure scenario: two `groundly index` runs (or CLI + a future MCP writer — the rules
   explicitly say they share store.db) race on the same new file. Both read
   `hash_status()` before either commits; the loser's `INSERT INTO materials` hits the
   `sha256 UNIQUE` constraint and `sqlite3.IntegrityError` propagates out of
@@ -27,20 +27,20 @@ convention, plus one false-success report.
   `skipped_duplicate` (someone else indexed it — that is what the constraint proves).
 
 ### F2 — `list`/`remove` with an invalid subject name print a traceback instead of the error [severity: medium]
-- Where: `unilearn/cli/__init__.py:130` (`list_`) and the equivalent `sdir = subject_dir(subject)` in `remove`
-- Failure scenario: `unilearn list ../evil` → `subject_dir` raises `ValueError`, which
+- Where: `groundly/cli/__init__.py:130` (`list_`) and the equivalent `sdir = subject_dir(subject)` in `remove`
+- Failure scenario: `groundly list ../evil` → `subject_dir` raises `ValueError`, which
   `list_`/`remove` never catch (only `init` and `index` route it through `_fail`). The
   user gets a multi-screen rich traceback for a typo. Violates the conventions rule that
   failures name the cause cleanly.
-- Evidence: reproduced — ran `uv run unilearn list "../evil"`; raw traceback in the
+- Evidence: reproduced — ran `uv run groundly list "../evil"`; raw traceback in the
   terminal. Same class (unverified): `list SUBJECT` when `store.db` was deleted but
   `manifest.json` survives → `sqlite3.OperationalError: no such table` traceback.
 
 ### F3 — Indexing a file that already lives in `materials/` crashes the run with SameFileError [severity: medium]
-- Where: `unilearn/ingestion/pipeline.py:74` (`shutil.copy2` in `_copy_to_materials`, called outside every try block in `_index_one`)
+- Where: `groundly/ingestion/pipeline.py:74` (`shutil.copy2` in `_copy_to_materials`, called outside every try block in `_index_one`)
 - Failure scenario: an orphaned file in `materials/` — precisely the state a Ctrl-C
   between copy (line 147) and commit (line 148) leaves behind, which UC-01 A4 declares
-  recoverable — then `unilearn index ~/.unilearn/SUBJ/materials/`. The file's hash is
+  recoverable — then `groundly index ~/.groundly/SUBJ/materials/`. The file's hash is
   not in the DB, so it reaches `_copy_to_materials`, `copy2(src, src)` raises
   `shutil.SameFileError`, and the whole run dies (not caught by the CLI's
   `(RuntimeError, ValueError)` either). "Interrupted run resumes without corruption"
@@ -49,7 +49,7 @@ convention, plus one false-success report.
   `SameFileError` aborted `index_paths`.
 
 ### F4 — After a transient failure, a same-content sibling in the same run is reported "skipped (already indexed)" with nothing stored [severity: medium]
-- Where: `unilearn/ingestion/pipeline.py:117` (`known[sha] = "indexed"` runs unconditionally after `_index_one`, including for `EXTRACTION_FAILED` and `ERROR` results)
+- Where: `groundly/ingestion/pipeline.py:117` (`known[sha] = "indexed"` runs unconditionally after `_index_one`, including for `EXTRACTION_FAILED` and `ERROR` results)
 - Failure scenario: `a.txt` and `b.txt` have identical content; embedding `a.txt` fails
   transiently (`ERROR`, deliberately no row). `b.txt` is then reported
   `skipped (already indexed)` — a false success; zero rows exist. The next run recovers,
@@ -60,7 +60,7 @@ convention, plus one false-success report.
 - Cheap fix shape: `known[sha] = result.status` (or only set when `INDEXED`).
 
 ### F5 — `extraction_failed` is not terminal: a scanned PDF is re-extracted on every re-run and the "idempotent" run exits 1 forever [severity: medium]
-- Where: `unilearn/ingestion/pipeline.py:113-114` (unconditional delete + retry of every `extraction_failed` hash); `unilearn/cli/__init__.py` (`if failed: raise typer.Exit(code=1)`)
+- Where: `groundly/ingestion/pipeline.py:113-114` (unconditional delete + retry of every `extraction_failed` hash); `groundly/cli/__init__.py` (`if failed: raise typer.Exit(code=1)`)
 - Failure scenario: the UC-01 headline workflow — re-run `index` on the course folder
   each week. One scanned PDF in the folder means every weekly run deletes its row,
   re-runs Docling on it (up to the 300 s timeout, easily minutes of layout-model work),
@@ -85,8 +85,8 @@ convention, plus one false-success report.
   test exists but pages are `None` for markdown.
 
 ### F7 — `remove` treats the identifier as a LIKE pattern: `%` (or "") matches and deletes materials [severity: low]
-- Where: `unilearn/core/store.py:120-125` (`sha256 LIKE ident + '%'` with unescaped ident)
-- Failure scenario: `unilearn remove SUBJ '%' -y` on a one-material subject deletes it
+- Where: `groundly/core/store.py:120-125` (`sha256 LIKE ident + '%'` with unescaped ident)
+- Failure scenario: `groundly remove SUBJ '%' -y` on a one-material subject deletes it
   (reproduced — exit 0, "removed only.pdf"); with several materials it "helpfully" lists
   all of them as candidates. `_` in the ident wildcards too. Local tool, user-typed input
   — low, but the disambiguator's contract says "sha256 prefix", and sha prefixes are
@@ -94,15 +94,11 @@ convention, plus one false-success report.
 - Evidence: reproduced.
 
 ### F8 — File copy and DB row are not atomic; crash windows leave orphan files [severity: low]
-- Where: `unilearn/ingestion/pipeline.py:147-148` (copy before the transaction); `unilearn/cli/__init__.py` remove path (unlink after commit)
-- Failure scenario: kill between copy and commit → orphan file in `materials/`
+- Where: `groundly/ingestion/pipeline.py:147-148` (copy before the transaction); `groundly/cli/__init__.py` remove path (unlink after commit)
   (self-heals on re-run of the original path, but see F3 for how the orphan can then
-  crash a run); kill in `remove` between commit and unlink → deleted material's file
-  still ships in a later export. No DB corruption in either window.
-- Evidence: code-traced; unverified — plausible.
 
 ### F9 — UC-01 main-flow step 4 (corpus-hash graph offer + cost estimate) is absent, but `remove` already prints a note referencing it [severity: low]
-- Where: `unilearn/ingestion/pipeline.py` (no corpus-hash logic); `unilearn/cli/__init__.py` remove ("the graph rebuilds on the next corpus-hash-triggered index run")
+- Where: `groundly/ingestion/pipeline.py` (no corpus-hash logic); `groundly/cli/__init__.py` remove ("the graph rebuilds on the next corpus-hash-triggered index run")
 - Failure scenario: none today (no graph exists to go stale). Flagged so the gap is
   deliberate, on the record, and the user-facing note stops being a promise the code
   can't keep if graph work lands in a different shape.
