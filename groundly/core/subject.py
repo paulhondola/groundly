@@ -2,12 +2,12 @@
 
 from pathlib import Path
 
-from unilearn.core import store
-from unilearn.core.manifest import Manifest
-from unilearn.core.paths import subject_dir, unilearn_home
+from groundly.core import store
+from groundly.core.manifest import Manifest
+from groundly.core.paths import subject_dir, groundly_home
 
 _CONFIG_TEMPLATE = """\
-# UniLearn provider config — one OpenAI-compatible endpoint per call class.
+# Groundly provider config — one OpenAI-compatible endpoint per call class.
 # All classes are optional: indexing and search work with no provider at all.
 #
 # [providers.chat]        # ask pipeline generation
@@ -22,7 +22,7 @@ _CONFIG_TEMPLATE = """\
 
 
 def init_subject(name: str) -> tuple[Path, bool]:
-    """Create ~/.unilearn/<name>/ (manifest, materials/, store.db, progress.db).
+    """Create ~/.groundly/<name>/ (manifest, materials/, store.db, progress.db).
 
     Returns (subject_dir, created); created=False if already initialized (idempotent).
     Also writes the top-level config.toml template on first ever init.
@@ -38,7 +38,7 @@ def init_subject(name: str) -> tuple[Path, bool]:
     store.create_progress(sdir / "progress.db")
     Manifest.new(name).save(manifest_path)
 
-    config_path = unilearn_home() / "config.toml"
+    config_path = groundly_home() / "config.toml"
     if not config_path.exists():
         config_path.write_text(_CONFIG_TEMPLATE)
     return sdir, True

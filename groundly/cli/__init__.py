@@ -1,4 +1,4 @@
-"""UniLearn CLI — batch lifecycle verbs; the host agent is the interactive surface.
+"""Groundly CLI — batch lifecycle verbs; the host agent is the interactive surface.
 
 Command surface per docs/superpowers/specs/2026-07-16-p1-cli-surface-design.md.
 Later phases add verbs: P2 import/export · P3 ask · P4 mcp/serve · P6 export-deck.
@@ -16,7 +16,7 @@ from rich.table import Table
 app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
-    help="UniLearn — local course knowledge bases for AI agents.",
+    help="Groundly — local course knowledge bases for AI agents.",
 )
 config_app = typer.Typer()
 app.add_typer(config_app, name="config")
@@ -30,19 +30,19 @@ def _fail(message: str) -> None:
 
 
 def _subject_dir_checked(subject: str) -> Path:
-    from unilearn.core.paths import subject_dir
+    from groundly.core.paths import subject_dir
 
     try:
         sdir = subject_dir(subject)
     except ValueError as exc:
         _fail(str(exc))
     if not (sdir / "manifest.json").exists():
-        _fail(f"subject '{subject}' is not initialized — run: unilearn init {subject}")
+        _fail(f"subject '{subject}' is not initialized — run: groundly init {subject}")
     return sdir
 
 
 def _connect_checked(sdir: Path):
-    from unilearn.core import store
+    from groundly.core import store
 
     try:
         return store.connect(sdir / "store.db")
@@ -51,13 +51,13 @@ def _connect_checked(sdir: Path):
 
 
 def _not_implemented(verb: str) -> None:
-    typer.echo(f"unilearn {verb}: not implemented yet — arrives in a later phase")
+    typer.echo(f"groundly {verb}: not implemented yet — arrives in a later phase")
     raise typer.Exit(code=1)
 
 
 def _print_version(value: bool) -> None:
     if value:
-        typer.echo(_package_version("unilearn"))
+        typer.echo(_package_version("groundly"))
         raise typer.Exit()
 
 
@@ -70,15 +70,15 @@ def main(
         ),
     ] = False,
 ) -> None:
-    """UniLearn — local-first course knowledge bases for AI agents."""
+    """Groundly — local-first course knowledge bases for AI agents."""
 
 
 @app.command()
 def init(
-    subject: Annotated[str, typer.Argument(help="Subject name; becomes ~/.unilearn/<SUBJECT>/.")],
+    subject: Annotated[str, typer.Argument(help="Subject name; becomes ~/.groundly/<SUBJECT>/.")],
 ) -> None:
     """Create a subject: manifest.json, materials/, store.db, progress.db."""
-    from unilearn.core.subject import init_subject
+    from groundly.core.subject import init_subject
 
     try:
         sdir, created = init_subject(subject)
@@ -96,7 +96,7 @@ def index(
     paths: Annotated[list[Path], typer.Argument(help="Files or directories to index.")],
 ) -> None:
     """Index course materials: hash-skip idempotent, per-file progress, resumable."""
-    from unilearn.ingestion import pipeline
+    from groundly.ingestion import pipeline
 
     labels = {
         pipeline.INDEXED: "[green]indexed[/green]",
@@ -143,9 +143,9 @@ def list_(
 
     from pydantic import ValidationError
 
-    from unilearn.core import store
-    from unilearn.core.manifest import Manifest
-    from unilearn.core.paths import discover_subjects, subject_dir
+    from groundly.core import store
+    from groundly.core.manifest import Manifest
+    from groundly.core.paths import discover_subjects, subject_dir
 
     if subject is None:
         table = Table("subject", "materials", "chunks")
@@ -185,7 +185,7 @@ def remove(
     material: Annotated[
         Optional[str],
         typer.Argument(
-            help="Material filename (or sha256 prefix) as shown by `unilearn list`; "
+            help="Material filename (or sha256 prefix) as shown by `groundly list`; "
             "omit to remove the whole subject."
         ),
     ] = None,
@@ -194,8 +194,8 @@ def remove(
     """Remove a material and all its indexed data, or a whole subject if no material given."""
     import sqlite3
 
-    from unilearn.core import store
-    from unilearn.core.manifest import sync_counts
+    from groundly.core import store
+    from groundly.core.manifest import sync_counts
 
     sdir = _subject_dir_checked(subject)
 
@@ -215,7 +215,7 @@ def remove(
     try:
         matches = store.find_materials(conn, material)
         if not matches:
-            _fail(f"no material {material!r} in {subject} — see: unilearn list {subject}")
+            _fail(f"no material {material!r} in {subject} — see: groundly list {subject}")
         if len(matches) > 1:
             candidates = ", ".join(f"{m['filename']} ({m['sha256'][:8]})" for m in matches)
             _fail(f"{material!r} is ambiguous — candidates: {candidates}; use a sha256 prefix")
@@ -257,5 +257,5 @@ def config_set(
     key: Annotated[str, typer.Argument(help="Dotted key, e.g. chat.model or chat.base_url.")],
     value: Annotated[str, typer.Argument(help="Value to set.")],
 ) -> None:
-    """Set a provider config value in ~/.unilearn/config.toml."""
+    """Set a provider config value in ~/.groundly/config.toml."""
     _not_implemented("config set")

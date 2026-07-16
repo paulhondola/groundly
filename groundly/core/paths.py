@@ -1,4 +1,4 @@
-"""Filesystem layout: ~/.unilearn/ (UNILEARN_HOME overrides), one dir per subject.
+"""Filesystem layout: ~/.groundly/ (GROUNDLY_HOME overrides), one dir per subject.
 
 Discovery scans */manifest.json — no registry database (docs/architecture/data-model.md).
 """
@@ -10,9 +10,9 @@ from pathlib import Path
 _SUBJECT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
-def unilearn_home() -> Path:
-    override = os.environ.get("UNILEARN_HOME")
-    return Path(override) if override else Path.home() / ".unilearn"
+def groundly_home() -> Path:
+    override = os.environ.get("GROUNDLY_HOME")
+    return Path(override) if override else Path.home() / ".groundly"
 
 
 def validate_subject_name(name: str) -> None:
@@ -26,8 +26,8 @@ def validate_subject_name(name: str) -> None:
 
 def subject_dir(name: str) -> Path:
     validate_subject_name(name)
-    return unilearn_home() / name
+    return groundly_home() / name
 
 
 def discover_subjects() -> list[str]:
-    return sorted(p.parent.name for p in unilearn_home().glob("*/manifest.json"))
+    return sorted(p.parent.name for p in groundly_home().glob("*/manifest.json"))

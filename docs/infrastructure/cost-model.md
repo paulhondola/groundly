@@ -12,7 +12,7 @@ The archived iteration budgeted a VM and platform-paid tokens. Post-pivot there 
 | Graph build | extraction | **the big one**: single-digit dollars per subject (corpus-size dependent) | estimated and shown **before** the run; skippable; **sharing amortizes it** — one student builds, the course imports |
 | Graph global search | chat (map-reduce) | 10–50× a factoid answer | fires only via router classification or explicit `overview` |
 | Thick generation (`generate_deck`/`generate_quiz`) | generation | 2–4× base generation (verifier loop) | one-time per deck; verified decks are exportable — amortized like the graph |
-| Thin generation (`submit_*`) | — | **$0 to UniLearn** — the host agent's subscription generates; UniLearn only verifies | the zero-key path |
+| Thin generation (`submit_*`) | — | **$0 to Groundly** — the host agent's subscription generates; Groundly only verifies | the zero-key path |
 
 ## Principles
 

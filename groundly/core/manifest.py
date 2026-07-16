@@ -53,7 +53,7 @@ class Manifest(BaseModel):
 
     @classmethod
     def new(cls, subject: str) -> "Manifest":
-        return cls(subject=subject, tool_version=_package_version("unilearn"))
+        return cls(subject=subject, tool_version=_package_version("groundly"))
 
     @classmethod
     def load(cls, path: Path) -> "Manifest":

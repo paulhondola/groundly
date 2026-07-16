@@ -1,6 +1,6 @@
 # Use Cases: Study Modes (UC-10 – UC-14)
 
-Detail for [`unilearn-spec.md`](../unilearn-spec.md) §3. Actor: a **host agent** (MCP tools) conversing with the student; CLI equivalents where noted. The professor-facing modes (UC-20–24) and photo notes (UC-15) of the archived iteration are dropped.
+Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: a **host agent** (MCP tools) conversing with the student; CLI equivalents where noted. The professor-facing modes (UC-20–24) and photo notes (UC-15) of the archived iteration are dropped.
 
 ---
 
@@ -11,7 +11,7 @@ Detail for [`unilearn-spec.md`](../unilearn-spec.md) §3. Actor: a **host agent*
 **Main flow**
 
 1. The student asks their host agent for a quiz (topic, difficulty, count, types: MCQ / short answer / code-completion / true-false-justify).
-2. **Thick:** host calls `generate_quiz` → UniLearn generates from retrieved context and runs the verifier loop (max 2 retries per question, then drop + batch report). **Thin:** the host generates from `search` results and calls `submit_questions` → same verifier; rejections return machine-readable reasons (`not_answerable_from_chunks`, `wrong_answer_key`, `distractor_not_wrong`, `reference_solution_failed`) and the host regenerates.
+2. **Thick:** host calls `generate_quiz` → Groundly generates from retrieved context and runs the verifier loop (max 2 retries per question, then drop + batch report). **Thin:** the host generates from `search` results and calls `submit_questions` → same verifier; rejections return machine-readable reasons (`not_answerable_from_chunks`, `wrong_answer_key`, `distractor_not_wrong`, `reference_solution_failed`) and the host regenerates.
 3. **Verifier, per question:** answerable from cited chunks alone (re-retrieval); answer key correct; distractors actually wrong; **code questions: reference solution executed in a subprocess** (timeout, tempdir) — output must match.
 4. The host presents the quiz conversationally; `submit_quiz` records per-question results → mastery (UC-14).
 5. Weak-area mode: `generate_quiz(weak_areas=true)` weights retrieval toward the student's weak graph communities.
@@ -27,7 +27,7 @@ Detail for [`unilearn-spec.md`](../unilearn-spec.md) §3. Actor: a **host agent*
 ## UC-11 — Verified flashcards → Anki
 
 1. `generate_deck` (thick) or `submit_cards` (thin) → verifier gate → deck stored in `store.db` (exported with the KB — one student pays verification, the course imports the deck).
-2. `export_deck` → **`.apkg` (genanki)** — Anki owns daily spaced repetition; UniLearn owns verified generation. No in-chat SRS.
+2. `export_deck` → **`.apkg` (genanki)** — Anki owns daily spaced repetition; Groundly owns verified generation. No in-chat SRS.
 
 **Acceptance criteria:** an exported deck imports into stock Anki with cards, answers, and source citations on the back; every card cites resolving chunks.
 
@@ -35,7 +35,7 @@ Detail for [`unilearn-spec.md`](../unilearn-spec.md) §3. Actor: a **host agent*
 
 ## UC-12 — Graph study formats
 
-**Preconditions:** graph built (skippable at index time; these tools report "graph not built — run `unilearn index --graph`" otherwise).
+**Preconditions:** graph built (skippable at index time; these tools report "graph not built — run `groundly index --graph`" otherwise).
 
 - `overview(subject, topic)` — community-summary synthesis ("main themes", exam-scope overviews). Fires graphrag global search — router-gated / explicit only (cost).
 - `drill_down(subject, entity)` — entity-anchored local search for multi-hop questions.
@@ -49,7 +49,7 @@ Detail for [`unilearn-spec.md`](../unilearn-spec.md) §3. Actor: a **host agent*
 
 1. Host requests challenges for a topic → generated from indexed lab/lecture content (thick or thin path).
 2. Every challenge ships with tests + a reference solution **proven by subprocess execution** before storage (same runner as UC-10 code questions; timeout + tempdir).
-3. The student solves in their own environment — their host agent is already a coding agent; UniLearn deliberately does not tutor code itself (dropped native code tutor, pivot #2).
+3. The student solves in their own environment — their host agent is already a coding agent; Groundly deliberately does not tutor code itself (dropped native code tutor, pivot #2).
 
 **Acceptance criteria:** a stored challenge's reference solution passes its own tests via the runner; a broken generation is rejected with `reference_solution_failed`.
 

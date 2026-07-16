@@ -1,12 +1,12 @@
 # P1 CLI surface — verbs & flags design
 
-Status: approved 2026-07-16. Source decisions: [unilearn-spec.md](../../unilearn-spec.md) §4/§8,
+Status: approved 2026-07-16. Source decisions: [groundly-spec.md](../../groundly-spec.md) §4/§8,
 [use-cases/knowledge-base.md](../../use-cases/knowledge-base.md) (UC-01, UC-03),
 [.claude/rules/conventions.md](../../../.claude/rules/conventions.md).
 
 ## Context
 
-P1 delivers `unilearn init/index`: the indexing pipeline behind a typer CLI. This design fixes
+P1 delivers `groundly init/index`: the indexing pipeline behind a typer CLI. This design fixes
 the command surface — verbs, arguments, flags, output, errors — before implementation, so later
 phases add verbs without reshaping P1's grammar.
 
@@ -17,24 +17,24 @@ No stubs for later-phase verbs (`import/export/ask/mcp/serve` arrive in their ow
 
 ### Global
 
-- `unilearn --version` — print version, exit. The only global flag.
-- Home dir: `~/.unilearn/`, overridden by `UNILEARN_HOME` env var only — **no `--home` flag**;
+- `groundly --version` — print version, exit. The only global flag.
+- Home dir: `~/.groundly/`, overridden by `GROUNDLY_HOME` env var only — **no `--home` flag**;
   one override mechanism.
 - Exit codes: 0 success, 1 error, 2 usage (typer default). Failure messages name the specific
   cause, e.g. "scanned PDF — not supported".
 
-### `unilearn init <SUBJECT>`
+### `groundly init <SUBJECT>`
 
-Creates `~/.unilearn/<SUBJECT>/` with `manifest.json` (format version + model pins),
+Creates `~/.groundly/<SUBJECT>/` with `manifest.json` (format version + model pins),
 `materials/`, `store.db` (schema via `PRAGMA user_version`, WAL + busy_timeout), `progress.db`.
-Also creates `~/.unilearn/config.toml` on first run if absent.
+Also creates `~/.groundly/config.toml` on first run if absent.
 
 - **Flags: none.**
 - Subject name validated as a safe directory name (alnum, `-`, `_`; it becomes a path component
   and MCP identifier).
 - Already-initialized subject → friendly message, exit 0 (idempotent).
 
-### `unilearn index <SUBJECT> <PATHS...>`
+### `groundly index <SUBJECT> <PATHS...>`
 
 UC-01 contract. Paths are files or directories (directories walked recursively for supported
 extensions: pdf/docx/pptx/txt/md plus a source-code allowlist fixed in the ingestion plan).
@@ -48,10 +48,10 @@ past failures.
   scanned-PDF failure) is default behavior, not flag-gated.
 - Reserved names — do not repurpose later: `--graph` (P5 graph build), `--no-rerank` (P3,
   retrieval not indexing), `--no-materials` (P2 export).
-- Subject not initialized → error telling the user to run `unilearn init <SUBJECT>` (UC-01
+- Subject not initialized → error telling the user to run `groundly init <SUBJECT>` (UC-01
   precondition; no auto-init).
 
-### `unilearn list [SUBJECT]`
+### `groundly list [SUBJECT]`
 
 UC-03. No argument → table of subjects (name, materials, chunks). With subject → materials
 table: filename, status (`indexed` / `extraction_failed` / …), pages, chunks. Same data the MCP
@@ -59,7 +59,7 @@ table: filename, status (`indexed` / `extraction_failed` / …), pages, chunks. 
 
 - **Flags: none.** (No `--json`; agents get MCP, not CLI scraping.)
 
-### `unilearn remove <SUBJECT> [MATERIAL]`
+### `groundly remove <SUBJECT> [MATERIAL]`
 
 UC-03. `MATERIAL` = filename as shown by `list`. Deletes chunks/vectors/sparse/FTS rows and the
 file under `materials/` in one transaction; manifest counts re-synced. Prints the
@@ -71,7 +71,7 @@ graph-staleness note when a graph exists (harmless no-op until P5).
   arguments).
 - Ambiguous/unknown material name → error listing candidates.
 
-### `unilearn config` / `unilearn config set <KEY> <VALUE>`
+### `groundly config` / `groundly config set <KEY> <VALUE>`
 
 - Bare `config`: prints the config file path + effective values per call class (`chat`,
   `generation`, `extraction`, `router`), **keys masked** to last 3 chars.
@@ -85,21 +85,21 @@ graph-staleness note when a graph exists (harmless no-op until P5).
 
 Client layer thin, logic in services (architecture invariants):
 
-- `unilearn/cli/__init__.py` — typer `app`, the five verbs, rich output. No business logic.
-- `unilearn/core/paths.py` — home resolution (`UNILEARN_HOME`), subject dir layout,
+- `groundly/cli/__init__.py` — typer `app`, the five verbs, rich output. No business logic.
+- `groundly/core/paths.py` — home resolution (`GROUNDLY_HOME`), subject dir layout,
   subject-name validation.
-- `unilearn/core/store.py` — SQLite open helper (WAL + busy_timeout on every connection,
+- `groundly/core/store.py` — SQLite open helper (WAL + busy_timeout on every connection,
   `PRAGMA user_version` check), P1 schema (materials, chunks, vectors, sparse, FTS5), manifest
   read/write.
-- `unilearn/core/config.py` — pydantic-settings model for `config.toml` per call class;
+- `groundly/core/config.py` — pydantic-settings model for `config.toml` per call class;
   load/save/mask.
-- `unilearn/ingestion/` — the index pipeline (hash-skip, Docling subprocess, chunker, embedder,
+- `groundly/ingestion/` — the index pipeline (hash-skip, Docling subprocess, chunker, embedder,
   per-file transaction). The pipeline is the bulk of P1 and gets its own detailed implementation
   plan; the CLI wires `index` to its entry point.
 
 ## Acceptance (traceable to UC-01/UC-03)
 
-- `unilearn init PDSS` → dir tree exists, `store.db` opens with WAL + expected `user_version`;
+- `groundly init PDSS` → dir tree exists, `store.db` opens with WAL + expected `user_version`;
   re-run is a no-op.
 - A real digital lecture PDF round-trips to `indexed` with correct page/chunk counts; chunks
   carry page + heading path.
@@ -107,6 +107,6 @@ Client layer thin, logic in services (architecture invariants):
   terminal state.
 - Re-run on unchanged folder → zero re-embedding; adding one file embeds exactly one file.
 - Ctrl-C mid-index → re-run resumes; store not corrupted (WAL).
-- `unilearn remove` leaves no retrievable rows in any channel; manifest counts synced.
-- `unilearn config set chat.model x` visible in `config` output, key masked; unknown key
+- `groundly remove` leaves no retrievable rows in any channel; manifest counts synced.
+- `groundly config set chat.model x` visible in `config` output, key masked; unknown key
   rejected.

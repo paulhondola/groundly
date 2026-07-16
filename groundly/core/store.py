@@ -10,7 +10,7 @@ from pathlib import Path
 
 import sqlite_vec
 
-from unilearn.core.manifest import EMBEDDING_DIM
+from groundly.core.manifest import EMBEDDING_DIM
 
 STORE_USER_VERSION = 1
 
@@ -76,8 +76,8 @@ def connect(path: Path, create: bool = False) -> sqlite3.Connection:
     if version > STORE_USER_VERSION:
         conn.close()
         raise RuntimeError(
-            f"{path.name} has schema version {version}, newer than this unilearn "
-            f"understands (max {STORE_USER_VERSION}) — upgrade unilearn"
+            f"{path.name} has schema version {version}, newer than this groundly "
+            f"understands (max {STORE_USER_VERSION}) — upgrade groundly"
         )
     return conn
 

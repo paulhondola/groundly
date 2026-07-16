@@ -12,7 +12,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from unilearn.ingestion import extract_worker
+from groundly.ingestion import extract_worker
 
 EXTRACT_TIMEOUT_SECONDS = 300
 STDERR_TAIL_BYTES = 4096
@@ -59,7 +59,7 @@ def extract(path: Path, timeout: float = EXTRACT_TIMEOUT_SECONDS) -> Extraction:
                     [
                         sys.executable,
                         "-m",
-                        "unilearn.ingestion.extract_worker",
+                        "groundly.ingestion.extract_worker",
                         str(
                             path.resolve()
                         ),  # worker runs with cwd=tmp; relative paths must survive

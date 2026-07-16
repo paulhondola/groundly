@@ -7,8 +7,8 @@ pytestmark = pytest.mark.slow
 
 
 def test_bge_m3_dense_and_sparse_contract():
-    from unilearn.core.manifest import EMBEDDING_DIM
-    from unilearn.llm.embeddings import BgeM3Embedder
+    from groundly.core.manifest import EMBEDDING_DIM
+    from groundly.llm.embeddings import BgeM3Embedder
 
     dense, sparse = BgeM3Embedder().encode(["mutual exclusion in distributed systems"])
     assert len(dense) == len(sparse) == 1

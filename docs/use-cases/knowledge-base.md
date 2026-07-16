@@ -1,17 +1,17 @@
 # Use Cases: Knowledge Base (UC-01 – UC-03)
 
-Detail for [`unilearn-spec.md`](../unilearn-spec.md) §3. Actor: the **student** (CLI) or a **host agent** acting for them (MCP). "Done" = acceptance criteria pass.
+Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: the **student** (CLI) or a **host agent** acting for them (MCP). "Done" = acceptance criteria pass.
 
 ---
 
 ## UC-01 — Index materials
 
 **Actor:** student (CLI).
-**Preconditions:** subject initialized (`unilearn init <SUBJECT>`); files are digital documents (PDF/DOCX/PPTX/TXT/MD/source with a text layer).
+**Preconditions:** subject initialized (`groundly init <SUBJECT>`); files are digital documents (PDF/DOCX/PPTX/TXT/MD/source with a text layer).
 
 **Main flow**
 
-1. `unilearn index <SUBJECT> <paths...>` — files are hashed (sha-256); already-indexed hashes are skipped (idempotent re-run = the "new lecture this week" workflow; no watch daemon).
+1. `groundly index <SUBJECT> <paths...>` — files are hashed (sha-256); already-indexed hashes are skipped (idempotent re-run = the "new lecture this week" workflow; no watch daemon).
 2. Per file, in one transaction: Docling extraction **in a subprocess** (digital only — no OCR) → HybridChunker (section-aligned, heading path prepended) → bge-m3 dense + learned sparse (lazy-loaded, local) → sqlite-vec / sparse table / FTS5 rows → `indexed`.
 3. Progress per file (`queued → extracting → embedding → indexed`), rich CLI output.
 4. Corpus hash changed → offer the graph build with a **cost estimate first** (skippable; vector-only subjects are first-class — see UC-12).
@@ -34,7 +34,7 @@ Detail for [`unilearn-spec.md`](../unilearn-spec.md) §3. Actor: the **student**
 
 ## UC-02 — Grounded Q&A
 
-**Actor:** host agent (MCP `ask`/`search`) or student (`unilearn ask`).
+**Actor:** host agent (MCP `ask`/`search`) or student (`groundly ask`).
 **Preconditions:** subject has ≥1 indexed material; `ask` additionally needs a configured chat provider.
 
 **Main flow (`ask` — the enforced path)**
@@ -52,7 +52,7 @@ Detail for [`unilearn-spec.md`](../unilearn-spec.md) §3. Actor: the **student**
 
 - Every `ask` answer contains ≥1 citation resolving to the correct page; the no-coverage case returns the refusal, not a hallucination.
 - A Romanian question over English-only slides retrieves relevant chunks (dense channel; cross-lingual slice in the eval).
-- `unilearn ask` and the MCP `ask` tool produce identical results for the same query (same function).
+- `groundly ask` and the MCP `ask` tool produce identical results for the same query (same function).
 - With no API key configured, `ask` fails with a clear message while `search` works fully.
 
 ---
@@ -63,11 +63,11 @@ Detail for [`unilearn-spec.md`](../unilearn-spec.md) §3. Actor: the **student**
 
 **Main flow**
 
-1. `unilearn list <SUBJECT>` shows materials with status, page counts, chunk counts; `list_subjects` (MCP) exposes the same.
+1. `groundly list <SUBJECT>` shows materials with status, page counts, chunk counts; `list_subjects` (MCP) exposes the same.
 2. Removing a material deletes its chunks/vectors/sparse/FTS rows immediately; the graph rebuilds on the next corpus-hash-triggered run (lag surfaced in output).
 3. `manifest.json` counts stay in sync after every mutation.
 
 **Acceptance criteria**
 
 - Deleting a material leaves no retrievable chunks in any channel.
-- `list_subjects` works from an MCP host spawned in an arbitrary working directory (global `~/.unilearn/` discovery).
+- `list_subjects` works from an MCP host spawned in an arbitrary working directory (global `~/.groundly/` discovery).

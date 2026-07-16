@@ -1,6 +1,6 @@
 # Agent Layer
 
-Expands [`unilearn-spec.md`](../unilearn-spec.md) §5b. Governing rule: **agents only where the system must decide, iterate, or use tools mid-task** — everything else is a pipeline. Specialization is data, never code: "which subject" is literally which `~/.unilearn/<SUBJECT>/` directory is open. Loops are **plain bounded async functions** — LangGraph was dropped when the roster shrank (consolidation pass).
+Expands [`groundly-spec.md`](../groundly-spec.md) §5b. Governing rule: **agents only where the system must decide, iterate, or use tools mid-task** — everything else is a pipeline. Specialization is data, never code: "which subject" is literally which `~/.groundly/<SUBJECT>/` directory is open. Loops are **plain bounded async functions** — LangGraph was dropped when the roster shrank (consolidation pass).
 
 ## The roster (two)
 
@@ -8,7 +8,7 @@ Expands [`unilearn-spec.md`](../unilearn-spec.md) §5b. Governing rule: **agents
 
 `router → retrieval arm(s) → fusion/rerank → trust-layered prompt assembly → generation (chat call class) → citation resolution → cited answer or "not covered" → trace row.`
 
-Exposed identically as the MCP `ask` tool and the `unilearn ask` CLI verb — **the product tool and the evaluation instrument are one function**. Grounding is enforced inside this boundary: a response with zero resolvable citations is an error; insufficient context returns the refusal, never model knowledge.
+Exposed identically as the MCP `ask` tool and the `groundly ask` CLI verb — **the product tool and the evaluation instrument are one function**. Grounding is enforced inside this boundary: a response with zero resolvable citations is an error; insufficient context returns the refusal, never model knowledge.
 
 Honest scope note: host agents may prefer raw `search` (free, composable) and compose their own answers — that path is best-effort grounding by construction, and the eval *measures* the gap (grounding-fidelity experiment) rather than pretending it away.
 
@@ -23,7 +23,7 @@ Two doors, one gate:
 
 | Path | Generator | Needs API key | Loop |
 |---|---|---|---|
-| Thick: `generate_deck` / `generate_quiz` | UniLearn (generation call class) | yes | generate → verify → regenerate, max 2 retries, then drop + note in batch report |
+| Thick: `generate_deck` / `generate_quiz` | Groundly (generation call class) | yes | generate → verify → regenerate, max 2 retries, then drop + note in batch report |
 | Thin: `submit_cards` / `submit_questions` | The host agent, from `search` results | no | verifier returns machine-readable rejections (`not_answerable_from_chunks`, `wrong_answer_key`, `reference_solution_failed`, …); the host regenerates conversationally |
 
 Verified items record their generation source — **rejection rate by source** is a thesis measurement. Verified decks live in `store.db` (exported: one student pays the verification cost, the course imports the deck) and leave the system as Anki `.apkg` via `export_deck`. Forward-compat: the generation interface is shaped so MCP sampling (host-paid tokens, server-controlled loop) can slot in later; not depended on.

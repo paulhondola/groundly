@@ -10,7 +10,7 @@ compatibility contract: same pin ⇒ shared vectors transfer as-is.
 import sys
 from typing import Protocol
 
-from unilearn.core.manifest import EMBEDDING_MODEL, HF_REVISION
+from groundly.core.manifest import EMBEDDING_MODEL, HF_REVISION
 
 SparseWeights = dict[int, float]
 

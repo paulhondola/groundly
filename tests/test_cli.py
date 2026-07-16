@@ -1,20 +1,20 @@
 """CLI: grammar pinned by the P1 surface design; init/list/remove exercised for real
-against a temp UNILEARN_HOME. Heavy index logic is covered in test_pipeline.py; the
+against a temp GROUNDLY_HOME. Heavy index logic is covered in test_pipeline.py; the
 CLI index test stubs the pipeline entry point."""
 
 import pytest
 from typer.testing import CliRunner
 
-from unilearn.cli import app
-from unilearn.core.paths import subject_dir
-from unilearn.ingestion import pipeline
+from groundly.cli import app
+from groundly.core.paths import subject_dir
+from groundly.ingestion import pipeline
 
 runner = CliRunner()
 
 
 @pytest.fixture(autouse=True)
 def home(monkeypatch, tmp_path):
-    monkeypatch.setenv("UNILEARN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
     (tmp_path / "home").mkdir()
     return tmp_path / "home"
 
@@ -59,7 +59,7 @@ def test_list_all_subjects():
 def test_list_unknown_subject_names_the_fix():
     result = runner.invoke(app, ["list", "NOPE"])
     assert result.exit_code == 1
-    assert "unilearn init NOPE" in result.output
+    assert "groundly init NOPE" in result.output
 
 
 def test_index_reports_results(monkeypatch, tmp_path):
@@ -81,7 +81,7 @@ def test_index_uninitialized_subject_fails_with_fix(tmp_path):
     f.write_text("content")
     result = runner.invoke(app, ["index", "NOPE", str(f)])
     assert result.exit_code == 1
-    assert "unilearn init NOPE" in result.output
+    assert "groundly init NOPE" in result.output
 
 
 @pytest.mark.parametrize("args", [["list", "../evil"], ["remove", "../evil", "x.pdf", "-y"]])
@@ -99,7 +99,7 @@ def test_remove_unknown_material():
 
 
 def test_remove_deletes_rows_and_file(home):
-    from unilearn.core import store
+    from groundly.core import store
 
     runner.invoke(app, ["init", "PDSS"])
     sdir = subject_dir("PDSS")
@@ -153,7 +153,7 @@ def test_list_all_skips_corrupt_manifest_with_warning():
 def test_remove_failed_row_keeps_indexed_siblings_file(home):
     """A failed row records the original filename with no collision suffix — removing
     it must not delete a same-named indexed material's stored file (citation target)."""
-    from unilearn.core import store
+    from groundly.core import store
 
     runner.invoke(app, ["init", "PDSS"])
     sdir = subject_dir("PDSS")

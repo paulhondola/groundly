@@ -1,10 +1,10 @@
 # Tech Stack
 
-Expands [`unilearn-spec.md`](../unilearn-spec.md) §4. Every row is a **decision** with its decisive reason, not a menu. Alternatives appear only as live migration paths.
+Expands [`groundly-spec.md`](../groundly-spec.md) §4. Every row is a **decision** with its decisive reason, not a menu. Alternatives appear only as live migration paths.
 
 | Layer | Choice | Decisive reason | Documented alternative |
 |---|---|---|---|
-| Language / distribution | Python ≥3.11, installed via **uv** (`uv tool install unilearn`) | Docling + LlamaIndex + graphrag + RAGAS coexist only in Python; uv makes `curl \| bash` honest | — |
+| Language / distribution | Python ≥3.11, installed via **uv** (`uv tool install groundly`) | Docling + LlamaIndex + graphrag + RAGAS coexist only in Python; uv makes `curl \| bash` honest | — |
 | CLI | **typer + rich** | Batch verbs with progress output; the host agent is the interactive surface (no TUI) | — |
 | MCP surface | **FastMCP** | stdio + streamable HTTP from one tool set; tools, resources, prompts | — |
 | Storage | **SQLite (WAL) + sqlite-vec + FTS5**, files on disk | Zero services; export = zip; exact KNN at 5k–50k chunks/subject | LanceDB/IVF if a corpus ever outgrows brute force |
@@ -14,16 +14,16 @@ Expands [`unilearn-spec.md`](../unilearn-spec.md) §4. Every row is a **decision
 | Graph engine | **Microsoft `graphrag`** (batch, per subject, parquet on disk) | Canonical GraphRAG — Leiden + community summaries + local/global search | timeboxed; vector-only operation is first-class |
 | Retrieval orchestration | **LlamaIndex** | One `Retriever` interface across all four evaluation arms — the comparison's fairness depends on it | — |
 | Agent loops | **Plain async functions** | Post-pivot roster = one pipeline + two bounded loops; a graph framework wraps nothing (LangGraph dropped) | — |
-| Flashcards | **genanki → .apkg** | Anki owns daily review; UniLearn owns verified generation | — |
+| Flashcards | **genanki → .apkg** | Anki owns daily review; Groundly owns verified generation | — |
 | Observability | **Local `traces` table** in progress.db | Offline, private, shippable eval artifact (LangSmith dropped — cloud tracing inside a local-first tool) | — |
-| Dashboard | One **static HTML page** (theme as CSS variables in `unilearn/web/static/theme.css`) | A React toolchain for one page was unjustifiable (final review) | — |
-| Web serving | FastAPI + uvicorn, only inside `unilearn serve` (loopback-only) | FastMCP mounts into it; dashboard rides along | — |
+| Dashboard | One **static HTML page** (theme as CSS variables in `groundly/web/static/theme.css`) | A React toolchain for one page was unjustifiable (final review) | — |
+| Web serving | FastAPI + uvicorn, only inside `groundly serve` (loopback-only) | FastMCP mounts into it; dashboard rides along | — |
 
 ## LLM provider boundary
 
 **Decision: one OpenAI-compatible boundary, per call class, bring-your-own provider.**
 
-All LLM clients are constructed in **one module** (`unilearn/llm/`) from `~/.unilearn/config.toml`:
+All LLM clients are constructed in **one module** (`groundly/llm/`) from `~/.groundly/config.toml`:
 
 ```toml
 [providers.chat]        # ask pipeline generation
@@ -38,7 +38,7 @@ api_key  = "..."
 
 Rules that make this real:
 
-1. **No provider SDK usage outside `unilearn/llm/`.** LlamaIndex and graphrag accept OpenAI-compatible configs — only that form is used.
+1. **No provider SDK usage outside `groundly/llm/`.** LlamaIndex and graphrag accept OpenAI-compatible configs — only that form is used.
 2. **Per call class**, so "cheap router, strong verifier" is config, not refactoring. Local runtimes (LM Studio, Ollama) and cloud keys are the same code path — different `base_url`.
 3. **Every call passes through `llm/` and records tokens + cost into traces.** Visibility, not budget enforcement — it's the student's own key.
 4. **No subscription-OAuth piggybacking** (Claude Pro token reuse etc.) — ToS-fragile; opencode's history proves it.

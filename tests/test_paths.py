@@ -2,18 +2,18 @@ from pathlib import Path
 
 import pytest
 
-from unilearn.core import paths
-from unilearn.core.manifest import Manifest
+from groundly.core import paths
+from groundly.core.manifest import Manifest
 
 
 def test_home_env_override(monkeypatch, tmp_path):
-    monkeypatch.setenv("UNILEARN_HOME", str(tmp_path))
-    assert paths.unilearn_home() == tmp_path
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path))
+    assert paths.groundly_home() == tmp_path
 
 
 def test_home_default(monkeypatch):
-    monkeypatch.delenv("UNILEARN_HOME", raising=False)
-    assert paths.unilearn_home() == Path.home() / ".unilearn"
+    monkeypatch.delenv("GROUNDLY_HOME", raising=False)
+    assert paths.groundly_home() == Path.home() / ".groundly"
 
 
 @pytest.mark.parametrize("name", ["PDSS", "ml-course", "algo_2", "a"])
@@ -28,7 +28,7 @@ def test_invalid_subject_names(name):
 
 
 def test_discover_subjects_scans_manifests(monkeypatch, tmp_path):
-    monkeypatch.setenv("UNILEARN_HOME", str(tmp_path))
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path))
     for name in ["PDSS", "ML"]:
         (tmp_path / name).mkdir()
         Manifest.new(name).save(tmp_path / name / "manifest.json")

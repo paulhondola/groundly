@@ -1,4 +1,4 @@
-"""Extraction worker — runs as `python -m unilearn.ingestion.extract_worker <in> <out.json>`.
+"""Extraction worker — runs as `python -m groundly.ingestion.extract_worker <in> <out.json>`.
 
 Always a child process: a parser crash on a hostile/broken file kills this process,
 not the indexing run (UC-01 A2, security.md §3). Digital documents only — no OCR;
@@ -24,7 +24,7 @@ DOCLING_SUFFIXES = {".pdf", ".docx", ".pptx", ".md"}
 def _bge_m3_tokenizer():
     from transformers import AutoTokenizer
 
-    from unilearn.core.manifest import EMBEDDING_MODEL, HF_REVISION
+    from groundly.core.manifest import EMBEDDING_MODEL, HF_REVISION
 
     return AutoTokenizer.from_pretrained(EMBEDDING_MODEL, revision=HF_REVISION)
 
@@ -46,7 +46,7 @@ def _extract_docling(path: Path) -> dict:
     from docling.document_converter import DocumentConverter
     from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
 
-    from unilearn.core.manifest import CHUNK_MAX_TOKENS
+    from groundly.core.manifest import CHUNK_MAX_TOKENS
 
     formats = {
         ".pdf": InputFormat.PDF,
@@ -88,7 +88,7 @@ def _extract_docling(path: Path) -> dict:
 
 
 def _extract_plain_text(path: Path) -> dict:
-    from unilearn.core.manifest import CHUNK_MAX_TOKENS
+    from groundly.core.manifest import CHUNK_MAX_TOKENS
 
     text = path.read_text(errors="replace")
     tokenizer = _model_step(_bge_m3_tokenizer)

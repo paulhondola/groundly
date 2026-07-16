@@ -10,11 +10,11 @@ from pathlib import Path
 
 import sqlite_vec
 
-from unilearn.core import store
-from unilearn.core.manifest import sync_counts
-from unilearn.core.paths import subject_dir
-from unilearn.ingestion.extract import ExtractionFailure, ModelUnavailable, extract
-from unilearn.llm.embeddings import BgeM3Embedder, Embedder
+from groundly.core import store
+from groundly.core.manifest import sync_counts
+from groundly.core.paths import subject_dir
+from groundly.ingestion.extract import ExtractionFailure, ModelUnavailable, extract
+from groundly.llm.embeddings import BgeM3Embedder, Embedder
 
 SUPPORTED_SUFFIXES = {
     ".pdf",
@@ -89,7 +89,7 @@ def index_paths(
     sdir = subject_dir(subject)
     manifest_path = sdir / "manifest.json"
     if not manifest_path.exists():
-        raise RuntimeError(f"subject '{subject}' is not initialized — run: unilearn init {subject}")
+        raise RuntimeError(f"subject '{subject}' is not initialized — run: groundly init {subject}")
 
     emit = on_event or (lambda path, stage: None)
     embedder = embedder or BgeM3Embedder()

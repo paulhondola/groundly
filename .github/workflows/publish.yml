@@ -1,15 +1,17 @@
-name: CI
+name: Publish
 
 on:
   push:
-    branches: [main, "**"]
-  pull_request:
-    branches: [main]
+    tags: ["v*"]
 
 jobs:
-  server:
-    name: groundly
+  publish:
+    name: Build and publish to PyPI
     runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -29,3 +31,9 @@ jobs:
 
       - name: Test (pytest)
         run: uv run pytest
+
+      - name: Build
+        run: uv build
+
+      - name: Publish
+        run: uv publish

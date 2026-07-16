@@ -4,7 +4,7 @@ Single-user, local-first: most of the archived iteration's threat model (multi-t
 
 ## 1. Import — the trust boundary
 
-A `.unilearn` bundle is third-party content that will enter the student's prompts and filesystem.
+A `.groundly` bundle is third-party content that will enter the student's prompts and filesystem.
 
 **Controls:**
 - **Zip-slip protection**: extraction rejects entries escaping the target directory (no absolute paths, no `..`); symlinks not extracted.
@@ -24,17 +24,17 @@ The verifier executes LLM-generated reference solutions; challenges run student-
 
 ## 4. Local servers
 
-`unilearn serve` (MCP-over-HTTP + dashboard) binds **127.0.0.1 only** — no-auth is acceptable exactly and only on loopback. Refuse `--host` values other than loopback without an explicit `--i-know-what-im-doing` style override. stdio MCP has no network surface at all.
+`groundly serve` (MCP-over-HTTP + dashboard) binds **127.0.0.1 only** — no-auth is acceptable exactly and only on loopback. Refuse `--host` values other than loopback without an explicit `--i-know-what-im-doing` style override. stdio MCP has no network surface at all.
 
 ## 5. Privacy
 
 - **Nothing leaves the machine** except calls to the student's own configured LLM provider (their key, their choice) and model downloads from Hugging Face.
 - **The privacy boundary is a file**: `progress.db` — every query (traces), quiz result, and study note — is never exported. `store.db` exports carry the whole knowledge base including chunk text and original materials; the export UX says so plainly ("this bundle contains everything indexed in this subject").
-- **Sharing = sharing course-material text.** Between enrolled students this is note-sharing; UniLearn documents it rather than policing it (thesis acknowledges the copyright surface).
+- **Sharing = sharing course-material text.** Between enrolled students this is note-sharing; Groundly documents it rather than policing it (thesis acknowledges the copyright surface).
 - No telemetry, no accounts, no third-party trace storage (LangSmith was dropped for exactly this reason).
 
 ## Residual risks, named
 
-- A malicious `.unilearn` bundle with a crafted SQLite file targeting parser bugs — mitigated by schema checks, not eliminated.
+- A malicious `.groundly` bundle with a crafted SQLite file targeting parser bugs — mitigated by schema checks, not eliminated.
 - Docling parsing a hostile PDF (from a merge-by-reindex of imported materials) — contained to the extraction subprocess (`extraction_failed`), not the app.
 - Generated code doing something hostile inside the timeout — accepted as self-risk on the student's own machine, stated in docs.

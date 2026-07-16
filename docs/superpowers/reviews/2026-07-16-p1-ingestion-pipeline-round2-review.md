@@ -18,13 +18,13 @@ misreport, invalid-subject-name tracebacks in list/remove.
 ## Findings
 
 ### F1 — `remove` of an `extraction_failed` row silently deletes another material's stored file [severity: high]
-- Where: `unilearn/cli/__init__.py:192-194` (unlink by `target["filename"]`); root cause
-  `unilearn/ingestion/pipeline.py:154-157` (failed rows record `path.name` with no
+- Where: `groundly/cli/__init__.py:192-194` (unlink by `target["filename"]`); root cause
+  `groundly/ingestion/pipeline.py:154-157` (failed rows record `path.name` with no
   collision handling, unlike the indexed path's `_copy_to_materials` suffixing)
 - Failure scenario: `lec.pdf` (good) is indexed → stored as `materials/lec.pdf`. A
   different file also named `lec.pdf` (e.g. the scanned version) fails extraction → row
   `(filename='lec.pdf', status='extraction_failed')`, no copy made. User runs
-  `unilearn remove S <sha-prefix-of-failed> -y` (the sha prefix is forced — the filename
+  `groundly remove S <sha-prefix-of-failed> -y` (the sha prefix is forced — the filename
   is ambiguous). The failed row is removed, then the unlink at cli/__init__.py:193 hits
   `materials/lec.pdf` — the *indexed* material's file. Exit 0, "removed lec.pdf". The
   indexed row survives but its citation target / export payload is gone, silently.
@@ -35,16 +35,16 @@ misreport, invalid-subject-name tracebacks in list/remove.
   copied anything), and/or verify no other row references the same filename.
 
 ### F2 — Docling model-fetch failure is recorded as *terminal* `extraction_failed`; an offline first run permanently poisons every PDF/DOCX/PPTX/MD [severity: high]
-- Where: `unilearn/ingestion/extract_worker.py:50` (`DocumentConverter().convert` runs
+- Where: `groundly/ingestion/extract_worker.py:50` (`DocumentConverter().convert` runs
   *before* `_load_tokenizer`, outside any EXIT_MODEL_UNAVAILABLE handling);
-  `unilearn/ingestion/extract.py:80-82` (exit 1 → `ExtractionFailure("parser failed: …")`)
+  `groundly/ingestion/extract.py:80-82` (exit 1 → `ExtractionFailure("parser failed: …")`)
 - Failure scenario: fresh machine (or cleared HF cache) with no network — exactly the
   transient environment 60ecf19 set out to handle. `.txt` files correctly exit 4 →
   retryable `error`, no row. But for any Docling-suffix file, docling's own layout-model
   download raises inside `convert()` → worker exits 1 → parent records a **terminal**
   `extraction_failed` row. Because extraction_failed is now terminal (pipeline.py:122-131),
   every subsequent run — network restored, models cached — reports
-  "failed previously … remove to retry" forever. One offline `unilearn index` on a course
+  "failed previously … remove to retry" forever. One offline `groundly index` on a course
   folder requires a manual `remove` per document to recover. The recorded error message is
   also a raw huggingface_hub traceback line, not a named cause (conventions violation).
 - Evidence: reproduced — ran the worker on a real PDF with `HF_HOME=<empty>` +
@@ -54,7 +54,7 @@ misreport, invalid-subject-name tracebacks in list/remove.
   the artifact cache) in the same EXIT_MODEL_UNAVAILABLE path.
 
 ### F3 — The `extraction_failed` INSERT still loses the concurrent-run race and aborts the whole run [severity: medium]
-- Where: `unilearn/ingestion/pipeline.py:152-158` — the IntegrityError catch added in
+- Where: `groundly/ingestion/pipeline.py:152-158` — the IntegrityError catch added in
   60ecf19 wraps only `_write_indexed` (line 170-176), not the failure-path insert. The
   first review's F1 named both insert sites.
 - Failure scenario: two runs (CLI + MCP share store.db per the architecture rules) both
@@ -82,14 +82,14 @@ misreport, invalid-subject-name tracebacks in list/remove.
   workflow (plain `uv run pytest`).
 
 ### F5 — `list` crashes with raw tracebacks on a corrupt manifest or a missing store.db; `connect()` silently creates an empty DB [severity: medium]
-- Where: `unilearn/cli/__init__.py:140` (`Manifest.load` in the list-all loop, uncaught),
+- Where: `groundly/cli/__init__.py:140` (`Manifest.load` in the list-all loop, uncaught),
   `:146` (`store.connect` + `list_materials`, uncaught `OperationalError`);
-  `unilearn/core/store.py:64` (`sqlite3.connect` creates the file when absent;
+  `groundly/core/store.py:64` (`sqlite3.connect` creates the file when absent;
   user_version 0 passes the ≤ known check)
 - Failure scenario: (a) a manifest.json truncated by a crash/Ctrl-C (see F7 — the writer
-  is not atomic) makes `unilearn list` die with a pydantic `ValidationError` traceback
+  is not atomic) makes `groundly list` die with a pydantic `ValidationError` traceback
   and list *no* subjects, including healthy ones. (b) `store.db` deleted while
-  manifest.json survives → `unilearn list S` throws `sqlite3.OperationalError: no such
+  manifest.json survives → `groundly list S` throws `sqlite3.OperationalError: no such
   table: materials` — and as a side effect leaves behind a freshly created, schema-less
   `store.db`, converting a recoverable state ("re-init") into a confusing one. Both
   violate "failure messages name the cause specifically, never generic errors".
@@ -97,7 +97,7 @@ misreport, invalid-subject-name tracebacks in list/remove.
   OperationalError as `result.exception`, empty output, bogus store.db created.
 
 ### F6 — `_copy_to_materials` sits outside every try block: any copy OSError aborts the whole run [severity: low]
-- Where: `unilearn/ingestion/pipeline.py:169` (called between the embed try and the
+- Where: `groundly/ingestion/pipeline.py:169` (called between the embed try and the
   write try in `_index_one`)
 - Failure scenario: disk full, permission error on `materials/`, or — reproduced — a
   hard link of an already-stored file (the 60ecf19 orphan fix compares `resolve()`
@@ -108,12 +108,12 @@ misreport, invalid-subject-name tracebacks in list/remove.
   `CRASH: SameFileError`. ENOSPC/EACCES unverified — plausible, same code path.
 
 ### F7 — `Manifest.save` is a non-atomic truncate-then-write; interruption or a concurrent run corrupts manifest.json [severity: low]
-- Where: `unilearn/core/manifest.py:63` (`path.write_text`), called per-file from
+- Where: `groundly/core/manifest.py:63` (`path.write_text`), called per-file from
   `index_paths` (pipeline.py:137) and from `remove`
 - Failure scenario: Ctrl-C during the write (index calls it after *every* file, so the
   window recurs constantly), or two concurrent `index` runs interleaving truncate/write,
   leaves a partial JSON. Everything that loads the manifest then fails — including
-  `unilearn list` for *all* subjects (F5a). A4's "interrupted run resumes without
+  `groundly list` for *all* subjects (F5a). A4's "interrupted run resumes without
   corruption" holds for the DB but not for the manifest sitting next to it.
 - Evidence: unverified — code-traced; the downstream crash on a truncated manifest is
   reproduced (F5a).
