@@ -64,7 +64,9 @@ def index_paths(
         for path in _iter_files(paths):
             emit(path, "queued")
             if path.is_symlink():  # a hostile symlink would index (and later export)
-                results.append(FileResult(path, Status.SKIPPED_UNSUPPORTED, "symlink — not followed"))
+                results.append(
+                    FileResult(path, Status.SKIPPED_UNSUPPORTED, "symlink — not followed")
+                )
                 emit(path, Status.SKIPPED_UNSUPPORTED)
                 continue
             if not path.exists():
@@ -73,7 +75,9 @@ def index_paths(
                 continue
             if path.suffix.lower() not in SUPPORTED_SUFFIXES:
                 results.append(
-                    FileResult(path, Status.SKIPPED_UNSUPPORTED, f"unsupported type {path.suffix!r}")
+                    FileResult(
+                        path, Status.SKIPPED_UNSUPPORTED, f"unsupported type {path.suffix!r}"
+                    )
                 )
                 emit(path, Status.SKIPPED_UNSUPPORTED)
                 continue
