@@ -76,6 +76,32 @@ def test_md_chunks_carry_heading_path(subject, course):
 
 
 @slow
+def test_html_chunks_carry_heading_path(subject, course):
+    html = course / "notes.html"
+    html.write_text(
+        "<html><body><h1>Deadlock</h1><h2>Conditions</h2>"
+        "<p>Four conditions must hold for a deadlock to occur.</p>"
+        "</body></html>"
+    )
+    pipeline.index_paths(subject, [html], embedder=StubEmbedder())
+    with _connect(subject) as conn:
+        rows = conn.execute("SELECT heading_path FROM chunks").fetchall()
+    assert any(r["heading_path"] and "Deadlock" in r["heading_path"] for r in rows)
+
+
+@slow
+def test_latex_file_indexes_without_error(subject, course):
+    tex = course / "notes.tex"
+    tex.write_text(
+        r"\documentclass{article}\begin{document}"
+        r"\section{Deadlock}Four conditions must hold for a deadlock to occur."
+        r"\end{document}"
+    )
+    results = pipeline.index_paths(subject, [tex], embedder=StubEmbedder())
+    assert results[0].status == "indexed"
+
+
+@slow
 def test_rerun_skips_everything_new_file_embeds_alone(subject, course):
     pipeline.index_paths(subject, [course], embedder=StubEmbedder())
     emb = StubEmbedder()
@@ -95,6 +121,20 @@ def test_unsupported_extension_reported_skipped(subject, course):
     results = pipeline.index_paths(subject, [course / "img.png"], embedder=StubEmbedder())
     assert results[0].status == "skipped_unsupported"
     assert ".png" in results[0].detail
+
+
+def test_docling_suffixes_are_a_subset_of_supported_suffixes():
+    from groundly.ingestion.extract_worker import DOCLING_FORMATS, DOCLING_SUFFIXES
+
+    assert DOCLING_SUFFIXES <= pipeline.SUPPORTED_SUFFIXES
+    assert all(suffix.startswith(".") and suffix == suffix.lower() for suffix in DOCLING_FORMATS)
+
+
+def test_new_plain_text_format_indexes(subject, course, monkeypatch):
+    monkeypatch.setattr(pipeline, "extract", lambda path, *a, **k: _stub_extraction())
+    (course / "config.yaml").write_text("course: Deadlock Theory\nweek: 3\n")
+    results = pipeline.index_paths(subject, [course / "config.yaml"], embedder=StubEmbedder())
+    assert results[0].status == "indexed"
 
 
 @slow

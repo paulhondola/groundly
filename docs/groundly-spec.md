@@ -23,7 +23,7 @@ One human role: the **student** (owner of the machine and the data). The other "
 
 ## 3. Core Use Cases
 
-- **UC-01 Index materials** — digital PDF/DOCX/PPTX/TXT/MD/source → Docling → chunks → embeddings (+ optional graph). [Detail](use-cases/knowledge-base.md)
+- **UC-01 Index materials** — digital PDF/DOCX/PPTX/MD/HTML/LaTeX/AsciiDoc/CSV/XLSX/EPUB/TXT/source → Docling → chunks → embeddings (+ optional graph). [Detail](use-cases/knowledge-base.md)
 - **UC-02 Grounded Q&A** — `ask` (enforced pipeline, cited-or-refusal) and `search` (raw cited chunks for host agents). [Detail](use-cases/knowledge-base.md)
 - **UC-03 Source management** — list/re-index/delete materials per subject. [Detail](use-cases/knowledge-base.md)
 - **UC-10 Verified mock tests** — generate→verify→regenerate; code questions execution-verified. [Detail](use-cases/student-modes.md)
@@ -142,6 +142,7 @@ One-line register:
 10. **Study memory**: `recent_activity` daily rollups + `remember` notes + `continue-studying` MCP prompt; no server-side LLM summarization.
 11. **Pilot subjects: two** (Parallel & Distributed Algorithms; an ML course) — carried over from v1. Professor available for gold-set spot-checks.
 12. **Timeline**: defense June/July 2027.
+13. **Expanded ingest formats** (2026-07-16): all docling-native text formats (HTML, LaTeX, AsciiDoc, CSV, XLSX, EPUB) plus a wider plain-text set (rst, json, yaml, toml, sh, sql, cs, rb, kt, swift); OCR and `.ipynb` still excluded.
 
 ## 8. Phasing (roadmap v2)
 

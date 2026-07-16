@@ -11,8 +11,7 @@ dist/
 .env
 .env.*
 
-# User data (never in the repo)
-.unilearn/
+# Test data (never in the repo)
 fixtures/
 
 # OS
