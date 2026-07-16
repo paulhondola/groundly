@@ -4,8 +4,6 @@ continues past failures. Ingestion writes the stores; it never serves queries.""
 import hashlib
 import shutil
 import sqlite3
-from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 
 import sqlite_vec
@@ -14,52 +12,9 @@ from groundly.core import store
 from groundly.core.manifest import sync_counts
 from groundly.core.paths import subject_dir
 from groundly.ingestion.extract import ExtractionFailure, ModelUnavailable, extract
-from groundly.ingestion.extract_worker import DOCLING_SUFFIXES
+from groundly.ingestion.formats import SUPPORTED_SUFFIXES
+from groundly.ingestion.results import FileResult, OnEvent, Status
 from groundly.llm.embeddings import BgeM3Embedder, Embedder
-
-PLAIN_TEXT_SUFFIXES = {
-    ".txt",
-    ".py",
-    ".c",
-    ".cpp",
-    ".h",
-    ".hpp",
-    ".java",
-    ".js",
-    ".ts",
-    ".rs",
-    ".go",
-    ".rst",
-    ".json",
-    ".yaml",
-    ".yml",
-    ".toml",
-    ".sh",
-    ".sql",
-    ".cs",
-    ".rb",
-    ".kt",
-    ".swift",
-}
-SUPPORTED_SUFFIXES = DOCLING_SUFFIXES | PLAIN_TEXT_SUFFIXES
-
-# FileResult.status values
-INDEXED = "indexed"
-SKIPPED_DUPLICATE = "skipped_duplicate"
-SKIPPED_UNSUPPORTED = "skipped_unsupported"
-SKIPPED_FAILED = "skipped_failed"  # failed on an earlier run; `remove` it to retry
-EXTRACTION_FAILED = "extraction_failed"  # terminal, recorded in store.db
-ERROR = "error"  # transient (e.g. embedder crash), no row recorded
-
-OnEvent = Callable[[Path, str], None]
-
-
-@dataclass
-class FileResult:
-    path: Path
-    status: str
-    detail: str | None = None
-    chunks: int = 0
 
 
 def _iter_files(paths: list[Path]) -> list[Path]:
@@ -109,39 +64,39 @@ def index_paths(
         for path in _iter_files(paths):
             emit(path, "queued")
             if path.is_symlink():  # a hostile symlink would index (and later export)
-                results.append(FileResult(path, SKIPPED_UNSUPPORTED, "symlink — not followed"))
-                emit(path, SKIPPED_UNSUPPORTED)
+                results.append(FileResult(path, Status.SKIPPED_UNSUPPORTED, "symlink — not followed"))
+                emit(path, Status.SKIPPED_UNSUPPORTED)
                 continue
             if not path.exists():
-                results.append(FileResult(path, ERROR, "file not found"))
-                emit(path, ERROR)
+                results.append(FileResult(path, Status.ERROR, "file not found"))
+                emit(path, Status.ERROR)
                 continue
             if path.suffix.lower() not in SUPPORTED_SUFFIXES:
                 results.append(
-                    FileResult(path, SKIPPED_UNSUPPORTED, f"unsupported type {path.suffix!r}")
+                    FileResult(path, Status.SKIPPED_UNSUPPORTED, f"unsupported type {path.suffix!r}")
                 )
-                emit(path, SKIPPED_UNSUPPORTED)
+                emit(path, Status.SKIPPED_UNSUPPORTED)
                 continue
 
             sha = _sha256(path)
-            if known.get(sha) == "indexed":
-                results.append(FileResult(path, SKIPPED_DUPLICATE, "already indexed"))
-                emit(path, SKIPPED_DUPLICATE)
+            if known.get(sha) == Status.INDEXED:
+                results.append(FileResult(path, Status.SKIPPED_DUPLICATE, "already indexed"))
+                emit(path, Status.SKIPPED_DUPLICATE)
                 continue
-            if known.get(sha) == "extraction_failed":
+            if known.get(sha) == Status.EXTRACTION_FAILED:
                 # terminal per UC-01: don't re-extract every run; `remove` it to retry
                 error = store.find_materials(conn, sha)[0]["error"]
                 results.append(
                     FileResult(
-                        path, SKIPPED_FAILED, f"failed previously: {error} — remove to retry"
+                        path, Status.SKIPPED_FAILED, f"failed previously: {error} — remove to retry"
                     )
                 )
-                emit(path, SKIPPED_FAILED)
+                emit(path, Status.SKIPPED_FAILED)
                 continue
 
             result = _index_one(conn, path, sha, sdir, embedder, emit)
             results.append(result)
-            if result.status in (INDEXED, EXTRACTION_FAILED):
+            if result.status in (Status.INDEXED, Status.EXTRACTION_FAILED):
                 known[sha] = result.status  # a same-content sibling this run is a skip
             sync_counts(conn, manifest_path)
     finally:
@@ -156,8 +111,8 @@ def _index_one(
     try:
         extraction = extract(path)
     except ModelUnavailable as exc:  # transient (offline/uncached model): no row, next run retries
-        emit(path, ERROR)
-        return FileResult(path, ERROR, f"extractor unavailable: {exc}")
+        emit(path, Status.ERROR)
+        return FileResult(path, Status.ERROR, f"extractor unavailable: {exc}")
     except ExtractionFailure as failure:
         try:
             with conn:
@@ -168,28 +123,28 @@ def _index_one(
                 )
         except sqlite3.IntegrityError:
             pass  # sha256 UNIQUE lost a race: a concurrent run recorded this content first
-        emit(path, EXTRACTION_FAILED)
-        return FileResult(path, EXTRACTION_FAILED, str(failure))
+        emit(path, Status.EXTRACTION_FAILED)
+        return FileResult(path, Status.EXTRACTION_FAILED, str(failure))
 
     emit(path, "embedding")
     try:
         dense, sparse = embedder.encode([c.text for c in extraction.chunks])
     except Exception as exc:  # transient (model load/OOM): no row, next run retries
-        emit(path, ERROR)
-        return FileResult(path, ERROR, f"embedding failed: {exc}")
+        emit(path, Status.ERROR)
+        return FileResult(path, Status.ERROR, f"embedding failed: {exc}")
 
     try:
         stored_name = _copy_to_materials(path, sha, sdir / "materials")
     except OSError as exc:  # transient (disk full, permissions): no row, next run retries
-        emit(path, ERROR)
-        return FileResult(path, ERROR, f"copy to materials failed: {exc}")
+        emit(path, Status.ERROR)
+        return FileResult(path, Status.ERROR, f"copy to materials failed: {exc}")
     try:
         return _write_indexed(conn, path, sha, stored_name, extraction, dense, sparse, emit)
     except sqlite3.IntegrityError:
         # sha256 UNIQUE lost a race: a concurrent run (CLI + MCP share the store)
         # indexed the same content between our hash check and this write
-        emit(path, SKIPPED_DUPLICATE)
-        return FileResult(path, SKIPPED_DUPLICATE, "already indexed (concurrent run)")
+        emit(path, Status.SKIPPED_DUPLICATE)
+        return FileResult(path, Status.SKIPPED_DUPLICATE, "already indexed (concurrent run)")
 
 
 def _write_indexed(
@@ -215,5 +170,5 @@ def _write_indexed(
                 "INSERT INTO sparse_terms (token_id, chunk_id, weight) VALUES (?, ?, ?)",
                 [(token_id, cid, weight) for token_id, weight in weights.items()],
             )
-    emit(path, INDEXED)
-    return FileResult(path, INDEXED, chunks=len(extraction.chunks))
+    emit(path, Status.INDEXED)
+    return FileResult(path, Status.INDEXED, chunks=len(extraction.chunks))
