@@ -26,4 +26,4 @@ Layers: clients (`cli/`, `mcp/`, `web/`) → services (`agents/`, `retrieval/`, 
 
 ## Frameworks
 
-Exactly three, one owner each: LlamaIndex (retrieval interface), MS graphrag (graph backend), FastMCP (tool surface). Agent loops are plain bounded async functions — no LangGraph. Exact pins for graphrag/llama-index/docling/sentence-transformers set at P1; upgrades are deliberate events recorded in docs + manifest.
+Exactly three, one owner each: LlamaIndex (retrieval interface), MS graphrag (graph backend), FastMCP (tool surface). Agent loops are plain bounded async functions — no LangGraph. Exact pins for graphrag/llama-index/docling/sentence-transformers/FlagEmbedding set at P1; upgrades are deliberate events recorded in docs + manifest.
