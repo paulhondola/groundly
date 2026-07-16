@@ -14,14 +14,11 @@ from groundly.core import store
 from groundly.core.manifest import sync_counts
 from groundly.core.paths import subject_dir
 from groundly.ingestion.extract import ExtractionFailure, ModelUnavailable, extract
+from groundly.ingestion.extract_worker import DOCLING_SUFFIXES
 from groundly.llm.embeddings import BgeM3Embedder, Embedder
 
-SUPPORTED_SUFFIXES = {
-    ".pdf",
-    ".docx",
-    ".pptx",
+PLAIN_TEXT_SUFFIXES = {
     ".txt",
-    ".md",
     ".py",
     ".c",
     ".cpp",
@@ -32,7 +29,19 @@ SUPPORTED_SUFFIXES = {
     ".ts",
     ".rs",
     ".go",
+    ".rst",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".sh",
+    ".sql",
+    ".cs",
+    ".rb",
+    ".kt",
+    ".swift",
 }
+SUPPORTED_SUFFIXES = DOCLING_SUFFIXES | PLAIN_TEXT_SUFFIXES
 
 # FileResult.status values
 INDEXED = "indexed"

@@ -16,7 +16,23 @@ from pathlib import Path
 EXIT_NO_TEXT = 3
 EXIT_MODEL_UNAVAILABLE = 4
 
-DOCLING_SUFFIXES = {".pdf", ".docx", ".pptx", ".md"}
+DOCLING_FORMATS = {
+    ".pdf": "pdf",
+    ".docx": "docx",
+    ".pptx": "pptx",
+    ".md": "md",
+    ".html": "html",
+    ".htm": "html",
+    ".xhtml": "html",
+    ".tex": "latex",
+    ".latex": "latex",
+    ".adoc": "asciidoc",
+    ".asciidoc": "asciidoc",
+    ".csv": "csv",
+    ".xlsx": "xlsx",
+    ".epub": "epub",
+}
+DOCLING_SUFFIXES = set(DOCLING_FORMATS)
 # Everything else on the pipeline allowlist (txt + source code) is read as plain
 # text and chunked by token windows — docling's converter does not accept it.
 
@@ -48,16 +64,11 @@ def _extract_docling(path: Path) -> dict:
 
     from groundly.core.manifest import CHUNK_MAX_TOKENS
 
-    formats = {
-        ".pdf": InputFormat.PDF,
-        ".docx": InputFormat.DOCX,
-        ".pptx": InputFormat.PPTX,
-        ".md": InputFormat.MD,
-    }
+    input_format = InputFormat(DOCLING_FORMATS[path.suffix.lower()])
     converter = DocumentConverter()
     # docling's layout models load here, before the document is touched — a fetch
     # failure is the environment's fault, never this document's parse failure
-    _model_step(lambda: converter.initialize_pipeline(formats[path.suffix.lower()]))
+    _model_step(lambda: converter.initialize_pipeline(input_format))
     doc = converter.convert(path).document
     tokenizer = HuggingFaceTokenizer(
         tokenizer=_model_step(_bge_m3_tokenizer), max_tokens=CHUNK_MAX_TOKENS
