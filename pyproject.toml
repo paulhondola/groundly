@@ -1,6 +1,6 @@
 [project]
 name = "groundly"
-version = "0.3.0"
+version = "0.3.1"
 description = "Local-first course knowledge bases for AI agents: index your materials, study grounded, share the index."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
