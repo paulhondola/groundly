@@ -60,7 +60,10 @@ class Manifest(BaseModel):
         return cls.model_validate_json(path.read_text())
 
     def save(self, path: Path) -> None:
-        path.write_text(self.model_dump_json(indent=2) + "\n")
+        # write-then-rename: a Ctrl-C or concurrent save never leaves torn JSON behind
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(self.model_dump_json(indent=2) + "\n")
+        tmp.replace(path)
 
 
 def sync_counts(conn: sqlite3.Connection, manifest_path: Path) -> None:

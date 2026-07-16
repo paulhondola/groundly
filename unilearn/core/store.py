@@ -60,7 +60,10 @@ END;
 """
 
 
-def connect(path: Path) -> sqlite3.Connection:
+def connect(path: Path, create: bool = False) -> sqlite3.Connection:
+    if not create and not path.exists():
+        # sqlite3.connect would silently create an empty db — surface the real cause
+        raise RuntimeError(f"{path.name} is missing from {path.parent} — the subject is damaged")
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.enable_load_extension(True)
@@ -80,7 +83,7 @@ def connect(path: Path) -> sqlite3.Connection:
 
 
 def create_store(path: Path) -> None:
-    conn = connect(path)
+    conn = connect(path, create=True)
     try:
         conn.executescript(_SCHEMA)
         conn.execute(f"PRAGMA user_version = {STORE_USER_VERSION}")

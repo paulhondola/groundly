@@ -29,12 +29,12 @@ def _bge_m3_tokenizer():
     return AutoTokenizer.from_pretrained(EMBEDDING_MODEL, revision=HF_REVISION)
 
 
-def _load_tokenizer():
-    """The one network/dependency-bound step. A failure loading the pinned tokenizer
-    (uncached + offline, HF rate-limit, transformers missing) is transient — the parent
-    retries it — so it exits distinctly, never collapsing into a terminal 'bad document'."""
+def _model_step(fn):
+    """Model loading is the network/dependency-bound step. A failure (uncached + offline,
+    HF rate-limit, missing dep) is transient — the parent retries it — so it exits
+    distinctly, never collapsing into a terminal 'bad document'."""
     try:
-        return _bge_m3_tokenizer()
+        return fn()
     except Exception as exc:
         print(f"model unavailable: {exc}", file=sys.stderr)
         sys.exit(EXIT_MODEL_UNAVAILABLE)
@@ -42,13 +42,26 @@ def _load_tokenizer():
 
 def _extract_docling(path: Path) -> dict:
     from docling.chunking import HybridChunker
+    from docling.datamodel.base_models import InputFormat
     from docling.document_converter import DocumentConverter
     from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
 
     from unilearn.core.manifest import CHUNK_MAX_TOKENS
 
-    doc = DocumentConverter().convert(path).document
-    tokenizer = HuggingFaceTokenizer(tokenizer=_load_tokenizer(), max_tokens=CHUNK_MAX_TOKENS)
+    formats = {
+        ".pdf": InputFormat.PDF,
+        ".docx": InputFormat.DOCX,
+        ".pptx": InputFormat.PPTX,
+        ".md": InputFormat.MD,
+    }
+    converter = DocumentConverter()
+    # docling's layout models load here, before the document is touched — a fetch
+    # failure is the environment's fault, never this document's parse failure
+    _model_step(lambda: converter.initialize_pipeline(formats[path.suffix.lower()]))
+    doc = converter.convert(path).document
+    tokenizer = HuggingFaceTokenizer(
+        tokenizer=_model_step(_bge_m3_tokenizer), max_tokens=CHUNK_MAX_TOKENS
+    )
     chunker = HybridChunker(tokenizer=tokenizer, merge_peers=True)
 
     chunks = []
@@ -78,7 +91,7 @@ def _extract_plain_text(path: Path) -> dict:
     from unilearn.core.manifest import CHUNK_MAX_TOKENS
 
     text = path.read_text(errors="replace")
-    tokenizer = _load_tokenizer()
+    tokenizer = _model_step(_bge_m3_tokenizer)
     ids = tokenizer.encode(text, add_special_tokens=False)
     chunks = []
     for start in range(0, len(ids), CHUNK_MAX_TOKENS):

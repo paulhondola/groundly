@@ -1,7 +1,8 @@
-"""Pipeline tests use a stub embedder (no model download) and .txt/.md fixtures
-(Docling's layout models are only needed for PDFs). The real embedder contract is
-@pytest.mark.slow in test_slow_models.py; UC-01's real-PDF page-attribution criterion
-is verified manually per release (no committed PDF fixture)."""
+"""Pipeline tests use a stub embedder. Tests that invoke the real extract worker
+(bge-m3 tokenizer download on a cold cache) are @pytest.mark.slow and excluded from
+the default/CI run; pipeline-logic tests stub `extract` and run everywhere. The real
+embedder contract is in test_slow_models.py; UC-01's real-PDF page-attribution
+criterion is verified manually per release (no committed PDF fixture)."""
 
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from unilearn.core.paths import subject_dir
 from unilearn.core.subject import init_subject
 from unilearn.ingestion import pipeline
 
-pytestmark = pytest.mark.slow
+slow = pytest.mark.slow  # real extract worker: tokenizer download on a cold cache
 
 
 class StubEmbedder:
@@ -50,6 +51,7 @@ def _connect(subject):
     return store.connect(subject_dir(subject) / "store.db")
 
 
+@slow
 def test_index_writes_all_channels_and_copies_materials(subject, course):
     emb = StubEmbedder()
     results = pipeline.index_paths(subject, [course], embedder=emb)
@@ -65,6 +67,7 @@ def test_index_writes_all_channels_and_copies_materials(subject, course):
     assert manifest.counts.materials == 2 and manifest.counts.chunks == n_chunks
 
 
+@slow
 def test_md_chunks_carry_heading_path(subject, course):
     pipeline.index_paths(subject, [course / "readme.md"], embedder=StubEmbedder())
     with _connect(subject) as conn:
@@ -72,6 +75,7 @@ def test_md_chunks_carry_heading_path(subject, course):
     assert any(r["heading_path"] and "Deadlock" in r["heading_path"] for r in rows)
 
 
+@slow
 def test_rerun_skips_everything_new_file_embeds_alone(subject, course):
     pipeline.index_paths(subject, [course], embedder=StubEmbedder())
     emb = StubEmbedder()
@@ -93,6 +97,7 @@ def test_unsupported_extension_reported_skipped(subject, course):
     assert ".png" in results[0].detail
 
 
+@slow
 def test_empty_file_fails_cleanly_then_skips_then_new_hash_indexes(subject, course):
     empty = course / "empty.txt"
     empty.write_text("   ")
@@ -113,6 +118,7 @@ def test_empty_file_fails_cleanly_then_skips_then_new_hash_indexes(subject, cour
     assert results[0].status == "indexed"
 
 
+@slow
 def test_embedder_crash_keeps_earlier_file_and_rerun_completes(subject, course):
     (course / "boom.txt").write_text("TRIGGER embedding failure for this text.")
     emb = StubEmbedder(fail_on="TRIGGER")
@@ -127,6 +133,7 @@ def test_embedder_crash_keeps_earlier_file_and_rerun_completes(subject, course):
     assert by_status["notes.txt"] == "skipped_duplicate"
 
 
+@slow
 def test_transient_failure_sibling_duplicate_not_misreported(subject, course):
     """A same-content sibling after a transient embed failure must retry, not be
     reported 'already indexed' with zero rows stored."""
@@ -138,6 +145,7 @@ def test_transient_failure_sibling_duplicate_not_misreported(subject, course):
     assert all(r.status == "error" for r in results)  # neither claims success
 
 
+@slow
 def test_extractor_unavailable_is_transient_then_retries(subject, course, monkeypatch):
     """A tokenizer/model load failure in the worker is environmental, not a bad document:
     it must be a retryable `error` with no terminal row (unlike no-text), so the next run
@@ -163,6 +171,84 @@ def test_extractor_unavailable_is_transient_then_retries(subject, course, monkey
     assert results[0].status == "indexed"  # environment recovered → retried, no `remove` needed
 
 
+def _stub_extraction():
+    from unilearn.ingestion.extract import ChunkData, Extraction
+
+    return Extraction(pages=None, chunks=[ChunkData("stub text", None, None, 2)])
+
+
+def test_concurrent_failure_race_does_not_abort_run(subject, course, monkeypatch):
+    """Another process recording the same failing content between our hash check and
+    the failure INSERT must not abort the run (regression: raw IntegrityError)."""
+    from unilearn.ingestion.extract import ExtractionFailure
+
+    def always_fail(path, *args, **kwargs):
+        raise ExtractionFailure("scanned PDF — not supported")
+
+    monkeypatch.setattr(pipeline, "extract", always_fail)
+    pipeline.index_paths(subject, [course / "notes.txt"], embedder=StubEmbedder())
+    monkeypatch.setattr(pipeline.store, "hash_status", lambda conn: {})  # stale snapshot
+    results = pipeline.index_paths(
+        subject, [course / "notes.txt", course / "readme.md"], embedder=StubEmbedder()
+    )
+    # the race is absorbed and the run continues to the next file
+    assert [r.status for r in results] == ["extraction_failed", "extraction_failed"]
+    with _connect(subject) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM materials").fetchone()[0] == 2
+
+
+def test_copy_failure_is_transient_and_run_continues(subject, course, monkeypatch):
+    """A materials/ copy failure (disk full, permissions) must be a retryable error
+    for that file, not abort the whole run (regression: uncaught OSError)."""
+
+    def broken_copy(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(pipeline, "extract", lambda path, *a, **k: _stub_extraction())
+    monkeypatch.setattr(pipeline, "_copy_to_materials", broken_copy)
+    results = pipeline.index_paths(subject, [course], embedder=StubEmbedder())
+    assert [r.status for r in results] == ["error", "error"]  # both files reported, no crash
+    with _connect(subject) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM materials").fetchone()[0] == 0  # retryable
+
+
+def test_hardlink_into_materials_does_not_crash(subject, tmp_path, monkeypatch):
+    """A hard link shares its target's inode: copying it onto the materials/ original
+    raises SameFileError under a resolve()-based check (regression) — samefile treats
+    it as already in place."""
+    import os
+
+    monkeypatch.setattr(pipeline, "extract", lambda path, *a, **k: _stub_extraction())
+    stored = subject_dir(subject) / "materials" / "lec.txt"
+    stored.write_text("Lamport clocks order events without synchronized time.")
+    src = tmp_path / "lec.txt"
+    os.link(stored, src)
+    results = pipeline.index_paths(subject, [src], embedder=StubEmbedder())
+    assert results[0].status == "indexed"
+
+
+def test_docling_model_fetch_failure_exits_retryable(monkeypatch, tmp_path):
+    """Docling's layout models load before the document is parsed: a fetch failure
+    (cold HF cache + offline) must exit EXIT_MODEL_UNAVAILABLE (retryable), never be
+    recorded as the PDF's terminal parse failure."""
+    from docling.document_converter import DocumentConverter
+
+    from unilearn.ingestion import extract_worker
+
+    def offline_init(self, format):
+        raise OSError("couldn't connect to huggingface.co")
+
+    def no_convert(self, path):
+        raise AssertionError("document must not be parsed when models are unavailable")
+
+    monkeypatch.setattr(DocumentConverter, "initialize_pipeline", offline_init)
+    monkeypatch.setattr(DocumentConverter, "convert", no_convert)
+    with pytest.raises(SystemExit) as exc:
+        extract_worker._extract_docling(tmp_path / "lec.pdf")
+    assert exc.value.code == extract_worker.EXIT_MODEL_UNAVAILABLE
+
+
+@slow
 def test_relative_path_indexes(subject, course, tmp_path, monkeypatch):
     """The extract worker runs with cwd=tempdir; a relative CLI path must still
     resolve (regression: recorded as terminal extraction_failed)."""
@@ -180,6 +266,7 @@ def test_symlink_not_followed(subject, course, tmp_path):
     assert "symlink" in results[0].detail
 
 
+@slow
 def test_indexing_orphan_inside_materials_does_not_crash(subject):
     """UC-01 A4: a Ctrl-C can leave a copied file in materials/ without DB rows;
     re-indexing that exact path must work (regression: shutil.SameFileError)."""
@@ -189,6 +276,7 @@ def test_indexing_orphan_inside_materials_does_not_crash(subject):
     assert results[0].status == "indexed"
 
 
+@slow
 def test_concurrent_index_race_reports_duplicate_not_crash(subject, course, monkeypatch):
     """Another process indexing the same content between our hash check and the
     write must surface as a skip, not an unhandled IntegrityError."""

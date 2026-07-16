@@ -72,7 +72,7 @@ def _copy_to_materials(src: Path, sha256: str, materials_dir: Path) -> str:
     """Original files are the citation targets; they ship in exports."""
     dest = materials_dir / src.name
     if dest.exists():
-        if dest.resolve() == src.resolve():  # indexing an orphan already in materials/
+        if dest.samefile(src):  # orphan already in materials/ — or a hard link to it
             return dest.name
         if _sha256(dest) != sha256:
             dest = materials_dir / f"{src.stem}-{sha256[:8]}{src.suffix}"
@@ -150,12 +150,15 @@ def _index_one(
         emit(path, ERROR)
         return FileResult(path, ERROR, f"extractor unavailable: {exc}")
     except ExtractionFailure as failure:
-        with conn:
-            conn.execute(
-                "INSERT INTO materials (filename, sha256, status, error) "
-                "VALUES (?, ?, 'extraction_failed', ?)",
-                (path.name, sha, str(failure)),
-            )
+        try:
+            with conn:
+                conn.execute(
+                    "INSERT INTO materials (filename, sha256, status, error) "
+                    "VALUES (?, ?, 'extraction_failed', ?)",
+                    (path.name, sha, str(failure)),
+                )
+        except sqlite3.IntegrityError:
+            pass  # sha256 UNIQUE lost a race: a concurrent run recorded this content first
         emit(path, EXTRACTION_FAILED)
         return FileResult(path, EXTRACTION_FAILED, str(failure))
 
@@ -166,7 +169,11 @@ def _index_one(
         emit(path, ERROR)
         return FileResult(path, ERROR, f"embedding failed: {exc}")
 
-    stored_name = _copy_to_materials(path, sha, sdir / "materials")
+    try:
+        stored_name = _copy_to_materials(path, sha, sdir / "materials")
+    except OSError as exc:  # transient (disk full, permissions): no row, next run retries
+        emit(path, ERROR)
+        return FileResult(path, ERROR, f"copy to materials failed: {exc}")
     try:
         return _write_indexed(conn, path, sha, stored_name, extraction, dense, sparse, emit)
     except sqlite3.IntegrityError:

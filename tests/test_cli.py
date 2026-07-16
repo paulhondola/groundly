@@ -120,6 +120,82 @@ def test_remove_deletes_rows_and_file(home):
     conn.close()
 
 
+def test_list_missing_store_db_names_cause_not_traceback():
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    (sdir / "store.db").unlink()
+    result = runner.invoke(app, ["list", "PDSS"])
+    assert result.exit_code == 1
+    assert "store.db is missing" in result.output
+    assert not (sdir / "store.db").exists()  # regression: connect() created an empty db
+
+
+def test_list_empty_store_db_names_cause_not_traceback():
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    (sdir / "store.db").unlink()
+    (sdir / "store.db").touch()  # exists but schema-less (e.g. interrupted init)
+    result = runner.invoke(app, ["list", "PDSS"])
+    assert result.exit_code == 1
+    assert "corrupt or incomplete" in result.output
+
+
+def test_list_all_skips_corrupt_manifest_with_warning():
+    runner.invoke(app, ["init", "PDSS"])
+    runner.invoke(app, ["init", "ML"])
+    (subject_dir("PDSS") / "manifest.json").write_text("{ truncated")
+    result = runner.invoke(app, ["list"])
+    assert result.exit_code == 0  # one damaged subject must not take down the listing
+    assert "ML" in result.output
+    assert "PDSS" in result.output and "corrupt" in result.output
+
+
+def test_remove_failed_row_keeps_indexed_siblings_file(home):
+    """A failed row records the original filename with no collision suffix — removing
+    it must not delete a same-named indexed material's stored file (citation target)."""
+    from unilearn.core import store
+
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    (sdir / "materials" / "lec.pdf").write_text("indexed copy")
+    conn = store.connect(sdir / "store.db")
+    with conn:
+        conn.execute(
+            "INSERT INTO materials (filename, sha256, status) VALUES ('lec.pdf', ?, 'indexed')",
+            ("a" * 64,),
+        )
+        conn.execute(
+            "INSERT INTO materials (filename, sha256, status, error) "
+            "VALUES ('lec.pdf', ?, 'extraction_failed', 'scanned PDF — not supported')",
+            ("b" * 64,),
+        )
+    conn.close()
+
+    result = runner.invoke(app, ["remove", "PDSS", "b" * 8, "--yes"])
+    assert result.exit_code == 0, result.output
+    assert (sdir / "materials" / "lec.pdf").exists()  # indexed material's file survives
+    conn = store.connect(sdir / "store.db")
+    rows = conn.execute("SELECT status FROM materials").fetchall()
+    assert [r["status"] for r in rows] == ["indexed"]
+    conn.close()
+
+
+def test_remove_whole_subject_deletes_directory():
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    (sdir / "store.db").unlink()  # even a damaged subject must be removable
+    result = runner.invoke(app, ["remove", "PDSS", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert not sdir.exists()
+
+
+def test_remove_whole_subject_aborts_without_confirmation():
+    runner.invoke(app, ["init", "PDSS"])
+    result = runner.invoke(app, ["remove", "PDSS"], input="n\n")
+    assert result.exit_code != 0
+    assert subject_dir("PDSS").exists()
+
+
 @pytest.mark.parametrize("args", [["config"], ["config", "set", "chat.model", "x"]])
 def test_config_still_stubbed(args):
     result = runner.invoke(app, args)
@@ -132,7 +208,6 @@ def test_config_still_stubbed(args):
     [
         ["init"],  # subject required
         ["index", "PDSS"],  # paths required
-        ["remove", "PDSS"],  # material required
         ["config", "set", "chat.model"],  # value required
         ["ask", "PDSS", "q"],  # P3 verb must NOT exist yet
     ],

@@ -41,6 +41,15 @@ def _subject_dir_checked(subject: str) -> Path:
     return sdir
 
 
+def _connect_checked(sdir: Path):
+    from unilearn.core import store
+
+    try:
+        return store.connect(sdir / "store.db")
+    except RuntimeError as exc:  # missing store.db / newer schema — named cause, no traceback
+        _fail(str(exc))
+
+
 def _not_implemented(verb: str) -> None:
     typer.echo(f"unilearn {verb}: not implemented yet — arrives in a later phase")
     raise typer.Exit(code=1)
@@ -130,6 +139,10 @@ def list_(
     ] = None,
 ) -> None:
     """List subjects, or one subject's materials with status, pages, chunks."""
+    import sqlite3
+
+    from pydantic import ValidationError
+
     from unilearn.core import store
     from unilearn.core.manifest import Manifest
     from unilearn.core.paths import discover_subjects, subject_dir
@@ -137,13 +150,18 @@ def list_(
     if subject is None:
         table = Table("subject", "materials", "chunks")
         for name in discover_subjects():
-            manifest = Manifest.load(subject_dir(name) / "manifest.json")
+            try:
+                manifest = Manifest.load(subject_dir(name) / "manifest.json")
+            except ValidationError:
+                # one damaged subject must not take down the whole listing
+                console.print(f"[red]warning:[/red] {name}: manifest.json is corrupt — skipping")
+                continue
             table.add_row(name, str(manifest.counts.materials), str(manifest.counts.chunks))
         console.print(table)
         return
 
     sdir = _subject_dir_checked(subject)
-    conn = store.connect(sdir / "store.db")
+    conn = _connect_checked(sdir)
     try:
         table = Table("material", "status", "pages", "chunks", "detail")
         for row in store.list_materials(conn):
@@ -155,6 +173,8 @@ def list_(
                 escape(row["error"] or ""),
             )
         console.print(table)
+    except sqlite3.OperationalError as exc:
+        _fail(f"store.db is corrupt or incomplete: {exc}")
     finally:
         conn.close()
 
@@ -163,17 +183,36 @@ def list_(
 def remove(
     subject: Annotated[str, typer.Argument(help="Subject the material belongs to.")],
     material: Annotated[
-        str,
-        typer.Argument(help="Material filename (or sha256 prefix) as shown by `unilearn list`."),
-    ],
+        Optional[str],
+        typer.Argument(
+            help="Material filename (or sha256 prefix) as shown by `unilearn list`; "
+            "omit to remove the whole subject."
+        ),
+    ] = None,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
 ) -> None:
-    """Remove a material and all its indexed data (chunks, vectors, sparse, FTS)."""
+    """Remove a material and all its indexed data, or a whole subject if no material given."""
+    import sqlite3
+
     from unilearn.core import store
     from unilearn.core.manifest import sync_counts
 
     sdir = _subject_dir_checked(subject)
-    conn = store.connect(sdir / "store.db")
+
+    if material is None:
+        import shutil
+
+        if not yes:
+            typer.confirm(
+                f"remove subject {subject} and ALL its data"
+                " (materials, index, progress, notes)?",
+                abort=True,
+            )
+        shutil.rmtree(sdir)
+        console.print(f"removed subject [bold]{subject}[/bold]")
+        return
+
+    conn = _connect_checked(sdir)
     try:
         matches = store.find_materials(conn, material)
         if not matches:
@@ -189,15 +228,20 @@ def remove(
             )
         store.remove_material(conn, target["id"])
         sync_counts(conn, sdir / "manifest.json")
-        stored = sdir / "materials" / target["filename"]
-        if stored.exists():
-            stored.unlink()
+        if target["status"] == "indexed":
+            # failed rows never got a copy in materials/, and their original filename
+            # (no collision suffix) can shadow a different indexed material's file
+            stored = sdir / "materials" / target["filename"]
+            if stored.exists():
+                stored.unlink()
         console.print(f"removed [bold]{escape(target['filename'])}[/bold] from {subject}")
         if (sdir / "graph").exists():
             console.print(
                 "[dim]note: the graph is now stale — it rebuilds on the next"
                 " corpus-hash-triggered index run[/dim]"
             )
+    except sqlite3.OperationalError as exc:
+        _fail(f"store.db is corrupt or incomplete: {exc}")
     finally:
         conn.close()
 
