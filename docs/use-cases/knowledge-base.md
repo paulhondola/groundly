@@ -7,7 +7,7 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: the **student**
 ## UC-01 — Index materials
 
 **Actor:** student (CLI).
-**Preconditions:** subject initialized (`groundly init <SUBJECT>`); files are digital documents (PDF/DOCX/PPTX/TXT/MD/source with a text layer).
+**Preconditions:** subject initialized (`groundly init <SUBJECT>`); files are digital documents (PDF/DOCX/PPTX/MD/HTML/LaTeX/AsciiDoc/CSV/XLSX/EPUB/TXT/source with a text layer).
 
 **Main flow**
 
