@@ -37,6 +37,11 @@ class ExtractionFailure(Exception):
     """reason is user-facing and names the specific cause."""
 
 
+class ModelUnavailable(Exception):
+    """The worker couldn't load its model (uncached + offline, HF rate-limit, missing
+    dep). Transient, not the document's fault — the pipeline retries, records no row."""
+
+
 def _stderr_tail(path: Path) -> str:
     with open(path, "rb") as f:
         f.seek(max(0, path.stat().st_size - STDERR_TAIL_BYTES))
@@ -55,7 +60,7 @@ def extract(path: Path, timeout: float = EXTRACT_TIMEOUT_SECONDS) -> Extraction:
                         sys.executable,
                         "-m",
                         "unilearn.ingestion.extract_worker",
-                        str(path),
+                        str(path.resolve()),  # worker runs with cwd=tmp; relative paths must survive
                         str(out_json),
                     ],
                     stdout=subprocess.DEVNULL,
@@ -66,6 +71,8 @@ def extract(path: Path, timeout: float = EXTRACT_TIMEOUT_SECONDS) -> Extraction:
             except subprocess.TimeoutExpired:
                 raise ExtractionFailure(f"extraction timed out after {int(timeout)}s") from None
 
+        if proc.returncode == extract_worker.EXIT_MODEL_UNAVAILABLE:
+            raise ModelUnavailable(_stderr_tail(stderr_path) or "extractor model unavailable")
         if proc.returncode == extract_worker.EXIT_NO_TEXT:
             if path.suffix.lower() == ".pdf":
                 raise ExtractionFailure("scanned PDF — not supported")

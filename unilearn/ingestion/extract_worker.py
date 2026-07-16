@@ -3,6 +3,8 @@
 Always a child process: a parser crash on a hostile/broken file kills this process,
 not the indexing run (UC-01 A2, security.md §3). Digital documents only — no OCR;
 an empty text layer exits with EXIT_NO_TEXT so the parent reports the specific cause.
+A model that can't be loaded (uncached + offline, HF rate-limit, missing dep) exits
+with EXIT_MODEL_UNAVAILABLE — an environment failure, retryable, never a bad document.
 
 Output JSON: {"pages": N|null, "chunks": [{"text", "heading_path", "page", "token_count"}]}
 """
@@ -12,6 +14,7 @@ import sys
 from pathlib import Path
 
 EXIT_NO_TEXT = 3
+EXIT_MODEL_UNAVAILABLE = 4
 
 DOCLING_SUFFIXES = {".pdf", ".docx", ".pptx", ".md"}
 # Everything else on the pipeline allowlist (txt + source code) is read as plain
@@ -26,6 +29,17 @@ def _bge_m3_tokenizer():
     return AutoTokenizer.from_pretrained(EMBEDDING_MODEL, revision=HF_REVISION)
 
 
+def _load_tokenizer():
+    """The one network/dependency-bound step. A failure loading the pinned tokenizer
+    (uncached + offline, HF rate-limit, transformers missing) is transient — the parent
+    retries it — so it exits distinctly, never collapsing into a terminal 'bad document'."""
+    try:
+        return _bge_m3_tokenizer()
+    except Exception as exc:
+        print(f"model unavailable: {exc}", file=sys.stderr)
+        sys.exit(EXIT_MODEL_UNAVAILABLE)
+
+
 def _extract_docling(path: Path) -> dict:
     from docling.chunking import HybridChunker
     from docling.document_converter import DocumentConverter
@@ -34,7 +48,7 @@ def _extract_docling(path: Path) -> dict:
     from unilearn.core.manifest import CHUNK_MAX_TOKENS
 
     doc = DocumentConverter().convert(path).document
-    tokenizer = HuggingFaceTokenizer(tokenizer=_bge_m3_tokenizer(), max_tokens=CHUNK_MAX_TOKENS)
+    tokenizer = HuggingFaceTokenizer(tokenizer=_load_tokenizer(), max_tokens=CHUNK_MAX_TOKENS)
     chunker = HybridChunker(tokenizer=tokenizer, merge_peers=True)
 
     chunks = []
@@ -64,7 +78,7 @@ def _extract_plain_text(path: Path) -> dict:
     from unilearn.core.manifest import CHUNK_MAX_TOKENS
 
     text = path.read_text(errors="replace")
-    tokenizer = _bge_m3_tokenizer()
+    tokenizer = _load_tokenizer()
     ids = tokenizer.encode(text, add_special_tokens=False)
     chunks = []
     for start in range(0, len(ids), CHUNK_MAX_TOKENS):

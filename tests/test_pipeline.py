@@ -3,6 +3,8 @@
 @pytest.mark.slow in test_slow_models.py; UC-01's real-PDF page-attribution criterion
 is verified manually per release (no committed PDF fixture)."""
 
+from pathlib import Path
+
 import pytest
 
 from unilearn.core import store
@@ -134,6 +136,39 @@ def test_transient_failure_sibling_duplicate_not_misreported(subject, course):
         subject, [course / "a.txt", course / "b.txt"], embedder=StubEmbedder(fail_on="TRIGGER")
     )
     assert all(r.status == "error" for r in results)  # neither claims success
+
+
+def test_extractor_unavailable_is_transient_then_retries(subject, course, monkeypatch):
+    """A tokenizer/model load failure in the worker is environmental, not a bad document:
+    it must be a retryable `error` with no terminal row (unlike no-text), so the next run
+    succeeds without the user having to `remove` a wrongly-failed file."""
+    from unilearn.ingestion.extract import ModelUnavailable
+
+    real_extract = pipeline.extract
+    calls = {"n": 0}
+
+    def flaky(path, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ModelUnavailable("bge-m3 tokenizer download failed")
+        return real_extract(path, *args, **kwargs)
+
+    monkeypatch.setattr(pipeline, "extract", flaky)
+    results = pipeline.index_paths(subject, [course / "notes.txt"], embedder=StubEmbedder())
+    assert results[0].status == "error"  # transient, not extraction_failed
+    with _connect(subject) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM materials").fetchone()[0] == 0  # no terminal row
+
+    results = pipeline.index_paths(subject, [course / "notes.txt"], embedder=StubEmbedder())
+    assert results[0].status == "indexed"  # environment recovered → retried, no `remove` needed
+
+
+def test_relative_path_indexes(subject, course, tmp_path, monkeypatch):
+    """The extract worker runs with cwd=tempdir; a relative CLI path must still
+    resolve (regression: recorded as terminal extraction_failed)."""
+    monkeypatch.chdir(tmp_path)
+    results = pipeline.index_paths(subject, [Path("course/notes.txt")], embedder=StubEmbedder())
+    assert results[0].status == "indexed"
 
 
 def test_symlink_not_followed(subject, course, tmp_path):

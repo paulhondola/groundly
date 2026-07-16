@@ -13,7 +13,7 @@ import sqlite_vec
 from unilearn.core import store
 from unilearn.core.manifest import sync_counts
 from unilearn.core.paths import subject_dir
-from unilearn.ingestion.extract import ExtractionFailure, extract
+from unilearn.ingestion.extract import ExtractionFailure, ModelUnavailable, extract
 from unilearn.llm.embeddings import BgeM3Embedder, Embedder
 
 SUPPORTED_SUFFIXES = {
@@ -146,6 +146,9 @@ def _index_one(
     emit(path, "extracting")
     try:
         extraction = extract(path)
+    except ModelUnavailable as exc:  # transient (offline/uncached model): no row, next run retries
+        emit(path, ERROR)
+        return FileResult(path, ERROR, f"extractor unavailable: {exc}")
     except ExtractionFailure as failure:
         with conn:
             conn.execute(
