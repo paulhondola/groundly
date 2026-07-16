@@ -60,7 +60,9 @@ def extract(path: Path, timeout: float = EXTRACT_TIMEOUT_SECONDS) -> Extraction:
                         sys.executable,
                         "-m",
                         "unilearn.ingestion.extract_worker",
-                        str(path.resolve()),  # worker runs with cwd=tmp; relative paths must survive
+                        str(
+                            path.resolve()
+                        ),  # worker runs with cwd=tmp; relative paths must survive
                         str(out_json),
                     ],
                     stdout=subprocess.DEVNULL,

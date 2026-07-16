@@ -204,8 +204,7 @@ def remove(
 
         if not yes:
             typer.confirm(
-                f"remove subject {subject} and ALL its data"
-                " (materials, index, progress, notes)?",
+                f"remove subject {subject} and ALL its data (materials, index, progress, notes)?",
                 abort=True,
             )
         shutil.rmtree(sdir)
