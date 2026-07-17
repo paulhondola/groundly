@@ -33,7 +33,7 @@ One human role: the **student** (owner of the machine and the data). The other "
 - **UC-14 Mastery & study memory** — per-community mastery from quiz results; cross-session continuity tools. [Detail](use-cases/student-modes.md)
 - **UC-30 Share knowledge bases** — export/import `.groundly` bundles with manifest-pinned compatibility. [Detail](use-cases/sharing.md)
 
-Dropped from the v1 spec: professor modes UC-20–24, the code sandbox, photo notes UC-15, OCR, tiers, auth.
+Dropped from the v1 spec: professor modes UC-20–24, the code sandbox, photo notes UC-15, tiers, auth.
 
 ## 4. System Architecture
 
@@ -88,7 +88,7 @@ The **privacy boundary is a file**: `store.db` travels, `progress.db` (your quer
 | Distribution | Python package via `uv` | Docling/LlamaIndex/graphrag/RAGAS ecosystem is Python-only |
 | Interface | CLI (typer) + MCP server (FastMCP, stdio + HTTP); **no TUI** | The host agent is the interactive surface; residual tasks are batch verbs |
 | Storage | SQLite (WAL) + sqlite-vec + FTS5, files on disk | Zero services; export = zip; exact KNN at subject scale |
-| Extraction | Docling, **digital documents only — no OCR** | Professor decision (pivot #3); scanned PDFs fail cleanly |
+| Extraction | Docling + bundled RapidOCR OCR | Pivot #3 reversed (2026-07-17): OCR ships in base docling, local/offline, zero-key; scanned course PDFs are common |
 | Embeddings | `bge-m3` local, pinned incl. hf_revision; dense + learned sparse | Quality-first (Paul); RO/EN cross-lingual; the pin makes shared vectors compatible |
 | Rerank | `bge-reranker-v2-m3`, **default ON** | Quality over performance (Paul); `--no-rerank` for weak hardware |
 | Graph | MS `graphrag` per-subject batch → parquet | Canonical GraphRAG; naturally file-based |
@@ -134,7 +134,7 @@ One-line register:
 2. **MCP-first**: Groundly is an MCP server for external agents; CLI for lifecycle; no TUI (professor).
 3. **Embedded storage**: SQLite WAL + sqlite-vec + FTS5 + parquet under `~/.groundly/`; no Postgres/Redis/Celery/Docker.
 4. **bge-m3 local, pinned (incl. hf_revision)**, dense + learned sparse; reranker default ON; ColBERT rejected (storage). Quality over performance (Paul).
-5. **No OCR** — digital documents only; vision fallback and photo notes dropped (professor).
+5. **No OCR** (professor, pivot #3) — digital documents only; vision fallback and photo notes dropped. **OCR portion reversed 2026-07-17** — see decision 14; vision fallback and photo notes remain dropped.
 6. **Verifier-gate generation**: server-side verifier mandatory; generators pluggable (thick/thin). Flashcards delivered as Anki `.apkg`.
 7. **Interchange format**: export = subject dir minus `progress.db`; manifest pins embedding/graphrag/chunking; no merge in v1; import creates fresh `progress.db`.
 8. **Frameworks**: LlamaIndex + MS graphrag + FastMCP, one owner each; **LangGraph and LangSmith dropped** — traces live in a local table.
@@ -142,13 +142,15 @@ One-line register:
 10. **Study memory**: `recent_activity` daily rollups + `remember` notes + `continue-studying` MCP prompt; no server-side LLM summarization.
 11. **Pilot subjects: two** (Parallel & Distributed Algorithms; an ML course) — carried over from v1. Professor available for gold-set spot-checks.
 12. **Timeline**: defense June/July 2027.
-13. **Expanded ingest formats** (2026-07-16): all docling-native text formats (HTML, LaTeX, AsciiDoc, CSV, XLSX, EPUB) plus a wider plain-text set (rst, json, yaml, toml, sh, sql, cs, rb, kt, swift); OCR and `.ipynb` still excluded.
+13. **Expanded ingest formats** (2026-07-16): all docling-native text formats (HTML, LaTeX, AsciiDoc, CSV, XLSX, EPUB) plus a wider plain-text set (rst, json, yaml, toml, sh, sql, cs, rb, kt, swift); `.ipynb` still excluded.
+14. **Pivot #3 reversed — OCR enabled** (Paul, 2026-07-17): decision 5's "no OCR extras" premise was false — `docling==2.113.0` resolves to `docling-slim[standard]`, whose `standard` extra bundles RapidOCR (PP-OCR ONNX models) inside the wheel, local/offline, zero-key; scanned course PDFs are common enough to matter. `_extract_docling` now builds the converter with explicit `PdfPipelineOptions(do_ocr=True)` and the engine pinned to `RapidOcrOptions(backend="onnxruntime")`, default langs — docling's "auto" selection would silently switch engines (ocrmac; easyocr, which downloads models at runtime) if one ever appeared in the environment, and non-default langs are supported per subject (decision 15). The local/offline claim holds exactly for this pinned path. Consequences: `rapidocr==3.9.1` pinned exactly as a direct dependency; the PDF extraction-failure message changes to "no readable text — OCR found nothing to extract"; no re-index migration (DoclingDocument output and embeddings are unchanged by this pipeline-options change); OCR'd text becomes citation-target chunks like any other — citation accuracy on scanned sources is now bounded by OCR quality, not just layout parsing.
+15. **Per-subject OCR language** (Paul, 2026-07-17): `groundly index --ocr-lang <code>` (e.g. `ro`) is recorded once per subject in `manifest.json`'s `ocr.lang` and passed to RapidOCR as `Rec.lang_type` via docling's `rapidocr_params` pass-through — docling's own lang mapping collapses ISO codes to the PP-OCRv4-era "latin" group, which rapidocr 3.9's default PP-OCRv6 multilingual rec model rejects while accepting the ISO code directly. On the pinned onnxruntime path the PP-OCRv6 multilingual models ship in the rapidocr wheel, so `--ocr-lang ro` stays fully offline (verified: no download on first use); a lang/backend combo resolving to a non-bundled model is fetched sha256-pinned from modelscope.cn (version-tagged under the `rapidocr==3.9.1` pin) inside the already-wrapped `initialize_pipeline()` step — a fetch failure is `EXIT_MODEL_UNAVAILABLE` like any other model load. Changing a subject's recorded lang is a re-index migration — refused at index time with a specific message while indexed materials exist (with none, e.g. after a mistyped code that fails every extraction, the lang may be corrected freely). Manifest change is additive-with-defaults (`ocr: {engine, lang: []}`), so `format_version` stays 1.
 
 ## 8. Phasing (roadmap v2)
 
 | Phase | Deliverable | Verify by |
 |---|---|---|
-| P1 | `groundly init/index`: Docling (subprocess, digital-only) → HybridChunker → bge-m3 dense+sparse → sqlite-vec/FTS5; resumable (hash-skip); WAL | Index a real course incl. one scanned PDF (fails cleanly) + one Ctrl-C resume; page attribution correct |
+| P1 | `groundly init/index`: Docling (subprocess, OCR via bundled RapidOCR) → HybridChunker → bge-m3 dense+sparse → sqlite-vec/FTS5; resumable (hash-skip); WAL | Index a real course incl. one scanned PDF (indexes via OCR, correct page attribution) + one Ctrl-C resume; page attribution correct |
 | P2 | Import/export: zip + manifest validation + re-embed path | Export on machine A, import on machine B, citations open the right page |
 | P3 | Grounded core + `groundly ask`: four arms, trust layers, citations, refusal, traces | Gold-set eval starts; "not covered" path proven |
 | P4 | MCP v1: `list_subjects`/`search`/`ask`/`get_page` over stdio + HTTP; citation resources | Demo inside Claude Code: search, ask, open a cited page |

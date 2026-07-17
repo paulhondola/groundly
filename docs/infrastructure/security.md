@@ -28,7 +28,7 @@ The verifier executes LLM-generated reference solutions; challenges run student-
 
 ## 5. Privacy
 
-- **Nothing leaves the machine** except calls to the student's own configured LLM provider (their key, their choice) and model downloads from Hugging Face.
+- **Nothing leaves the machine** except calls to the student's own configured LLM provider (their key, their choice) and model downloads from Hugging Face, plus RapidOCR models from modelscope.cn (sha256-pinned) only if a configured `--ocr-lang` resolves to a model not bundled in the rapidocr wheel.
 - **The privacy boundary is a file**: `progress.db` — every query (traces), quiz result, and study note — is never exported. `store.db` exports carry the whole knowledge base including chunk text and original materials; the export UX says so plainly ("this bundle contains everything indexed in this subject").
 - **Sharing = sharing course-material text.** Between enrolled students this is note-sharing; Groundly documents it rather than policing it (thesis acknowledges the copyright surface).
 - No telemetry, no accounts, no third-party trace storage (LangSmith was dropped for exactly this reason).
@@ -37,4 +37,5 @@ The verifier executes LLM-generated reference solutions; challenges run student-
 
 - A malicious `.groundly` bundle with a crafted SQLite file targeting parser bugs — mitigated by schema checks, not eliminated.
 - Docling parsing a hostile PDF (from a merge-by-reindex of imported materials) — contained to the extraction subprocess (`extraction_failed`), not the app.
+- OCR rasterization on adversarial page geometries (a huge MediaBox rasterizes to multi-GB bitmaps) — bounded only by the extraction subprocess's wall-clock timeout, no memory cap; an OOM kill is contained to the child (`extraction_failed`) but the machine takes the memory pressure first.
 - Generated code doing something hostile inside the timeout — accepted as self-risk on the student's own machine, stated in docs.

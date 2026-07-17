@@ -7,18 +7,18 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: the **student**
 ## UC-01 — Index materials
 
 **Actor:** student (CLI).
-**Preconditions:** subject initialized (`groundly init <SUBJECT>`); files are digital documents (PDF/DOCX/PPTX/MD/HTML/LaTeX/AsciiDoc/CSV/XLSX/EPUB/TXT/source with a text layer).
+**Preconditions:** subject initialized (`groundly init <SUBJECT>`); files are PDF/DOCX/PPTX/MD/HTML/LaTeX/AsciiDoc/CSV/XLSX/EPUB/TXT/source (a text layer is no longer required — scanned PDFs are allowed, OCR'd on extraction).
 
 **Main flow**
 
-1. `groundly index <SUBJECT> <paths...>` — files are hashed (sha-256); already-indexed hashes are skipped (idempotent re-run = the "new lecture this week" workflow; no watch daemon).
-2. Per file, in one transaction: Docling extraction **in a subprocess** (digital only — no OCR) → HybridChunker (section-aligned, heading path prepended) → bge-m3 dense + learned sparse (lazy-loaded, local) → sqlite-vec / sparse table / FTS5 rows → `indexed`.
+1. `groundly index <SUBJECT> <paths...>` — files are hashed (sha-256); already-indexed hashes are skipped (idempotent re-run = the "new lecture this week" workflow; no watch daemon). `--ocr-lang <code>` (e.g. `ro`) sets the subject's OCR language on first use — recorded in the manifest; changing it later requires re-indexing and is refused with a specific message (decision 15).
+2. Per file, in one transaction: Docling extraction **in a subprocess** (OCR via bundled RapidOCR for scanned/bitmap regions) → HybridChunker (section-aligned, heading path prepended) → bge-m3 dense + learned sparse (lazy-loaded, local) → sqlite-vec / sparse table / FTS5 rows → `indexed`.
 3. Progress per file (`queued → extracting → embedding → indexed`), rich CLI output.
 4. Corpus hash changed → offer the graph build with a **cost estimate first** (skippable; vector-only subjects are first-class — see UC-12).
 
 **Alternate / error flows**
 
-- **A1 — Scanned/image-only PDF:** empty text layer detected → `extraction_failed` with "scanned PDF — not supported". No silent garbage, no OCR fallback (pivot #3).
+- **A1 — Scanned/image-only PDF:** indexes via OCR (bundled RapidOCR) like any other PDF. The remaining failure is a document with no readable text even after OCR → `extraction_failed` with "no readable text — OCR found nothing to extract".
 - **A2 — Parser crash on a hostile/broken file:** subprocess dies → that file is `extraction_failed`; the run continues.
 - **A3 — Duplicate (same hash, same subject):** skipped, reported as duplicate.
 - **A4 — Ctrl-C mid-run:** per-file transactions mean at most the in-flight file is lost; re-run resumes.
@@ -26,7 +26,7 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: the **student**
 **Acceptance criteria**
 
 - A real digital lecture PDF round-trips to retrievable chunks with **correct page attribution and heading paths**.
-- A scanned PDF fails cleanly with the specific message; every file reaches a terminal state.
+- A scanned PDF indexes via OCR with correct page attribution; a document with no readable text even after OCR fails cleanly with the specific message; every file reaches a terminal state.
 - Re-running `index` on an unchanged folder does no re-embedding; adding one file embeds exactly one file.
 - An interrupted run resumes without corruption (WAL) while a live MCP process keeps answering.
 
