@@ -49,6 +49,7 @@ def index_paths(
     paths: list[Path],
     embedder: Embedder | None = None,
     on_event: OnEvent | None = None,
+    ocr_lang: str | None = None,
 ) -> list[FileResult]:
     sdir = subject_dir(subject)
     manifest_path = sdir / "manifest.json"
@@ -98,7 +99,7 @@ def index_paths(
                 emit(path, Status.SKIPPED_FAILED)
                 continue
 
-            result = _index_one(conn, path, sha, sdir, embedder, emit)
+            result = _index_one(conn, path, sha, sdir, embedder, emit, ocr_lang)
             results.append(result)
             if result.status in (Status.INDEXED, Status.EXTRACTION_FAILED):
                 known[sha] = result.status  # a same-content sibling this run is a skip
@@ -109,11 +110,11 @@ def index_paths(
 
 
 def _index_one(
-    conn, path: Path, sha: str, sdir: Path, embedder: Embedder, emit: OnEvent
+    conn, path: Path, sha: str, sdir: Path, embedder: Embedder, emit: OnEvent, ocr_lang: str | None
 ) -> FileResult:
     emit(path, "extracting")
     try:
-        extraction = extract(path)
+        extraction = extract(path, ocr_lang=ocr_lang)
     except ModelUnavailable as exc:  # transient (offline/uncached model): no row, next run retries
         emit(path, Status.ERROR)
         return FileResult(path, Status.ERROR, f"extractor unavailable: {exc}")

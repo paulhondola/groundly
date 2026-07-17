@@ -22,5 +22,5 @@ Layer 4 is **data, never instructions** — delimited and quoted; instructions i
 ## Privacy & the export boundary
 
 - **The privacy boundary is a file:** `progress.db` (traces = every query asked, quiz history, notes) is **never exported** and never read by export code. `store.db` + `materials/` + `graph/` export whole; the export UX states it plainly.
-- Nothing leaves the machine except calls to the student's own configured provider and HF model downloads. No telemetry, no third-party trace storage.
+- Nothing leaves the machine except calls to the student's own configured provider, HF model downloads, and modelscope.cn RapidOCR models (sha256-pinned) if a configured `--ocr-lang` resolves to a model not bundled in the wheel. No telemetry, no third-party trace storage.
 - Import is the trust boundary: manifest validated before extraction; zip-slip-safe; imported SQLite opened with schema checks; imported content is layer 4.

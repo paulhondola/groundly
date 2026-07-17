@@ -9,7 +9,7 @@ The storage backbone for [`overview.md`](overview.md). SQLite (WAL) per subject;
   config.toml                # with arbitrary cwd, so discovery must not be per-project
   <SUBJECT>/
     manifest.json            # the interchange contract (below)
-    materials/               # original digital files — citation targets
+    materials/               # original files — citation targets
     store.db                 # the knowledge base            → EXPORTED
     progress.db              # the student's private state   → NEVER EXPORTED
     graph/                   # MS graphrag parquet artifacts → exported
@@ -49,12 +49,13 @@ Traces contain every question the student ever asked — which is exactly why th
                   "dtype": "float32", "normalized": true },
   "graphrag":  { "version": "<exact pin>", "extraction_model": "<model used>" },
   "chunking":  { "strategy": "docling-hybrid", "max_tokens": 512, "overlap": 0 },
+  "ocr":       { "engine": "rapidocr-onnxruntime", "lang": [] },
   "counts":    { "materials": 0, "chunks": 0 },
   "tool_version": "<groundly version>"
 }
 ```
 
-Semantics: vectors transfer **as-is only on exact embedding match** (model + revision + dim + normalization) — the global bge-m3 pin makes this the default. Mismatch → re-embed from chunk text (which is why chunk text always ships). The graph is text-only parquet — model-independent, always portable — but `extraction_model` is recorded because an imported graph built by a different model is a different experimental condition.
+Semantics: vectors transfer **as-is only on exact embedding match** (model + revision + dim + normalization) — the global bge-m3 pin makes this the default. Mismatch → re-embed from chunk text (which is why chunk text always ships). The graph is text-only parquet — model-independent, always portable — but `extraction_model` is recorded because an imported graph built by a different model is a different experimental condition. `ocr.lang` records the subject's OCR language set via `groundly index --ocr-lang` (`[]` = bundled default model set); it is part of the interchange contract because it shapes extracted chunk text — a re-index with a different lang is a different corpus (decision 15).
 
 ## Export / import
 

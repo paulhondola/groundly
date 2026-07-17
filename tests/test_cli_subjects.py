@@ -62,13 +62,57 @@ def test_index_reports_results(monkeypatch, tmp_path):
     f = tmp_path / "lec.txt"
     f.write_text("content")
 
-    def fake_index_paths(subject, paths, embedder=None, on_event=None):
+    def fake_index_paths(subject, paths, embedder=None, on_event=None, ocr_lang=None):
         return [FileResult(f, Status.INDEXED, chunks=3)]
 
     monkeypatch.setattr(pipeline, "index_paths", fake_index_paths)
     result = runner.invoke(app, ["index", "PDSS", str(f)])
     assert result.exit_code == 0, result.output
     assert "1 indexed" in result.output and "(3 chunks)" in result.output
+
+
+def test_index_ocr_lang_set_reuse_mismatch(monkeypatch, tmp_path):
+    """--ocr-lang: first use persists into the manifest; same value reuses; a
+    different value is refused (re-index migration, decision 15)."""
+    from groundly.core.manifest import Manifest
+
+    runner.invoke(app, ["init", "PDSS"])
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    seen = []
+
+    def fake_index_paths(subject, paths, embedder=None, on_event=None, ocr_lang=None):
+        seen.append(ocr_lang)
+        return [FileResult(f, Status.INDEXED, chunks=1)]
+
+    monkeypatch.setattr(pipeline, "index_paths", fake_index_paths)
+    manifest_path = subject_dir("PDSS") / "manifest.json"
+
+    # set: persisted into manifest.json and passed to the pipeline
+    assert runner.invoke(app, ["index", "PDSS", str(f), "--ocr-lang", "ro"]).exit_code == 0
+    assert Manifest.load(manifest_path).ocr.lang == ["ro"]
+
+    # reuse: same flag ok; no flag falls back to the recorded value
+    assert runner.invoke(app, ["index", "PDSS", str(f), "--ocr-lang", "ro"]).exit_code == 0
+    assert runner.invoke(app, ["index", "PDSS", str(f)]).exit_code == 0
+    assert seen == ["ro", "ro", "ro"]
+
+    # mismatch with indexed materials: refused, manifest untouched
+    manifest = Manifest.load(manifest_path)
+    manifest.counts.materials = 1
+    manifest.save(manifest_path)
+    result = runner.invoke(app, ["index", "PDSS", str(f), "--ocr-lang", "en"])
+    assert result.exit_code == 1
+    assert "already set to 'ro'" in result.output and "re-index" in result.output
+    assert Manifest.load(manifest_path).ocr.lang == ["ro"]
+
+    # mismatch with nothing indexed: allowed — recovers from a mistyped lang,
+    # which stores no rows (every extraction exits model-unavailable)
+    manifest = Manifest.load(manifest_path)
+    manifest.counts.materials = 0
+    manifest.save(manifest_path)
+    assert runner.invoke(app, ["index", "PDSS", str(f), "--ocr-lang", "en"]).exit_code == 0
+    assert Manifest.load(manifest_path).ocr.lang == ["en"]
 
 
 def test_index_uninitialized_subject_fails_with_fix(tmp_path):
@@ -161,7 +205,7 @@ def test_remove_failed_row_keeps_indexed_siblings_file(home):
         )
         conn.execute(
             "INSERT INTO materials (filename, sha256, status, error) "
-            "VALUES ('lec.pdf', ?, 'extraction_failed', 'scanned PDF — not supported')",
+            "VALUES ('lec.pdf', ?, 'extraction_failed', 'no readable text — OCR found nothing to extract')",
             ("b" * 64,),
         )
     conn.close()
