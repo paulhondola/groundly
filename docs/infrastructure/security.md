@@ -36,6 +36,7 @@ The verifier executes LLM-generated reference solutions; challenges run student-
 ## Residual risks, named
 
 - A malicious `.groundly` bundle with a crafted SQLite file targeting parser bugs — mitigated by schema checks, not eliminated.
+- A malicious `.groundly` bundle sized as a zip bomb — declared uncompressed sizes are checked before anything is decompressed (manifest.json capped at 1 MB, bundle total at 20 GiB), relying on zipfile's own enforcement of each entry's declared size on read; a legitimately-huge bundle under that cap exceeding the student's free disk still fails, but at extraction with an OS error, not silently.
 - Docling parsing a hostile PDF (from a merge-by-reindex of imported materials) — contained to the extraction subprocess (`extraction_failed`), not the app.
 - OCR rasterization on adversarial page geometries (a huge MediaBox rasterizes to multi-GB bitmaps) — bounded only by the extraction subprocess's wall-clock timeout, no memory cap; an OOM kill is contained to the child (`extraction_failed`) but the machine takes the memory pressure first.
 - Generated code doing something hostile inside the timeout — accepted as self-risk on the student's own machine, stated in docs.
