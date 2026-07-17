@@ -176,6 +176,19 @@ def test_validate_entries_rejects_symlink(tmp_path):
             bundle.validate_entries(zf)
 
 
+def test_validate_entries_rejects_oversized_declared_total(tmp_path):
+    path = _zip_with_entry(tmp_path / "hostile.groundly", "materials/lec.pdf")
+    with zipfile.ZipFile(path) as zf:
+        # zipfile enforces each entry's *declared* file_size on read (truncates + CRC-fails
+        # on mismatch), so admission checks against declared size are trustworthy without
+        # decompressing anything. Bump the declared size on the live ZipInfo objects to
+        # simulate a bundle claiming to be huge, without writing a huge file.
+        for info in zf.infolist():
+            info.file_size = bundle._BUNDLE_MAX_BYTES + 1
+        with pytest.raises(bundle.BundleError, match="uncompressed"):
+            bundle.validate_entries(zf)
+
+
 def test_hostile_import_leaves_existing_subject_untouched(tmp_path, monkeypatch):
     _use_home(monkeypatch, tmp_path / "a")
     init_subject("PDSS")
@@ -254,6 +267,25 @@ def test_import_as_creates_second_subject_alongside_original(tmp_path, monkeypat
     assert Subject("PDSS2").exists()
 
 
+def test_import_onto_leftover_dir_without_manifest_fails_cleanly(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed("PDSS")
+    bundle_path = tmp_path / "PDSS.groundly"
+    runner.invoke(app, ["export", "PDSS", "-o", str(bundle_path)])
+
+    leftover = subject_dir("PDSS_PARTIAL")
+    leftover.mkdir(parents=True)
+    (leftover / "stray.txt").write_text("interrupted init")
+
+    result = runner.invoke(app, ["import", str(bundle_path), "--as", "PDSS_PARTIAL"])
+    assert result.exit_code != 0
+    assert "Traceback" not in result.output
+    assert "leftover directory" in result.output
+    assert leftover.name in result.output
+    assert not any((groundly_home() / ".imports").iterdir())
+
+
 # --- Extras --------------------------------------------------------------------
 
 
@@ -283,6 +315,15 @@ def test_read_manifest_missing_names_cause(tmp_path):
         zf.writestr("store.db", b"")
     with zipfile.ZipFile(path) as zf:
         with pytest.raises(bundle.BundleError, match="missing manifest.json"):
+            bundle.read_manifest(zf)
+
+
+def test_read_manifest_rejects_oversized_manifest(tmp_path):
+    path = tmp_path / "bad.groundly"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("manifest.json", b" " * (1024 * 1024 + 1))
+    with zipfile.ZipFile(path) as zf:
+        with pytest.raises(bundle.BundleError, match="too large"):
             bundle.read_manifest(zf)
 
 

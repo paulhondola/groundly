@@ -22,6 +22,8 @@ OnStep = Callable[[int, int], None]  # re_embed callback: (done, total) chunks r
 _ALLOWED_TOP = {"manifest.json", "store.db"}
 _ALLOWED_PREFIXES = ("materials/", "graph/")
 _REEMBED_BATCH = 32
+_MANIFEST_MAX_BYTES = 1024 * 1024  # 1 MB; a real manifest is ~600 bytes
+_BUNDLE_MAX_BYTES = 20 * 1024**3  # 20 GiB declared uncompressed total
 
 
 class BundleError(RuntimeError):
@@ -65,9 +67,15 @@ def export_subject(
 def read_manifest(zf: zipfile.ZipFile) -> Manifest:
     """Validate and return the bundle's manifest. Nothing else is read."""
     try:
-        raw = zf.read("manifest.json")
+        info = zf.getinfo("manifest.json")
     except KeyError:
         raise BundleError("bundle is missing manifest.json — not a groundly bundle") from None
+    if info.file_size > _MANIFEST_MAX_BYTES:
+        raise BundleError(
+            f"bundle manifest.json declares {info.file_size} bytes — too large for a "
+            "groundly manifest, rejected"
+        )
+    raw = zf.read("manifest.json")
     try:
         manifest = Manifest.model_validate_json(raw)
     except ValidationError as exc:
@@ -85,6 +93,7 @@ def read_manifest(zf: zipfile.ZipFile) -> Manifest:
 def validate_entries(zf: zipfile.ZipFile) -> None:
     """Zip-slip gate: reject, never sanitize. Also blocks anything outside the
     export allowlist, so a smuggled non-allowlisted file cannot be extracted."""
+    total_size = 0
     for info in zf.infolist():
         name = info.filename
         posix = PurePosixPath(name)
@@ -96,6 +105,12 @@ def validate_entries(zf: zipfile.ZipFile) -> None:
             raise BundleError(f"bundle entry {name!r} is a symlink — rejected")
         if name not in _ALLOWED_TOP and not name.startswith(_ALLOWED_PREFIXES):
             raise BundleError(f"bundle entry {name!r} is outside the export allowlist — rejected")
+        total_size += info.file_size
+    if total_size > _BUNDLE_MAX_BYTES:
+        raise BundleError(
+            f"bundle declares {total_size} bytes uncompressed — over the "
+            f"{_BUNDLE_MAX_BYTES} byte cap, rejected"
+        )
 
 
 def extract_bundle(bundle_path: Path, dest_dir: Path, on_file: OnFile | None = None) -> Manifest:

@@ -122,7 +122,14 @@ def import_(
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise
 
-    if target.exists():
-        shutil.rmtree(target.root_dir)
-    tmp_dir.rename(target.root_dir)
+    try:
+        if target.exists():
+            shutil.rmtree(target.root_dir)
+        tmp_dir.rename(target.root_dir)
+    except OSError:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        _fail(
+            f"a leftover directory already exists at {target.root_dir} "
+            "(no manifest.json, so it wasn't replaced) — remove it and re-run the import"
+        )
     console.print(f"imported [bold]{name}[/bold] to {target.root_dir}")
