@@ -61,3 +61,24 @@ def stub_extraction():
         return Extraction(pages=None, chunks=[ChunkData("stub text", None, None, 2)])
 
     return _stub_extraction
+
+
+class StubExtractor:
+    def __init__(self, extraction):
+        self.extraction = extraction
+        self.seen_paths = []
+        self.seen_langs = []
+
+    def extract(self, path, ocr_lang=None):
+        self.seen_paths.append(path)
+        self.seen_langs.append(ocr_lang)
+        return self.extraction
+
+
+@pytest.fixture
+def stub_extractor(stub_extraction):
+    def _stub_extractor(extraction=None):
+        ext = extraction or stub_extraction()
+        return StubExtractor(ext)
+
+    return _stub_extractor

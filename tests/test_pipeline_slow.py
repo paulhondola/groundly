@@ -10,7 +10,9 @@ import pytest
 
 from groundly.core.manifest import Manifest
 from groundly.core.paths import subject_dir
+from groundly.core.store import SQLiteSubjectStore
 from groundly.ingestion import pipeline
+from groundly.ingestion.extract import SubprocessExtractor
 
 
 @pytest.mark.slow
@@ -137,16 +139,16 @@ def test_extractor_unavailable_is_transient_then_retries(
     succeeds without the user having to `remove` a wrongly-failed file."""
     from groundly.ingestion.extract import ModelUnavailable
 
-    real_extract = pipeline.extract
+    real_extract = SubprocessExtractor.extract
     calls = {"n": 0}
 
-    def flaky(path, *args, **kwargs):
+    def flaky(self, path, ocr_lang=None):
         calls["n"] += 1
         if calls["n"] == 1:
             raise ModelUnavailable("bge-m3 tokenizer download failed")
-        return real_extract(path, *args, **kwargs)
+        return real_extract(self, path, ocr_lang=ocr_lang)
 
-    monkeypatch.setattr(pipeline, "extract", flaky)
+    monkeypatch.setattr(SubprocessExtractor, "extract", flaky)
     results = pipeline.index_paths(subject, [course / "notes.txt"], embedder=stub_embedder())
     assert results[0].status == "error"  # transient, not extraction_failed
     with connect(subject) as conn:
@@ -182,7 +184,7 @@ def test_concurrent_index_race_reports_duplicate_not_crash(
     """Another process indexing the same content between our hash check and the
     write must surface as a skip, not an unhandled IntegrityError."""
     pipeline.index_paths(subject, [course / "notes.txt"], embedder=stub_embedder())
-    monkeypatch.setattr(pipeline.store, "hash_status", lambda conn: {})  # stale snapshot
+    monkeypatch.setattr(SQLiteSubjectStore, "hash_status", lambda self: {})  # stale snapshot
     results = pipeline.index_paths(subject, [course / "notes.txt"], embedder=stub_embedder())
     assert results[0].status == "skipped_duplicate"
     assert "concurrent" in results[0].detail

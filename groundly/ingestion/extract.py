@@ -49,44 +49,50 @@ def _stderr_tail(path: Path) -> str:
     return lines[-1] if lines else ""
 
 
-def extract(
-    path: Path, timeout: float = EXTRACT_TIMEOUT_SECONDS, ocr_lang: str | None = None
-) -> Extraction:
-    with tempfile.TemporaryDirectory() as tmp:
-        out_json = Path(tmp) / "extraction.json"
-        stderr_path = Path(tmp) / "stderr.log"
-        argv = [
-            sys.executable,
-            "-m",
-            "groundly.ingestion.extract_worker",
-            str(path.resolve()),  # worker runs with cwd=tmp; relative paths must survive
-            str(out_json),
-        ]
-        if ocr_lang:
-            argv.append(ocr_lang)  # optional third positional: subject's OCR language
-        with open(stderr_path, "wb") as stderr_file:
-            try:
-                proc = subprocess.run(
-                    argv,
-                    stdout=subprocess.DEVNULL,
-                    stderr=stderr_file,
-                    cwd=tmp,
-                    timeout=timeout,
-                )
-            except subprocess.TimeoutExpired:
-                raise ExtractionFailure(f"extraction timed out after {int(timeout)}s") from None
+class SubprocessExtractor:
+    """Extracts document content using a separate worker subprocess (Docling, RapidOCR)."""
 
-        if proc.returncode == extract_worker.EXIT_MODEL_UNAVAILABLE:
-            raise ModelUnavailable(_stderr_tail(stderr_path) or "extractor model unavailable")
-        if proc.returncode == extract_worker.EXIT_NO_TEXT:
-            if path.suffix.lower() == ".pdf":
-                raise ExtractionFailure("no readable text — OCR found nothing to extract")
-            raise ExtractionFailure("no extractable text")
-        if proc.returncode != 0:
-            tail = _stderr_tail(stderr_path) or f"exit code {proc.returncode}"
-            raise ExtractionFailure(f"parser failed: {tail}")
+    def __init__(self, timeout: float = EXTRACT_TIMEOUT_SECONDS) -> None:
+        self.timeout = timeout
 
-        if out_json.stat().st_size > MAX_EXTRACTION_JSON_BYTES:
-            raise ExtractionFailure("extraction output too large")
-        data = json.loads(out_json.read_text())
-        return Extraction(pages=data["pages"], chunks=[ChunkData(**c) for c in data["chunks"]])
+    def extract(self, path: Path, ocr_lang: str | None = None) -> Extraction:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_json = Path(tmp) / "extraction.json"
+            stderr_path = Path(tmp) / "stderr.log"
+            argv = [
+                sys.executable,
+                "-m",
+                "groundly.ingestion.extract_worker",
+                str(path.resolve()),  # worker runs with cwd=tmp; relative paths must survive
+                str(out_json),
+            ]
+            if ocr_lang:
+                argv.append(ocr_lang)  # optional third positional: subject's OCR language
+            with open(stderr_path, "wb") as stderr_file:
+                try:
+                    proc = subprocess.run(
+                        argv,
+                        stdout=subprocess.DEVNULL,
+                        stderr=stderr_file,
+                        cwd=tmp,
+                        timeout=self.timeout,
+                    )
+                except subprocess.TimeoutExpired:
+                    raise ExtractionFailure(
+                        f"extraction timed out after {int(self.timeout)}s"
+                    ) from None
+
+            if proc.returncode == extract_worker.EXIT_MODEL_UNAVAILABLE:
+                raise ModelUnavailable(_stderr_tail(stderr_path) or "extractor model unavailable")
+            if proc.returncode == extract_worker.EXIT_NO_TEXT:
+                if path.suffix.lower() == ".pdf":
+                    raise ExtractionFailure("no readable text — OCR found nothing to extract")
+                raise ExtractionFailure("no extractable text")
+            if proc.returncode != 0:
+                tail = _stderr_tail(stderr_path) or f"exit code {proc.returncode}"
+                raise ExtractionFailure(f"parser failed: {tail}")
+
+            if out_json.stat().st_size > MAX_EXTRACTION_JSON_BYTES:
+                raise ExtractionFailure("extraction output too large")
+            data = json.loads(out_json.read_text())
+            return Extraction(pages=data["pages"], chunks=[ChunkData(**c) for c in data["chunks"]])

@@ -105,39 +105,122 @@ def create_progress(path: Path) -> None:
         conn.close()
 
 
-def list_materials(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return conn.execute(
-        """
-        SELECT m.id, m.filename, m.sha256, m.status, m.pages, m.error,
-               COUNT(c.id) AS chunk_count
-        FROM materials m LEFT JOIN chunks c ON c.material_id = m.id
-        GROUP BY m.id ORDER BY m.filename
-        """
-    ).fetchall()
+class SQLiteSubjectStore:
+    """A subject's store.db: connection lifecycle + all reads/writes for materials,
+    chunks, vectors and sparse terms."""
 
+    def __init__(self, db_path: Path) -> None:
+        self.db_path = db_path
 
-def hash_status(conn: sqlite3.Connection) -> dict[str, str]:
-    """sha256 -> status, for hash-skip (indexed) and retry (extraction_failed)."""
-    return {r["sha256"]: r["status"] for r in conn.execute("SELECT sha256, status FROM materials")}
+    def connect(self) -> sqlite3.Connection:
+        return connect(self.db_path)
 
+    def list_materials(self) -> list[sqlite3.Row]:
+        conn = self.connect()
+        try:
+            return conn.execute(
+                """
+                SELECT m.id, m.filename, m.sha256, m.status, m.pages, m.error,
+                       COUNT(c.id) AS chunk_count
+                FROM materials m LEFT JOIN chunks c ON c.material_id = m.id
+                GROUP BY m.id ORDER BY m.filename
+                """
+            ).fetchall()
+        finally:
+            conn.close()
 
-def find_materials(conn: sqlite3.Connection, ident: str) -> list[sqlite3.Row]:
-    """Match by exact filename or sha256 prefix (the disambiguator)."""
-    escaped = ident.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    return conn.execute(
-        "SELECT * FROM materials WHERE filename = ? OR sha256 LIKE ? ESCAPE '\\' ORDER BY filename",
-        (ident, escaped + "%"),
-    ).fetchall()
+    def hash_status(self) -> dict[str, str]:
+        """sha256 -> status, for hash-skip (indexed) and retry (extraction_failed)."""
+        conn = self.connect()
+        try:
+            return {
+                r["sha256"]: r["status"]
+                for r in conn.execute("SELECT sha256, status FROM materials")
+            }
+        finally:
+            conn.close()
 
+    def find_materials(self, ident: str) -> list[sqlite3.Row]:
+        """Match by exact filename or sha256 prefix (the disambiguator)."""
+        conn = self.connect()
+        try:
+            escaped = ident.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            return conn.execute(
+                "SELECT * FROM materials WHERE filename = ? OR sha256 LIKE ? ESCAPE '\\' "
+                "ORDER BY filename",
+                (ident, escaped + "%"),
+            ).fetchall()
+        finally:
+            conn.close()
 
-def remove_material(conn: sqlite3.Connection, material_id: int) -> None:
-    """One transaction. FTS syncs via the chunks_ad trigger; sparse_terms via FK
-    cascade; vectors (vec0, no FK) deleted explicitly by chunk rowid."""
-    with conn:
-        chunk_ids = [
-            r["id"]
-            for r in conn.execute("SELECT id FROM chunks WHERE material_id = ?", (material_id,))
-        ]
-        conn.executemany("DELETE FROM vectors WHERE rowid = ?", [(cid,) for cid in chunk_ids])
-        conn.execute("DELETE FROM chunks WHERE material_id = ?", (material_id,))
-        conn.execute("DELETE FROM materials WHERE id = ?", (material_id,))
+    def remove_material(self, material_id: int) -> None:
+        """One transaction. FTS syncs via the chunks_ad trigger; sparse_terms via FK
+        cascade; vectors (vec0, no FK) deleted explicitly by chunk rowid."""
+        conn = self.connect()
+        try:
+            with conn:
+                chunk_ids = [
+                    r["id"]
+                    for r in conn.execute(
+                        "SELECT id FROM chunks WHERE material_id = ?", (material_id,)
+                    )
+                ]
+                conn.executemany(
+                    "DELETE FROM vectors WHERE rowid = ?", [(cid,) for cid in chunk_ids]
+                )
+                conn.execute("DELETE FROM chunks WHERE material_id = ?", (material_id,))
+                conn.execute("DELETE FROM materials WHERE id = ?", (material_id,))
+        finally:
+            conn.close()
+
+    def add_extraction_failed(self, filename: str, sha256: str, error: str) -> None:
+        conn = self.connect()
+        try:
+            with conn:
+                conn.execute(
+                    "INSERT INTO materials (filename, sha256, status, error) "
+                    "VALUES (?, ?, 'extraction_failed', ?)",
+                    (filename, sha256, error),
+                )
+        finally:
+            conn.close()
+
+    def add_indexed(
+        self,
+        filename: str,
+        sha256: str,
+        pages: int | None,
+        chunks: list,
+        dense: list[list[float]],
+        sparse: list[dict[int, float]],
+    ) -> int:
+        conn = self.connect()
+        try:
+            with conn:
+                cur = conn.execute(
+                    "INSERT INTO materials (filename, sha256, status, pages) VALUES (?, ?, 'indexed', ?)",
+                    (filename, sha256, pages),
+                )
+                material_id = cur.lastrowid
+                for chunk, vec, weights in zip(chunks, dense, sparse, strict=True):
+                    c_text = chunk.text
+                    c_page = chunk.page
+                    c_heading_path = chunk.heading_path
+                    c_token_count = chunk.token_count
+
+                    cid = conn.execute(
+                        "INSERT INTO chunks (material_id, page, heading_path, text, token_count) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (material_id, c_page, c_heading_path, c_text, c_token_count),
+                    ).lastrowid
+                    conn.execute(
+                        "INSERT INTO vectors (rowid, embedding) VALUES (?, ?)",
+                        (cid, sqlite_vec.serialize_float32(vec)),
+                    )
+                    conn.executemany(
+                        "INSERT INTO sparse_terms (token_id, chunk_id, weight) VALUES (?, ?, ?)",
+                        [(token_id, cid, weight) for token_id, weight in weights.items()],
+                    )
+                return material_id
+        finally:
+            conn.close()
