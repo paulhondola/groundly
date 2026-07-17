@@ -33,6 +33,18 @@ def test_new_plain_text_format_indexes(
     assert results[0].status == "indexed"
 
 
+def test_ocr_lang_reaches_extract(subject, course, monkeypatch, stub_embedder, stub_extraction):
+    seen = []
+
+    def spy_extract(path, *args, **kwargs):
+        seen.append(kwargs.get("ocr_lang"))
+        return stub_extraction()
+
+    monkeypatch.setattr(pipeline, "extract", spy_extract)
+    pipeline.index_paths(subject, [course / "notes.txt"], embedder=stub_embedder(), ocr_lang="ro")
+    assert seen == ["ro"]
+
+
 def test_concurrent_failure_race_does_not_abort_run(
     subject, course, monkeypatch, stub_embedder, connect
 ):
@@ -41,7 +53,7 @@ def test_concurrent_failure_race_does_not_abort_run(
     from groundly.ingestion.extract import ExtractionFailure
 
     def always_fail(path, *args, **kwargs):
-        raise ExtractionFailure("scanned PDF — not supported")
+        raise ExtractionFailure("no readable text — OCR found nothing to extract")
 
     monkeypatch.setattr(pipeline, "extract", always_fail)
     pipeline.index_paths(subject, [course / "notes.txt"], embedder=stub_embedder())
