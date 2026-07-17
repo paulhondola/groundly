@@ -31,10 +31,46 @@ def init(
 def index(
     subject: Annotated[str, typer.Argument(help="Subject to index into (must be initialized).")],
     paths: Annotated[list[Path], typer.Argument(help="Files or directories to index.")],
+    ocr_lang: Annotated[
+        Optional[str],
+        typer.Option(
+            "--ocr-lang",
+            help="OCR language for scanned PDFs (e.g. 'ro'); set once per subject, "
+            "persisted in the manifest.",
+        ),
+    ] = None,
 ) -> None:
     """Index course materials: hash-skip idempotent, per-file progress, resumable."""
+    from groundly.core.manifest import Manifest
+    from groundly.core.paths import subject_dir
     from groundly.ingestion import pipeline
     from groundly.ingestion.results import Status
+
+    try:
+        manifest_path = subject_dir(subject) / "manifest.json"
+    except ValueError as exc:  # bad subject name — same cause pipeline would name
+        _fail(str(exc))
+    if manifest_path.exists():
+        manifest = Manifest.load(manifest_path)
+        recorded = manifest.ocr.lang[0] if manifest.ocr.lang else None
+        if ocr_lang and recorded and ocr_lang != recorded:
+            # the recorded lang shaped every OCR'd chunk already stored — changing it
+            # silently would mix corpora (decision 15). With nothing indexed yet there
+            # is nothing to mix: allow the change (recovers from a mistyped lang, which
+            # stores no rows — every extraction exits model-unavailable).
+            if manifest.counts.materials > 0:
+                _fail(
+                    f"OCR language already set to {recorded!r} for this subject; changing it "
+                    "requires re-indexing (remove and re-index scanned materials)"
+                )
+            manifest.ocr.lang = [ocr_lang]
+            manifest.save(manifest_path)
+        elif ocr_lang and not recorded:
+            manifest.ocr.lang = [ocr_lang]
+            manifest.save(manifest_path)
+        elif not ocr_lang:
+            ocr_lang = recorded
+    # else: not initialized — pipeline.index_paths names the fix below
 
     labels = {
         Status.INDEXED: "[green]indexed[/green]",
@@ -52,7 +88,7 @@ def index(
                 status.update(f"{path.name}: {stage}…")
 
         try:
-            results = pipeline.index_paths(subject, paths, on_event=on_event)
+            results = pipeline.index_paths(subject, paths, on_event=on_event, ocr_lang=ocr_lang)
         except (RuntimeError, ValueError) as exc:
             _fail(str(exc))
 

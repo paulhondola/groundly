@@ -49,22 +49,25 @@ def _stderr_tail(path: Path) -> str:
     return lines[-1] if lines else ""
 
 
-def extract(path: Path, timeout: float = EXTRACT_TIMEOUT_SECONDS) -> Extraction:
+def extract(
+    path: Path, timeout: float = EXTRACT_TIMEOUT_SECONDS, ocr_lang: str | None = None
+) -> Extraction:
     with tempfile.TemporaryDirectory() as tmp:
         out_json = Path(tmp) / "extraction.json"
         stderr_path = Path(tmp) / "stderr.log"
+        argv = [
+            sys.executable,
+            "-m",
+            "groundly.ingestion.extract_worker",
+            str(path.resolve()),  # worker runs with cwd=tmp; relative paths must survive
+            str(out_json),
+        ]
+        if ocr_lang:
+            argv.append(ocr_lang)  # optional third positional: subject's OCR language
         with open(stderr_path, "wb") as stderr_file:
             try:
                 proc = subprocess.run(
-                    [
-                        sys.executable,
-                        "-m",
-                        "groundly.ingestion.extract_worker",
-                        str(
-                            path.resolve()
-                        ),  # worker runs with cwd=tmp; relative paths must survive
-                        str(out_json),
-                    ],
+                    argv,
                     stdout=subprocess.DEVNULL,
                     stderr=stderr_file,
                     cwd=tmp,
@@ -77,7 +80,7 @@ def extract(path: Path, timeout: float = EXTRACT_TIMEOUT_SECONDS) -> Extraction:
             raise ModelUnavailable(_stderr_tail(stderr_path) or "extractor model unavailable")
         if proc.returncode == extract_worker.EXIT_NO_TEXT:
             if path.suffix.lower() == ".pdf":
-                raise ExtractionFailure("scanned PDF — not supported")
+                raise ExtractionFailure("no readable text — OCR found nothing to extract")
             raise ExtractionFailure("no extractable text")
         if proc.returncode != 0:
             tail = _stderr_tail(stderr_path) or f"exit code {proc.returncode}"

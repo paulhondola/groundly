@@ -17,7 +17,7 @@
 - MCP tools are the product surface: tool descriptions are UX — write them for the host model. Citations double as MCP resources (`groundly://<subject>/<file>#page=N`).
 - CLI verbs are batch lifecycle only (index/import/export/config/ask); anything conversational belongs to the host agent. No TUI.
 - Long operations print cost estimates before spending the student's tokens and report per-file/per-item progress.
-- User-facing failure messages name the cause specifically ("scanned PDF — not supported"), never generic errors.
+- User-facing failure messages name the cause specifically ("no readable text — OCR found nothing to extract"), never generic errors.
 
 ## Workflow
 

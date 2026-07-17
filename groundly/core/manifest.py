@@ -8,7 +8,7 @@ import sqlite3
 from importlib.metadata import version as _package_version
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 FORMAT_VERSION = 1
 EMBEDDING_MODEL = "BAAI/bge-m3"
@@ -37,6 +37,11 @@ class Chunking(BaseModel):
     overlap: int = CHUNK_OVERLAP
 
 
+class Ocr(BaseModel):
+    engine: str = "rapidocr-onnxruntime"
+    lang: list[str] = Field(default_factory=list)  # [] = bundled default model set
+
+
 class Counts(BaseModel):
     materials: int = 0
     chunks: int = 0
@@ -48,6 +53,7 @@ class Manifest(BaseModel):
     embedding: Embedding = Embedding()
     graphrag: Graphrag = Graphrag()
     chunking: Chunking = Chunking()
+    ocr: Ocr = Ocr()
     counts: Counts = Counts()
     tool_version: str = ""
 
