@@ -2,7 +2,6 @@
 (subjects/models import from here) — avoids circularity."""
 
 from importlib.metadata import version as _package_version
-from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -29,23 +28,26 @@ def _fail(message: str) -> None:
     raise typer.Exit(code=1)
 
 
-def _subject_dir_checked(subject: str) -> Path:
-    from groundly.core.paths import subject_dir
+def _subject_checked(subject: str):
+    from groundly.core.subject import Subject
 
     try:
-        sdir = subject_dir(subject)
+        subj = Subject(subject)
     except ValueError as exc:
         _fail(str(exc))
-    if not (sdir / "manifest.json").exists():
+    if not subj.exists():
         _fail(f"subject '{subject}' is not initialized — run: groundly init {subject}")
-    return sdir
+    return subj
 
 
-def _connect_checked(sdir: Path):
-    from groundly.core import store
+def _store_checked(subj):
+    from groundly.core.store import SQLiteSubjectStore
 
     try:
-        return store.connect(sdir / "store.db")
+        store_obj = SQLiteSubjectStore(subj.store_db_path)
+        conn = store_obj.connect()
+        conn.close()
+        return store_obj
     except RuntimeError as exc:  # missing store.db / newer schema — named cause, no traceback
         _fail(str(exc))
 

@@ -7,7 +7,7 @@ import typer
 from rich.markup import escape
 from rich.table import Table
 
-from groundly.cli.app import _connect_checked, _fail, _subject_dir_checked, app, console
+from groundly.cli.app import _fail, _subject_checked, _store_checked, app, console
 
 
 @app.command()
@@ -15,16 +15,17 @@ def init(
     subject: Annotated[str, typer.Argument(help="Subject name; becomes ~/.groundly/<SUBJECT>/.")],
 ) -> None:
     """Create a subject: manifest.json, materials/, store.db, progress.db."""
-    from groundly.core.subject import init_subject
+    from groundly.core.subject import Subject
 
     try:
-        sdir, created = init_subject(subject)
+        subj = Subject(subject)
+        created = subj.initialize()
     except ValueError as exc:
         _fail(str(exc))
     if created:
-        console.print(f"initialized [bold]{subject}[/bold] at {sdir}")
+        console.print(f"initialized [bold]{subject}[/bold] at {subj.root_dir}")
     else:
-        console.print(f"[bold]{subject}[/bold] already initialized at {sdir}")
+        console.print(f"[bold]{subject}[/bold] already initialized at {subj.root_dir}")
 
 
 @app.command()
@@ -41,17 +42,16 @@ def index(
     ] = None,
 ) -> None:
     """Index course materials: hash-skip idempotent, per-file progress, resumable."""
-    from groundly.core.manifest import Manifest
-    from groundly.core.paths import subject_dir
+    from groundly.core.subject import Subject
     from groundly.ingestion import pipeline
     from groundly.ingestion.results import Status
 
     try:
-        manifest_path = subject_dir(subject) / "manifest.json"
+        subj = Subject(subject)
     except ValueError as exc:  # bad subject name — same cause pipeline would name
         _fail(str(exc))
-    if manifest_path.exists():
-        manifest = Manifest.load(manifest_path)
+    if subj.exists():
+        manifest = subj.load_manifest()
         recorded = manifest.ocr.lang[0] if manifest.ocr.lang else None
         if ocr_lang and recorded and ocr_lang != recorded:
             # the recorded lang shaped every OCR'd chunk already stored — changing it
@@ -64,10 +64,10 @@ def index(
                     "requires re-indexing (remove and re-index scanned materials)"
                 )
             manifest.ocr.lang = [ocr_lang]
-            manifest.save(manifest_path)
+            subj.save_manifest(manifest)
         elif ocr_lang and not recorded:
             manifest.ocr.lang = [ocr_lang]
-            manifest.save(manifest_path)
+            subj.save_manifest(manifest)
         elif not ocr_lang:
             ocr_lang = recorded
     # else: not initialized — pipeline.index_paths names the fix below
@@ -117,15 +117,15 @@ def list_(
 
     from pydantic import ValidationError
 
-    from groundly.core import store
-    from groundly.core.manifest import Manifest
-    from groundly.core.paths import discover_subjects, subject_dir
+    from groundly.core.paths import discover_subjects
+    from groundly.core.subject import Subject
 
     if subject is None:
         table = Table("subject", "materials", "chunks")
         for name in discover_subjects():
             try:
-                manifest = Manifest.load(subject_dir(name) / "manifest.json")
+                subj = Subject(name)
+                manifest = subj.load_manifest()
             except ValidationError:
                 # one damaged subject must not take down the whole listing
                 console.print(f"[red]warning:[/red] {name}: manifest.json is corrupt — skipping")
@@ -134,11 +134,11 @@ def list_(
         console.print(table)
         return
 
-    sdir = _subject_dir_checked(subject)
-    conn = _connect_checked(sdir)
+    subj = _subject_checked(subject)
+    store_obj = _store_checked(subj)
     try:
         table = Table("material", "status", "pages", "chunks", "detail")
-        for row in store.list_materials(conn):
+        for row in store_obj.list_materials():
             table.add_row(
                 escape(row["filename"]),
                 row["status"],
@@ -149,8 +149,6 @@ def list_(
         console.print(table)
     except sqlite3.OperationalError as exc:
         _fail(f"store.db is corrupt or incomplete: {exc}")
-    finally:
-        conn.close()
 
 
 @app.command()
@@ -168,10 +166,9 @@ def remove(
     """Remove a material and all its indexed data, or a whole subject if no material given."""
     import sqlite3
 
-    from groundly.core import store
     from groundly.core.manifest import sync_counts
 
-    sdir = _subject_dir_checked(subject)
+    subj = _subject_checked(subject)
 
     if material is None:
         import shutil
@@ -181,13 +178,13 @@ def remove(
                 f"remove subject {subject} and ALL its data (materials, index, progress, notes)?",
                 abort=True,
             )
-        shutil.rmtree(sdir)
+        shutil.rmtree(subj.root_dir)
         console.print(f"removed subject [bold]{subject}[/bold]")
         return
 
-    conn = _connect_checked(sdir)
+    store_obj = _store_checked(subj)
     try:
-        matches = store.find_materials(conn, material)
+        matches = store_obj.find_materials(material)
         if not matches:
             _fail(f"no material {material!r} in {subject} — see: groundly list {subject}")
         if len(matches) > 1:
@@ -199,21 +196,24 @@ def remove(
                 f"remove {target['filename']} and all its indexed data from {subject}?",
                 abort=True,
             )
-        store.remove_material(conn, target["id"])
-        sync_counts(conn, sdir / "manifest.json")
+        store_obj.remove_material(target["id"])
+        conn = store_obj.connect()
+        try:
+            sync_counts(conn, subj.manifest_path)
+        finally:
+            conn.close()
+
         if target["status"] == "indexed":
             # failed rows never got a copy in materials/, and their original filename
             # (no collision suffix) can shadow a different indexed material's file
-            stored = sdir / "materials" / target["filename"]
+            stored = subj.materials_dir / target["filename"]
             if stored.exists():
                 stored.unlink()
         console.print(f"removed [bold]{escape(target['filename'])}[/bold] from {subject}")
-        if (sdir / "graph").exists():
+        if (subj.root_dir / "graph").exists():
             console.print(
                 "[dim]note: the graph is now stale — it rebuilds on the next"
                 " corpus-hash-triggered index run[/dim]"
             )
     except sqlite3.OperationalError as exc:
         _fail(f"store.db is corrupt or incomplete: {exc}")
-    finally:
-        conn.close()

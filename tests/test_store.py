@@ -5,6 +5,7 @@ import sqlite_vec
 
 from groundly.core import store
 from groundly.core.manifest import EMBEDDING_DIM, Manifest, sync_counts
+from groundly.core.store import SQLiteSubjectStore
 
 
 @pytest.fixture
@@ -70,9 +71,9 @@ def test_fts_search_finds_chunk_text(db):
     assert len(hits) == 2
 
 
-def test_remove_material_leaves_no_rows_in_any_channel(db):
+def test_remove_material_leaves_no_rows_in_any_channel(db, tmp_path):
     mid = _add_material(db)
-    store.remove_material(db, mid)
+    SQLiteSubjectStore(tmp_path / "store.db").remove_material(mid)
     for table in ["materials", "chunks", "sparse_terms", "vectors"]:
         assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0, table
     assert not db.execute(
@@ -80,15 +81,16 @@ def test_remove_material_leaves_no_rows_in_any_channel(db):
     ).fetchall()
 
 
-def test_find_materials_by_filename_or_sha_prefix(db):
+def test_find_materials_by_filename_or_sha_prefix(db, tmp_path):
     _add_material(db, "lec1.pdf", "a" * 64)
     _add_material(db, "lec2.pdf", "b" * 64)
-    assert len(store.find_materials(db, "lec1.pdf")) == 1
-    assert len(store.find_materials(db, "bbbb")) == 1
-    assert len(store.find_materials(db, "nope")) == 0
+    store_obj = SQLiteSubjectStore(tmp_path / "store.db")
+    assert len(store_obj.find_materials("lec1.pdf")) == 1
+    assert len(store_obj.find_materials("bbbb")) == 1
+    assert len(store_obj.find_materials("nope")) == 0
     # LIKE wildcards must not act as wildcards (remove SUBJ '%' would delete anything)
-    assert len(store.find_materials(db, "%")) == 0
-    assert len(store.find_materials(db, "_" * 8)) == 0
+    assert len(store_obj.find_materials("%")) == 0
+    assert len(store_obj.find_materials("_" * 8)) == 0
 
 
 def test_sync_counts(db, tmp_path):
