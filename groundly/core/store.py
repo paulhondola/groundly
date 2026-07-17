@@ -5,6 +5,7 @@ Every connection gets WAL + busy_timeout: one-shot CLI runs and host-spawned MCP
 processes share the same files (.claude/rules/architecture.md).
 """
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -13,6 +14,27 @@ import sqlite_vec
 from groundly.core.manifest import EMBEDDING_DIM
 
 STORE_USER_VERSION = 1
+
+_TRACES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS traces (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('ask', 'search')),
+    query TEXT NOT NULL,
+    router_label TEXT,
+    arm TEXT,
+    path TEXT,       -- JSON array, e.g. ["dense","sparse","bm25","rrf","rerank"]
+    chunk_ids TEXT,  -- JSON array of retrieved chunk ids
+    outcome TEXT NOT NULL CHECK (outcome IN ('answered', 'refused', 'error', 'results')),
+    answer TEXT,
+    citations TEXT,  -- JSON array of {chunk_id, filename, page, heading_path}
+    model TEXT,
+    tokens INTEGER,
+    cost_usd REAL,
+    latency_ms INTEGER,
+    error TEXT,
+    ts TEXT NOT NULL DEFAULT (datetime('now'))
+);
+"""
 
 _SCHEMA = f"""
 CREATE TABLE materials (
@@ -105,6 +127,64 @@ def create_progress(path: Path) -> None:
         conn.close()
 
 
+def connect_progress(path: Path) -> sqlite3.Connection:
+    """Open progress.db, creating it (and the traces table) if missing. `CREATE TABLE
+    IF NOT EXISTS` idempotently upgrades a pre-existing empty progress.db (P1/P2 era)
+    with no migration framework — progress.db never travels, so this is safe."""
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 5000")
+    conn.executescript(_TRACES_SCHEMA)
+    conn.commit()
+    return conn
+
+
+def record_trace(
+    conn: sqlite3.Connection,
+    *,
+    kind: str,
+    query: str,
+    outcome: str,
+    router_label: str | None = None,
+    arm: str | None = None,
+    path: list[str] | None = None,
+    chunk_ids: list[int] | None = None,
+    answer: str | None = None,
+    citations: list[dict] | None = None,
+    model: str | None = None,
+    tokens: int | None = None,
+    cost_usd: float | None = None,
+    latency_ms: int | None = None,
+    error: str | None = None,
+) -> None:
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO traces (
+                kind, query, router_label, arm, path, chunk_ids, outcome,
+                answer, citations, model, tokens, cost_usd, latency_ms, error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                kind,
+                query,
+                router_label,
+                arm,
+                json.dumps(path) if path is not None else None,
+                json.dumps(chunk_ids) if chunk_ids is not None else None,
+                outcome,
+                answer,
+                json.dumps(citations) if citations is not None else None,
+                model,
+                tokens,
+                cost_usd,
+                latency_ms,
+                error,
+            ),
+        )
+
+
 class SQLiteSubjectStore:
     """A subject's store.db: connection lifecycle + all reads/writes for materials,
     chunks, vectors and sparse terms."""
@@ -182,6 +262,78 @@ class SQLiteSubjectStore:
                     "VALUES (?, ?, 'extraction_failed', ?)",
                     (filename, sha256, error),
                 )
+        finally:
+            conn.close()
+
+    def dense_search(self, embedding: list[float], k: int) -> list[int]:
+        """Exact KNN over the dense channel (sqlite-vec brute force). Chunk ids
+        nearest-first."""
+        conn = self.connect()
+        try:
+            rows = conn.execute(
+                "SELECT rowid FROM vectors WHERE embedding MATCH ? AND k = ? ORDER BY distance",
+                (sqlite_vec.serialize_float32(embedding), k),
+            ).fetchall()
+            return [r["rowid"] for r in rows]
+        finally:
+            conn.close()
+
+    def sparse_search(self, weights: dict[int, float], k: int) -> list[int]:
+        """Learned-sparse channel: sum of weight * query_weight per chunk, best-first."""
+        if not weights:
+            return []
+        conn = self.connect()
+        try:
+            query_json = json.dumps({str(token_id): w for token_id, w in weights.items()})
+            rows = conn.execute(
+                """
+                SELECT st.chunk_id AS chunk_id, SUM(st.weight * qw.value) AS score
+                FROM sparse_terms st
+                JOIN json_each(?) AS qw ON CAST(qw.key AS INTEGER) = st.token_id
+                GROUP BY st.chunk_id
+                ORDER BY score DESC
+                LIMIT ?
+                """,
+                (query_json, k),
+            ).fetchall()
+            return [r["chunk_id"] for r in rows]
+        finally:
+            conn.close()
+
+    def bm25_search(self, query: str, k: int) -> list[int]:
+        """FTS5 BM25 channel. Each term is individually double-quoted before joining
+        with OR — an unescaped query string is FTS5 query syntax, not a literal, and
+        raises on stray quotes/operators (query-injection safety)."""
+        terms = query.split()
+        if not terms:
+            return []
+        match_expr = " OR ".join('"' + t.replace('"', '""') + '"' for t in terms)
+        conn = self.connect()
+        try:
+            rows = conn.execute(
+                "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? "
+                "ORDER BY bm25(chunks_fts) LIMIT ?",
+                (match_expr, k),
+            ).fetchall()
+            return [r["rowid"] for r in rows]
+        finally:
+            conn.close()
+
+    def chunk_details(self, chunk_ids: list[int]) -> list[sqlite3.Row]:
+        """Resolve chunk ids to citation targets: document + page + heading path."""
+        if not chunk_ids:
+            return []
+        conn = self.connect()
+        try:
+            placeholders = ",".join("?" for _ in chunk_ids)
+            return conn.execute(
+                f"""
+                SELECT c.id AS chunk_id, c.page, c.heading_path, c.text, m.filename
+                FROM chunks c JOIN materials m ON m.id = c.material_id
+                WHERE c.id IN ({placeholders})
+                """,
+                chunk_ids,
+            ).fetchall()
         finally:
             conn.close()
 

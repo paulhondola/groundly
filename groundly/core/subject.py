@@ -14,6 +14,8 @@ _CONFIG_TEMPLATE = """\
 # base_url = "http://localhost:1234/v1"
 # model    = "..."
 # api_key  = "..."
+# input_price_per_mtok  = 0.0   # optional, USD per 1M input tokens — enables cost tracing
+# output_price_per_mtok = 0.0   # optional, USD per 1M output tokens
 #
 # [providers.generation]  # exam/deck generation (thick path)
 # [providers.extraction]  # graphrag entity extraction
