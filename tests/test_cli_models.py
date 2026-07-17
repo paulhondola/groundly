@@ -26,9 +26,9 @@ def test_config_still_stubbed(args):
 
 
 def test_models_install_cache_hit_skips_download(monkeypatch):
-    monkeypatch.setattr(embeddings, "cached_snapshot", lambda: Path("/fake/cached"))
+    monkeypatch.setattr(embeddings, "cached_snapshot", lambda *a: Path("/fake/cached"))
 
-    def must_not_download(force=False):
+    def must_not_download(*a, force=False):
         raise AssertionError("must not download on cache hit")
 
     monkeypatch.setattr(embeddings, "ensure_downloaded", must_not_download)
@@ -37,40 +37,41 @@ def test_models_install_cache_hit_skips_download(monkeypatch):
     assert "already cached" in result.output
 
 
-def test_models_install_cache_miss_downloads(monkeypatch):
-    monkeypatch.setattr(embeddings, "cached_snapshot", lambda: None)
-    calls = {}
+def test_models_install_cache_miss_downloads_both_models(monkeypatch):
+    monkeypatch.setattr(embeddings, "cached_snapshot", lambda *a: None)
+    calls = []
 
-    def fake_ensure(force=False):
-        calls["force"] = force
+    def fake_ensure(*a, force=False):
+        calls.append((a, force))
         return Path("/fake/downloaded")
 
     monkeypatch.setattr(embeddings, "ensure_downloaded", fake_ensure)
     result = runner.invoke(app, ["models", "install"])
     assert result.exit_code == 0, result.output
-    assert calls["force"] is False
+    assert len(calls) == 2  # embedding + reranker
+    assert all(force is False for _, force in calls)
     assert "ready" in result.output
 
 
 def test_models_install_force_downloads_even_if_cached(monkeypatch):
-    monkeypatch.setattr(embeddings, "cached_snapshot", lambda: Path("/fake/cached"))
-    calls = {"n": 0}
+    monkeypatch.setattr(embeddings, "cached_snapshot", lambda *a: Path("/fake/cached"))
+    calls = []
 
-    def fake_ensure(force=False):
-        calls["n"] += 1
-        calls["force"] = force
+    def fake_ensure(*a, force=False):
+        calls.append((a, force))
         return Path("/fake/cached")
 
     monkeypatch.setattr(embeddings, "ensure_downloaded", fake_ensure)
     result = runner.invoke(app, ["models", "install", "--force"])
     assert result.exit_code == 0, result.output
-    assert calls == {"n": 1, "force": True}
+    assert len(calls) == 2
+    assert all(force is True for _, force in calls)
 
 
 def test_models_install_download_failure_names_cause_not_traceback(monkeypatch):
-    monkeypatch.setattr(embeddings, "cached_snapshot", lambda: None)
+    monkeypatch.setattr(embeddings, "cached_snapshot", lambda *a: None)
 
-    def fake_ensure(force=False):
+    def fake_ensure(*a, force=False):
         raise embeddings.ModelDownloadError("failed to download BAAI/bge-m3: connection reset")
 
     monkeypatch.setattr(embeddings, "ensure_downloaded", fake_ensure)
