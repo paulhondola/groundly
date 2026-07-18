@@ -10,9 +10,6 @@ resolution-markers = [
     "python_full_version < '3.12' and sys_platform != 'darwin' and sys_platform != 'win32'",
 ]
 
-[manifest]
-constraints = [{ name = "transformers", specifier = ">=4.51,<5" }]
-
 [[package]]
 name = "accelerate"
 version = "1.14.0"
@@ -1562,6 +1559,7 @@ dependencies = [
     { name = "rich" },
     { name = "sentence-transformers" },
     { name = "sqlite-vec" },
+    { name = "transformers" },
     { name = "typer" },
     { name = "uvicorn" },
 ]
@@ -1596,6 +1594,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
     { name = "sentence-transformers", specifier = "==5.6.0" },
     { name = "sqlite-vec", specifier = ">=0.1" },
+    { name = "transformers", specifier = ">=4.51,<5" },
     { name = "typer", specifier = ">=0.12" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
