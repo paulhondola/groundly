@@ -25,14 +25,17 @@ class ModelDownloadError(Exception):
     to a named cause, never a raw traceback."""
 
 
-def cached_snapshot() -> Path | None:
-    """Return the local snapshot dir if bge-m3's weights are already cached, else None."""
+def cached_snapshot(model: str = EMBEDDING_MODEL, revision: str = HF_REVISION) -> Path | None:
+    """Return the local snapshot dir if `model`'s weights are already cached, else None.
+
+    Defaults to bge-m3; rerank.py passes the reranker's own (model, revision) pin to
+    reuse this same cache-check logic."""
     from huggingface_hub import snapshot_download
 
     try:
         # a snapshot can exist with only tokenizer files (the extraction
         # worker caches those) — "cached" means the weights are present
-        local = snapshot_download(EMBEDDING_MODEL, revision=HF_REVISION, local_files_only=True)
+        local = snapshot_download(model, revision=revision, local_files_only=True)
     except Exception:
         return None
     if not any(
@@ -42,8 +45,10 @@ def cached_snapshot() -> Path | None:
     return Path(local)
 
 
-def ensure_downloaded(force: bool = False) -> Path:
-    """Ensure bge-m3's weights are present in the local HF cache; return the snapshot dir.
+def ensure_downloaded(
+    model: str = EMBEDDING_MODEL, revision: str = HF_REVISION, force: bool = False
+) -> Path:
+    """Ensure `model`'s weights are present in the local HF cache; return the snapshot dir.
 
     force=True skips the cache-hit fast path and always re-fetches — HF's own cache
     dedupes unchanged files, so this re-verifies rather than wiping and refetching.
@@ -51,15 +56,15 @@ def ensure_downloaded(force: bool = False) -> Path:
     from huggingface_hub import snapshot_download
 
     if not force:
-        cached = cached_snapshot()
+        cached = cached_snapshot(model, revision)
         if cached is not None:
             return cached
 
-    print(f"downloading {EMBEDDING_MODEL} (one-time, ~2.3 GB) …", file=sys.stderr)
+    print(f"downloading {model} (one-time) …", file=sys.stderr)
     try:
-        local = snapshot_download(EMBEDDING_MODEL, revision=HF_REVISION)
+        local = snapshot_download(model, revision=revision)
     except Exception as exc:
-        raise ModelDownloadError(f"failed to download {EMBEDDING_MODEL}: {exc}") from exc
+        raise ModelDownloadError(f"failed to download {model}: {exc}") from exc
     return Path(local)
 
 
