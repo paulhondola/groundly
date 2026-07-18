@@ -40,6 +40,19 @@ def _completion_json(text="A deadlock is [chunk 1].", prompt_tokens=10, completi
     }
 
 
+def test_complete_allows_slow_local_first_token(home):
+    """A local runtime JIT-loads the model on first request — minutes, not httpx's
+    5 s default. The request must carry a generous read timeout."""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["timeout"] = request.extensions["timeout"]
+        return httpx.Response(200, json=_completion_json())
+
+    complete("chat", [{"role": "user", "content": "hi"}], transport=httpx.MockTransport(handler))
+    assert seen["timeout"]["read"] >= 120
+
+
 def test_complete_parses_text_and_tokens(home):
     transport = httpx.MockTransport(_handler(_completion_json()))
     result = complete("chat", [{"role": "user", "content": "hi"}], transport=transport)
