@@ -21,5 +21,5 @@
 
 ## Workflow
 
-- Paul commits himself — leave changes in the working tree.
+- Commit finished, reviewed work on a feature branch — **never on `main`** (merges to `main` go through Paul).
 - Review diffs with `spec-guardian` (invariants) and `security-reviewer` (threat model) before phase gates.

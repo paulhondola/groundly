@@ -12,4 +12,4 @@ Local-first course knowledge bases for AI agents — index course materials, ser
 
 ## Working rules
 
-Binding invariants auto-load from `.claude/rules/` (module boundaries, grounding guarantees, conventions). Docs are the source of truth — a decision change updates the docs in the same change set (use `/decision`). Implement use cases with `/implement-uc UC-XX`; review with the `spec-guardian` and `security-reviewer` agents. Developer commits himself — leave changes in the working tree for review.
+Binding invariants auto-load from `.claude/rules/` (module boundaries, grounding guarantees, conventions). Docs are the source of truth — a decision change updates the docs in the same change set (use `/decision`). Implement use cases with `/implement-uc UC-XX`; review with the `spec-guardian` and `security-reviewer` agents. Commit finished, reviewed work on a feature branch — never commit to `main`.
