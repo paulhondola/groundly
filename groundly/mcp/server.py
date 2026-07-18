@@ -64,10 +64,14 @@ def search(subject: str, query: str, k: int = 8) -> list[dict]:
     (hybrid dense + sparse + BM25, reranked). No LLM call, no provider needed — you
     compose the answer yourself from the returned chunks; grounding is not enforced
     here (use `ask` when you need an enforced, cited answer)."""
+    from groundly.llm.embeddings import ModelDownloadError
     from groundly.retrieval.vector import search as search_fn
 
     _subject_or_error(subject, ToolError)
-    nodes = search_fn(subject, query, k=k)
+    try:
+        nodes = search_fn(subject, query, k=k)
+    except ModelDownloadError as exc:
+        raise ToolError(str(exc)) from exc
     results = []
     for n in nodes:
         m = n.node.metadata
@@ -93,7 +97,9 @@ def ask(subject: str, query: str) -> dict:
     answer. Needs a configured chat provider — `search` does not."""
     from groundly.agents.ask import NoCitationsError
     from groundly.agents.ask import ask as ask_fn
+    from groundly.llm.chat import ChatUnreachableError
     from groundly.llm.config import ProviderNotConfiguredError
+    from groundly.llm.embeddings import ModelDownloadError
 
     _subject_or_error(subject, ToolError)
     try:
@@ -103,6 +109,8 @@ def ask(subject: str, query: str) -> dict:
             f"ask needs a configured chat provider; search works without one — {exc}"
         ) from exc
     except NoCitationsError as exc:
+        raise ToolError(str(exc)) from exc
+    except (ModelDownloadError, ChatUnreachableError) as exc:
         raise ToolError(str(exc)) from exc
 
     return {

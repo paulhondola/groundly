@@ -7,11 +7,18 @@ resolved at the pinned hf_revision via snapshot_download, which is the interchan
 compatibility contract: same pin ⇒ shared vectors transfer as-is.
 """
 
+import os
 import sys
 from pathlib import Path
 from typing import Protocol
 
 from groundly.core.manifest import EMBEDDING_MODEL, HF_REVISION
+
+# suppress transformers' advisory warnings (e.g. the fast-tokenizer pad() notice).
+# Must be the env var, not logging.setLevel("transformers"): transformers resets its
+# root logger level on first (lazy) import, clobbering any level set here at import
+# time; the env var is read per call, so ordering can't break it.
+os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
 
 SparseWeights = dict[int, float]
 
@@ -88,10 +95,13 @@ class BgeM3Embedder:
 
     def _load(self):
         if self._model is None:
-            from FlagEmbedding import BGEM3FlagModel
-
             local = ensure_downloaded()
-            self._model = BGEM3FlagModel(str(local), use_fp16=False)
+            try:
+                from FlagEmbedding import BGEM3FlagModel
+
+                self._model = BGEM3FlagModel(str(local), use_fp16=False)
+            except Exception as exc:
+                raise ModelDownloadError(f"failed to load {EMBEDDING_MODEL}: {exc}") from exc
         return self._model
 
     def encode(self, texts: list[str]) -> tuple[list[list[float]], list[SparseWeights]]:
