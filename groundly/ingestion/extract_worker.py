@@ -12,10 +12,17 @@ Output JSON: {"pages": N|null, "chunks": [{"text", "heading_path", "page", "toke
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
 from groundly.ingestion.formats import DOCLING_FORMATS, DOCLING_SUFFIXES
+
+# silence the XLMRobertaTokenizerFast "__call__ is faster" advisory that
+# HybridChunker's pad() calls trigger in this worker process. Must be the env var,
+# not logging.setLevel: transformers resets its root logger level on first import,
+# clobbering any level set before the (lazy) import; the env var is read per call.
+os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
 
 EXIT_NO_TEXT = 3
 EXIT_MODEL_UNAVAILABLE = 4

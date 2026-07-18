@@ -6,7 +6,9 @@ Date: 2026-07-18 · Branch: `mcp` · Approved by Paul
 
 P4 v1 per spec §8: FastMCP server exposing `list_subjects`, `search`, `ask`,
 `get_page` over **stdio** (`groundly mcp`, host-spawned), plus citation
-resources `groundly://<subject>/<file>#page=N`. HTTP/`serve` deferred.
+resources `groundly://<subject>/<file>#page=N`. (`groundly serve` — the same
+tool surface over Streamable HTTP on 127.0.0.1 — shipped later on branch
+`http-streaming`; see docs/guides/mcp-hosts.md.)
 Gate: demo inside Claude Code — search, ask, open a cited page.
 
 ## Architecture
