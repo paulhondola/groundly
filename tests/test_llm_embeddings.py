@@ -11,9 +11,7 @@ from groundly.llm.embeddings import EMBEDDING_MODEL, BgeM3Embedder, ModelDownloa
 def test_bge_m3_load_wraps_construction_failure_in_model_download_error(monkeypatch):
     from pathlib import Path
 
-    monkeypatch.setattr(
-        "groundly.llm.embeddings.ensure_downloaded", lambda *a, **k: Path("/fake")
-    )
+    monkeypatch.setattr("groundly.llm.embeddings.ensure_downloaded", lambda *a, **k: Path("/fake"))
 
     real_import = builtins.__import__
 

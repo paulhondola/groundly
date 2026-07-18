@@ -37,9 +37,7 @@ def test_bge_reranker_load_wraps_construction_failure_in_model_download_error(mo
 
     from groundly.llm.embeddings import ModelDownloadError
 
-    monkeypatch.setattr(
-        "groundly.llm.embeddings.ensure_downloaded", lambda *a, **k: Path("/fake")
-    )
+    monkeypatch.setattr("groundly.llm.embeddings.ensure_downloaded", lambda *a, **k: Path("/fake"))
 
     real_import = builtins.__import__
 
