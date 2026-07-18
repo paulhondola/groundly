@@ -35,4 +35,6 @@ uv tool install groundly
 
 Local-first honestly stated: first run downloads the embedding models (~2.7GB total). Indexing and search need **no API key**; grounded answer generation and graph builds use your own OpenAI-compatible provider (cloud key, LM Studio, or Ollama).
 
+**Setup guides:** [connect Claude Code / Codex to the MCP server](docs/guides/mcp-hosts.md) · [use LM Studio as a zero-key local provider](docs/guides/lm-studio.md)
+
 **Thesis core:** four-arm RAG vs GraphRAG evaluation on real RO/EN course corpora, plus a measured comparison of enforced vs agent-mediated grounding.

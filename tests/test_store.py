@@ -299,6 +299,21 @@ def test_chunk_details_empty_list_returns_empty(db, tmp_path, ranked):
     assert store_obj.chunk_details([]) == []
 
 
+def test_page_chunks_joins_material_in_chunk_id_order(db, tmp_path, ranked):
+    store_obj = SQLiteSubjectStore(tmp_path / "store.db")
+    rows = store_obj.page_chunks("lec.pdf", 1)
+    assert [r["chunk_id"] for r in rows] == [ranked["near"]]
+    assert rows[0]["filename"] == "lec.pdf"
+    assert rows[0]["heading_path"] == "Intro"
+    assert "mutual exclusion" in rows[0]["text"]
+
+
+def test_page_chunks_no_match_returns_empty(db, tmp_path, ranked):
+    store_obj = SQLiteSubjectStore(tmp_path / "store.db")
+    assert store_obj.page_chunks("nope.pdf", 1) == []
+    assert store_obj.page_chunks("lec.pdf", 99) == []
+
+
 def test_removed_material_vanishes_from_all_search_channels(db, tmp_path, ranked):
     store_obj = SQLiteSubjectStore(tmp_path / "store.db")
     store_obj.remove_material(ranked["material_id"])
