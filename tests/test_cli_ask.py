@@ -92,6 +92,45 @@ def test_ask_no_rerank_plumbs_through(retrievable_subject, monkeypatch):
     assert captured["rerank"] is False
 
 
+def test_ask_model_download_error_fails_cleanly(retrievable_subject, monkeypatch):
+    _configure_chat(retrievable_subject)
+    from groundly.llm.embeddings import ModelDownloadError
+
+    def fake_ask(*a, **k):
+        raise ModelDownloadError("failed to load bge-m3: boom")
+
+    monkeypatch.setattr("groundly.agents.ask.ask", fake_ask)
+    result = runner.invoke(app, ["ask", retrievable_subject, "q", "--no-rerank"])
+    assert result.exit_code == 1
+    assert "failed to load bge-m3" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_ask_chat_unreachable_error_fails_cleanly(retrievable_subject, monkeypatch):
+    _configure_chat(retrievable_subject)
+    from groundly.llm.chat import ChatUnreachableError
+
+    def fake_ask(*a, **k):
+        raise ChatUnreachableError("[providers.chat] at http://x is unreachable: boom")
+
+    monkeypatch.setattr("groundly.agents.ask.ask", fake_ask)
+    result = runner.invoke(app, ["ask", retrievable_subject, "q", "--no-rerank"])
+    assert result.exit_code == 1
+    assert "unreachable" in result.output
+
+
+def test_search_model_download_error_fails_cleanly(retrievable_subject, monkeypatch):
+    from groundly.llm.embeddings import ModelDownloadError
+
+    def fake_search(*a, **k):
+        raise ModelDownloadError("failed to load bge-m3: boom")
+
+    monkeypatch.setattr("groundly.retrieval.vector.search", fake_search)
+    result = runner.invoke(app, ["search", retrievable_subject, "deadlock"])
+    assert result.exit_code == 1
+    assert "failed to load bge-m3" in result.output
+
+
 def test_ask_uninitialized_subject_fails_with_fix(tmp_path, monkeypatch):
     monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
     (tmp_path / "home").mkdir()

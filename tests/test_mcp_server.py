@@ -180,6 +180,44 @@ async def test_ask_refusal_returns_no_citations(retrievable_subject, monkeypatch
     assert result.data["citations"] == []
 
 
+async def test_ask_model_download_error_raises_tool_error(retrievable_subject, monkeypatch):
+    _configure_chat(retrievable_subject)
+    from groundly.llm.embeddings import ModelDownloadError
+
+    def fake_ask(*a, **k):
+        raise ModelDownloadError("failed to load bge-m3: boom")
+
+    monkeypatch.setattr("groundly.agents.ask.ask", fake_ask)
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="failed to load bge-m3"):
+            await client.call_tool("ask", {"subject": "TEST", "query": "q"})
+
+
+async def test_ask_chat_unreachable_error_raises_tool_error(retrievable_subject, monkeypatch):
+    _configure_chat(retrievable_subject)
+    from groundly.llm.chat import ChatUnreachableError
+
+    def fake_ask(*a, **k):
+        raise ChatUnreachableError("[providers.chat] at http://x is unreachable: boom")
+
+    monkeypatch.setattr("groundly.agents.ask.ask", fake_ask)
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="unreachable"):
+            await client.call_tool("ask", {"subject": "TEST", "query": "q"})
+
+
+async def test_search_model_download_error_raises_tool_error(retrievable_subject, monkeypatch):
+    from groundly.llm.embeddings import ModelDownloadError
+
+    def fake_search(*a, **k):
+        raise ModelDownloadError("failed to load bge-m3: boom")
+
+    monkeypatch.setattr("groundly.retrieval.vector.search", fake_search)
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="failed to load bge-m3"):
+            await client.call_tool("search", {"subject": "TEST", "query": "q"})
+
+
 async def test_mcp_ask_matches_cli_ask_for_the_same_query(
     retrievable_subject, monkeypatch, stub_chat
 ):
@@ -269,3 +307,80 @@ def test_citation_uri_omits_fragment_for_pageless_chunks():
 
     assert _citation_uri("TEST", "notes.txt", None) == "groundly://TEST/notes.txt"
     assert _citation_uri("TEST", "lec.pdf", 2) == "groundly://TEST/lec.pdf#page=2"
+
+
+# --- http transport (`groundly serve`) ----------------------------------------------
+
+
+async def test_http_transport_serves_the_same_tools(retrievable_subject):
+    # smoke test for `groundly serve`: same FastMCP instance, Streamable HTTP transport
+    import asyncio
+    import threading
+
+    import uvicorn
+
+    app = mcp.http_app(host_origin_protection="auto")  # mirror cli/serve.py's kwargs
+    config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning")
+    server = uvicorn.Server(config)
+    sock = config.bind_socket()  # ephemeral port, bound before the thread starts
+    port = sock.getsockname()[1]
+    thread = threading.Thread(target=server.run, kwargs={"sockets": [sock]}, daemon=True)
+    thread.start()
+    try:
+        for _ in range(500):
+            if server.started:
+                break
+            await asyncio.sleep(0.01)
+        assert server.started, "uvicorn never came up"
+
+        async with Client(f"http://127.0.0.1:{port}/mcp") as client:
+            result = await client.call_tool("list_subjects", {})
+        assert result.data == [
+            {
+                "subject": "TEST",
+                "materials": 1,
+                "pages": 3,
+                "chunks": 3,
+                "graph_built": False,
+            }
+        ]
+
+        # DNS-rebinding guard: a hostile Host header must be rejected (421), not served
+        import httpx
+
+        rebound = await httpx.AsyncClient().post(
+            f"http://127.0.0.1:{port}/mcp",
+            json={"jsonrpc": "2.0", "method": "ping", "id": 1},
+            headers={
+                "Host": "evil.example.com",
+                "Accept": "application/json, text/event-stream",
+            },
+        )
+        assert rebound.status_code == 421
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+def test_serve_cli_wires_http_transport_with_rebinding_protection(monkeypatch):
+    """`groundly serve` must pass the exact production kwargs to run() — the smoke
+    test above exercises the ASGI app; this covers cli/serve.py's own run() line
+    (transport string, loopback host, host_origin_protection)."""
+    from typer.testing import CliRunner
+
+    import groundly.cli.serve  # noqa: F401  — registers the verb on the app
+    from fastmcp import FastMCP
+    from groundly.cli.app import app
+
+    calls: dict = {}
+    # patch the class, not the module-level `mcp` instance: the heavy-imports test
+    # reloads groundly.mcp.server, so serve()'s lazy import may see a fresh instance
+    monkeypatch.setattr(FastMCP, "run", lambda self, **kw: calls.update(kw))
+    result = CliRunner().invoke(app, ["serve", "--port", "5150"])
+    assert result.exit_code == 0
+    assert calls == {
+        "transport": "http",
+        "host": "127.0.0.1",
+        "port": 5150,
+        "host_origin_protection": "auto",
+    }

@@ -23,13 +23,20 @@ def ask(
     """Ask a grounded question: a cited answer, or the refusal — never model knowledge."""
     from groundly.agents.ask import NoCitationsError
     from groundly.agents.ask import ask as ask_fn
+    from groundly.llm.chat import ChatUnreachableError
     from groundly.llm.config import ProviderNotConfiguredError
+    from groundly.llm.embeddings import ModelDownloadError
 
     subj = _subject_checked(subject)
     _store_checked(subj)
     try:
         result = ask_fn(subject, query, rerank=not no_rerank)
-    except (ProviderNotConfiguredError, NoCitationsError) as exc:
+    except (
+        ProviderNotConfiguredError,
+        NoCitationsError,
+        ModelDownloadError,
+        ChatUnreachableError,
+    ) as exc:
         _fail(str(exc))
 
     console.print(escape(result.answer))
@@ -55,11 +62,15 @@ def search(
 ) -> None:
     """Raw retrieval: top-k chunks with text + citations. No LLM call, works with no
     provider configured — the host composes its own answer (best-effort grounding)."""
+    from groundly.llm.embeddings import ModelDownloadError
     from groundly.retrieval.vector import search as search_fn
 
     subj = _subject_checked(subject)
     _store_checked(subj)
-    nodes = search_fn(subject, query, k=k, rerank=not no_rerank)
+    try:
+        nodes = search_fn(subject, query, k=k, rerank=not no_rerank)
+    except ModelDownloadError as exc:
+        _fail(str(exc))
     if not nodes:
         console.print("[dim]no results[/dim]")
         return

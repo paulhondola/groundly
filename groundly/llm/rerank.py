@@ -19,12 +19,15 @@ class BgeReranker:
 
     def _load(self):
         if self._model is None:
-            from FlagEmbedding import FlagReranker
-
-            from groundly.llm.embeddings import ensure_downloaded
+            from groundly.llm.embeddings import ModelDownloadError, ensure_downloaded
 
             local = ensure_downloaded(RERANKER_MODEL, RERANKER_HF_REVISION)
-            self._model = FlagReranker(str(local), use_fp16=False)
+            try:
+                from FlagEmbedding import FlagReranker
+
+                self._model = FlagReranker(str(local), use_fp16=False)
+            except Exception as exc:
+                raise ModelDownloadError(f"failed to load {RERANKER_MODEL}: {exc}") from exc
         return self._model
 
     def compute_score(self, pairs: list[tuple[str, str]]) -> list[float]:

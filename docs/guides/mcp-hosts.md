@@ -46,6 +46,38 @@ args = ["mcp"]
 (Newer Codex CLI versions also accept `codex mcp add groundly -- groundly
 mcp`.)
 
+## HTTP transport (`groundly serve`)
+
+For hosts that connect to a URL instead of spawning a stdio subprocess, run
+the same server over Streamable HTTP:
+
+```sh
+groundly serve            # binds http://127.0.0.1:8000/mcp
+groundly serve --port 9000
+```
+
+It binds 127.0.0.1 only. Point the host at the URL:
+
+```sh
+claude mcp add --transport http groundly http://127.0.0.1:8000/mcp
+```
+
+or in `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "groundly": {
+      "type": "http",
+      "url": "http://127.0.0.1:8000/mcp"
+    }
+  }
+}
+```
+
+Unlike stdio, you manage the process yourself — the host does not start or
+stop it.
+
 ## What the host gets
 
 | Tool | What it does | Needs a provider? |
