@@ -82,3 +82,68 @@ def stub_extractor(stub_extraction):
         return StubExtractor(ext)
 
     return _stub_extractor
+
+
+class StubChat:
+    """Scripted `ChatFn`: replies pop in call order (last reply repeats once exhausted),
+    every call is recorded as (call_class, messages) for assertion. StubEmbedder returns
+    identical vectors for every text, which can't exercise ranking — this stub can't
+    either, but reruns of the *same* stub_chat instance across router+generation calls
+    let a test script both classification and the final answer in one object."""
+
+    def __init__(
+        self,
+        replies="not covered by the course materials",
+        *,
+        model="stub-model",
+        tokens=10,
+        cost_usd=None,
+    ):
+        self.replies = [replies] if isinstance(replies, str) else list(replies)
+        self.calls: list[tuple[str, list[dict]]] = []
+        self.model = model
+        self.tokens = tokens
+        self.cost_usd = cost_usd
+
+    def __call__(self, call_class, messages, *, transport=None):
+        from groundly.llm.chat import ChatResult
+
+        self.calls.append((call_class, messages))
+        i = min(len(self.calls) - 1, len(self.replies) - 1)
+        return ChatResult(
+            text=self.replies[i], tokens=self.tokens, cost_usd=self.cost_usd, model=self.model
+        )
+
+
+@pytest.fixture
+def stub_chat():
+    return StubChat
+
+
+@pytest.fixture
+def retrievable_subject(monkeypatch, tmp_path):
+    """An initialized subject with hand-built orthogonal dense vectors and distinct
+    sparse weights across 3 chunks, so retrieval ranking is actually exercised
+    (StubEmbedder above returns identical vectors for every text — useless for this)."""
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    init_subject("TEST")
+
+    from groundly.core.store import SQLiteSubjectStore
+    from groundly.ingestion.extract import ChunkData
+
+    chunks = [
+        ChunkData("deadlock needs mutual exclusion to occur", "Intro > Deadlocks", 1, 10),
+        ChunkData("semaphores and mutexes for synchronization", "Intro > Sync", 2, 10),
+        ChunkData("deadlock deadlock deadlock circular wait condition", "Intro > Deadlocks", 3, 10),
+    ]
+    dense = [
+        [1.0, 0.0] + [0.0] * (EMBEDDING_DIM - 2),
+        [0.0, 1.0] + [0.0] * (EMBEDDING_DIM - 2),
+        [0.9, 0.1] + [0.0] * (EMBEDDING_DIM - 2),
+    ]
+    sparse = [{1: 0.9, 2: 0.1}, {3: 0.9}, {1: 0.4}]
+    SQLiteSubjectStore(subject_dir("TEST") / "store.db").add_indexed(
+        "lec.pdf", "a" * 64, 3, chunks, dense, sparse
+    )
+    return "TEST"

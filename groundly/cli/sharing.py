@@ -115,12 +115,12 @@ def import_(
         manifest.save(tmp_dir / "manifest.json")
         store.create_progress(tmp_dir / "progress.db")
         (tmp_dir / "materials").mkdir(exist_ok=True)
-    except (RuntimeError, ValueError) as exc:  # BundleError is a RuntimeError
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        _fail(str(exc))
     except typer.Abort:
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise
+    except (RuntimeError, ValueError) as exc:  # BundleError is a RuntimeError
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        _fail(str(exc))
 
     try:
         if target.exists():

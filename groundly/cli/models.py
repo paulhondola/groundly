@@ -30,21 +30,27 @@ def install(
         bool, typer.Option("--force", help="Re-download and re-verify even if already cached.")
     ] = False,
 ) -> None:
-    """Download the bge-m3 embedding model into the local Hugging Face cache."""
+    """Download the bge-m3 embedding model and the bge-reranker-v2-m3 cross-encoder
+    into the local Hugging Face cache."""
     from groundly.core.manifest import EMBEDDING_MODEL
     from groundly.llm import embeddings
+    from groundly.llm.rerank import RERANKER_HF_REVISION, RERANKER_MODEL
 
-    if not force and embeddings.cached_snapshot() is not None:
+    embed_cached = embeddings.cached_snapshot() is not None
+    rerank_cached = embeddings.cached_snapshot(RERANKER_MODEL, RERANKER_HF_REVISION) is not None
+    if not force and embed_cached and rerank_cached:
         console.print(
-            f"{EMBEDDING_MODEL} already cached — nothing to do (use --force to re-verify)"
+            f"{EMBEDDING_MODEL} and {RERANKER_MODEL} already cached — "
+            "nothing to do (use --force to re-verify)"
         )
         return
 
     try:
         embeddings.ensure_downloaded(force=force)
+        embeddings.ensure_downloaded(RERANKER_MODEL, RERANKER_HF_REVISION, force=force)
     except embeddings.ModelDownloadError as exc:
         _fail(str(exc))
-    console.print(f"{EMBEDDING_MODEL} ready")
+    console.print(f"{EMBEDDING_MODEL} and {RERANKER_MODEL} ready")
 
 
 @models_app.command()
