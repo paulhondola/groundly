@@ -21,6 +21,7 @@ dependencies = [
 	"sqlite-vec>=0.1",
 	"sentence-transformers==5.6.0",
 	"FlagEmbedding==1.3.5",         # bge-m3 dense + learned sparse, one forward pass
+	"transformers>=4.51,<5",        # FlagEmbedding 1.3.5 predates transformers 5.x (removed is_torch_fx_available)
 	"docling==2.113.0",             # includes bundled RapidOCR — OCR enabled
 	"rapidocr==3.9.1",              # load-bearing: docling's OCR engine, local/offline
 	"llama-index==0.14.23",
@@ -28,10 +29,6 @@ dependencies = [
 	"genanki>=0.13",                # verified decks → .apkg
 	"httpx>=0.27",
 ]
-
-[tool.uv]
-# FlagEmbedding 1.3.5 predates transformers 5.x (removed is_torch_fx_available)
-constraint-dependencies = ["transformers>=4.51,<5"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5"]
