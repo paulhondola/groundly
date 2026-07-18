@@ -337,6 +337,23 @@ class SQLiteSubjectStore:
         finally:
             conn.close()
 
+    def page_chunks(self, filename: str, page: int) -> list[sqlite3.Row]:
+        """Resolve one (filename, page) to its chunks, chunk-id order — the citation
+        resource / `get_page` MCP tool's read path."""
+        conn = self.connect()
+        try:
+            return conn.execute(
+                """
+                SELECT c.id AS chunk_id, c.page, c.heading_path, c.text, m.filename
+                FROM chunks c JOIN materials m ON m.id = c.material_id
+                WHERE m.filename = ? AND c.page = ?
+                ORDER BY c.id
+                """,
+                (filename, page),
+            ).fetchall()
+        finally:
+            conn.close()
+
     def add_indexed(
         self,
         filename: str,
