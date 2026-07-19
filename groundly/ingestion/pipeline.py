@@ -6,6 +6,7 @@ import hashlib
 import os
 import shutil
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 
 
@@ -105,12 +106,14 @@ class IngestionPipeline:
         extractor: SubprocessExtractor | None = None,
         embedder: Embedder | None = None,
         on_event: OnEvent | None = None,
+        on_discovered: Callable[[int], None] | None = None,
     ) -> None:
         self.subject = subject
         self.store = store or SQLiteSubjectStore(subject.store_db_path)
         self.extractor = extractor or SubprocessExtractor()
         self.embedder = embedder or BgeM3Embedder()
         self.on_event = on_event or (lambda path, stage: None)
+        self.on_discovered = on_discovered or (lambda total: None)
 
     def run(self, paths: list[Path], ocr_lang: str | None = None) -> list[FileResult]:
         if not self.subject.exists():
@@ -120,7 +123,9 @@ class IngestionPipeline:
 
         results: list[FileResult] = []
         known = self.store.hash_status()
-        for path in _iter_files(paths):
+        files = _iter_files(paths)
+        self.on_discovered(len(files))
+        for path in files:
             self.on_event(path, "queued")
             if path.is_symlink():  # a hostile symlink would index (and later export)
                 results.append(
@@ -217,8 +222,11 @@ def index_paths(
     paths: list[Path],
     embedder: Embedder | None = None,
     on_event: OnEvent | None = None,
+    on_discovered: Callable[[int], None] | None = None,
     ocr_lang: str | None = None,
 ) -> list[FileResult]:
     subj = Subject(subject)
-    pipeline = IngestionPipeline(subject=subj, embedder=embedder, on_event=on_event)
+    pipeline = IngestionPipeline(
+        subject=subj, embedder=embedder, on_event=on_event, on_discovered=on_discovered
+    )
     return pipeline.run(paths, ocr_lang=ocr_lang)

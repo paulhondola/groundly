@@ -189,6 +189,33 @@ def test_explicit_path_wins_over_ignore_pattern(subject, course, stub_embedder, 
     assert results[0].status == Status.INDEXED
 
 
+def test_on_discovered_and_terminal_events_match_file_count(
+    subject, course, stub_embedder, stub_extractor
+):
+    discovered: list[int] = []
+    terminal_events: list[str] = []
+
+    def on_discovered(total):
+        discovered.append(total)
+
+    def on_event(path, stage):
+        if stage in set(Status):
+            terminal_events.append(stage)
+
+    subj = Subject(subject)
+    pipe = IngestionPipeline(
+        subject=subj,
+        extractor=stub_extractor(),
+        embedder=stub_embedder(),
+        on_event=on_event,
+        on_discovered=on_discovered,
+    )
+    pipe.run([course])
+
+    assert discovered == [2]  # notes.txt, readme.md
+    assert len(terminal_events) == discovered[0]
+
+
 def test_uninitialized_subject_names_the_fix(
     monkeypatch, tmp_path, course, stub_embedder, stub_extractor
 ):

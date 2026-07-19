@@ -41,7 +41,7 @@ def install(
     if not force and embed_cached and rerank_cached:
         console.print(
             f"{EMBEDDING_MODEL} and {RERANKER_MODEL} already cached — "
-            "nothing to do (use --force to re-verify)"
+            "Nothing to do (use --force to re-verify)"
         )
         return
 

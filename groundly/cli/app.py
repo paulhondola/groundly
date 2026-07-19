@@ -24,7 +24,7 @@ console = Console()
 
 
 def _fail(message: str) -> None:
-    console.print(f"[red]error:[/red] {escape(message)}")
+    console.print(f"[red]Error:[/red] {escape(message)}")
     raise typer.Exit(code=1)
 
 
@@ -36,7 +36,7 @@ def _subject_checked(subject: str):
     except ValueError as exc:
         _fail(str(exc))
     if not subj.exists():
-        _fail(f"subject '{subject}' is not initialized — run: groundly init {subject}")
+        _fail(f"Subject '{subject}' is not initialized — run: groundly init {subject}")
     return subj
 
 
