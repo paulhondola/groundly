@@ -14,9 +14,10 @@ Output JSON: {"pages": N|null, "chunks": [{"text", "heading_path", "page", "toke
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
-from groundly.ingestion.formats import DOCLING_FORMATS, DOCLING_SUFFIXES
+from groundly.ingestion.formats import DOCLING_FORMATS, DOCLING_SUFFIXES, IMAGE_SUFFIXES
 
 # silence the XLMRobertaTokenizerFast "__call__ is faster" advisory that
 # HybridChunker's pad() calls trigger in this worker process. Must be the env var,
@@ -47,6 +48,25 @@ def _model_step(fn):
         sys.exit(EXIT_MODEL_UNAVAILABLE)
 
 
+def _first_frame(path: Path) -> Path:
+    """Standalone images are single-page by contract (page-1 attribution). A multi-frame
+    raster (multi-page TIFF, animated WEBP) would otherwise expand to N docling pages that
+    HybridChunker merges into one chunk carrying only the *first* page number — a citation
+    resolving to the wrong page. Index frame 0 only; a multi-page scan belongs in a PDF.
+    Single-frame images (the overwhelming case) pass straight through."""
+    from PIL import Image, ImageSequence
+
+    img = Image.open(path)
+    if getattr(img, "n_frames", 1) <= 1:
+        return path
+    fd, tmp = tempfile.mkstemp(
+        suffix=path.suffix
+    )  # ponytail: leaks on the rare multi-frame image; OS-cleaned
+    os.close(fd)
+    ImageSequence.Iterator(img)[0].convert("RGB").save(tmp)
+    return Path(tmp)
+
+
 def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
     from docling.chunking import HybridChunker
     from docling.datamodel.base_models import InputFormat
@@ -57,6 +77,8 @@ def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
     from groundly.core.manifest import CHUNK_MAX_TOKENS
 
     input_format = InputFormat(DOCLING_FORMATS[path.suffix.lower()])
+    if path.suffix.lower() in IMAGE_SUFFIXES:
+        path = _first_frame(path)
     # explicit, not inherited: do_ocr=True runs OCR on scanned/bitmap PDF content
     # The engine is pinned to RapidOCR/onnxruntime — docling's
     # "auto" would silently switch engines (ocrmac, easyocr with runtime model
@@ -79,8 +101,9 @@ def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
     )
     pipeline_options = PdfPipelineOptions(do_ocr=True, ocr_options=ocr_options)
     # IMAGE gets the same options so standalone images OCR with the pinned RapidOCR
-    # engine — without this, docling's IMAGE default falls back to EasyOCR (runtime
-    # model downloads), exactly what the pinning above avoids.
+    # engine — without this, docling's auto OCR selection picks a *different* engine
+    # (ocrmac on macOS, easyocr elsewhere with runtime downloads) than the decision-14
+    # interchange pin, exactly the silent switch the pinning above exists to prevent.
     converter = DocumentConverter(
         format_options={
             InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),

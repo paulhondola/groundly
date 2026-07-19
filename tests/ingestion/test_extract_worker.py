@@ -83,7 +83,8 @@ def test_image_suffixes_route_to_docling():
 
 def test_image_format_uses_pinned_rapidocr(monkeypatch):
     """The IMAGE format option must carry the same do_ocr RapidOcrOptions as PDF —
-    without it docling's IMAGE default falls back to EasyOCR (runtime downloads)."""
+    without it docling's auto OCR selection picks a different engine (ocrmac/easyocr)
+    than the decision-14 pin."""
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import RapidOcrOptions
 
@@ -196,6 +197,44 @@ def test_standalone_image_indexes_via_ocr(tmp_path):
     assert result["chunks"], "OCR found no text"
     assert any("mutual exclusion" in c["text"] for c in result["chunks"])
     assert result["chunks"][0]["page"] == 1
+
+
+@pytest.mark.slow
+def test_multi_frame_image_indexes_first_frame_only(tmp_path):
+    """A multi-frame raster (multi-page TIFF) must index frame 0 only — one page, page-1
+    attribution — so no chunk carries later-frame text under a page-1 citation (the
+    cross-page HybridChunker merge that would otherwise misattribute the page)."""
+    from groundly.ingestion import extract_worker
+
+    tif = tmp_path / "scan.tiff"
+    frame0 = _rendered(
+        [
+            "Deadlock Conditions",
+            "A deadlock requires mutual exclusion",
+            "in each of the processes here",
+        ]
+    )
+    frame1 = _rendered(["Second Frame", "circular wait lives on the second frame here"])
+    frame0.save(tif, save_all=True, append_images=[frame1])
+
+    result = extract_worker._extract_docling(tif)
+
+    assert result["pages"] == 1
+    text = " ".join(c["text"] for c in result["chunks"])
+    assert "mutual exclusion" in text
+    assert "second frame" not in text
+    assert all(c["page"] == 1 for c in result["chunks"])
+
+
+def _rendered(lines):
+    from PIL import Image, ImageDraw, ImageFont
+
+    img = Image.new("RGB", (1700, 2200), "white")
+    draw = ImageDraw.Draw(img)
+    font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 80)
+    for i, line in enumerate(lines):
+        draw.text((100, 150 + i * 150), line, fill="black", font=font)
+    return img
 
 
 @pytest.mark.slow
