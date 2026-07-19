@@ -1,7 +1,9 @@
 """The index pipeline (UC-01): hash-skip idempotent, per-file transactions, the run
 continues past failures. Ingestion writes the stores; it never serves queries."""
 
+import fnmatch
 import hashlib
+import os
 import shutil
 import sqlite3
 from pathlib import Path
@@ -15,12 +17,62 @@ from groundly.ingestion.formats import SUPPORTED_SUFFIXES
 from groundly.ingestion.results import FileResult, OnEvent, Status
 from groundly.llm.embeddings import BgeM3Embedder, Embedder
 
+DEFAULT_IGNORED_DIRS = {
+    ".git",
+    ".venv",
+    "venv",
+    "node_modules",
+    "dist",
+    "build",
+    "__pycache__",
+    "target",
+    ".idea",
+    ".vscode",
+}
+
+
+def _load_ignore_patterns(root: Path) -> list[str]:
+    ignore_file = root / ".groundlyignore"
+    if not ignore_file.is_file():
+        return []
+    patterns = []
+    for line in ignore_file.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            patterns.append(line)
+    return patterns
+
+
+def _ignored(rel_posix: str, name: str, patterns: list[str]) -> bool:
+    return any(
+        fnmatch.fnmatch(rel_posix, pat) if "/" in pat else fnmatch.fnmatch(name, pat)
+        for pat in patterns
+    )
+
 
 def _iter_files(paths: list[Path]) -> list[Path]:
     files: list[Path] = []
     for p in paths:
         if p.is_dir():
-            files.extend(sorted(f for f in p.rglob("*") if f.is_file()))
+            patterns = _load_ignore_patterns(p)
+            for dirpath, dirnames, filenames in os.walk(p):
+                dirnames.sort()
+                filenames.sort()
+                cur = Path(dirpath)
+                dirnames[:] = [
+                    d
+                    for d in dirnames
+                    if d not in DEFAULT_IGNORED_DIRS
+                    and not d.startswith(".")
+                    and not _ignored((cur / d).relative_to(p).as_posix(), d, patterns)
+                ]
+                for name in filenames:
+                    if name.startswith("."):
+                        continue
+                    rel = (cur / name).relative_to(p).as_posix()
+                    if _ignored(rel, name, patterns):
+                        continue
+                    files.append(cur / name)
         else:
             files.append(p)
     return files
