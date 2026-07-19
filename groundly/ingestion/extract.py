@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from groundly.ingestion import extract_worker
+from groundly.ingestion.formats import IMAGE_SUFFIXES
 
 EXTRACT_TIMEOUT_SECONDS = 300
 STDERR_TAIL_BYTES = 4096
@@ -85,7 +86,7 @@ class SubprocessExtractor:
             if proc.returncode == extract_worker.EXIT_MODEL_UNAVAILABLE:
                 raise ModelUnavailable(_stderr_tail(stderr_path) or "extractor model unavailable")
             if proc.returncode == extract_worker.EXIT_NO_TEXT:
-                if path.suffix.lower() == ".pdf":
+                if path.suffix.lower() == ".pdf" or path.suffix.lower() in IMAGE_SUFFIXES:
                     raise ExtractionFailure("no readable text — OCR found nothing to extract")
                 raise ExtractionFailure("no extractable text")
             if proc.returncode != 0:

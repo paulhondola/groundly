@@ -11,12 +11,12 @@ from groundly.ingestion.results import Status
 
 
 def test_unsupported_extension_reported_skipped(subject, course, stub_embedder, stub_extractor):
-    (course / "img.png").write_bytes(b"\x89PNG")
+    (course / "archive.xyz").write_bytes(b"\x00\x01")
     subj = Subject(subject)
     pipe = IngestionPipeline(subject=subj, extractor=stub_extractor(), embedder=stub_embedder())
-    results = pipe.run([course / "img.png"])
+    results = pipe.run([course / "archive.xyz"])
     assert results[0].status == Status.SKIPPED_UNSUPPORTED
-    assert ".png" in results[0].detail
+    assert ".xyz" in results[0].detail
 
 
 def test_docling_suffixes_are_a_subset_of_supported_suffixes():

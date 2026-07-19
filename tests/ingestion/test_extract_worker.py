@@ -70,6 +70,29 @@ def test_no_ocr_lang_keeps_default_langs(monkeypatch):
     assert ocr_options.lang == RapidOcrOptions(backend="onnxruntime").lang
 
 
+def test_image_suffixes_route_to_docling():
+    """Standalone image extensions land on the docling allowlist and map to the
+    'image' format, so main() routes them to _extract_docling."""
+    from groundly.ingestion.formats import DOCLING_FORMATS, DOCLING_SUFFIXES, SUPPORTED_SUFFIXES
+
+    for suffix in (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"):
+        assert suffix in SUPPORTED_SUFFIXES
+        assert suffix in DOCLING_SUFFIXES
+        assert DOCLING_FORMATS[suffix] == "image"
+
+
+def test_image_format_uses_pinned_rapidocr(monkeypatch):
+    """The IMAGE format option must carry the same do_ocr RapidOcrOptions as PDF —
+    without it docling's IMAGE default falls back to EasyOCR (runtime downloads)."""
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import RapidOcrOptions
+
+    opts = _captured_format_options(monkeypatch, None)
+    img_pipeline = opts[InputFormat.IMAGE].pipeline_options
+    assert img_pipeline.do_ocr is True
+    assert isinstance(img_pipeline.ocr_options, RapidOcrOptions)
+
+
 def _image_only_pdf(path, lines):
     # ponytail: PIL's own "PDF" save format is a real (if minimal) single-image-per-page
     # PDF — no need for reportlab/img2pdf just to build a fixture. Page-sized canvas +
@@ -135,3 +158,56 @@ def test_blank_pdf_exits_no_text(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as exc:
         extract_worker.main()
     assert exc.value.code == extract_worker.EXIT_NO_TEXT
+
+
+def _image_with_text(path, lines):
+    # Standalone image fixture: text rendered onto a page-tall white canvas, no text
+    # layer, so a passing OCR read proves the IMAGE pipeline ran. Page-sized canvas +
+    # large font matter (a small one OCRs to nothing), and a title + body lines so
+    # docling classifies content as body text — a heading-only doc yields no chunks.
+    from PIL import Image, ImageDraw, ImageFont
+
+    img = Image.new("RGB", (1700, 2200), "white")
+    draw = ImageDraw.Draw(img)
+    font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 80)
+    for i, line in enumerate(lines):
+        draw.text((100, 150 + i * 150), line, fill="black", font=font)
+    img.save(path)
+
+
+@pytest.mark.slow
+def test_standalone_image_indexes_via_ocr(tmp_path):
+    """A standalone PNG of text must be readable via the IMAGE pipeline (pinned
+    RapidOCR) — chunks non-empty, single-page attribution."""
+    from groundly.ingestion import extract_worker
+
+    png = tmp_path / "slide.png"
+    _image_with_text(
+        png,
+        [
+            "Deadlock Conditions",
+            "A deadlock requires mutual exclusion",
+            "and a circular wait among processes.",
+        ],
+    )
+
+    result = extract_worker._extract_docling(png)
+
+    assert result["chunks"], "OCR found no text"
+    assert any("mutual exclusion" in c["text"] for c in result["chunks"])
+    assert result["chunks"][0]["page"] == 1
+
+
+@pytest.mark.slow
+def test_blank_image_reports_ocr_failure(tmp_path):
+    """A text-free image through the subprocess boundary must surface the OCR-specific
+    cause, not the generic 'no extractable text'."""
+    from PIL import Image
+
+    from groundly.ingestion.extract import ExtractionFailure, SubprocessExtractor
+
+    png = tmp_path / "blank.png"
+    Image.new("RGB", (1700, 1000), "white").save(png)
+
+    with pytest.raises(ExtractionFailure, match="OCR found nothing to extract"):
+        SubprocessExtractor().extract(png)

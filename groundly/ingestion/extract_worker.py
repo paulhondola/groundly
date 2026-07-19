@@ -51,7 +51,7 @@ def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
     from docling.chunking import HybridChunker
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import PdfPipelineOptions, RapidOcrOptions
-    from docling.document_converter import DocumentConverter, PdfFormatOption
+    from docling.document_converter import DocumentConverter, ImageFormatOption, PdfFormatOption
     from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
 
     from groundly.core.manifest import CHUNK_MAX_TOKENS
@@ -78,8 +78,14 @@ def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
         else RapidOcrOptions(backend="onnxruntime")
     )
     pipeline_options = PdfPipelineOptions(do_ocr=True, ocr_options=ocr_options)
+    # IMAGE gets the same options so standalone images OCR with the pinned RapidOCR
+    # engine — without this, docling's IMAGE default falls back to EasyOCR (runtime
+    # model downloads), exactly what the pinning above avoids.
     converter = DocumentConverter(
-        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
+        format_options={
+            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
+            InputFormat.IMAGE: ImageFormatOption(pipeline_options=pipeline_options),
+        }
     )
     # docling's layout models load here, before the document is touched — a fetch
     # failure is the environment's fault, never this document's parse failure
