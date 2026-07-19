@@ -127,6 +127,68 @@ def test_symlink_not_followed(subject, course, tmp_path, stub_embedder, stub_ext
     assert "symlink" in results[0].detail
 
 
+def test_default_deny_list_prunes_junk_dirs(subject, course, stub_embedder, stub_extractor):
+    (course / ".venv" / "lib").mkdir(parents=True)
+    (course / ".venv" / "lib" / "foo.py").write_text("junk")
+    (course / "dist").mkdir()
+    (course / "dist" / "bundle.js").write_text("junk")
+
+    subj = Subject(subject)
+    pipe = IngestionPipeline(subject=subj, extractor=stub_extractor(), embedder=stub_embedder())
+    results = pipe.run([course])
+    indexed_names = {r.path.name for r in results if r.status == Status.INDEXED}
+    assert indexed_names == {"notes.txt", "readme.md"}
+
+
+def test_hidden_dir_and_file_skipped_by_default(subject, course, stub_embedder, stub_extractor):
+    (course / ".hidden_dir").mkdir()
+    (course / ".hidden_dir" / "secret.txt").write_text("junk")
+    (course / ".DS_Store").write_text("junk")
+
+    subj = Subject(subject)
+    pipe = IngestionPipeline(subject=subj, extractor=stub_extractor(), embedder=stub_embedder())
+    results = pipe.run([course])
+    indexed_names = {r.path.name for r in results if r.status == Status.INDEXED}
+    assert indexed_names == {"notes.txt", "readme.md"}
+
+
+def test_groundlyignore_prunes_dir_and_skips_glob_match(
+    subject, course, stub_embedder, stub_extractor
+):
+    (course / "scratch").mkdir()
+    (course / "scratch" / "junk.txt").write_text("junk")
+    (course / "draft.tmp.md").write_text("junk")
+    (course / ".groundlyignore").write_text("scratch\n*.tmp.md\n")
+
+    subj = Subject(subject)
+    pipe = IngestionPipeline(subject=subj, extractor=stub_extractor(), embedder=stub_embedder())
+    results = pipe.run([course])
+    indexed_names = {r.path.name for r in results if r.status == Status.INDEXED}
+    assert indexed_names == {"notes.txt", "readme.md"}
+
+
+def test_groundlyignore_comments_and_blank_lines_are_inert(
+    subject, course, stub_embedder, stub_extractor
+):
+    (course / ".groundlyignore").write_text("# a comment\n\n   \n")
+
+    subj = Subject(subject)
+    pipe = IngestionPipeline(subject=subj, extractor=stub_extractor(), embedder=stub_embedder())
+    results = pipe.run([course])
+    indexed_names = {r.path.name for r in results if r.status == Status.INDEXED}
+    assert indexed_names == {"notes.txt", "readme.md"}
+
+
+def test_explicit_path_wins_over_ignore_pattern(subject, course, stub_embedder, stub_extractor):
+    (course / "draft.tmp.md").write_text("Deadlock notes worth indexing.")
+    (course / ".groundlyignore").write_text("*.tmp.md\n")
+
+    subj = Subject(subject)
+    pipe = IngestionPipeline(subject=subj, extractor=stub_extractor(), embedder=stub_embedder())
+    results = pipe.run([course / "draft.tmp.md"])
+    assert results[0].status == Status.INDEXED
+
+
 def test_uninitialized_subject_names_the_fix(
     monkeypatch, tmp_path, course, stub_embedder, stub_extractor
 ):
