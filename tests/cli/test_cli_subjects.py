@@ -62,7 +62,9 @@ def test_index_reports_results(monkeypatch, tmp_path):
     f = tmp_path / "lec.txt"
     f.write_text("content")
 
-    def fake_index_paths(subject, paths, embedder=None, on_event=None, ocr_lang=None):
+    def fake_index_paths(
+        subject, paths, embedder=None, on_event=None, on_discovered=None, ocr_lang=None
+    ):
         return [FileResult(f, Status.INDEXED, chunks=3)]
 
     monkeypatch.setattr(pipeline, "index_paths", fake_index_paths)
@@ -81,7 +83,9 @@ def test_index_ocr_lang_set_reuse_mismatch(monkeypatch, tmp_path):
     f.write_text("content")
     seen = []
 
-    def fake_index_paths(subject, paths, embedder=None, on_event=None, ocr_lang=None):
+    def fake_index_paths(
+        subject, paths, embedder=None, on_event=None, on_discovered=None, ocr_lang=None
+    ):
         seen.append(ocr_lang)
         return [FileResult(f, Status.INDEXED, chunks=1)]
 

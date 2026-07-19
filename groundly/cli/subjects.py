@@ -5,6 +5,7 @@ from typing import Annotated, Optional
 
 import typer
 from rich.markup import escape
+from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
 from rich.table import Table
 
 from groundly.cli.app import _fail, _subject_checked, _store_checked, app, console
@@ -23,7 +24,7 @@ def init(
     except ValueError as exc:
         _fail(str(exc))
     if created:
-        console.print(f"initialized [bold]{subject}[/bold] at {subj.root_dir}")
+        console.print(f"Initialized [bold]{subject}[/bold] at {subj.root_dir}")
     else:
         console.print(f"[bold]{subject}[/bold] already initialized at {subj.root_dir}")
 
@@ -81,14 +82,24 @@ def index(
         Status.ERROR: "[red]error[/red]",
     }
 
-    with console.status("indexing…") as status:
+    with Progress(
+        TextColumn("{task.description}"), BarColumn(), MofNCompleteColumn(), console=console
+    ) as progress:
+        task = progress.add_task("indexing…", total=None)
+
+        def on_discovered(total: int) -> None:
+            progress.update(task, total=total)
 
         def on_event(path: Path, stage: str) -> None:
             if stage in ("extracting", "embedding"):
-                status.update(f"{path.name}: {stage}…")
+                progress.update(task, description=f"{path.name}: {stage}…")
+            elif stage in set(Status):
+                progress.advance(task)
 
         try:
-            results = pipeline.index_paths(subject, paths, on_event=on_event, ocr_lang=ocr_lang)
+            results = pipeline.index_paths(
+                subject, paths, on_event=on_event, on_discovered=on_discovered, ocr_lang=ocr_lang
+            )
         except (RuntimeError, ValueError) as exc:
             _fail(str(exc))
 
@@ -128,7 +139,7 @@ def list_(
                 manifest = subj.load_manifest()
             except ValidationError:
                 # one damaged subject must not take down the whole listing
-                console.print(f"[red]warning:[/red] {name}: manifest.json is corrupt — skipping")
+                console.print(f"[red]Warning:[/red] {name}: manifest.json is corrupt — skipping")
                 continue
             table.add_row(name, str(manifest.counts.materials), str(manifest.counts.chunks))
         console.print(table)
@@ -175,11 +186,11 @@ def remove(
 
         if not yes:
             typer.confirm(
-                f"remove subject {subject} and ALL its data (materials, index, progress, notes)?",
+                f"Remove subject {subject} and ALL its data (materials, index, progress, notes)?",
                 abort=True,
             )
         shutil.rmtree(subj.root_dir)
-        console.print(f"removed subject [bold]{subject}[/bold]")
+        console.print(f"Removed subject [bold]{subject}[/bold]")
         return
 
     store_obj = _store_checked(subj)
@@ -193,7 +204,7 @@ def remove(
         target = matches[0]
         if not yes:
             typer.confirm(
-                f"remove {target['filename']} and all its indexed data from {subject}?",
+                f"Remove {target['filename']} and all its indexed data from {subject}?",
                 abort=True,
             )
         store_obj.remove_material(target["id"])
@@ -209,10 +220,10 @@ def remove(
             stored = subj.materials_dir / target["filename"]
             if stored.exists():
                 stored.unlink()
-        console.print(f"removed [bold]{escape(target['filename'])}[/bold] from {subject}")
+        console.print(f"Removed [bold]{escape(target['filename'])}[/bold] from {subject}")
         if (subj.root_dir / "graph").exists():
             console.print(
-                "[dim]note: the graph is now stale — it rebuilds on the next"
+                "[dim]Note: the graph is now stale — it rebuilds on the next"
                 " corpus-hash-triggered index run[/dim]"
             )
     except sqlite3.OperationalError as exc:
