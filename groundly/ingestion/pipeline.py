@@ -205,28 +205,33 @@ class IngestionPipeline:
 
         self.on_event(path, "embedding")
         try:
-            dense, sparse = self.embedder.encode([c.text for c in extraction.chunks])
-        except Exception as exc:  # transient (model load/OOM): no row, next run retries
-            self.on_event(path, Status.ERROR)
-            return FileResult(path, Status.ERROR, f"embedding failed: {exc}")
-
-        try:
             stored_name = _copy_to_materials(path, sha, self.subject.materials_dir)
         except OSError as exc:  # transient (disk full, permissions): no row, next run retries
             self.on_event(path, Status.ERROR)
             return FileResult(path, Status.ERROR, f"copy to materials failed: {exc}")
 
+        # Vectors stream lazily into the single per-file transaction (encode_stream runs
+        # the model batch-by-batch), so peak RAM never holds the whole document's
+        # embeddings. Embedding failure rolls the transaction back — no row, next run
+        # retries; the already-copied material is reused by _copy_to_materials on retry.
         try:
             self.store.add_indexed(
-                stored_name, sha, extraction.pages, extraction.chunks, dense, sparse
+                stored_name,
+                sha,
+                extraction.pages,
+                extraction.chunks,
+                self.embedder.encode_stream([c.text for c in extraction.chunks]),
             )
-            self.on_event(path, Status.INDEXED)
-            return FileResult(path, Status.INDEXED, chunks=len(extraction.chunks))
         except sqlite3.IntegrityError:
             # sha256 UNIQUE lost a race: a concurrent run (CLI + MCP share the store)
             # indexed the same content between our hash check and this write
             self.on_event(path, Status.SKIPPED_DUPLICATE)
             return FileResult(path, Status.SKIPPED_DUPLICATE, "already indexed (concurrent run)")
+        except Exception as exc:  # transient embed (model load/OOM): no row, next run retries
+            self.on_event(path, Status.ERROR)
+            return FileResult(path, Status.ERROR, f"embedding failed: {exc}")
+        self.on_event(path, Status.INDEXED)
+        return FileResult(path, Status.INDEXED, chunks=len(extraction.chunks))
 
 
 def index_paths(

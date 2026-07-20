@@ -82,6 +82,33 @@ def test_remove_material_leaves_no_rows_in_any_channel(db, tmp_path):
     ).fetchall()
 
 
+def test_add_indexed_streams_vectors_from_lazy_iterable(db, tmp_path):
+    """add_indexed consumes a one-shot (dense, sparse) generator aligned with chunks,
+    so a document's vectors need never be materialized as a list at once (findings 3+4+1)."""
+    from groundly.ingestion.extract import ChunkData
+
+    store_obj = SQLiteSubjectStore(tmp_path / "store.db")
+    chunks = [
+        ChunkData("first chunk", "Intro > A", 1, 5),
+        ChunkData("second chunk", "Intro > B", 2, 5),
+    ]
+
+    def vectors():  # a generator, not a list — proves streaming consumption
+        yield [1.0] + [0.0] * (EMBEDDING_DIM - 1), {1: 0.5}
+        yield [0.0, 1.0] + [0.0] * (EMBEDDING_DIM - 2), {2: 0.7, 3: 0.3}
+
+    mid = store_obj.add_indexed("lec.pdf", "b" * 64, 7, chunks, vectors())
+
+    assert db.execute("SELECT pages FROM materials WHERE id=?", (mid,)).fetchone()[0] == 7
+    assert db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == 2
+    assert db.execute("SELECT COUNT(*) FROM vectors").fetchone()[0] == 2
+    assert db.execute("SELECT COUNT(*) FROM sparse_terms").fetchone()[0] == 3  # 1 + 2 weights
+    assert [r[0] for r in db.execute("SELECT text FROM chunks ORDER BY id")] == [
+        "first chunk",
+        "second chunk",
+    ]
+
+
 def test_find_materials_by_filename_or_sha_prefix(db, tmp_path):
     _add_material(db, "lec1.pdf", "a" * 64)
     _add_material(db, "lec2.pdf", "b" * 64)

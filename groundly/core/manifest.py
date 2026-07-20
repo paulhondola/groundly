@@ -1,7 +1,7 @@
 """manifest.json — the interchange contract (docs/architecture/data-model.md).
 
-The embedding pin (model + hf_revision + dim + normalization) decides whether shared
-vectors transfer as-is; changing it is a full re-index migration, never a tweak.
+The embedding pin (model + hf_revision + dim + dtype + normalization) decides whether
+shared vectors transfer as-is; changing it is a full re-index migration, never a tweak.
 """
 
 import sqlite3
@@ -22,7 +22,7 @@ class Embedding(BaseModel):
     model: str = EMBEDDING_MODEL
     hf_revision: str = HF_REVISION
     dim: int = EMBEDDING_DIM
-    dtype: str = "float32"
+    dtype: str = "float16"
     normalized: bool = True
 
 

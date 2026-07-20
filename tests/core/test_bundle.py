@@ -34,7 +34,9 @@ def _seed(name, filename="lec.pdf", content=b"lecture bytes", sha256="a" * 64, n
     ]
     dense = [[0.1] * EMBEDDING_DIM for _ in chunks]
     sparse = [{1: 0.5} for _ in chunks]
-    SQLiteSubjectStore(sdir / "store.db").add_indexed(filename, sha256, 3, chunks, dense, sparse)
+    SQLiteSubjectStore(sdir / "store.db").add_indexed(
+        filename, sha256, 3, chunks, zip(dense, sparse)
+    )
     conn = store.connect(sdir / "store.db")
     try:
         sync_counts(conn, sdir / "manifest.json")
@@ -110,6 +112,24 @@ def test_export_import_roundtrip_preserves_data_and_resets_progress(tmp_path, mo
         assert conn.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()[0] == 0
     finally:
         conn.close()
+
+
+def test_export_excludes_orphan_material_with_no_store_row(tmp_path, monkeypatch):
+    """A materials/ file with no `materials` row (e.g. copied just before a transient
+    embed failure, per decision 19) must NOT ship in the bundle — export ships what
+    store.db knows is indexed, not whatever files happen to sit in materials/."""
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed("PDSS")  # indexes lec.pdf (has a materials row)
+    orphan = subject_dir("PDSS") / "materials" / "leaked-secret.pdf"
+    orphan.write_bytes(b"un-indexed original that failed to embed")
+
+    out_path = tmp_path / "PDSS.groundly"
+    bundle.export_subject(Subject("PDSS"), out_path)
+
+    names = zipfile.ZipFile(out_path).namelist()
+    assert "materials/lec.pdf" in names  # indexed material still ships
+    assert "materials/leaked-secret.pdf" not in names  # orphan does not leak
 
 
 # --- AC2: embedding pin mismatch triggers re-embed --------------------------------

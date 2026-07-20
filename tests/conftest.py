@@ -22,6 +22,13 @@ class StubEmbedder:
         self.encoded.extend(texts)
         return [[0.1] * EMBEDDING_DIM for _ in texts], [{1: 0.5} for _ in texts]
 
+    def encode_stream(self, texts, batch_size=64):
+        for t in texts:
+            if self.fail_on and self.fail_on in t:
+                raise RuntimeError("stub embedder failure")
+            self.encoded.append(t)
+            yield [0.1] * EMBEDDING_DIM, {1: 0.5}
+
 
 @pytest.fixture
 def stub_embedder():
@@ -144,6 +151,6 @@ def retrievable_subject(monkeypatch, tmp_path):
     ]
     sparse = [{1: 0.9, 2: 0.1}, {3: 0.9}, {1: 0.4}]
     SQLiteSubjectStore(subject_dir("TEST") / "store.db").add_indexed(
-        "lec.pdf", "a" * 64, 3, chunks, dense, sparse
+        "lec.pdf", "a" * 64, 3, chunks, zip(dense, sparse)
     )
     return "TEST"
