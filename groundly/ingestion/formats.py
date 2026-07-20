@@ -18,6 +18,20 @@ DOCLING_FORMATS = {
     ".xlsx": "xlsx",
     ".epub": "epub",
 }
+# Standalone raster images: docling routes InputFormat.IMAGE ("image") through the
+# same StandardPdfPipeline as PDFs, so they OCR on the identical pinned-RapidOCR path
+# (a photographed slide / screenshot of notes indexes like a one-page scanned PDF).
+IMAGE_FORMATS = {
+    ".png": "image",
+    ".jpg": "image",
+    ".jpeg": "image",
+    ".tif": "image",
+    ".tiff": "image",
+    ".bmp": "image",
+    ".webp": "image",
+}
+DOCLING_FORMATS.update(IMAGE_FORMATS)
+IMAGE_SUFFIXES = set(IMAGE_FORMATS)  # exported for extract.py's OCR failure-message branch
 DOCLING_SUFFIXES = set(DOCLING_FORMATS)
 # Everything else on the pipeline allowlist (txt + source code) is read as plain
 # text and chunked by token windows — docling's converter does not accept it.
