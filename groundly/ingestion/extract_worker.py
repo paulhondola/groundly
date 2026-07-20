@@ -27,6 +27,10 @@ os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
 
 EXIT_NO_TEXT = 3
 EXIT_MODEL_UNAVAILABLE = 4
+EXIT_INPUT_TOO_LARGE = 5
+# ~100 MP (a 10000×10000 raster): course screenshots/photos/scans sit far below. Bounds
+# decompression-bomb memory before docling rasterizes an image (security.md §threat-model).
+MAX_IMAGE_PIXELS = 100_000_000
 
 
 def _bge_m3_tokenizer():
@@ -56,7 +60,15 @@ def _first_frame(path: Path) -> Path:
     Single-frame images (the overwhelming case) pass straight through."""
     from PIL import Image, ImageSequence
 
-    img = Image.open(path)
+    img = Image.open(path)  # lazy: reads header (size) without decoding pixels
+    w, h = img.size
+    if w * h > MAX_IMAGE_PIXELS:
+        print(
+            f"image too large: {w}x{h} ({w * h // 1_000_000} MP) exceeds "
+            f"{MAX_IMAGE_PIXELS // 1_000_000} MP cap",
+            file=sys.stderr,
+        )
+        sys.exit(EXIT_INPUT_TOO_LARGE)
     if getattr(img, "n_frames", 1) <= 1:
         return path
     fd, tmp = tempfile.mkstemp(
@@ -137,6 +149,24 @@ def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
                 "token_count": tokenizer.count_tokens(text),
             }
         )
+
+    if not chunks:
+        # HybridChunker drops docs whose only content is headings (a title-only slide or
+        # page): OCR *did* read the text, so keep it as one chunk rather than exiting
+        # EXIT_NO_TEXT with a "found nothing" message that isn't true. Only fires when the
+        # chunker produced nothing — a doc with body text never reaches here.
+        salvaged = [t for t in doc.texts if t.text and t.text.strip()]
+        if salvaged:
+            text = "\n".join(t.text.strip() for t in salvaged)
+            page = next((t.prov[0].page_no for t in salvaged if t.prov), None)
+            chunks.append(
+                {
+                    "text": text,
+                    "heading_path": None,
+                    "page": page,
+                    "token_count": tokenizer.count_tokens(text),
+                }
+            )
 
     pages = len(doc.pages) if doc.pages else None
     return {"pages": pages, "chunks": chunks}

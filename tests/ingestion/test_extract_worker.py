@@ -81,17 +81,40 @@ def test_image_suffixes_route_to_docling():
         assert DOCLING_FORMATS[suffix] == "image"
 
 
-def test_image_format_uses_pinned_rapidocr(monkeypatch):
-    """The IMAGE format option must carry the same do_ocr RapidOcrOptions as PDF —
-    without it docling's auto OCR selection picks a different engine (ocrmac/easyocr)
-    than the decision-14 pin."""
+def test_image_format_overrides_docling_auto_ocr(monkeypatch):
+    """The IMAGE registration is load-bearing: docling's *default* IMAGE OCR is the auto
+    resolver (`OcrAutoOptions` → ocrmac/rapidocr/easyocr by environment), which would
+    silently diverge from the decision-14 pin. `_extract_docling` must override it with
+    the explicit RapidOcrOptions — and deleting the registration drops the IMAGE key,
+    failing the second assert."""
     from docling.datamodel.base_models import InputFormat
-    from docling.datamodel.pipeline_options import RapidOcrOptions
+    from docling.datamodel.pipeline_options import OcrAutoOptions, RapidOcrOptions
+    from docling.document_converter import ImageFormatOption
+
+    # what we're protecting against: docling's unconfigured IMAGE default is auto, not the pin
+    assert isinstance(ImageFormatOption().pipeline_options.ocr_options, OcrAutoOptions)
 
     opts = _captured_format_options(monkeypatch, None)
     img_pipeline = opts[InputFormat.IMAGE].pipeline_options
     assert img_pipeline.do_ocr is True
     assert isinstance(img_pipeline.ocr_options, RapidOcrOptions)
+
+
+def test_oversized_image_exits_input_too_large(tmp_path, monkeypatch):
+    """An image whose pixel count exceeds the cap must fail fast before docling decodes it
+    (decompression-bomb bound), with a specific cause. Cap is lowered so the fixture stays
+    tiny — no need to allocate a real 100 MP raster."""
+    from PIL import Image
+
+    from groundly.ingestion import extract_worker
+
+    png = tmp_path / "big.png"
+    Image.new("RGB", (300, 300), "white").save(png)  # 90k px
+    monkeypatch.setattr(extract_worker, "MAX_IMAGE_PIXELS", 100)
+
+    with pytest.raises(SystemExit) as exc:
+        extract_worker._first_frame(png)
+    assert exc.value.code == extract_worker.EXIT_INPUT_TOO_LARGE
 
 
 def _image_only_pdf(path, lines):
@@ -164,8 +187,7 @@ def test_blank_pdf_exits_no_text(tmp_path, monkeypatch):
 def _image_with_text(path, lines):
     # Standalone image fixture: text rendered onto a page-tall white canvas, no text
     # layer, so a passing OCR read proves the IMAGE pipeline ran. Page-sized canvas +
-    # large font matter (a small one OCRs to nothing), and a title + body lines so
-    # docling classifies content as body text — a heading-only doc yields no chunks.
+    # large font matter (a small one OCRs to nothing).
     from PIL import Image, ImageDraw, ImageFont
 
     img = Image.new("RGB", (1700, 2200), "white")
@@ -196,6 +218,23 @@ def test_standalone_image_indexes_via_ocr(tmp_path):
 
     assert result["chunks"], "OCR found no text"
     assert any("mutual exclusion" in c["text"] for c in result["chunks"])
+    assert result["chunks"][0]["page"] == 1
+
+
+@pytest.mark.slow
+def test_title_only_image_salvages_heading_text(tmp_path):
+    """A title-only image parses to a heading-only doc that HybridChunker drops. The
+    salvage fallback keeps the OCR'd text so it indexes (searchable, page-1) instead of
+    failing with a "found nothing" message that OCR would contradict."""
+    from groundly.ingestion import extract_worker
+
+    png = tmp_path / "title.png"
+    _image_with_text(png, ["Mutual Exclusion Principle"])  # single line → section_header
+
+    result = extract_worker._extract_docling(png)
+
+    assert result["chunks"], "heading-only text should be salvaged, not dropped"
+    assert "Mutual Exclusion" in result["chunks"][0]["text"]
     assert result["chunks"][0]["page"] == 1
 
 

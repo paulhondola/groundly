@@ -85,6 +85,8 @@ class SubprocessExtractor:
 
             if proc.returncode == extract_worker.EXIT_MODEL_UNAVAILABLE:
                 raise ModelUnavailable(_stderr_tail(stderr_path) or "extractor model unavailable")
+            if proc.returncode == extract_worker.EXIT_INPUT_TOO_LARGE:
+                raise ExtractionFailure(_stderr_tail(stderr_path) or "image too large to process")
             if proc.returncode == extract_worker.EXIT_NO_TEXT:
                 if path.suffix.lower() == ".pdf" or path.suffix.lower() in IMAGE_SUFFIXES:
                     raise ExtractionFailure("no readable text — OCR found nothing to extract")
