@@ -55,10 +55,16 @@ def ask(
 def search(
     subject: Annotated[str, typer.Argument(help="Subject to search.")],
     query: Annotated[str, typer.Argument(help="Search query.")],
-    k: Annotated[int, typer.Option("-k", help="Number of chunks to return.")] = 8,
-    no_rerank: Annotated[
-        bool, typer.Option("--no-rerank", help="Skip the cross-encoder rerank step.")
-    ] = False,
+    k: Annotated[
+        int | None,
+        typer.Option("-k", help="Number of chunks to return (default: retrieval.context_k)."),
+    ] = None,
+    rerank: Annotated[
+        bool | None,
+        typer.Option(
+            "--rerank/--no-rerank", help="Cross-encoder rerank (default: retrieval.rerank)."
+        ),
+    ] = None,
 ) -> None:
     """Raw retrieval: top-k chunks with text + citations. No LLM call, works with no
     provider configured — the host composes its own answer (best-effort grounding)."""
@@ -68,7 +74,7 @@ def search(
     subj = _subject_checked(subject)
     _store_checked(subj)
     try:
-        nodes = search_fn(subject, query, k=k, rerank=not no_rerank)
+        nodes = search_fn(subject, query, k=k, rerank=rerank)
     except ModelDownloadError as exc:
         _fail(str(exc))
     if not nodes:

@@ -62,10 +62,10 @@ def _first_frame(path: Path) -> Path:
 
     img = Image.open(path)  # lazy: reads header (size) without decoding pixels
     w, h = img.size
-    if w * h > MAX_IMAGE_PIXELS:
+    cap = int(os.environ.get("GROUNDLY_MAX_IMAGE_PIXELS") or MAX_IMAGE_PIXELS)
+    if w * h > cap:
         print(
-            f"image too large: {w}x{h} ({w * h // 1_000_000} MP) exceeds "
-            f"{MAX_IMAGE_PIXELS // 1_000_000} MP cap",
+            f"image too large: {w}x{h} ({w * h // 1_000_000} MP) exceeds {cap // 1_000_000} MP cap",
             file=sys.stderr,
         )
         sys.exit(EXIT_INPUT_TOO_LARGE)

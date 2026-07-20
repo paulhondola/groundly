@@ -59,10 +59,11 @@ def list_subjects() -> list[dict]:
 
 
 @mcp.tool
-def search(subject: str, query: str, k: int = 8) -> list[dict]:
+def search(subject: str, query: str, k: int | None = None) -> list[dict]:
     """Raw ranked retrieval: the top-k chunks for `query` from `subject`'s materials
-    (hybrid dense + sparse + BM25, reranked). No LLM call, no provider needed — you
-    compose the answer yourself from the returned chunks; grounding is not enforced
+    (hybrid dense + sparse + BM25, reranked). Omit `k` to use the configured default
+    (`retrieval.context_k`); pass it only to override. No LLM call, no provider needed —
+    you compose the answer yourself from the returned chunks; grounding is not enforced
     here (use `ask` when you need an enforced, cited answer)."""
     from groundly.llm.embeddings import ModelDownloadError
     from groundly.retrieval.vector import search as search_fn

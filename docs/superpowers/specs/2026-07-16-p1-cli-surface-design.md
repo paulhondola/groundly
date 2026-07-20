@@ -74,12 +74,17 @@ graph-staleness note when a graph exists (harmless no-op until P5).
 ### `groundly config` / `groundly config set <KEY> <VALUE>`
 
 - Bare `config`: prints the config file path + effective values per call class (`chat`,
-  `generation`, `extraction`, `router`), **keys masked** to last 3 chars.
-- `config set <key> <value>`: dotted keys, e.g. `chat.model`, `chat.base_url`, `chat.key`.
-  Unknown call class or field → error naming valid keys (typo protection). Validation via the
-  pydantic-settings model that `llm/` will consume in P3.
+  `generation`, `extraction`, `router`), **keys masked** to last 3 chars, then the operational
+  settings (`ingestion`/`llm`/`retrieval`, decision 18) with their effective values.
+- `config set <key> <value>`: dotted keys — providers `chat.model`, `chat.base_url`, `chat.key`;
+  settings `ingestion.timeout_seconds`, `ingestion.max_file_size_mb`, `llm.timeout_seconds`,
+  `retrieval.context_k`, `retrieval.rerank`, … The first segment routes to a call-class or a
+  settings section; unknown section/field or an unparseable value → error naming valid keys
+  (typo + type protection, coerced per the Pydantic field). The write regenerates the whole
+  documented template from the effective config (`tomllib` is read-only) — no dependency, and
+  the commented template survives every `set`.
 - P1 needs zero keys (embeddings are local) — `config` exists so provider setup is ready before
-  `ask` lands.
+  `ask` lands; settings all default to the former constants, so zero-config is unchanged.
 
 ### `groundly models install [--force]`
 
@@ -121,8 +126,9 @@ Client layer thin, logic in services (architecture invariants):
 - `groundly/core/store.py` — SQLite open helper (WAL + busy_timeout on every connection,
   `PRAGMA user_version` check), P1 schema (materials, chunks, vectors, sparse, FTS5), manifest
   read/write.
-- `groundly/core/config.py` — pydantic-settings model for `config.toml` per call class;
-  load/save/mask.
+- `groundly/core/config.py` — Pydantic models for `config.toml`: providers per call class +
+  operational settings (decision 18); `load_provider`/`load_settings`/`set_key`/`render_config_toml`/
+  `mask_key`. `groundly/llm/config.py` re-exports the provider surface (boundary preserved).
 - `groundly/llm/embeddings.py` — owns bge-m3 cache/download logic (`cached_snapshot`,
   `ensure_downloaded`, `remove_cached`); `BgeM3Embedder._load()` (lazy) and `groundly models
   install`/`uninstall` (eager) all call it.

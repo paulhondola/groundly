@@ -18,6 +18,18 @@ from groundly.ingestion.formats import SUPPORTED_SUFFIXES
 from groundly.ingestion.results import FileResult, OnEvent, Status
 from groundly.llm.embeddings import BgeM3Embedder, Embedder
 
+
+def _default_extractor() -> SubprocessExtractor:
+    from groundly.core.config import load_settings
+
+    s = load_settings().ingestion
+    return SubprocessExtractor(
+        timeout=s.timeout_seconds,
+        max_image_pixels=s.max_image_pixels,
+        max_file_size_mb=s.max_file_size_mb,
+    )
+
+
 DEFAULT_IGNORED_DIRS = {
     ".git",
     ".venv",
@@ -110,7 +122,7 @@ class IngestionPipeline:
     ) -> None:
         self.subject = subject
         self.store = store or SQLiteSubjectStore(subject.store_db_path)
-        self.extractor = extractor or SubprocessExtractor()
+        self.extractor = extractor or _default_extractor()
         self.embedder = embedder or BgeM3Embedder()
         self.on_event = on_event or (lambda path, stage: None)
         self.on_discovered = on_discovered or (lambda total: None)
