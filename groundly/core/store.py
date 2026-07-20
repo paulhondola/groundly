@@ -7,6 +7,7 @@ processes share the same files (.claude/rules/architecture.md).
 
 import json
 import sqlite3
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 import sqlite_vec
@@ -360,9 +361,11 @@ class SQLiteSubjectStore:
         sha256: str,
         pages: int | None,
         chunks: list,
-        dense: list[list[float]],
-        sparse: list[dict[int, float]],
+        vectors: Iterable[tuple[Sequence[float], dict[int, float]]],
     ) -> int:
+        """`vectors` yields one (dense, sparse) pair per chunk, in order. It is consumed
+        lazily inside the single per-file transaction, so the caller can stream vectors
+        batch-by-batch and never hold the whole document's embeddings at once."""
         conn = self.connect()
         try:
             with conn:
@@ -371,7 +374,7 @@ class SQLiteSubjectStore:
                     (filename, sha256, pages),
                 )
                 material_id = cur.lastrowid
-                for chunk, vec, weights in zip(chunks, dense, sparse, strict=True):
+                for chunk, (vec, weights) in zip(chunks, vectors, strict=True):
                     c_text = chunk.text
                     c_page = chunk.page
                     c_heading_path = chunk.heading_path

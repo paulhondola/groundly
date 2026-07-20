@@ -19,6 +19,25 @@ def test_bge_m3_dense_and_sparse_contract():
     assert all(isinstance(t, int) and w > 0 for t, w in sparse[0].items())
 
 
+def test_encode_stream_yields_one_numpy_vector_per_text_in_batches():
+    """encode_stream is the memory-bounded index path: it yields (dense, sparse) per
+    text — dense as a numpy row (not list[float], finding 1) — running the model on
+    batch_size texts at a time so peak never scales with the whole document."""
+    import numpy as np
+
+    from groundly.core.manifest import EMBEDDING_DIM
+    from groundly.llm.embeddings import BgeM3Embedder
+
+    texts = ["mutual exclusion", "deadlock", "semaphore", "monitor", "spinlock"]
+    out = list(BgeM3Embedder().encode_stream(texts, batch_size=2))
+
+    assert len(out) == len(texts)
+    vec, weights = out[0]
+    assert isinstance(vec, np.ndarray) and vec.shape == (EMBEDDING_DIM,)
+    assert abs(float((vec * vec).sum()) - 1.0) < 1e-3  # normalized, same contract as encode
+    assert weights and all(isinstance(t, int) and w > 0 for t, w in weights.items())
+
+
 def test_bge_reranker_v2_m3_scores_relevant_pair_higher():
     from groundly.llm.rerank import BgeReranker
 
@@ -54,7 +73,7 @@ def test_cross_lingual_romanian_query_matches_english_deadlock_chunk(tmp_path, m
     dense, sparse = embedder.encode(texts)
     chunks = [ChunkData(t, None, i + 1, 10) for i, t in enumerate(texts)]
     SQLiteSubjectStore(subject_dir("PDA") / "store.db").add_indexed(
-        "slides.pdf", "a" * 64, 2, chunks, dense, sparse
+        "slides.pdf", "a" * 64, 2, chunks, zip(dense, sparse)
     )
 
     store = SQLiteSubjectStore(subject_dir("PDA") / "store.db")

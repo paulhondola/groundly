@@ -40,6 +40,7 @@ def export_subject(
     conn = store.connect(subj.store_db_path)
     try:
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")  # flush WAL sidecars before zipping
+        indexed = {r["filename"] for r in conn.execute("SELECT filename FROM materials")}
     finally:
         conn.close()
 
@@ -48,8 +49,11 @@ def export_subject(
         (subj.store_db_path, "store.db"),
     ]
     if include_materials:
+        # Ship only files store.db knows are indexed — a materials/ file with no row
+        # (e.g. copied just before a transient embed failure, decision 19) is an
+        # un-indexed original and must not leak into the bundle (security.md §5).
         for f in sorted(subj.materials_dir.rglob("*")):
-            if f.is_file():
+            if f.is_file() and f.name in indexed:
                 entries.append((f, f"materials/{f.relative_to(subj.materials_dir).as_posix()}"))
     graph_dir = subj.root_dir / "graph"
     if graph_dir.exists():

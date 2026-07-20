@@ -9,6 +9,7 @@ compatibility contract: same pin ⇒ shared vectors transfer as-is.
 
 import os
 import sys
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Protocol
 
@@ -25,6 +26,9 @@ SparseWeights = dict[int, float]
 
 class Embedder(Protocol):
     def encode(self, texts: list[str]) -> tuple[list[list[float]], list[SparseWeights]]: ...
+    def encode_stream(
+        self, texts: list[str], batch_size: int = ...
+    ) -> Iterator[tuple[Sequence[float], SparseWeights]]: ...
 
 
 class ModelDownloadError(Exception):
@@ -99,7 +103,7 @@ class BgeM3Embedder:
             try:
                 from FlagEmbedding import BGEM3FlagModel
 
-                self._model = BGEM3FlagModel(str(local), use_fp16=False)
+                self._model = BGEM3FlagModel(str(local), use_fp16=True)
             except Exception as exc:
                 raise ModelDownloadError(f"failed to load {EMBEDDING_MODEL}: {exc}") from exc
         return self._model
@@ -112,3 +116,19 @@ class BgeM3Embedder:
             for weights in out["lexical_weights"]
         ]
         return dense, sparse
+
+    def encode_stream(
+        self, texts: list[str], batch_size: int = 64
+    ) -> Iterator[tuple[Sequence[float], SparseWeights]]:
+        """Memory-bounded index path: yield (dense_row, sparse) per text, running the
+        model on batch_size texts at a time. FlagEmbedding pre-tokenizes *and*
+        accumulates dense+sparse for whatever list it is handed, so encoding a whole
+        document at once makes peak RAM scale with the document; slicing here caps it to
+        one batch. Dense rows stay as numpy fp32 — never boxed into list[float] (8x, and
+        sqlite_vec.serialize_float32 takes the numpy row directly)."""
+        model = self._load()
+        for start in range(0, len(texts), batch_size):
+            batch = texts[start : start + batch_size]
+            out = model.encode(batch, batch_size=batch_size, return_dense=True, return_sparse=True)
+            for vec, weights in zip(out["dense_vecs"], out["lexical_weights"], strict=True):
+                yield vec, {int(token_id): float(weight) for token_id, weight in weights.items()}
