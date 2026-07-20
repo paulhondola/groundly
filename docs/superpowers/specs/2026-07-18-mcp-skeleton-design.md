@@ -31,7 +31,7 @@ the CLI (`cli/ask.py`) already demonstrates the pattern.
 | Tool | Wraps | Returns (structured) |
 |---|---|---|
 | `list_subjects()` | `discover_subjects()` + manifest/material counts | `[{subject, materials, pages, chunks, graph_built}]` |
-| `search(subject, query, k=8)` | `retrieval.vector.search()` | `[{chunk_id, text, score, filename, page, heading_path, uri}]` |
+| `search(subject, query, k=None)` | `retrieval.vector.search()` — `k` omitted ⇒ configured `retrieval.context_k` (decision 18) | `[{chunk_id, text, score, filename, page, heading_path, uri}]` |
 | `ask(subject, query)` | `agents.ask.ask()` | `{answer, citations: [{chunk_id, filename, page, heading_path, uri}]}` |
 | `get_page(subject, filename, page)` | new `page_chunks()` | verbatim chunk texts for that page, ordered, with heading paths |
 
