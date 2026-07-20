@@ -43,12 +43,19 @@ class VectorRetriever(BaseRetriever):
         store: SQLiteSubjectStore,
         embedder=None,
         reranker=None,
-        rerank: bool = True,
+        rerank: bool | None = None,
         channel_k: int = CHANNEL_K,
         rerank_pool: int = RERANK_POOL,
-        context_k: int = CONTEXT_K,
+        context_k: int | None = None,
     ) -> None:
         super().__init__(callback_manager=CallbackManager([]))
+        # rerank/context_k default from config (retrieval.*); explicit args override.
+        if rerank is None or context_k is None:
+            from groundly.core.config import load_settings
+
+            settings = load_settings().retrieval
+            rerank = settings.rerank if rerank is None else rerank
+            context_k = settings.context_k if context_k is None else context_k
         self.store = store
         self.rerank = rerank
         self.channel_k = channel_k
@@ -124,8 +131,8 @@ def search(
     subject: str,
     query: str,
     *,
-    k: int = CONTEXT_K,
-    rerank: bool = True,
+    k: int | None = None,
+    rerank: bool | None = None,
     embedder=None,
     reranker=None,
 ) -> list[NodeWithScore]:

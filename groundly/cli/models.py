@@ -5,23 +5,65 @@ from typing import Annotated
 
 import typer
 
-from groundly.cli.app import _fail, _not_implemented, config_app, console, models_app
+from groundly.cli.app import _fail, config_app, console, models_app
 
 
 @config_app.callback(invoke_without_command=True)
 def config(ctx: typer.Context) -> None:
     """Show the config file path and effective values per call class (keys masked)."""
-    if ctx.invoked_subcommand is None:
-        _not_implemented("config")
+    if ctx.invoked_subcommand is not None:
+        return
+    from groundly.core.config import (
+        CALL_CLASSES,
+        config_path,
+        load_settings,
+        mask_key,
+        providers_raw,
+    )
+
+    console.print(f"Config: {config_path()}", soft_wrap=True)
+    providers = providers_raw()
+    console.print("\n[bold]Providers[/bold]")
+    for call_class in CALL_CLASSES:
+        section = providers.get(call_class) or {}
+        if section.get("base_url") and section.get("model"):
+            key = mask_key(section.get("api_key", ""))
+            console.print(
+                f"  {call_class}: model={section['model']}  "
+                f"base_url={section['base_url']}  key={key}"
+            )
+        else:
+            console.print(f"  {call_class}: [dim](not configured)[/dim]")
+
+    s = load_settings()
+    console.print("\n[bold]Settings[/bold]")
+    console.print(f"  ingestion.timeout_seconds  = {s.ingestion.timeout_seconds}")
+    console.print(f"  ingestion.max_image_pixels = {s.ingestion.max_image_pixels}")
+    console.print(
+        f"  ingestion.max_file_size_mb = "
+        f"{s.ingestion.max_file_size_mb if s.ingestion.max_file_size_mb else '(unlimited)'}"
+    )
+    console.print(f"  llm.timeout_seconds        = {s.llm.timeout_seconds}")
+    console.print(f"  retrieval.context_k        = {s.retrieval.context_k}")
+    console.print(f"  retrieval.rerank           = {s.retrieval.rerank}")
 
 
 @config_app.command(name="set")
 def config_set(
-    key: Annotated[str, typer.Argument(help="Dotted key, e.g. chat.model or chat.base_url.")],
+    key: Annotated[
+        str,
+        typer.Argument(help="Dotted key, e.g. chat.model, chat.key, ingestion.timeout_seconds."),
+    ],
     value: Annotated[str, typer.Argument(help="Value to set.")],
 ) -> None:
-    """Set a provider config value in ~/.groundly/config.toml."""
-    _not_implemented("config set")
+    """Set a provider or settings value in ~/.groundly/config.toml."""
+    from groundly.core.config import ConfigKeyError, set_key
+
+    try:
+        set_key(key, value)
+    except ConfigKeyError as exc:
+        _fail(str(exc))
+    console.print(f"set {key}")
 
 
 @models_app.command()

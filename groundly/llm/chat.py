@@ -8,11 +8,7 @@ from typing import Protocol
 
 import httpx
 
-from groundly.llm.config import require_provider
-
-# Local runtimes (LM Studio, Ollama) JIT-load the model on first request and can
-# take minutes to first token on weak hardware; httpx's 5 s default aborts them.
-_TIMEOUT = httpx.Timeout(10.0, read=300.0)
+from groundly.llm.config import load_settings, require_provider
 
 
 @dataclass
@@ -46,8 +42,11 @@ def complete(
     cfg = require_provider(call_class)
     headers = {"Authorization": f"Bearer {cfg.api_key}"} if cfg.api_key else {}
     url = f"{cfg.base_url.rstrip('/')}/chat/completions"
+    # Local runtimes (LM Studio, Ollama) JIT-load the model on first request and can
+    # take minutes to first token on weak hardware; httpx's 5 s default aborts them.
+    timeout = httpx.Timeout(10.0, read=load_settings().llm.timeout_seconds)
     try:
-        with httpx.Client(transport=transport, timeout=_TIMEOUT) as client:
+        with httpx.Client(transport=transport, timeout=timeout) as client:
             response = client.post(
                 url, json={"model": cfg.model, "messages": messages}, headers=headers
             )

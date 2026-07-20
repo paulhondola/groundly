@@ -3,24 +3,9 @@
 from pathlib import Path
 
 from groundly.core import store
+from groundly.core.config import Settings, render_config_toml
 from groundly.core.manifest import Manifest
 from groundly.core.paths import subject_dir, groundly_home
-
-_CONFIG_TEMPLATE = """\
-# Groundly provider config — one OpenAI-compatible endpoint per call class.
-# All classes are optional: indexing and search work with no provider at all.
-#
-# [providers.chat]        # ask pipeline generation
-# base_url = "http://localhost:1234/v1"
-# model    = "..."
-# api_key  = "..."
-# input_price_per_mtok  = 0.0   # optional, USD per 1M input tokens — enables cost tracing
-# output_price_per_mtok = 0.0   # optional, USD per 1M output tokens
-#
-# [providers.generation]  # exam/deck generation (thick path)
-# [providers.extraction]  # graphrag entity extraction
-# [providers.router]      # cheap query classifier
-"""
 
 
 class Subject:
@@ -69,7 +54,7 @@ class Subject:
 
         config_path = groundly_home() / "config.toml"
         if not config_path.exists():
-            config_path.write_text(_CONFIG_TEMPLATE)
+            config_path.write_text(render_config_toml({}, Settings()))
         return True
 
     def load_manifest(self) -> Manifest:
