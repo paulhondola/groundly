@@ -2,6 +2,65 @@
 
 Expands [`groundly-spec.md`](../groundly-spec.md) §5b. Governing rule: **agents only where the system must decide, iterate, or use tools mid-task** — everything else is a pipeline. Specialization is data, never code: "which subject" is literally which `~/.groundly/<SUBJECT>/` directory is open. Loops are **plain bounded async functions** — LangGraph was dropped when the roster shrank (consolidation pass).
 
+## Actors and actions
+
+Groundly connects student workflows and host-agent workflows through a shared
+retrieval, generation, verification, and storage layer.
+
+```mermaid
+flowchart LR
+    student[Student / operator]
+    host[Host AI agent]
+    provider[Configured chat provider]
+
+    subgraph Groundly[Groundly actions]
+        init[init, list, index, remove]
+        share[import, export]
+        discover[list_subjects]
+        search[search]
+        ask[ask]
+        page[get_page or citation resource]
+        retrieve[Retrieval orchestration]
+        vector[Vector baseline]
+        generate[Grounded chat generation]
+        citations[Citation validation and resolution]
+        stores[(Subject stores)]
+        gph[GraphRAG local/global retrieval]
+        deck[generate_deck / generate_quiz]
+        submit[submit_cards / submit_questions]
+        verify[Exam verifier\nincluding code execution]
+        exportdeck[export_deck]
+    end
+
+    student --> init --> stores
+    student --> share --> stores
+    student --> ask
+    student --> search
+    host --> discover
+    host --> search
+    host --> ask
+    host --> page
+    discover --> stores
+    search --> retrieve --> stores
+    page --> stores
+    ask --> retrieve
+    ask --> generate --> provider
+    generate --> citations --> stores
+    host --> submit
+    student --> deck
+    deck --> verify
+    submit --> verify
+    verify -->|approved items| stores
+    stores -->|decks| exportdeck
+    vector --> retrieve
+    gph --> retrieve
+```
+
+`search` is a raw, read-only retrieval action; `ask` adds generation and citation
+resolution. Ingestion, sharing, generation, and verification contribute to the subject
+bundle, while removal is destructive and requires confirmation unless explicitly
+bypassed from the CLI.
+
 ## The roster (two)
 
 ### 1. Ask pipeline — interactive
