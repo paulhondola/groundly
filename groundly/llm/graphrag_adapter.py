@@ -32,9 +32,9 @@ class Bgem3GraphEmbedding(LLMEmbedding):
     cheap beyond the one extraction cost). Dense vectors only: graphrag's embedding
     store only needs similarity, not our sparse channel.
 
-    `embedder` mirrors VectorRetriever's lazy-singleton pattern (retrieval/vector.py):
-    None in production (lazily constructs the real BgeM3Embedder on first use), or a
-    stub injected by tests.
+    `embedder` mirrors VectorRetriever's pattern (retrieval/vector.py): None in
+    production (lazily resolves to the process-wide `shared_embedder()` singleton on
+    first use, same resident model VectorRetriever uses), or a stub injected by tests.
     """
 
     def __init__(
@@ -55,9 +55,9 @@ class Bgem3GraphEmbedding(LLMEmbedding):
     @property
     def embedder(self):
         if self._embedder is None:
-            from groundly.llm.embeddings import BgeM3Embedder
+            from groundly.llm.embeddings import shared_embedder
 
-            self._embedder = BgeM3Embedder()
+            self._embedder = shared_embedder()
         return self._embedder
 
     def embedding(self, /, **kwargs):

@@ -19,13 +19,13 @@ STORE_USER_VERSION = 1
 _TRACES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS traces (
     id INTEGER PRIMARY KEY,
-    kind TEXT NOT NULL CHECK (kind IN ('ask', 'search')),
+    kind TEXT NOT NULL CHECK (kind IN ('ask', 'search', 'index')),
     query TEXT NOT NULL,
     router_label TEXT,
     arm TEXT,
     path TEXT,       -- JSON array, e.g. ["dense","sparse","bm25","rrf","rerank"]
     chunk_ids TEXT,  -- JSON array of retrieved chunk ids
-    outcome TEXT NOT NULL CHECK (outcome IN ('answered', 'refused', 'error', 'results')),
+    outcome TEXT NOT NULL CHECK (outcome IN ('answered', 'refused', 'error', 'results', 'built')),
     answer TEXT,
     citations TEXT,  -- JSON array of {chunk_id, filename, page, heading_path}
     model TEXT,

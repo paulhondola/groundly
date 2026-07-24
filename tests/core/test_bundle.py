@@ -10,7 +10,8 @@ from typer.testing import CliRunner
 
 from groundly.cli import app
 from groundly.core import bundle, store
-from groundly.core.manifest import EMBEDDING_DIM, HF_REVISION, Manifest, sync_counts
+from groundly.core.manifest import EMBEDDING_DIM, HF_REVISION, Graphrag, Manifest, sync_counts
+from groundly.ingestion.graph import corpus_hash as _real_corpus_hash
 from groundly.core.paths import groundly_home, subject_dir
 from groundly.core.store import SQLiteSubjectStore
 from groundly.core.subject import Subject, init_subject
@@ -65,6 +66,24 @@ def _zip_with_entry(path, entry_name, content=b"x", symlink=False):
         else:
             zf.writestr(entry_name, content)
     return path
+
+
+def _seed_graph(name, matches_corpus=True):
+    """Stamp a fake graph/ dir + manifest.graphrag for `name`, recorded against either
+    the subject's real corpus_hash (a trustworthy build) or an unrelated stale one
+    (simulating a tampered/stale bundle)."""
+    sdir = subject_dir(name)
+    graph_dir = sdir / "graph"
+    graph_dir.mkdir(exist_ok=True)
+    (graph_dir / "entities.parquet").write_bytes(b"parquet data")
+    manifest = Manifest.load(sdir / "manifest.json")
+    store_obj = SQLiteSubjectStore(sdir / "store.db")
+    manifest.graphrag = Graphrag(
+        version="3.1.0",
+        extraction_model="m",
+        corpus_hash=_real_corpus_hash(store_obj) if matches_corpus else "stale-hash-xyz",
+    )
+    manifest.save(sdir / "manifest.json")
 
 
 def _rewrite_zip_manifest(bundle_path, **embedding_overrides):
@@ -132,6 +151,35 @@ def test_export_excludes_orphan_material_with_no_store_row(tmp_path, monkeypatch
     assert "materials/leaked-secret.pdf" not in names  # orphan does not leak
 
 
+def test_export_excludes_graph_cache_and_logs_but_ships_other_graph_artifacts(
+    tmp_path, monkeypatch
+):
+    """graph/cache/ (graphrag's own incremental-rebuild cache) and graph/logs/
+    (operational debug output) are unneeded bloat in a portable bundle — everything
+    else under graph/ (parquet artifacts, lancedb/) still ships."""
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed("PDSS")
+    graph_dir = subject_dir("PDSS") / "graph"
+    (graph_dir / "cache").mkdir(parents=True)
+    (graph_dir / "cache" / "entry.json").write_text("cached llm response")
+    (graph_dir / "logs").mkdir(parents=True)
+    (graph_dir / "logs" / "indexing-engine.log").write_text("debug log line")
+    (graph_dir / "lancedb").mkdir(parents=True)
+    (graph_dir / "lancedb" / "entities.lance").write_bytes(b"vector store data")
+    (graph_dir / "entities.parquet").write_bytes(b"parquet data")
+
+    out_path = tmp_path / "PDSS.groundly"
+    bundle.export_subject(Subject("PDSS"), out_path)
+
+    with zipfile.ZipFile(out_path) as zf:
+        names = zf.namelist()
+    assert not any(n.startswith("graph/cache/") for n in names)
+    assert not any(n.startswith("graph/logs/") for n in names)
+    assert "graph/entities.parquet" in names
+    assert "graph/lancedb/entities.lance" in names
+
+
 # --- AC2: embedding pin mismatch triggers re-embed --------------------------------
 
 
@@ -164,6 +212,65 @@ def test_import_pin_mismatch_confirm_no_installs_nothing(tmp_path, monkeypatch):
     assert result.exit_code != 0
     assert not Subject("PDSS_C").exists()
     assert not any((groundly_home() / ".imports").glob("*"))
+
+
+# --- Security fix: imported graph/ validated against store.db's corpus_hash ------
+
+
+def test_import_graph_with_matching_corpus_hash_survives(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed("PDSS")
+    _seed_graph("PDSS", matches_corpus=True)
+    bundle_path = tmp_path / "PDSS.groundly"
+    runner.invoke(app, ["export", "PDSS", "-o", str(bundle_path)])
+
+    _use_home(monkeypatch, tmp_path / "b")
+    result = runner.invoke(app, ["import", str(bundle_path)])
+    assert result.exit_code == 0, result.output
+
+    subj = Subject("PDSS")
+    assert (subj.root_dir / "graph" / "entities.parquet").exists()
+    assert subj.load_manifest().graphrag.corpus_hash is not None
+
+
+def test_import_graph_with_mismatched_corpus_hash_dropped_import_still_succeeds(
+    tmp_path, monkeypatch
+):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed("PDSS")
+    _seed_graph("PDSS", matches_corpus=False)  # tampered/stale: doesn't match store.db
+    bundle_path = tmp_path / "PDSS.groundly"
+    runner.invoke(app, ["export", "PDSS", "-o", str(bundle_path)])
+
+    _use_home(monkeypatch, tmp_path / "b")
+    result = runner.invoke(app, ["import", str(bundle_path)])
+    assert result.exit_code == 0, result.output  # not a fatal error
+    assert "dropped the imported" in result.output
+
+    subj = Subject("PDSS")
+    assert not (subj.root_dir / "graph").exists()
+    assert subj.load_manifest().graphrag == Graphrag()
+
+
+def test_import_pin_mismatch_drops_graph_after_reembed(tmp_path, monkeypatch, stub_embedder):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed("PDSS")
+    _seed_graph("PDSS", matches_corpus=True)  # a legitimately matching graph...
+    bundle_path = tmp_path / "PDSS.groundly"
+    runner.invoke(app, ["export", "PDSS", "-o", str(bundle_path)])
+    _rewrite_zip_manifest(bundle_path, hf_revision="stale-revision")  # ...under the old pin
+
+    monkeypatch.setattr("groundly.llm.embeddings.BgeM3Embedder", stub_embedder)
+    result = runner.invoke(app, ["import", str(bundle_path), "--as", "PDSS_B"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert "dropped the imported" in result.output
+
+    subj = Subject("PDSS_B")
+    assert not (subj.root_dir / "graph").exists()
+    assert subj.load_manifest().graphrag == Graphrag()
 
 
 # --- AC3: hostile bundle rejected + structural privacy ----------------------------

@@ -295,7 +295,7 @@ def _stub_build_graph(monkeypatch):
 
     calls = []
 
-    def fake_build_graph(subj, store_obj):
+    def fake_build_graph(subj, store_obj, *, estimated_tokens=0, estimated_cost_usd=None):
         calls.append(subj.name)
         (subj.root_dir / "graph").mkdir(exist_ok=True)
         manifest = subj.load_manifest()
@@ -410,6 +410,35 @@ def test_index_graph_declining_confirmation_aborts_without_building(monkeypatch,
     assert not (sdir / "graph").exists()
 
 
+def test_index_stale_graph_rebuild_fails_cleanly_without_extraction_provider(
+    monkeypatch, home, tmp_path
+):
+    """build_graph's require_provider("extraction") call runs before its own
+    try/except (fail fast, by design) — a ProviderNotConfiguredError on the
+    auto-rebuild-a-stale-graph path (no --graph flag needed) must still be caught
+    and named, not propagate raw past _maybe_build_graph."""
+    from groundly.core.manifest import Graphrag
+    from groundly.core.subject import Subject
+
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+
+    (sdir / "graph").mkdir()
+    subj = Subject("PDSS")
+    manifest = subj.load_manifest()
+    manifest.graphrag = Graphrag(version="3.1.0", extraction_model="m", corpus_hash="stale-hash")
+    subj.save_manifest(manifest)
+
+    result = runner.invoke(app, ["index", "PDSS", str(f), "--yes"])
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert "[providers.extraction]" in result.output
+
+
 def test_index_graph_build_error_fails_cleanly(monkeypatch, home, tmp_path):
     from groundly.ingestion import graph as ingestion_graph
     from groundly.ingestion.graph import GraphBuildError
@@ -421,7 +450,7 @@ def test_index_graph_build_error_fails_cleanly(monkeypatch, home, tmp_path):
     f.write_text("content")
     _stub_index_paths(monkeypatch, f)
 
-    def failing_build_graph(subj, store_obj):
+    def failing_build_graph(subj, store_obj, *, estimated_tokens=0, estimated_cost_usd=None):
         raise GraphBuildError("boom")
 
     monkeypatch.setattr(ingestion_graph, "build_graph", failing_build_graph)

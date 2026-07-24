@@ -68,9 +68,9 @@ class VectorRetriever(BaseRetriever):
     @property
     def embedder(self):
         if self._embedder is None:
-            from groundly.llm.embeddings import BgeM3Embedder
+            from groundly.llm.embeddings import shared_embedder
 
-            self._embedder = BgeM3Embedder()
+            self._embedder = shared_embedder()
         return self._embedder
 
     @property

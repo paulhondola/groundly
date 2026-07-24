@@ -22,7 +22,7 @@ from graphrag_storage import StorageConfig
 from graphrag_vectors import VectorStoreConfig
 
 from groundly.core.manifest import EMBEDDING_DIM, Graphrag
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SQLiteSubjectStore, connect_progress, record_trace
 from groundly.core.subject import Subject
 from groundly.llm.config import require_provider
 from groundly.llm.graphrag_adapter import (
@@ -87,10 +87,20 @@ def _build_config(subj: Subject) -> GraphRagConfig:
     )
 
 
-def build_graph(subj: Subject, store: SQLiteSubjectStore) -> None:
+def build_graph(
+    subj: Subject,
+    store: SQLiteSubjectStore,
+    *,
+    estimated_tokens: int = 0,
+    estimated_cost_usd: float | None = None,
+) -> None:
     """Batch build graphrag's graph for a subject (parquet artifacts + a LanceDB
     vector store under <subject>/graph/). Cost-estimate confirmation is the CLI's
-    job, not this module's — ingestion never does interactive I/O."""
+    job, not this module's — ingestion never does interactive I/O.
+
+    `estimated_tokens`/`estimated_cost_usd` are the CLI's already-computed
+    `graphrag_adapter.estimate_cost()` figures, threaded through so this function
+    doesn't recompute them — recorded into progress.db as a trace row on success."""
     provider_cfg = require_provider("extraction")  # fail fast, before any chunk enumeration
 
     try:
@@ -119,3 +129,22 @@ def build_graph(subj: Subject, store: SQLiteSubjectStore) -> None:
         corpus_hash=corpus_hash(store),
     )
     subj.save_manifest(manifest)
+
+    # This is the pre-build heuristic estimate (chars // 4), not metered actual usage —
+    # graphrag's own internal extraction LLM calls aren't instrumented through llm/, so
+    # exact tokens/cost are unknowable here (see retrieval/graph.py's module docstring
+    # for the query-side equivalent gap).
+    conn = connect_progress(subj.progress_db_path)
+    try:
+        record_trace(
+            conn,
+            kind="index",
+            query="",
+            outcome="built",
+            arm="graph-build",
+            model=provider_cfg.model,
+            tokens=estimated_tokens,
+            cost_usd=estimated_cost_usd,
+        )
+    finally:
+        conn.close()

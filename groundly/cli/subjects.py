@@ -135,6 +135,7 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool) -> None:
     neither applies."""
     from groundly.core.store import SQLiteSubjectStore
     from groundly.ingestion.graph import GraphBuildError, build_graph, graph_is_stale
+    from groundly.llm.config import ProviderNotConfiguredError
     from groundly.llm.graphrag_adapter import estimate_cost
 
     store_obj = SQLiteSubjectStore(subj.store_db_path)
@@ -161,8 +162,8 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool) -> None:
         typer.confirm(prompt, abort=True)
 
     try:
-        build_graph(subj, store_obj)
-    except GraphBuildError as exc:
+        build_graph(subj, store_obj, estimated_tokens=tokens, estimated_cost_usd=cost)
+    except (GraphBuildError, ProviderNotConfiguredError) as exc:
         _fail(str(exc))
     console.print(f"Graph built for [bold]{subj.name}[/bold]")
 

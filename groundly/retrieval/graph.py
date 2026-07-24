@@ -19,6 +19,11 @@ we join the reports actually used as the map-reduce's context back to their
 member entities (via graphrag's own `read_indexer_entities`, same community
 join it uses internally) and those entities' contributing text units, then
 resolve text units to chunk_ids the same way as local search.
+
+Known gap: the synthesis LLM call graphrag makes internally inside `local_search`/
+`global_search` is NOT traced/metered by Groundly — graphrag's own LiteLLM client
+doesn't report usage back through our `llm/` layer, so this call is invisible to the
+traces table (a framework-boundary limitation, not something this module fixes).
 """
 
 import asyncio
@@ -44,10 +49,14 @@ from groundly.llm.graphrag_adapter import (
     register_bge_m3_embedding,
 )
 
-# Matches graphrag CLI's own default (`--community-level`, graphrag/cli/main.py) and
-# ingestion/graph.py's build-time config — query and build must agree on model ids.
+# Matches graphrag CLI's own default (`--community-level`, graphrag/cli/main.py). This
+# is a level *ceiling*, not an exact match (`df[df.level <= community_level]` —
+# confirmed via graphrag's `_filter_under_community_level`): build and query disagreeing
+# here is harmless, a smaller value just means less breadth, never empty/broken results.
 COMMUNITY_LEVEL = 2
 RESPONSE_TYPE = "multiple paragraphs"
+# Unlike COMMUNITY_LEVEL above, query and build MUST agree on these — they're the keys
+# graphrag looks up completion_models/embedding_models by; a mismatch fails the lookup.
 _COMPLETION_MODEL_ID = "default_completion_model"
 _EMBEDDING_MODEL_ID = "default_embedding_model"
 

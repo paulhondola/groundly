@@ -165,6 +165,34 @@ def test_build_graph_feeds_input_documents_and_records_manifest(subj, store, hom
     assert manifest.graphrag.version  # graphrag's installed package version
 
 
+def test_build_graph_records_one_index_trace_row_on_success(subj, store, home, monkeypatch):
+    from groundly.core.store import connect_progress
+
+    _configure_extraction(home)
+    _add_material(store, "a.pdf", "a" * 64)
+
+    async def fake_build_index(config, input_documents=None):
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+
+    build_graph(subj, store, estimated_tokens=123, estimated_cost_usd=0.0045)
+
+    conn = connect_progress(subj.progress_db_path)
+    try:
+        rows = conn.execute("SELECT * FROM traces").fetchall()
+    finally:
+        conn.close()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["kind"] == "index"
+    assert row["outcome"] == "built"
+    assert row["arm"] == "graph-build"
+    assert row["model"] == "gpt-4o-mini"
+    assert row["tokens"] == 123
+    assert row["cost_usd"] == 0.0045
+
+
 def test_build_graph_wraps_failure_in_graph_build_error(subj, store, home, monkeypatch):
     _configure_extraction(home)
     _add_material(store, "a.pdf", "a" * 64)
