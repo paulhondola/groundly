@@ -250,3 +250,183 @@ def test_remove_whole_subject_aborts_without_confirmation():
 )
 def test_bad_usage_is_usage_error(args):
     assert runner.invoke(app, args).exit_code == 2
+
+
+# --- index --graph / --yes -----------------------------------------------------------
+# `pipeline.index_paths` is stubbed (as above) — these tests only exercise the graph
+# build trigger/confirm/skip logic that runs after it, so `build_graph` itself is also
+# stubbed (real graphrag never runs in tests). The fake mimics build_graph's real
+# side effects (create graph/, stamp manifest.graphrag) closely enough that the
+# staleness/no-rebuild logic on a second `index` run is exercised for real.
+
+
+def _seed_material(sdir, filename, sha256, text="some chunk text"):
+    from groundly.core import store
+
+    conn = store.connect(sdir / "store.db")
+    with conn:
+        cur = conn.execute(
+            "INSERT INTO materials (filename, sha256, status) VALUES (?, ?, 'indexed')",
+            (filename, sha256),
+        )
+        conn.execute(
+            "INSERT INTO chunks (material_id, page, heading_path, text, token_count) "
+            "VALUES (?, 1, 'h', ?, 3)",
+            (cur.lastrowid, text),
+        )
+    conn.close()
+
+
+def _stub_index_paths(monkeypatch, f):
+    def fake_index_paths(
+        subject, paths, embedder=None, on_event=None, on_discovered=None, ocr_lang=None
+    ):
+        return [FileResult(f, Status.INDEXED, chunks=1)]
+
+    monkeypatch.setattr(pipeline, "index_paths", fake_index_paths)
+
+
+def _stub_build_graph(monkeypatch):
+    """Records each call and mimics build_graph's real success side effects (graph/
+    directory + manifest.graphrag stamped with the current corpus hash) so a later
+    `index` run's staleness check behaves like it would against a real build."""
+    from groundly.core.manifest import Graphrag
+    from groundly.ingestion import graph as ingestion_graph
+
+    calls = []
+
+    def fake_build_graph(subj, store_obj):
+        calls.append(subj.name)
+        (subj.root_dir / "graph").mkdir(exist_ok=True)
+        manifest = subj.load_manifest()
+        manifest.graphrag = Graphrag(
+            version="3.1.0",
+            extraction_model="m",
+            corpus_hash=ingestion_graph.corpus_hash(store_obj),
+        )
+        subj.save_manifest(manifest)
+
+    monkeypatch.setattr(ingestion_graph, "build_graph", fake_build_graph)
+    return calls
+
+
+def test_index_graph_flag_triggers_first_build(monkeypatch, home, tmp_path):
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+    calls = _stub_build_graph(monkeypatch)
+
+    result = runner.invoke(app, ["index", "PDSS", str(f), "--graph", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert calls == ["PDSS"]
+    assert (sdir / "graph").exists()
+    assert "Graph built" in result.output
+
+
+def test_index_without_graph_flag_or_existing_graph_does_nothing(monkeypatch, home, tmp_path):
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+    calls = _stub_build_graph(monkeypatch)
+
+    result = runner.invoke(app, ["index", "PDSS", str(f)])
+    assert result.exit_code == 0, result.output
+    assert calls == []
+    assert not (sdir / "graph").exists()
+
+
+def test_index_unchanged_corpus_does_not_rebuild(monkeypatch, home, tmp_path):
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+    calls = _stub_build_graph(monkeypatch)
+
+    runner.invoke(app, ["index", "PDSS", str(f), "--graph", "--yes"])
+    assert calls == ["PDSS"]
+
+    result = runner.invoke(app, ["index", "PDSS", str(f)])  # no --graph, no --yes needed
+    assert result.exit_code == 0, result.output
+    assert calls == ["PDSS"]  # no second build
+
+
+def test_index_corpus_change_auto_rebuilds_without_graph_flag(monkeypatch, home, tmp_path):
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+    calls = _stub_build_graph(monkeypatch)
+
+    runner.invoke(app, ["index", "PDSS", str(f), "--graph", "--yes"])
+    assert calls == ["PDSS"]
+
+    _seed_material(sdir, "b.pdf", "b" * 64)  # corpus changed after the first build
+    result = runner.invoke(app, ["index", "PDSS", str(f), "--yes"])  # no --graph needed
+    assert result.exit_code == 0, result.output
+    assert calls == ["PDSS", "PDSS"]  # auto-rebuilt without needing --graph again
+
+
+def test_index_corpus_change_prompts_with_stale_message_without_yes(monkeypatch, home, tmp_path):
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+    calls = _stub_build_graph(monkeypatch)
+
+    runner.invoke(app, ["index", "PDSS", str(f), "--graph", "--yes"])
+    assert calls == ["PDSS"]
+
+    _seed_material(sdir, "b.pdf", "b" * 64)
+    result = runner.invoke(app, ["index", "PDSS", str(f)], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert calls == ["PDSS", "PDSS"]
+    assert "stale" in result.output.lower()
+
+
+def test_index_graph_declining_confirmation_aborts_without_building(monkeypatch, home, tmp_path):
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+    calls = _stub_build_graph(monkeypatch)
+
+    result = runner.invoke(app, ["index", "PDSS", str(f), "--graph"], input="n\n")
+    assert result.exit_code != 0
+    assert calls == []
+    assert not (sdir / "graph").exists()
+
+
+def test_index_graph_build_error_fails_cleanly(monkeypatch, home, tmp_path):
+    from groundly.ingestion import graph as ingestion_graph
+    from groundly.ingestion.graph import GraphBuildError
+
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+
+    def failing_build_graph(subj, store_obj):
+        raise GraphBuildError("boom")
+
+    monkeypatch.setattr(ingestion_graph, "build_graph", failing_build_graph)
+
+    result = runner.invoke(app, ["index", "PDSS", str(f), "--graph", "--yes"])
+    assert result.exit_code == 1
+    assert "boom" in result.output
+    assert not (sdir / "graph").exists()
