@@ -1,8 +1,8 @@
-"""The MCP tool surface (P4 v1): `list_subjects`, `search`, `ask`, `get_page`, plus a
-citation resource template — thin wrappers over the same functions `groundly` CLI
-verbs call (docs/superpowers/specs/2026-07-18-mcp-skeleton-design.md). No heavy
-imports at module top: service imports live inside tool/resource bodies so host
-spawn -> handshake is fast and bge-m3/torch load lazily on first `search`/`ask`
+"""The MCP tool surface: `list_subjects`, `search`, `ask`, `drill_down`, `overview`,
+`get_page`, plus a citation resource template — thin wrappers over the same functions
+`groundly` CLI verbs call (docs/superpowers/specs/2026-07-18-mcp-skeleton-design.md).
+No heavy imports at module top: service imports live inside tool/resource bodies so
+host spawn -> handshake is fast and bge-m3/torch load lazily on first `search`/`ask`
 (.claude/rules/architecture.md).
 """
 
@@ -126,6 +126,97 @@ def ask(subject: str, query: str) -> dict:
             }
             for c in result.citations
         ],
+    }
+
+
+@mcp.tool
+def drill_down(subject: str, entity: str) -> dict:
+    """Entity-anchored deep dive: multi-hop graph search anchored on one specific
+    `entity`, producing a cited answer drawn from `subject`'s knowledge graph rather
+    than plain vector retrieval. Use this instead of `ask`/`search` when the question
+    is about how one entity connects to others (multi-hop), not a single fact.
+    Requires the subject's graph to be built — check `graph_built` via `list_subjects`
+    first, and run `groundly index --graph` if it's false. Needs a configured chat
+    provider, same as `ask`."""
+    from groundly.agents.citations import NoCitationsError
+    from groundly.agents.study_modes import drill_down as drill_down_fn
+    from groundly.llm.chat import ChatUnreachableError
+    from groundly.llm.config import ProviderNotConfiguredError
+    from groundly.llm.embeddings import ModelDownloadError
+    from groundly.retrieval.graph import GraphNotBuiltError
+
+    _subject_or_error(subject, ToolError)
+    try:
+        result = drill_down_fn(subject, entity)
+    except GraphNotBuiltError as exc:
+        raise ToolError(str(exc)) from exc
+    except ProviderNotConfiguredError as exc:
+        raise ToolError(
+            f"drill_down needs a configured chat provider; search works without one — {exc}"
+        ) from exc
+    except NoCitationsError as exc:
+        raise ToolError(str(exc)) from exc
+    except (ModelDownloadError, ChatUnreachableError) as exc:
+        raise ToolError(str(exc)) from exc
+
+    return {
+        "answer": result.answer,
+        "citations": [
+            {
+                "chunk_id": c.chunk_id,
+                "filename": c.filename,
+                "page": c.page,
+                "heading_path": c.heading_path,
+                "uri": _citation_uri(subject, c.filename, c.page),
+            }
+            for c in result.citations
+        ],
+    }
+
+
+@mcp.tool
+def overview(subject: str, topic: str) -> dict:
+    """Course-wide synthesis: community-summary global search over `subject`'s
+    knowledge graph, producing a cited answer about `topic` plus the graph communities
+    consulted to build it. Use this instead of `ask`/`drill_down` when the question is
+    broad or thematic (e.g. "what does this course cover about X") rather than anchored
+    on one entity. Requires the subject's graph to be built — check `graph_built` via
+    `list_subjects` first, and run `groundly index --graph` if it's false. Needs a
+    configured chat provider, same as `ask`."""
+    from groundly.agents.citations import NoCitationsError
+    from groundly.agents.study_modes import overview as overview_fn
+    from groundly.llm.chat import ChatUnreachableError
+    from groundly.llm.config import ProviderNotConfiguredError
+    from groundly.llm.embeddings import ModelDownloadError
+    from groundly.retrieval.graph import GraphNotBuiltError
+
+    _subject_or_error(subject, ToolError)
+    try:
+        result = overview_fn(subject, topic)
+    except GraphNotBuiltError as exc:
+        raise ToolError(str(exc)) from exc
+    except ProviderNotConfiguredError as exc:
+        raise ToolError(
+            f"overview needs a configured chat provider; search works without one — {exc}"
+        ) from exc
+    except NoCitationsError as exc:
+        raise ToolError(str(exc)) from exc
+    except (ModelDownloadError, ChatUnreachableError) as exc:
+        raise ToolError(str(exc)) from exc
+
+    return {
+        "answer": result.answer,
+        "citations": [
+            {
+                "chunk_id": c.chunk_id,
+                "filename": c.filename,
+                "page": c.page,
+                "heading_path": c.heading_path,
+                "uri": _citation_uri(subject, c.filename, c.page),
+            }
+            for c in result.citations
+        ],
+        "communities": result.communities,
     }
 
 
