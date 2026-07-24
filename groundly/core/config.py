@@ -52,7 +52,7 @@ class IngestionSettings(BaseModel):
 
 
 class LlmSettings(BaseModel):
-    timeout_seconds: float = 300  # flat litellm request timeout — llm/chat.py
+    timeout_seconds: float = 300  # read timeout — llm/chat.py (connect stays 10s)
 
 
 class RetrievalSettings(BaseModel):
@@ -241,7 +241,7 @@ def render_config_toml(providers: dict, settings: Settings) -> str:
     lines += [
         "",
         "[llm]",
-        f"timeout_seconds = {_toml_value(settings.llm.timeout_seconds)}   # litellm request timeout for provider calls; local models can be slow to first token",
+        f"timeout_seconds = {_toml_value(settings.llm.timeout_seconds)}   # read timeout for provider calls; local models can be slow to first token",
         "",
         "[retrieval]",
         f"context_k = {_toml_value(settings.retrieval.context_k)}   # chunks assembled into the answer / prompt",

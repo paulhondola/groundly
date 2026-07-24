@@ -4,6 +4,7 @@ litellm's own object (the seam chat.py's lazy `import litellm` resolves against)
 
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from groundly.llm.chat import ChatUnreachableError, complete
@@ -124,7 +125,9 @@ def test_complete_keyless_provider_gets_placeholder_key(monkeypatch, tmp_path, h
     assert capture["api_key"] == "not-needed"
 
 
-def test_complete_passes_timeout_from_settings(monkeypatch, tmp_path, home):
+def test_complete_passes_split_timeout_from_settings(monkeypatch, tmp_path, home):
+    # 10s connect (a dead host fails fast) + configurable read (local models are
+    # slow to first token) — litellm passes httpx.Timeout through unchanged.
     (home / "config.toml").write_text(
         '[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "m"\n'
         "\n[llm]\ntimeout_seconds = 123.0\n"
@@ -132,7 +135,10 @@ def test_complete_passes_timeout_from_settings(monkeypatch, tmp_path, home):
     capture = {}
     _stub_completion(monkeypatch, _response(), capture=capture)
     complete("chat", [{"role": "user", "content": "hi"}])
-    assert capture["timeout"] == 123.0
+    timeout = capture["timeout"]
+    assert isinstance(timeout, httpx.Timeout)
+    assert timeout.read == 123.0
+    assert timeout.connect == 10.0
 
 
 def test_complete_unreachable_names_cause(monkeypatch, home):

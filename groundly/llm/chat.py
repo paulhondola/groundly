@@ -14,6 +14,8 @@ import os
 from dataclasses import dataclass
 from typing import Protocol
 
+import httpx
+
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 from groundly.llm.config import load_settings, require_provider
@@ -50,7 +52,10 @@ def complete(call_class: str, messages: list[dict]) -> ChatResult:
             messages=messages,
             api_base=cfg.base_url,
             api_key=cfg.api_key or _LOCAL_PLACEHOLDER_KEY,
-            timeout=load_settings().llm.timeout_seconds,
+            # Local runtimes (LM Studio, Ollama) JIT-load the model on first request
+            # and can take minutes to first token; a dead host should still fail fast —
+            # 10s connect, configurable read (litellm passes httpx.Timeout through).
+            timeout=httpx.Timeout(10.0, read=load_settings().llm.timeout_seconds),
         )
     except openai.APIError as exc:
         # Every litellm exception raised by completion() (connection failures,

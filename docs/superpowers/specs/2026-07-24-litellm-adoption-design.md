@@ -50,7 +50,7 @@ Add `litellm` as a direct pinned dependency at the already-resolved version (no 
 - `docs/groundly-spec.md` §7: new decision entry — litellm adopted as the LLM client inside `llm/` (already installed transitively via graphrag; zero new installs; automatic cost tracing for mapped models; `LITELLM_LOCAL_MODEL_COST_MAP=True` is load-bearing for privacy; manual price fields become an override for local/unmapped models). Reverses chat.py's "raw httpx, no SDK" rationale.
 - `.claude/rules/architecture.md` + `docs/tech-stack/tech-stack.md`: amend the "exactly three frameworks" / "no provider SDK" wording — litellm is the provider *client* inside `llm/` (graphrag's own transitive dep), not a fourth orchestration framework; the OpenAI-compatible `base_url`+`model`+`key` config shape is unchanged.
 - `chat.py` module docstring rewritten to match reality.
-- `groundly/core/config.py` template comments + `llm.timeout_seconds` comment (no longer "httpx read timeout"; note the single flat timeout, losing the separate 10 s connect timeout).
+- `groundly/core/config.py` template comments + `llm.timeout_seconds` comment. (Amended post-implementation: the split timeout is kept — litellm accepts `httpx.Timeout` directly, so 10 s connect + configurable read pass through unchanged.)
 - `docs/guides/lm-studio.md` + `docs/guides/graphrag-provider.md`: price fields now optional for litellm-mapped cloud models (auto-priced); still needed for local/unmapped models if you want cost figures.
 
 ## Non-changes (explicitly out of scope)
