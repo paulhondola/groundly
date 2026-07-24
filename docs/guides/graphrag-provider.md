@@ -6,12 +6,15 @@ your indexed materials. Extraction is a real LLM call per chunk — this is the
 one call class that needs a specific kind of provider, not just any
 configured endpoint.
 
-## Why extraction can't be a small local model
+## Why extraction shouldn't be a small local model
 
-Groundly's `extraction` call class exists specifically for this. Unlike
-`chat` (which LM Studio/Ollama handle fine for `ask`), a weak extraction
-model produces a bad graph — sparse or wrong entities, garbled relationships —
-and a bad graph silently invalidates the whole point of having one. The rule
+LM Studio/Ollama work mechanically for `extraction` — it's the same
+OpenAI-compatible `base_url`+`model`+`key` shape as every other call class,
+and an unset key is fine (Groundly passes a placeholder graphrag's own
+config validation requires, same as any local provider). But a weak
+extraction model produces a bad graph — sparse or wrong entities, garbled
+relationships — and a bad graph silently invalidates the whole point of
+having one. The rule
 is: extraction needs a mid-tier cloud model, never a small local model. If
 you don't want to spend on this, skip `--graph` entirely — the vector arm
 works with zero API key, and `groundly index` (without `--graph`) is
