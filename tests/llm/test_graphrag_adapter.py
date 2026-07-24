@@ -59,6 +59,19 @@ def test_completion_model_config_fails_fast_when_unconfigured(home):
         completion_model_config()
 
 
+def test_completion_model_config_local_provider_gets_placeholder_key(home):
+    # LM Studio/Ollama: no api_key configured, but graphrag's ModelConfig rejects an
+    # empty one outright — a local provider still needs *some* truthy placeholder.
+    (home / "config.toml").write_text(
+        "[providers.extraction]\n"
+        'base_url = "http://localhost:1234/v1"\n'
+        'model = "gemma-4-12b-qat"\n'
+        'api_key = ""\n'
+    )
+    cfg = completion_model_config()  # must not raise ModelConfig's own validation error
+    assert cfg.api_key
+
+
 # --- Bgem3GraphEmbedding -------------------------------------------------------------
 
 

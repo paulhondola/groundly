@@ -14,15 +14,24 @@ from groundly.llm.config import load_provider, require_provider
 BGE_M3_EMBEDDING_TYPE = "bge_m3"
 
 
+_LOCAL_PLACEHOLDER_KEY = "not-needed"  # LM Studio/Ollama ignore the Authorization header
+
+
 def completion_model_config() -> ModelConfig:
     """Build graphrag's ModelConfig from Groundly's `extraction` provider. Fails fast
-    (via require_provider) — the graph build has no zero-key path."""
+    (via require_provider) — a *configured* provider is always required, but not
+    necessarily a real API key: graphrag's own ModelConfig validator rejects an empty
+    api_key outright (unlike Groundly's own llm/chat.py, which just omits the
+    Authorization header when `cfg.api_key` is empty), so a local/keyless provider
+    (LM Studio, Ollama) needs a truthy placeholder here to pass that validation — the
+    placeholder is never checked by a local server, same as the empty-header path
+    already works for every other call class."""
     cfg = require_provider("extraction")
     return ModelConfig(
         model_provider="openai",
         model=cfg.model,
         api_base=cfg.base_url,
-        api_key=cfg.api_key,
+        api_key=cfg.api_key or _LOCAL_PLACEHOLDER_KEY,
     )
 
 
