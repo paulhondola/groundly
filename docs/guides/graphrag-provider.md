@@ -28,9 +28,11 @@ groundly config set extraction.model <mid-tier-model>
 groundly config set extraction.key <your-api-key>
 ```
 
-The optional cost-tracing fields are worth setting too — without them,
-`groundly index --graph` still prompts for confirmation before building, but
-can't show you a dollar estimate first:
+If `<mid-tier-model>` is in litellm's bundled price map (most mainstream cloud
+models are), cost tracing works automatically — no extra config. For a
+local/unmapped model, set the optional per-token override fields instead:
+without them, `groundly index --graph` still prompts for confirmation before
+building, but can't show you a dollar estimate first:
 
 ```sh
 groundly config set extraction.input_price_per_mtok <price per 1M input tokens>
@@ -47,9 +49,10 @@ groundly index <SUBJECT> --graph
 ```
 
 On first build, this prints a rough cost estimate (chunk text length ÷ 4,
-priced against `extraction.input_price_per_mtok`) and asks for confirmation
-— `--yes`/`-y` skips the prompt. If `input_price_per_mtok` isn't set, you'll
-see "no cost estimate available" instead of a dollar figure, but you're still
+priced against `extraction.input_price_per_mtok` if set, else litellm's
+bundled price map for `extraction.model`) and asks for confirmation —
+`--yes`/`-y` skips the prompt. If the model is priced by neither, you'll see
+"no cost estimate available" instead of a dollar figure, but you're still
 asked to confirm before anything is sent anywhere.
 
 Once a subject has a graph, `--graph` is no longer needed: every later

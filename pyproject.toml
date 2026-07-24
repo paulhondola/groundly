@@ -26,6 +26,7 @@ dependencies = [
 	"rapidocr==3.9.1",              # load-bearing: docling's OCR engine, local/offline
 	"llama-index==0.14.23",
 	"graphrag==3.1.0",
+	"litellm==1.86.2",              # already transitive via graphrag; now the direct llm/ client
 	"genanki>=0.13",                # verified decks → .apkg
 	"httpx>=0.27",
 ]

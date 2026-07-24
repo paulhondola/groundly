@@ -1,6 +1,9 @@
-"""groundly/llm/chat.py: raw httpx POST to {base_url}/chat/completions, via MockTransport."""
+"""groundly/llm/chat.py: litellm.completion() against any OpenAI-compatible endpoint,
+stubbed by monkeypatching litellm.completion/completion_cost at the module attribute
+litellm's own object (the seam chat.py's lazy `import litellm` resolves against)."""
 
-import httpx
+from types import SimpleNamespace
+
 import pytest
 
 from groundly.llm.chat import ChatUnreachableError, complete
@@ -17,80 +20,126 @@ def home(monkeypatch, tmp_path):
     return tmp_path / "home"
 
 
-def _handler(response_json, capture=None):
-    def handler(request: httpx.Request) -> httpx.Response:
+def _response(
+    text="A deadlock is [chunk 1].", prompt_tokens=10, completion_tokens=5, model="qwen2.5-7b"
+):
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=text))],
+        usage=SimpleNamespace(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+        ),
+        model=model,
+    )
+
+
+def _stub_completion(monkeypatch, response=None, exc=None, capture=None):
+    import litellm
+
+    def fake_completion(**kwargs):
         if capture is not None:
-            capture["headers"] = request.headers
-            capture["body"] = request.content
-            capture["url"] = str(request.url)
-        return httpx.Response(200, json=response_json)
+            capture.update(kwargs)
+        if exc is not None:
+            raise exc
+        return response or _response()
 
-    return handler
-
-
-def _completion_json(text="A deadlock is [chunk 1].", prompt_tokens=10, completion_tokens=5):
-    return {
-        "model": "qwen2.5-7b",
-        "choices": [{"message": {"role": "assistant", "content": text}}],
-        "usage": {
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": prompt_tokens + completion_tokens,
-        },
-    }
+    monkeypatch.setattr(litellm, "completion", fake_completion)
+    return capture
 
 
-def test_complete_allows_slow_local_first_token(home):
-    """A local runtime JIT-loads the model on first request — minutes, not httpx's
-    5 s default. The request must carry a generous read timeout."""
-    seen = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen["timeout"] = request.extensions["timeout"]
-        return httpx.Response(200, json=_completion_json())
-
-    complete("chat", [{"role": "user", "content": "hi"}], transport=httpx.MockTransport(handler))
-    assert seen["timeout"]["read"] >= 120
-
-
-def test_complete_parses_text_and_tokens(home):
-    transport = httpx.MockTransport(_handler(_completion_json()))
-    result = complete("chat", [{"role": "user", "content": "hi"}], transport=transport)
+def test_complete_parses_text_and_tokens(monkeypatch, home):
+    _stub_completion(monkeypatch, _response())
+    result = complete("chat", [{"role": "user", "content": "hi"}])
     assert result.text == "A deadlock is [chunk 1]."
     assert result.tokens == 15
     assert result.model == "qwen2.5-7b"
 
 
-def test_complete_computes_cost_when_prices_configured(home):
-    transport = httpx.MockTransport(
-        _handler(_completion_json(prompt_tokens=1000, completion_tokens=1000))
-    )
-    result = complete("chat", [{"role": "user", "content": "hi"}], transport=transport)
+def test_complete_computes_cost_when_prices_configured(monkeypatch, home):
+    _stub_completion(monkeypatch, _response(prompt_tokens=1000, completion_tokens=1000))
+    result = complete("chat", [{"role": "user", "content": "hi"}])
     # 1000 prompt tok * $1/Mtok + 1000 completion tok * $2/Mtok = 0.001 + 0.002
     assert result.cost_usd == pytest.approx(0.003)
 
 
-def test_complete_cost_none_without_prices(monkeypatch, tmp_path, home):
+def test_manual_price_wins_over_litellm_auto_cost(monkeypatch, home):
+    """Both a manual price and a mapped model are available — manual formula wins."""
+    import litellm
+
+    _stub_completion(monkeypatch, _response(prompt_tokens=1000, completion_tokens=1000))
+    monkeypatch.setattr(
+        litellm,
+        "completion_cost",
+        lambda **kw: (_ for _ in ()).throw(AssertionError("should not be called")),
+    )
+    result = complete("chat", [{"role": "user", "content": "hi"}])
+    assert result.cost_usd == pytest.approx(0.003)
+
+
+def test_complete_auto_cost_for_mapped_model_without_manual_prices(monkeypatch, tmp_path, home):
+    (home / "config.toml").write_text(
+        '[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "gpt-4o-mini"\n'
+    )
+    import litellm
+
+    _stub_completion(monkeypatch, _response(model="gpt-4o-mini"))
+    monkeypatch.setattr(litellm, "completion_cost", lambda **kw: 0.0042)
+    result = complete("chat", [{"role": "user", "content": "hi"}])
+    assert result.cost_usd == pytest.approx(0.0042)
+
+
+def test_complete_cost_none_for_unmapped_model(monkeypatch, tmp_path, home):
     (home / "config.toml").write_text(
         '[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "m"\n'
     )
-    transport = httpx.MockTransport(_handler(_completion_json()))
-    result = complete("chat", [{"role": "user", "content": "hi"}], transport=transport)
+    import litellm
+
+    _stub_completion(monkeypatch, _response())
+
+    def raise_unmapped(**kw):
+        raise Exception("This model isn't mapped yet")
+
+    monkeypatch.setattr(litellm, "completion_cost", raise_unmapped)
+    result = complete("chat", [{"role": "user", "content": "hi"}])
     assert result.cost_usd is None
 
 
-def test_complete_sends_api_key_header(home):
+def test_complete_sends_api_key_and_model_and_base_url(monkeypatch, home):
     capture = {}
-    transport = httpx.MockTransport(_handler(_completion_json(), capture=capture))
-    complete("chat", [{"role": "user", "content": "hi"}], transport=transport)
-    assert capture["headers"]["authorization"] == "Bearer sk-local"
-    assert capture["url"] == "http://localhost:1234/v1/chat/completions"
+    _stub_completion(monkeypatch, _response(), capture=capture)
+    complete("chat", [{"role": "user", "content": "hi"}])
+    assert capture["api_key"] == "sk-local"
+    assert capture["api_base"] == "http://localhost:1234/v1"
+    assert capture["model"] == "openai/qwen2.5-7b"
 
 
-def test_complete_unreachable_names_cause(home):
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("connection refused", request=request)
+def test_complete_keyless_provider_gets_placeholder_key(monkeypatch, tmp_path, home):
+    (home / "config.toml").write_text(
+        '[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "m"\n'
+    )
+    capture = {}
+    _stub_completion(monkeypatch, _response(), capture=capture)
+    complete("chat", [{"role": "user", "content": "hi"}])
+    assert capture["api_key"] == "not-needed"
 
-    transport = httpx.MockTransport(handler)
+
+def test_complete_passes_timeout_from_settings(monkeypatch, tmp_path, home):
+    (home / "config.toml").write_text(
+        '[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "m"\n'
+        "\n[llm]\ntimeout_seconds = 123.0\n"
+    )
+    capture = {}
+    _stub_completion(monkeypatch, _response(), capture=capture)
+    complete("chat", [{"role": "user", "content": "hi"}])
+    assert capture["timeout"] == 123.0
+
+
+def test_complete_unreachable_names_cause(monkeypatch, home):
+    import openai
+
+    _stub_completion(
+        monkeypatch, exc=openai.APIConnectionError(request=None, message="connection refused")
+    )
     with pytest.raises(ChatUnreachableError, match="unreachable"):
-        complete("chat", [{"role": "user", "content": "hi"}], transport=transport)
+        complete("chat", [{"role": "user", "content": "hi"}])

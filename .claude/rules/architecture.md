@@ -12,7 +12,7 @@ Layers: clients (`cli/`, `mcp/`, `web/`) → services (`agents/`, `retrieval/`, 
 
 ## LLM provider boundary (hard rule)
 
-- LLM clients are constructed **only** in `groundly/llm/` — OpenAI-compatible `base_url` + model + key, **per call class** (`chat`, `generation`, `extraction`, `router`) from `~/.groundly/config.toml`. Never hardcode a provider; cloud keys and LM Studio/Ollama are the same code path.
+- LLM clients are constructed **only** in `groundly/llm/` — OpenAI-compatible `base_url` + model + key, **per call class** (`chat`, `generation`, `extraction`, `router`) from `~/.groundly/config.toml`. Never hardcode a provider; cloud keys and LM Studio/Ollama are the same code path. `groundly/llm/chat.py`'s `complete()` is `litellm.completion()` under this same boundary — litellm is the sanctioned client library inside `llm/`, constructed nowhere else.
 - Every LLM call passes through `llm/` and records tokens + cost into the traces table.
 - **Zero-key operation is first-class**: index, `search`, thin `submit_*` generation must never require a provider.
 - Embeddings: `bge-m3`, pinned incl. hf_revision — the pin is the interchange compatibility contract. Changing it = full re-index migration + manifest bump, never a tweak.
@@ -26,4 +26,4 @@ Layers: clients (`cli/`, `mcp/`, `web/`) → services (`agents/`, `retrieval/`, 
 
 ## Frameworks
 
-Exactly three, one owner each: LlamaIndex (retrieval interface), MS graphrag (graph backend), FastMCP (tool surface). Agent loops are plain bounded async functions — no LangGraph. Exact pins for graphrag/llama-index/docling/sentence-transformers/FlagEmbedding set at P1; upgrades are deliberate events recorded in docs + manifest.
+Exactly three, one owner each: LlamaIndex (retrieval interface), MS graphrag (graph backend), FastMCP (tool surface). litellm (already graphrag's own transitive dependency) is a shared provider client used inside `llm/`, not a fourth orchestration framework. Agent loops are plain bounded async functions — no LangGraph. Exact pins for graphrag/llama-index/docling/sentence-transformers/FlagEmbedding set at P1; upgrades are deliberate events recorded in docs + manifest.

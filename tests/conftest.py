@@ -125,7 +125,7 @@ class StubChat:
         self.tokens = tokens
         self.cost_usd = cost_usd
 
-    def __call__(self, call_class, messages, *, transport=None):
+    def __call__(self, call_class, messages):
         from groundly.llm.chat import ChatResult
 
         self.calls.append((call_class, messages))
