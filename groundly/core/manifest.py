@@ -29,6 +29,7 @@ class Embedding(BaseModel):
 class Graphrag(BaseModel):
     version: str | None = None
     extraction_model: str | None = None
+    corpus_hash: str | None = None
 
 
 class Chunking(BaseModel):

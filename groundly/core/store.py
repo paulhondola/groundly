@@ -338,6 +338,21 @@ class SQLiteSubjectStore:
         finally:
             conn.close()
 
+    def all_chunks(self) -> list[sqlite3.Row]:
+        """Every chunk in the subject, resolved to its citation target — feeds the
+        graph batch builder (one input document per chunk)."""
+        conn = self.connect()
+        try:
+            return conn.execute(
+                """
+                SELECT c.id AS chunk_id, c.page, c.heading_path, c.text, m.filename
+                FROM chunks c JOIN materials m ON m.id = c.material_id
+                ORDER BY c.id
+                """
+            ).fetchall()
+        finally:
+            conn.close()
+
     def page_chunks(self, filename: str, page: int) -> list[sqlite3.Row]:
         """Resolve one (filename, page) to its chunks, chunk-id order — the citation
         resource / `get_page` MCP tool's read path."""
