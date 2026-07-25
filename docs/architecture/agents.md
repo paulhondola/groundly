@@ -108,7 +108,9 @@ Imports are the threat that keeps layer 4 honest: a shared knowledge base is thi
 
 ## Latency classes
 
-Interactive (`ask`, `search`): straight pipeline, no background machinery. Generation (decks, quizzes, graph build): background task behind a job id — **never block a request handler on an agent loop**. When the configured provider is a local runtime, generation jobs are serialized (GPU contention with interactive use).
+Interactive (`ask`, `search`): straight pipeline, no background machinery. Generation (decks, quizzes, graph build): background task behind a job id — **never block a request handler on an agent loop**. When the configured provider is a local runtime, generation jobs are serialized (GPU contention with interactive use); as implemented, one process-wide lock serializes *all* thick generation jobs — stricter than required, free for a single student.
+
+Jobs are **session-scoped, not durable**: the job registry lives in the MCP server process's memory, and verified items commit to `store.db` per item — a killed host session loses at most the job record and batch report, never a verified card. On a promptless surface, "cost estimates before spending" becomes a two-phase call: `generate_*` with `confirm=false` (default) returns only the estimate; `confirm=true` starts the job.
 
 ## Observability
 
