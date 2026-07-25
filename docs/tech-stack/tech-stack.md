@@ -40,7 +40,7 @@ The same file also carries operational settings (`[ingestion]`/`[llm]`/`[retriev
 
 Rules that make this real:
 
-1. **No provider SDK usage outside `groundly/llm/`.** LlamaIndex and graphrag accept OpenAI-compatible configs — only that form is used.
+1. **No provider SDK usage outside `groundly/llm/`.** LlamaIndex and graphrag accept OpenAI-compatible configs — only that form is used. `groundly/llm/chat.py` talks to providers via `litellm.completion()` — already `graphrag`'s own transitive dependency, pinned exactly (`litellm==1.86.2`, decision 20) — with the same `base_url`+`model`+`key` shape; import stays lazy so it never slows MCP spawn.
 2. **Per call class**, so "cheap router, strong verifier" is config, not refactoring. Local runtimes (LM Studio, Ollama) and cloud keys are the same code path — different `base_url`.
 3. **Every call passes through `llm/` and records tokens + cost into traces.** Visibility, not budget enforcement — it's the student's own key.
 4. **No subscription-OAuth piggybacking** (Claude Pro token reuse etc.) — ToS-fragile; opencode's history proves it.

@@ -5,10 +5,20 @@ LiteLLM-based client speaks the same OpenAI-compatible base_url+model+key shape
 Groundly already assumes everywhere else.
 """
 
+import os
+
+# Must be set before litellm is imported by anything — graphrag_llm.embedding.embedding
+# (below) pulls litellm in at *its* module load, ahead of groundly.llm.chat's own
+# setdefault, so this can't rely on chat.py having run first. Unset, litellm's
+# __init__ fetches its price map from GitHub — the privacy rule
+# (.claude/rules/grounding-and-privacy.md) forbids that.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
 from graphrag_llm.config import ModelConfig
 from graphrag_llm.embedding.embedding import LLMEmbedding
 from graphrag_llm.embedding.embedding_factory import register_embedding
 
+from groundly.llm.chat import _LOCAL_PLACEHOLDER_KEY
 from groundly.llm.config import load_provider, require_provider
 
 BGE_M3_EMBEDDING_TYPE = "bge_m3"
@@ -16,13 +26,19 @@ BGE_M3_EMBEDDING_TYPE = "bge_m3"
 
 def completion_model_config() -> ModelConfig:
     """Build graphrag's ModelConfig from Groundly's `extraction` provider. Fails fast
-    (via require_provider) — the graph build has no zero-key path."""
+    (via require_provider) — a *configured* provider is always required, but not
+    necessarily a real API key: graphrag's own ModelConfig validator rejects an empty
+    api_key outright (unlike Groundly's own llm/chat.py, which just omits the
+    Authorization header when `cfg.api_key` is empty), so a local/keyless provider
+    (LM Studio, Ollama) needs a truthy placeholder here to pass that validation — the
+    placeholder is never checked by a local server, same as the empty-header path
+    already works for every other call class."""
     cfg = require_provider("extraction")
     return ModelConfig(
         model_provider="openai",
         model=cfg.model,
         api_base=cfg.base_url,
-        api_key=cfg.api_key,
+        api_key=cfg.api_key or _LOCAL_PLACEHOLDER_KEY,
     )
 
 
@@ -98,9 +114,20 @@ def register_bge_m3_embedding() -> None:
 def estimate_cost(total_chars: int) -> tuple[int, float | None]:
     """Rough heuristic graph-build cost estimate: no tokenizer, no LLM call. Uses
     `load_provider` (not `require_provider`) — this is an estimate, not the fail-fast
-    build path, so an unconfigured/unpriced provider degrades to (tokens, None)."""
+    build path, so an unconfigured provider degrades to (tokens, None). The manual
+    `input_price_per_mtok` field is an override; unset, this falls back to litellm's
+    local price map (mapped cloud models get cost tracing with zero config) and
+    finally to (tokens, None) for local/unmapped models."""
     tokens = total_chars // 4
     cfg = load_provider("extraction")
-    if cfg is None or cfg.input_price_per_mtok is None:
+    if cfg is None:
         return tokens, None
-    return tokens, tokens * cfg.input_price_per_mtok / 1_000_000
+    if cfg.input_price_per_mtok is not None:
+        return tokens, tokens * cfg.input_price_per_mtok / 1_000_000
+
+    import litellm
+
+    price = litellm.model_cost.get(cfg.model, {}).get("input_cost_per_token")
+    if price is None:
+        return tokens, None
+    return tokens, tokens * price

@@ -48,9 +48,10 @@ base_url = "http://localhost:1234/v1"
 model    = "qwen2.5-7b-instruct"   # exact id from `lms ls` / the server view
 ```
 
-No `api_key` — local runtimes don't need one. The optional
-`input_price_per_mtok` / `output_price_per_mtok` fields stay unset (cost
-traces record 0 for local models).
+No `api_key` — local runtimes don't need one. Local models aren't in litellm's
+bundled price map, so the optional `input_price_per_mtok` /
+`output_price_per_mtok` fields are how you get cost tracing for them; leave
+them unset and cost traces just record no cost (`cost_usd = None`).
 
 The other call classes (`[providers.generation]`, `[providers.extraction]`,
 `[providers.router]`) accept the same keys when later phases need them — LM

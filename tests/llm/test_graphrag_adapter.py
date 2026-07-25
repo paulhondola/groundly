@@ -59,6 +59,19 @@ def test_completion_model_config_fails_fast_when_unconfigured(home):
         completion_model_config()
 
 
+def test_completion_model_config_local_provider_gets_placeholder_key(home):
+    # LM Studio/Ollama: no api_key configured, but graphrag's ModelConfig rejects an
+    # empty one outright — a local provider still needs *some* truthy placeholder.
+    (home / "config.toml").write_text(
+        "[providers.extraction]\n"
+        'base_url = "http://localhost:1234/v1"\n'
+        'model = "gemma-4-12b-qat"\n'
+        'api_key = ""\n'
+    )
+    cfg = completion_model_config()  # must not raise ModelConfig's own validation error
+    assert cfg.api_key
+
+
 # --- Bgem3GraphEmbedding -------------------------------------------------------------
 
 
@@ -135,5 +148,41 @@ def test_estimate_cost_priced_provider_computes_cost(home):
         '[providers.extraction]\nbase_url = "http://x"\nmodel = "m"\ninput_price_per_mtok = 5.0\n'
     )
     tokens, cost = estimate_cost(4_000_000)  # 1,000,000 tokens
+    assert tokens == 1_000_000
+    assert cost == pytest.approx(5.0)
+
+
+def test_estimate_cost_falls_back_to_litellm_map_for_mapped_model(monkeypatch, home):
+    (home / "config.toml").write_text(
+        '[providers.extraction]\nbase_url = "http://x"\nmodel = "gpt-4o-mini"\n'
+    )
+    import litellm
+
+    monkeypatch.setattr(litellm, "model_cost", {"gpt-4o-mini": {"input_cost_per_token": 1.5e-07}})
+    tokens, cost = estimate_cost(4_000_000)  # 1,000,000 tokens
+    assert tokens == 1_000_000
+    assert cost == pytest.approx(0.15)
+
+
+def test_estimate_cost_unmapped_model_in_litellm_map_returns_none(monkeypatch, home):
+    (home / "config.toml").write_text(
+        '[providers.extraction]\nbase_url = "http://x"\nmodel = "totally-unmapped-local-model"\n'
+    )
+    import litellm
+
+    monkeypatch.setattr(litellm, "model_cost", {"gpt-4o-mini": {"input_cost_per_token": 1.5e-07}})
+    tokens, cost = estimate_cost(4_000_000)
+    assert tokens == 1_000_000
+    assert cost is None
+
+
+def test_estimate_cost_manual_price_overrides_litellm_map(home):
+    # No litellm stubbing needed: a configured manual price must short-circuit
+    # before litellm's map is ever consulted.
+    (home / "config.toml").write_text(
+        '[providers.extraction]\nbase_url = "http://x"\nmodel = "gpt-4o-mini"\n'
+        "input_price_per_mtok = 5.0\n"
+    )
+    tokens, cost = estimate_cost(4_000_000)
     assert tokens == 1_000_000
     assert cost == pytest.approx(5.0)

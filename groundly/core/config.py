@@ -52,7 +52,7 @@ class IngestionSettings(BaseModel):
 
 
 class LlmSettings(BaseModel):
-    timeout_seconds: float = 300  # httpx read timeout — llm/chat.py (connect stays 10s)
+    timeout_seconds: float = 300  # read timeout — llm/chat.py (connect stays 10s)
 
 
 class RetrievalSettings(BaseModel):
@@ -219,8 +219,8 @@ def render_config_toml(providers: dict, settings: Settings) -> str:
                     '# base_url = "http://localhost:1234/v1"',
                     '# model    = "..."',
                     '# api_key  = "..."',
-                    "# input_price_per_mtok  = 0.0   # optional USD/1M input tokens — enables cost tracing",
-                    "# output_price_per_mtok = 0.0   # optional USD/1M output tokens",
+                    "# input_price_per_mtok  = 0.0   # optional USD/1M input tokens — override for local/unmapped models",
+                    "# output_price_per_mtok = 0.0   # optional USD/1M output tokens (litellm's bundled price map costs mapped models automatically)",
                 ]
         lines.append("")
 
@@ -241,7 +241,7 @@ def render_config_toml(providers: dict, settings: Settings) -> str:
     lines += [
         "",
         "[llm]",
-        f"timeout_seconds = {_toml_value(settings.llm.timeout_seconds)}   # HTTP read timeout for provider calls; local models can be slow to first token",
+        f"timeout_seconds = {_toml_value(settings.llm.timeout_seconds)}   # read timeout for provider calls; local models can be slow to first token",
         "",
         "[retrieval]",
         f"context_k = {_toml_value(settings.retrieval.context_k)}   # chunks assembled into the answer / prompt",
