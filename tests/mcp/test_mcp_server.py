@@ -240,6 +240,117 @@ async def test_mcp_ask_matches_cli_ask_for_the_same_query(
     ]
 
 
+# --- drill_down / overview -----------------------------------------------------------
+
+
+class _FakeGraphLocalRetriever:
+    def __init__(self, subject):
+        self.subject = subject
+        self.path: list[str] = []
+
+    def retrieve(self, query):
+        from llama_index.core.schema import NodeWithScore, TextNode
+
+        self.path = ["graphrag-local", "entity-search"]
+        node = TextNode(
+            text="graph text",
+            id_="1",
+            metadata={"chunk_id": 1, "filename": "lec.pdf", "page": 1, "heading_path": None},
+        )
+        return [NodeWithScore(node=node, score=1.0)]
+
+
+class _FakeGraphGlobalRetriever:
+    def __init__(self, subject):
+        self.subject = subject
+        self.path: list[str] = []
+        self.communities: list[dict] = []
+
+    def retrieve(self, query):
+        from llama_index.core.schema import NodeWithScore, TextNode
+
+        self.path = ["graphrag-global", "community-search"]
+        self.communities = [{"id": "0", "title": "Deadlocks"}]
+        node = TextNode(
+            text="graph text",
+            id_="1",
+            metadata={"chunk_id": 1, "filename": "lec.pdf", "page": 1, "heading_path": None},
+        )
+        return [NodeWithScore(node=node, score=1.0)]
+
+
+async def test_drill_down_happy_path_returns_answer_and_citations(
+    retrievable_subject, monkeypatch, stub_chat
+):
+    _configure_chat(retrievable_subject)
+    chat = stub_chat("Deadlocks need mutual exclusion [chunk 1].")
+    monkeypatch.setattr("groundly.agents.study_modes.complete", chat)
+    monkeypatch.setattr("groundly.agents.study_modes.GraphLocalRetriever", _FakeGraphLocalRetriever)
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("drill_down", {"subject": "TEST", "entity": "deadlock"})
+    assert "mutual exclusion" in result.data["answer"]
+    assert result.data["citations"][0]["chunk_id"] == 1
+    assert result.data["citations"][0]["filename"] == "lec.pdf"
+    assert result.data["citations"][0]["uri"] == "groundly://TEST/lec.pdf#page=1"
+
+
+async def test_drill_down_unknown_subject_errors(subject_free_home):
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="unknown subject 'NOPE'"):
+            await client.call_tool("drill_down", {"subject": "NOPE", "entity": "e"})
+
+
+async def test_drill_down_graph_not_built_raises_tool_error(retrievable_subject):
+    _configure_chat(retrievable_subject)
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="graph not built"):
+            await client.call_tool("drill_down", {"subject": "TEST", "entity": "deadlock"})
+
+
+async def test_drill_down_no_provider_fails_with_specific_message(retrievable_subject):
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="drill_down needs a configured chat provider"):
+            await client.call_tool("drill_down", {"subject": "TEST", "entity": "deadlock"})
+
+
+async def test_overview_happy_path_returns_answer_citations_and_communities(
+    retrievable_subject, monkeypatch, stub_chat
+):
+    _configure_chat(retrievable_subject)
+    chat = stub_chat("The course broadly covers deadlocks [chunk 1].")
+    monkeypatch.setattr("groundly.agents.study_modes.complete", chat)
+    monkeypatch.setattr(
+        "groundly.agents.study_modes.GraphGlobalRetriever", _FakeGraphGlobalRetriever
+    )
+
+    async with Client(mcp) as client:
+        result = await client.call_tool("overview", {"subject": "TEST", "topic": "deadlocks"})
+    assert "deadlocks" in result.data["answer"]
+    assert result.data["citations"][0]["chunk_id"] == 1
+    assert result.data["citations"][0]["uri"] == "groundly://TEST/lec.pdf#page=1"
+    assert result.data["communities"] == [{"id": "0", "title": "Deadlocks"}]
+
+
+async def test_overview_unknown_subject_errors(subject_free_home):
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="unknown subject 'NOPE'"):
+            await client.call_tool("overview", {"subject": "NOPE", "topic": "t"})
+
+
+async def test_overview_graph_not_built_raises_tool_error(retrievable_subject):
+    _configure_chat(retrievable_subject)
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="graph not built"):
+            await client.call_tool("overview", {"subject": "TEST", "topic": "deadlocks"})
+
+
+async def test_overview_no_provider_fails_with_specific_message(retrievable_subject):
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="overview needs a configured chat provider"):
+            await client.call_tool("overview", {"subject": "TEST", "topic": "deadlocks"})
+
+
 # --- get_page -----------------------------------------------------------------------
 
 

@@ -13,6 +13,53 @@ Expands [`groundly-spec.md`](../groundly-spec.md) §5. This layer is the thesis'
 
 The common LlamaIndex `Retriever` interface is what makes the comparison fair — same query in, same context format out, per-arm logging (arm, path, chunk ids, tokens, latency, cost) into the local `traces` table in `progress.db`.
 
+## RAG pipeline
+
+The retrieval layer supports vector, graph, hybrid, and adaptive retrieval paths
+through one common context contract. `search` returns raw ranked chunks; `ask` adds
+trust-layered generation and citation enforcement.
+
+```mermaid
+flowchart LR
+    query[Question]
+    search[search\nCLI or MCP]
+    ask[ask\nCLI or MCP]
+    contract[Shared LlamaIndex Retriever contract\nranked context with chunk metadata]
+    vector[Arm 1: vector baseline\ndense + sparse + BM25 + RRF + rerank]
+    gph[Arm 2: pure GraphRAG\nlocal or global search]
+    route[Arm 3: cheap query router]
+    hybrid[Static hybrid\nvector and/or graph]
+    fuse[Fusion then rerank]
+    adaptive[Arm 4: adaptive loop\nself-grade, escalate or rewrite\nmaximum 2 iterations]
+    context[Ranked context\nverbatim chunks and graph summaries]
+    prompt[Trust-layered prompt assembly]
+    chat[Chat completion]
+    cited{Resolvable retrieved citations?}
+    answer[Cited answer]
+    refusal[Refusal or citation error]
+    traces[(Private traces\narm, path, chunks, tokens, cost, latency)]
+
+    query --> search
+    query --> ask --> route
+    search --> vector
+    route -->|factoid| vector
+    route -->|multi-hop| hybrid
+    route -->|global| gph
+    query --> gph
+    query --> adaptive
+    adaptive -->|vector first| vector
+    adaptive -->|escalate or rewrite| gph
+    vector --> contract
+    gph --> contract
+    vector --> hybrid
+    gph --> hybrid --> fuse --> contract
+    contract --> context
+    context -->|search: raw results| traces
+    context -->|ask| prompt --> chat --> cited
+    cited -->|yes| answer --> traces
+    cited -->|no| refusal --> traces
+```
+
 ## Components
 
 ### Vector baseline (arm 1; the hybrid's workhorse)

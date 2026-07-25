@@ -57,9 +57,16 @@ def export_subject(
                 entries.append((f, f"materials/{f.relative_to(subj.materials_dir).as_posix()}"))
     graph_dir = subj.root_dir / "graph"
     if graph_dir.exists():
+        # cache/ (graphrag's own incremental-rebuild cache) and logs/ (operational
+        # debug output) are never needed for a portable knowledge base — parquet
+        # artifacts and lancedb/ still ship as before.
+        _excluded_graph_prefixes = ("cache/", "logs/")
         for f in sorted(graph_dir.rglob("*")):
             if f.is_file():
-                entries.append((f, f"graph/{f.relative_to(graph_dir).as_posix()}"))
+                rel = f.relative_to(graph_dir).as_posix()
+                if rel.startswith(_excluded_graph_prefixes):
+                    continue
+                entries.append((f, f"graph/{rel}"))
 
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for src, arcname in entries:

@@ -41,6 +41,15 @@ def index(
             "persisted in the manifest.",
         ),
     ] = None,
+    graph: Annotated[
+        bool,
+        typer.Option(
+            "--graph",
+            help="Build the graphrag arm for this subject (first build only; once built, "
+            "later index runs auto-rebuild on corpus changes without needing this flag again).",
+        ),
+    ] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
 ) -> None:
     """Index course materials: hash-skip idempotent, per-file progress, resumable."""
     from groundly.core.subject import Subject
@@ -112,8 +121,51 @@ def index(
     indexed = sum(r.status == Status.INDEXED for r in results)
     failed = sum(r.status in (Status.EXTRACTION_FAILED, Status.ERROR) for r in results)
     console.print(f"{indexed} indexed, {len(results) - indexed - failed} skipped, {failed} failed")
+
+    _maybe_build_graph(subj, graph=graph, yes=yes)
+
     if failed:
         raise typer.Exit(code=1)
+
+
+def _maybe_build_graph(subj, *, graph: bool, yes: bool) -> None:
+    """Corpus state is final for this run — decide whether the graph needs a
+    (re)build. Auto-rebuilds a stale graph unconditionally; a first build only
+    happens opt-in via --graph. Zero-key `index` behavior is unchanged when
+    neither applies."""
+    from groundly.core.store import SQLiteSubjectStore
+    from groundly.ingestion.graph import GraphBuildError, build_graph, graph_is_stale
+    from groundly.llm.config import ProviderNotConfiguredError
+    from groundly.llm.graphrag_adapter import estimate_cost
+
+    store_obj = SQLiteSubjectStore(subj.store_db_path)
+    graph_dir = subj.root_dir / "graph"
+
+    if graph_dir.exists() and graph_is_stale(subj, store_obj):
+        prompt = "the graph is now stale — the corpus changed since the last build. Rebuild now?"
+    elif not graph_dir.exists() and graph:
+        prompt = "Build the graphrag arm for this subject now?"
+    else:
+        return
+
+    total_chars = sum(len(row["text"]) for row in store_obj.all_chunks())
+    tokens, cost = estimate_cost(total_chars)
+    if cost is None:
+        console.print(
+            "[dim]no cost estimate available — set input_price_per_mtok for "
+            f"{escape('[providers.extraction]')} in config.toml to see one[/dim]"
+        )
+    else:
+        console.print(f"Estimated graph build cost: ~{tokens} tokens (${cost:.4f})")
+
+    if not yes:
+        typer.confirm(prompt, abort=True)
+
+    try:
+        build_graph(subj, store_obj, estimated_tokens=tokens, estimated_cost_usd=cost)
+    except (GraphBuildError, ProviderNotConfiguredError) as exc:
+        _fail(str(exc))
+    console.print(f"Graph built for [bold]{subj.name}[/bold]")
 
 
 @app.command(name="list")

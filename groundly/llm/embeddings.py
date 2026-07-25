@@ -132,3 +132,19 @@ class BgeM3Embedder:
             out = model.encode(batch, batch_size=batch_size, return_dense=True, return_sparse=True)
             for vec, weights in zip(out["dense_vecs"], out["lexical_weights"], strict=True):
                 yield vec, {int(token_id): float(weight) for token_id, weight in weights.items()}
+
+
+_shared: BgeM3Embedder | None = None
+
+
+def shared_embedder() -> BgeM3Embedder:
+    """Process-level singleton: one resident bge-m3 model shared by every production
+    call site (VectorRetriever, Bgem3GraphEmbedding, sharing.py's re-embed) instead of
+    each constructing its own several-hundred-MB-to-GB copy. Lazily constructs
+    `BgeM3Embedder()` once; every call thereafter returns the same instance. Tests keep
+    injecting their own stub via the `embedder=` constructor params — this is only the
+    default production path."""
+    global _shared
+    if _shared is None:
+        _shared = BgeM3Embedder()
+    return _shared

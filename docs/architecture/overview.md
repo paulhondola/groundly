@@ -25,6 +25,50 @@ groundly/
 - `agents` calls `retrieval` (as a tool) and the subprocess runner. `retrieval` never calls `agents`.
 - `ingestion` writes the stores; it never serves queries.
 
+## System context and boundaries
+
+Groundly is a local system whose portable knowledge-base artifacts are separate from
+the student's private progress data.
+
+```mermaid
+flowchart LR
+    student[Student / CLI operator]
+    host[Host AI agent / MCP client]
+    provider[OpenAI-compatible chat provider]
+    models[Local bge-m3 and reranker models]
+
+    subgraph Groundly[Groundly local process]
+        cli[CLI]
+        mcp[MCP server\nstdio or loopback HTTP]
+        services[Ingestion, retrieval, ask pipeline]
+        cli --> services
+        mcp --> services
+    end
+
+    subgraph Subject[Per-subject local directory]
+        materials[materials/]
+        store[(store.db\nportable)]
+        progress[(progress.db\nprivate)]
+    end
+
+    student --> cli
+    host --> mcp
+    services --> materials
+    services --> store
+    services --> progress
+    services --> models
+    services --> provider
+    bundle[.groundly export]
+    bundle --> store
+    bundle --> materials
+    graph_node[graph/ artifacts] --> bundle
+    services --> graph_node
+```
+
+`search` needs only the local retrieval models; `ask` additionally needs a configured
+chat provider. The MCP stdio process is created by the host and is not a persistent
+service. The HTTP option is intentionally loopback-only.
+
 ## Runtime modes & concurrency
 
 | Mode | Process | Lifecycle |

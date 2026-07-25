@@ -37,12 +37,8 @@ def _escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def assemble(query: str, nodes: list[NodeWithScore]) -> list[dict]:
-    # Layer 2 (subject profile) insertion point — deferred (docs/architecture/agents.md):
-    # a size-capped, user-editable markdown profile would be appended here as trusted
-    # *content*, never trusted *authority* — it still cannot disable grounding.
-
-    chunks = "\n".join(
+def _render_chunks(nodes: list[NodeWithScore]) -> str:
+    return "\n".join(
         '<chunk id="{id}" source="{source}" page="{page}" heading="{heading}">\n'
         "{text}\n</chunk>".format(
             id=n.node.metadata["chunk_id"],
@@ -53,7 +49,44 @@ def assemble(query: str, nodes: list[NodeWithScore]) -> list[dict]:
         )
         for n in nodes
     )
+
+
+def assemble(query: str, nodes: list[NodeWithScore]) -> list[dict]:
+    # Layer 2 (subject profile) insertion point — deferred (docs/architecture/agents.md):
+    # a size-capped, user-editable markdown profile would be appended here as trusted
+    # *content*, never trusted *authority* — it still cannot disable grounding.
+
+    chunks = _render_chunks(nodes)
     user_content = f"Question: {query}\n\n<course-materials>\n{chunks}\n</course-materials>"
+    return [
+        {"role": "system", "content": SYSTEM_RULES},
+        {"role": "user", "content": user_content},
+    ]
+
+
+def assemble_overview(
+    query: str, communities: list[dict], nodes: list[NodeWithScore]
+) -> list[dict]:
+    """Global search's community-grouped layout (UC-12: "an overview answer names its
+    constituent communities"). Global search's own context join (retrieval/graph.py's
+    `GraphGlobalRetriever`) pools contributing entities/text-units across the union of
+    used communities before chunk ids ever reach here, so individual <chunk> elements
+    can't be sorted back into per-community buckets — instead the communities are named
+    up front and the model is asked to cite which ones its answer draws from."""
+
+    community_list = "\n".join(
+        '<community id="{id}">{title}</community>'.format(
+            id=_escape(str(c["id"])), title=_escape(str(c.get("title", "")))
+        )
+        for c in communities
+    )
+    chunks = _render_chunks(nodes)
+    user_content = (
+        f"Question: {query}\n\n"
+        f"<communities>\n{community_list}\n</communities>\n"
+        "Name which of the communities above your answer draws from.\n\n"
+        f"<course-materials>\n{chunks}\n</course-materials>"
+    )
     return [
         {"role": "system", "content": SYSTEM_RULES},
         {"role": "user", "content": user_content},

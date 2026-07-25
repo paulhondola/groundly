@@ -59,9 +59,10 @@ def import_(
     import zipfile
 
     from groundly.core import bundle, store
-    from groundly.core.manifest import Embedding
+    from groundly.core.manifest import Embedding, Graphrag
     from groundly.core.paths import groundly_home, validate_subject_name
     from groundly.core.subject import Subject
+    from groundly.ingestion.graph import corpus_hash
 
     if not bundle_path.exists():
         _fail(f"{bundle_path} does not exist")
@@ -89,6 +90,15 @@ def import_(
     imports_dir.mkdir(parents=True, exist_ok=True)
     tmp_dir = Path(tempfile.mkdtemp(dir=imports_dir))
 
+    def _drop_graph(graph_dir: Path, manifest, reason: str):
+        """The imported graph/ can't be trusted (reason) — drop it and reset the
+        manifest's graphrag block so the subject's manifest correctly reflects "no
+        graph"; the student can rebuild with `groundly index --graph` if they want one."""
+        shutil.rmtree(graph_dir, ignore_errors=True)
+        manifest.graphrag = Graphrag()
+        console.print(f"[dim]{reason} — dropped the imported graph/[/dim]")
+        return manifest
+
     try:
         with console.status("importing…") as status:
 
@@ -98,18 +108,34 @@ def import_(
             manifest = bundle.extract_bundle(bundle_path, tmp_dir, on_file=on_file)
             bundle.check_counts(tmp_dir / "store.db", manifest)
 
+            graph_dir = tmp_dir / "graph"
+            if graph_dir.exists():
+                actual_hash = corpus_hash(store.SQLiteSubjectStore(tmp_dir / "store.db"))
+                if manifest.graphrag.corpus_hash != actual_hash:
+                    manifest = _drop_graph(
+                        graph_dir,
+                        manifest,
+                        "bundle's graph/ doesn't match its store.db contents",
+                    )
+
             if not bundle.pin_matches(manifest):
                 typer.confirm(
                     "embedding pin mismatch — re-embed locally now? (free, takes a few minutes)",
                     abort=True,
                 )
-                from groundly.llm.embeddings import BgeM3Embedder
+                from groundly.llm.embeddings import shared_embedder
 
                 def on_step(done: int, total: int) -> None:
                     status.update(f"re-embedding {done}/{total} chunks…")
 
-                bundle.re_embed(tmp_dir / "store.db", BgeM3Embedder(), on_step=on_step)
+                bundle.re_embed(tmp_dir / "store.db", shared_embedder(), on_step=on_step)
                 manifest.embedding = Embedding()
+                if graph_dir.exists():
+                    manifest = _drop_graph(
+                        graph_dir,
+                        manifest,
+                        "embedding pin changed and the graph was re-embedded",
+                    )
 
         manifest.subject = name
         manifest.save(tmp_dir / "manifest.json")

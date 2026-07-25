@@ -326,6 +326,23 @@ def test_chunk_details_empty_list_returns_empty(db, tmp_path, ranked):
     assert store_obj.chunk_details([]) == []
 
 
+def test_all_chunks_returns_every_chunk_joined_with_material(db, tmp_path, ranked):
+    store_obj = SQLiteSubjectStore(tmp_path / "store.db")
+    rows = store_obj.all_chunks()
+    assert {r["chunk_id"] for r in rows} == {ranked["near"], ranked["far"], ranked["mid"]}
+    by_id = {r["chunk_id"]: r for r in rows}
+    assert by_id[ranked["near"]]["filename"] == "lec.pdf"
+    assert by_id[ranked["near"]]["page"] == 1
+    assert by_id[ranked["near"]]["heading_path"] == "Intro"
+    assert "mutual exclusion" in by_id[ranked["near"]]["text"]
+
+
+def test_all_chunks_empty_store_returns_empty(tmp_path):
+    store.create_store(tmp_path / "store.db")
+    store_obj = SQLiteSubjectStore(tmp_path / "store.db")
+    assert store_obj.all_chunks() == []
+
+
 def test_page_chunks_joins_material_in_chunk_id_order(db, tmp_path, ranked):
     store_obj = SQLiteSubjectStore(tmp_path / "store.db")
     rows = store_obj.page_chunks("lec.pdf", 1)
