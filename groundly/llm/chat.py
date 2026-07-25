@@ -44,6 +44,10 @@ def complete(call_class: str, messages: list[dict]) -> ChatResult:
     import openai
 
     litellm.telemetry = False  # privacy: no phone-home (grounding-and-privacy.md)
+    # litellm print()s a "Give Feedback / Get Help" banner to *stdout* on any provider
+    # exception. `groundly mcp` speaks the MCP protocol over stdout and calls this
+    # in-process, so an unreachable provider would corrupt the JSON-RPC stream.
+    litellm.suppress_debug_info = True
 
     cfg = require_provider(call_class)
     try:
