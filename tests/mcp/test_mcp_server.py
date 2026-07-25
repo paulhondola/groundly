@@ -383,6 +383,62 @@ async def test_submit_cards_unknown_subject_errors(subject_free_home):
             )
 
 
+# --- generate_deck / get_job / list_decks (thick door) -------------------------------
+
+
+async def test_generate_deck_without_confirm_returns_estimate_and_starts_nothing(
+    retrievable_subject,
+):
+    from groundly.agents import jobs
+
+    before = dict(jobs._JOBS)
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "generate_deck",
+            {"subject": "TEST", "topic": "deadlocks", "deck": "OS Deck"},
+        )
+    assert "estimated_tokens" in result.data
+    assert "confirm" in result.data["note"]
+    assert jobs._JOBS == before  # no job registered
+
+
+async def test_generate_deck_confirm_without_provider_fails_with_specific_message(
+    retrievable_subject,
+):
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match=r"generate_deck needs a configured generation"):
+            await client.call_tool(
+                "generate_deck",
+                {"subject": "TEST", "topic": "deadlocks", "deck": "OS Deck", "confirm": True},
+            )
+
+
+async def test_get_job_unknown_id_errors_with_session_scope_explanation():
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="do not survive a server restart"):
+            await client.call_tool("get_job", {"job_id": "nope"})
+
+
+async def test_list_decks_reports_names_and_counts(retrievable_subject):
+    async with Client(mcp) as client:
+        await client.call_tool(
+            "submit_cards",
+            {
+                "subject": "TEST",
+                "deck": "OS Deck",
+                "cards": [
+                    {
+                        "front": "What does deadlock need?",
+                        "back": "mutual exclusion",
+                        "chunk_ids": [1],
+                    }
+                ],
+            },
+        )
+        result = await client.call_tool("list_decks", {"subject": "TEST"})
+    assert result.data == [{"deck": "OS Deck", "cards": 1}]
+
+
 # --- get_page -----------------------------------------------------------------------
 
 
