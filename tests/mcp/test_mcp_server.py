@@ -439,6 +439,39 @@ async def test_list_decks_reports_names_and_counts(retrievable_subject):
     assert result.data == [{"deck": "OS Deck", "cards": 1}]
 
 
+# --- export_deck ---------------------------------------------------------------------
+
+
+async def test_export_deck_returns_path_under_subject_exports(retrievable_subject):
+    from pathlib import Path
+
+    async with Client(mcp) as client:
+        await client.call_tool(
+            "submit_cards",
+            {
+                "subject": "TEST",
+                "deck": "OS Deck",
+                "cards": [
+                    {
+                        "front": "What does deadlock need?",
+                        "back": "mutual exclusion",
+                        "chunk_ids": [1],
+                    }
+                ],
+            },
+        )
+        result = await client.call_tool("export_deck", {"subject": "TEST", "deck": "OS Deck"})
+    path = Path(result.data["path"])
+    assert path.exists()
+    assert path == subject_dir("TEST") / "exports" / "OS Deck.apkg"
+
+
+async def test_export_deck_empty_deck_errors_with_named_cause(retrievable_subject):
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="has no cards"):
+            await client.call_tool("export_deck", {"subject": "TEST", "deck": "Nope"})
+
+
 # --- get_page -----------------------------------------------------------------------
 
 

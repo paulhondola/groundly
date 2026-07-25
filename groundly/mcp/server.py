@@ -321,6 +321,22 @@ def get_job(job_id: str) -> dict:
 
 
 @mcp.tool
+def export_deck(subject: str, deck: str) -> dict:
+    """Export a verified flashcard deck as an Anki .apkg file (citations on the card
+    backs) and return its absolute path for the student to import into Anki. The file
+    is written under the subject's exports/ directory; use `list_decks` to see which
+    decks exist."""
+    from groundly.core.anki import export_deck as export_deck_fn
+
+    _subject_or_error(subject, ToolError)
+    try:
+        path = export_deck_fn(subject, deck)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from exc
+    return {"path": str(path)}
+
+
+@mcp.tool
 def get_page(subject: str, filename: str, page: int) -> list[dict]:
     """Verbatim chunk text for one page of one material, in chunk order — the precise
     way to open what a search/ask citation points to. Never returns raw file bytes or
