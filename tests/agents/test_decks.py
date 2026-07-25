@@ -156,6 +156,24 @@ def test_thick_loop_unparseable_reply_burns_a_round_and_retries_same_prompt(
     assert chat.calls[0][1] == chat.calls[1][1]  # identical messages retried
 
 
+def test_thick_loop_all_rounds_unparseable_fails_with_named_cause(retrievable_subject, stub_chat):
+    import pytest
+
+    from groundly.agents.decks import generate_deck_job
+
+    chat = stub_chat("never json")
+    with pytest.raises(RuntimeError, match="unparseable output in all 3 rounds"):
+        generate_deck_job(
+            retrievable_subject,
+            "deadlocks",
+            "OS Deck",
+            1,
+            chat=chat,
+            embedder=AlignedEmbedder(),
+        )
+    assert len(chat.calls) == 3
+
+
 def test_thick_loop_tolerates_fenced_json(retrievable_subject, stub_chat):
     from groundly.agents.decks import generate_deck_job
 

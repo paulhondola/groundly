@@ -165,6 +165,7 @@ def generate_deck_job(
 
         messages = assemble_cards(topic, count, nodes)
         rejected: list[tuple[CardCandidate, Rejection]] = []
+        parsed_any = False
         rounds = 0
         while rounds < 1 + MAX_RETRIES:
             rounds += 1
@@ -177,6 +178,7 @@ def generate_deck_job(
             candidates = _parse_cards(result.text)
             if candidates is None:
                 continue  # unparseable burns this round; same messages go again
+            parsed_any = True
 
             outcomes = submit_cards(
                 subject, deck, candidates, generation_source="server", embedder=embedder
@@ -186,6 +188,12 @@ def generate_deck_job(
             if not rejected:
                 break
             messages = assemble_cards_retry(topic, rejected, nodes)
+
+        if not parsed_any:
+            raise RuntimeError(
+                f"the generation model returned unparseable output in all {rounds} "
+                "rounds — no cards were stored; try a different generation model"
+            )
 
         dropped = [
             {"front": card.front, "reason": rej.reason, "detail": rej.detail, "attempts": rounds}

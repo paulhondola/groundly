@@ -374,6 +374,30 @@ async def test_submit_cards_round_trip_with_no_provider_configured(retrievable_s
     assert "999" in rejected[0]["detail"]
 
 
+async def test_submit_cards_caps_batch_size(retrievable_subject):
+    from groundly.agents.decks import MAX_COUNT
+
+    too_many = [{"front": f"f{i}", "back": "b", "chunk_ids": [1]} for i in range(MAX_COUNT + 1)]
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="at most 50 cards per call"):
+            await client.call_tool(
+                "submit_cards", {"subject": "TEST", "deck": "OS Deck", "cards": too_many}
+            )
+
+
+async def test_submit_cards_hostile_deck_name_rejected(retrievable_subject):
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="invalid deck name"):
+            await client.call_tool(
+                "submit_cards",
+                {
+                    "subject": "TEST",
+                    "deck": "../escape",
+                    "cards": [{"front": "f", "back": "b", "chunk_ids": [1]}],
+                },
+            )
+
+
 async def test_submit_cards_unknown_subject_errors(subject_free_home):
     async with Client(mcp) as client:
         with pytest.raises(ToolError, match="unknown subject"):

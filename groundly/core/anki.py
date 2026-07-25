@@ -6,7 +6,7 @@ guids) so a re-export updates the deck in Anki instead of duplicating it."""
 import hashlib
 from pathlib import Path
 
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SQLiteSubjectStore, check_deck_name
 from groundly.core.subject import Subject
 
 _MODEL_ID = 1607392319  # random-once constant, genanki's documented convention
@@ -30,6 +30,7 @@ def export_deck(subject_name: str, deck_name: str, out_path: Path | None = None)
     outside the bundle allowlist, so exported decks never leak into .groundly bundles."""
     import genanki  # lazy: only the export path pays the import
 
+    check_deck_name(deck_name)  # before any path is built — imported stores are untrusted
     subj = Subject(subject_name)
     store = SQLiteSubjectStore(subj.store_db_path)
     rows = store.deck_cards(deck_name)

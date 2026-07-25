@@ -81,3 +81,22 @@ def test_reexport_is_deterministic(retrievable_subject, tmp_path):
 def test_unknown_or_empty_deck_fails_with_named_cause(retrievable_subject):
     with pytest.raises(ValueError, match="has no cards — list_decks shows what exists"):
         export_deck(retrievable_subject, "Nope")
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    ["../escape", "..\\escape", "/tmp/abs", "a/b", "..", "", "   "],
+)
+def test_hostile_deck_names_rejected_before_any_path_use(retrievable_subject, hostile):
+    # Deck names are the one host-controlled string that reaches the filesystem
+    # (exports/<deck>.apkg). Rejected at export even if a row exists (imported
+    # store.db is untrusted — a hostile bundle can carry any decks row).
+    with pytest.raises(ValueError, match="invalid deck name"):
+        export_deck(retrievable_subject, hostile)
+
+
+@pytest.mark.parametrize("hostile", ["../escape", "/tmp/abs", "a/b", ""])
+def test_hostile_deck_names_rejected_at_creation(retrievable_subject, hostile):
+    store = SQLiteSubjectStore(subject_dir(retrievable_subject) / "store.db")
+    with pytest.raises(ValueError, match="invalid deck name"):
+        store.get_or_create_deck(hostile)

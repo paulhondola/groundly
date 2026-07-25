@@ -239,15 +239,19 @@ def submit_cards(subject: str, deck: str, cards: list[CardIn]) -> dict:
     question_id) and, per rejected card, a machine-readable `reason` plus a `detail`
     explaining what to fix — usually: re-search, and cite chunks that genuinely
     support the card. Fix and resubmit only the rejected ones."""
-    from groundly.agents.decks import submit_cards as submit_cards_fn
+    from groundly.agents.decks import MAX_COUNT, submit_cards as submit_cards_fn
     from groundly.agents.verifier import CardCandidate
     from groundly.llm.embeddings import ModelDownloadError
 
     _subject_or_error(subject, ToolError)
+    if len(cards) > MAX_COUNT:
+        raise ToolError(
+            f"submit_cards accepts at most {MAX_COUNT} cards per call — split the batch"
+        )
     candidates = [CardCandidate(front=c.front, back=c.back, chunk_ids=c.chunk_ids) for c in cards]
     try:
         outcomes = submit_cards_fn(subject, deck, candidates, generation_source="host")
-    except ModelDownloadError as exc:
+    except (ValueError, ModelDownloadError) as exc:  # ValueError: invalid deck name
         raise ToolError(str(exc)) from exc
     return {
         "deck": deck,

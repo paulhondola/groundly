@@ -83,12 +83,12 @@ END;
 """
 
 _SCHEMA_V2 = """
-CREATE TABLE decks (
+CREATE TABLE IF NOT EXISTS decks (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE TABLE questions (
+CREATE TABLE IF NOT EXISTS questions (
     id INTEGER PRIMARY KEY,
     deck_id INTEGER REFERENCES decks(id) ON DELETE CASCADE,
     type TEXT NOT NULL CHECK (type IN ('flashcard','mcq','short_answer','code','true_false_justify')),
@@ -99,8 +99,8 @@ CREATE TABLE questions (
     generation_source TEXT NOT NULL CHECK (generation_source IN ('server','host')),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX idx_questions_deck ON questions(deck_id);
-CREATE TABLE question_citations (
+CREATE INDEX IF NOT EXISTS idx_questions_deck ON questions(deck_id);
+CREATE TABLE IF NOT EXISTS question_citations (
     question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
     chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
     PRIMARY KEY (question_id, chunk_id)
@@ -194,6 +194,18 @@ def connect_progress(path: Path) -> sqlite3.Connection:
     conn.executescript(_VERIFICATIONS_SCHEMA)
     conn.commit()
     return conn
+
+
+def check_deck_name(name: str) -> None:
+    """Deck names become file names (exports/<deck>.apkg) — the one host-controlled
+    string that reaches the filesystem. Validated at creation AND at export: an
+    imported store.db is untrusted and can carry any decks row (security.md import
+    trust boundary)."""
+    if not name.strip() or "/" in name or "\\" in name or ".." in name:
+        raise ValueError(
+            f"invalid deck name {name!r} — deck names cannot be empty or contain "
+            "path separators or '..'"
+        )
 
 
 def record_verification(
@@ -487,6 +499,7 @@ class SQLiteSubjectStore:
             conn.close()
 
     def get_or_create_deck(self, name: str) -> int:
+        check_deck_name(name)
         conn = self.connect()
         try:
             with conn:
