@@ -14,7 +14,7 @@ import sqlite_vec
 
 from groundly.core.manifest import EMBEDDING_DIM
 
-STORE_USER_VERSION = 1
+STORE_USER_VERSION = 2
 
 _TRACES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS traces (
@@ -82,6 +82,37 @@ CREATE TRIGGER chunks_au AFTER UPDATE ON chunks BEGIN
 END;
 """
 
+_SCHEMA_V2 = """
+CREATE TABLE decks (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE questions (
+    id INTEGER PRIMARY KEY,
+    deck_id INTEGER REFERENCES decks(id) ON DELETE CASCADE,
+    type TEXT NOT NULL CHECK (type IN ('flashcard','mcq','short_answer','code','true_false_justify')),
+    body TEXT NOT NULL,              -- flashcard front
+    answer TEXT NOT NULL,            -- flashcard back / answer key
+    distractors TEXT,                -- JSON array; NULL for flashcards
+    verify_status TEXT NOT NULL DEFAULT 'verified' CHECK (verify_status IN ('verified')),
+    generation_source TEXT NOT NULL CHECK (generation_source IN ('server','host')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_questions_deck ON questions(deck_id);
+CREATE TABLE question_citations (
+    question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+    chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+    PRIMARY KEY (question_id, chunk_id)
+);
+"""
+
+# Additive-only migrations, applied in order by connect() when an older store.db is
+# opened — no migration framework, just "run this DDL, bump user_version" per step
+# (.claude/rules/architecture.md: schema via PRAGMA user_version, no migration
+# framework). Keyed by the version each migration upgrades *to*.
+_MIGRATIONS: dict[int, str] = {2: _SCHEMA_V2}
+
 
 def connect(path: Path, create: bool = False) -> sqlite3.Connection:
     if not create and not path.exists():
@@ -102,6 +133,17 @@ def connect(path: Path, create: bool = False) -> sqlite3.Connection:
             f"{path.name} has schema version {version}, newer than this groundly "
             f"understands (max {STORE_USER_VERSION}) — upgrade groundly"
         )
+    # version 0 means "not yet created" — create_store lays down the full schema
+    # itself (below), so migrations only apply to an already-initialized store
+    # opened with an older-but-nonzero version.
+    if version > 0:
+        for v in range(version + 1, STORE_USER_VERSION + 1):
+            migration = _MIGRATIONS.get(v)
+            if migration is None:
+                continue
+            conn.executescript(migration)
+            conn.execute(f"PRAGMA user_version = {v}")
+            conn.commit()
     return conn
 
 
@@ -109,6 +151,7 @@ def create_store(path: Path) -> None:
     conn = connect(path, create=True)
     try:
         conn.executescript(_SCHEMA)
+        conn.executescript(_SCHEMA_V2)
         conn.execute(f"PRAGMA user_version = {STORE_USER_VERSION}")
         conn.commit()
     finally:
@@ -251,6 +294,13 @@ class SQLiteSubjectStore:
                 )
                 conn.execute("DELETE FROM chunks WHERE material_id = ?", (material_id,))
                 conn.execute("DELETE FROM materials WHERE id = ?", (material_id,))
+                # question_citations cascade with their chunks (FK ON DELETE CASCADE);
+                # a card stripped of every citation must not survive (zero resolvable
+                # citations = error, by rule).
+                conn.execute(
+                    "DELETE FROM questions WHERE id NOT IN "
+                    "(SELECT question_id FROM question_citations)"
+                )
         finally:
             conn.close()
 
@@ -409,5 +459,76 @@ class SQLiteSubjectStore:
                         [(token_id, cid, weight) for token_id, weight in weights.items()],
                     )
                 return material_id
+        finally:
+            conn.close()
+
+    def get_or_create_deck(self, name: str) -> int:
+        conn = self.connect()
+        try:
+            with conn:
+                conn.execute("INSERT OR IGNORE INTO decks (name) VALUES (?)", (name,))
+                row = conn.execute("SELECT id FROM decks WHERE name = ?", (name,)).fetchone()
+                return row["id"]
+        finally:
+            conn.close()
+
+    def add_verified_card(
+        self,
+        deck_id: int,
+        front: str,
+        back: str,
+        chunk_ids: list[int],
+        generation_source: str,
+    ) -> int:
+        """One transaction: an unresolvable chunk_id violates the citations FK and
+        rolls back the whole insert — the FK is the second enforcement of "every
+        card cites resolving chunks" (the verifier is the first)."""
+        conn = self.connect()
+        try:
+            with conn:
+                cur = conn.execute(
+                    "INSERT INTO questions (deck_id, type, body, answer, generation_source) "
+                    "VALUES (?, 'flashcard', ?, ?, ?)",
+                    (deck_id, front, back, generation_source),
+                )
+                question_id = cur.lastrowid
+                conn.executemany(
+                    "INSERT INTO question_citations (question_id, chunk_id) VALUES (?, ?)",
+                    [(question_id, cid) for cid in chunk_ids],
+                )
+                return question_id
+        finally:
+            conn.close()
+
+    def deck_cards(self, deck_name: str) -> list[sqlite3.Row]:
+        conn = self.connect()
+        try:
+            return conn.execute(
+                """
+                SELECT q.id AS question_id, q.body, q.answer,
+                       c.id AS chunk_id, m.filename, c.page, c.heading_path
+                FROM questions q
+                JOIN decks d ON d.id = q.deck_id
+                JOIN question_citations qc ON qc.question_id = q.id
+                JOIN chunks c ON c.id = qc.chunk_id
+                JOIN materials m ON m.id = c.material_id
+                WHERE d.name = ?
+                ORDER BY q.id, c.id
+                """,
+                (deck_name,),
+            ).fetchall()
+        finally:
+            conn.close()
+
+    def list_decks(self) -> list[sqlite3.Row]:
+        conn = self.connect()
+        try:
+            return conn.execute(
+                """
+                SELECT d.name AS name, COUNT(q.id) AS card_count
+                FROM decks d LEFT JOIN questions q ON q.deck_id = d.id
+                GROUP BY d.id ORDER BY d.name
+                """
+            ).fetchall()
         finally:
             conn.close()
