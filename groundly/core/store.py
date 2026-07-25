@@ -171,17 +171,41 @@ def create_progress(path: Path) -> None:
         conn.close()
 
 
+_VERIFICATIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS verifications (
+    id INTEGER PRIMARY KEY,
+    generation_source TEXT NOT NULL CHECK (generation_source IN ('server', 'host')),
+    reason TEXT,  -- a REJECTION_REASONS value; NULL = accepted
+    ts TEXT NOT NULL DEFAULT (datetime('now'))
+);
+"""
+
+
 def connect_progress(path: Path) -> sqlite3.Connection:
-    """Open progress.db, creating it (and the traces table) if missing. `CREATE TABLE
-    IF NOT EXISTS` idempotently upgrades a pre-existing empty progress.db (P1/P2 era)
-    with no migration framework — progress.db never travels, so this is safe."""
+    """Open progress.db, creating it (and the traces/verifications tables) if missing.
+    `CREATE TABLE IF NOT EXISTS` idempotently upgrades a pre-existing progress.db
+    (P1/P2 era) with no migration framework — progress.db never travels, so this is
+    safe."""
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA busy_timeout = 5000")
     conn.executescript(_TRACES_SCHEMA)
+    conn.executescript(_VERIFICATIONS_SCHEMA)
     conn.commit()
     return conn
+
+
+def record_verification(
+    conn: sqlite3.Connection, *, generation_source: str, reason: str | None
+) -> None:
+    """One row per verifier verdict, from either door — the rejection-rate-by-source
+    measurement (docs/architecture/data-model.md). reason=None records an accept."""
+    with conn:
+        conn.execute(
+            "INSERT INTO verifications (generation_source, reason) VALUES (?, ?)",
+            (generation_source, reason),
+        )
 
 
 def record_trace(

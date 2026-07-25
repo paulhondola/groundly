@@ -351,6 +351,38 @@ async def test_overview_no_provider_fails_with_specific_message(retrievable_subj
             await client.call_tool("overview", {"subject": "TEST", "topic": "deadlocks"})
 
 
+# --- submit_cards (thin door) --------------------------------------------------------
+
+
+async def test_submit_cards_round_trip_with_no_provider_configured(retrievable_subject):
+    """The zero-key proof: host generates, groundly verifies+stores — no [providers]
+    section exists anywhere in this test's GROUNDLY_HOME."""
+    cards = [
+        {"front": "What does deadlock need?", "back": "mutual exclusion", "chunk_ids": [1]},
+        {"front": "bogus", "back": "unsupported", "chunk_ids": [999]},
+    ]
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "submit_cards", {"subject": "TEST", "deck": "OS Deck", "cards": cards}
+        )
+    assert result.data["deck"] == "OS Deck"
+    assert [a["index"] for a in result.data["accepted"]] == [0]
+    assert result.data["accepted"][0]["question_id"] is not None
+    rejected = result.data["rejected"]
+    assert len(rejected) == 1 and rejected[0]["index"] == 1
+    assert rejected[0]["reason"] == "not_answerable_from_chunks"
+    assert "999" in rejected[0]["detail"]
+
+
+async def test_submit_cards_unknown_subject_errors(subject_free_home):
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="unknown subject"):
+            await client.call_tool(
+                "submit_cards",
+                {"subject": "NOPE", "deck": "D", "cards": []},
+            )
+
+
 # --- get_page -----------------------------------------------------------------------
 
 

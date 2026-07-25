@@ -8,8 +8,17 @@ host spawn -> handshake is fast and bge-m3/torch load lazily on first `search`/`
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ResourceError, ToolError
+from pydantic import BaseModel
 
 mcp = FastMCP("groundly")
+
+
+class CardIn(BaseModel):
+    """One flashcard candidate for `submit_cards`."""
+
+    front: str
+    back: str
+    chunk_ids: list[int]  # chunk_id values from `search` results this card is based on
 
 
 def _citation_uri(subject: str, filename: str, page: int | None) -> str:
@@ -217,6 +226,39 @@ def overview(subject: str, topic: str) -> dict:
             for c in result.citations
         ],
         "communities": result.communities,
+    }
+
+
+@mcp.tool
+def submit_cards(subject: str, deck: str, cards: list[CardIn]) -> dict:
+    """Verify flashcards you generated and store the ones that pass into `deck`
+    (created if new). Generate cards from `search` results and set each card's
+    `chunk_ids` to the chunk_id values of the chunks it is actually based on — the
+    verifier re-retrieves every card and rejects any whose cited chunks don't
+    support it. No LLM provider needed. Returns accepted cards (with their stored
+    question_id) and, per rejected card, a machine-readable `reason` plus a `detail`
+    explaining what to fix — usually: re-search, and cite chunks that genuinely
+    support the card. Fix and resubmit only the rejected ones."""
+    from groundly.agents.decks import submit_cards as submit_cards_fn
+    from groundly.agents.verifier import CardCandidate
+    from groundly.llm.embeddings import ModelDownloadError
+
+    _subject_or_error(subject, ToolError)
+    candidates = [CardCandidate(front=c.front, back=c.back, chunk_ids=c.chunk_ids) for c in cards]
+    try:
+        outcomes = submit_cards_fn(subject, deck, candidates, generation_source="host")
+    except ModelDownloadError as exc:
+        raise ToolError(str(exc)) from exc
+    return {
+        "deck": deck,
+        "accepted": [
+            {"index": o.index, "question_id": o.question_id} for o in outcomes if o.accepted
+        ],
+        "rejected": [
+            {"index": o.index, "reason": o.rejection.reason, "detail": o.rejection.detail}
+            for o in outcomes
+            if not o.accepted
+        ],
     }
 
 
