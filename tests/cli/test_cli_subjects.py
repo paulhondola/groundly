@@ -2,6 +2,8 @@
 against a temp GROUNDLY_HOME. Heavy index logic is covered in test_pipeline.py; the
 CLI index test stubs the pipeline entry point."""
 
+import logging
+
 import pytest
 from typer.testing import CliRunner
 
@@ -18,6 +20,24 @@ def home(monkeypatch, tmp_path):
     monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
     (tmp_path / "home").mkdir()
     return tmp_path / "home"
+
+
+@pytest.fixture(autouse=True)
+def _reset_logging():
+    """`--debug` tests attach a real handler to the process-global root logger —
+    reset it after each test so it never leaks into an unrelated test."""
+    import groundly.core.logs as logs_mod
+
+    root = logging.getLogger()
+    before_handlers = list(root.handlers)
+    before_levels = {name: logging.getLogger(name).level for name in logs_mod._LOGGER_NAMES}
+    yield
+    for handler in list(root.handlers):
+        if handler not in before_handlers:
+            root.removeHandler(handler)
+    for name, level in before_levels.items():
+        logging.getLogger(name).setLevel(level)
+    logs_mod._configured = False
 
 
 def test_no_args_shows_help():
@@ -295,7 +315,15 @@ def _stub_build_graph(monkeypatch):
 
     calls = []
 
-    def fake_build_graph(subj, store_obj, *, estimated_tokens=0, estimated_cost_usd=None):
+    def fake_build_graph(
+        subj,
+        store_obj,
+        *,
+        estimated_tokens=0,
+        estimated_cost_usd=None,
+        on_event=None,
+        verbose=False,
+    ):
         calls.append(subj.name)
         (subj.root_dir / "graph").mkdir(exist_ok=True)
         manifest = subj.load_manifest()
@@ -450,7 +478,15 @@ def test_index_graph_build_error_fails_cleanly(monkeypatch, home, tmp_path):
     f.write_text("content")
     _stub_index_paths(monkeypatch, f)
 
-    def failing_build_graph(subj, store_obj, *, estimated_tokens=0, estimated_cost_usd=None):
+    def failing_build_graph(
+        subj,
+        store_obj,
+        *,
+        estimated_tokens=0,
+        estimated_cost_usd=None,
+        on_event=None,
+        verbose=False,
+    ):
         raise GraphBuildError("boom")
 
     monkeypatch.setattr(ingestion_graph, "build_graph", failing_build_graph)
@@ -459,3 +495,104 @@ def test_index_graph_build_error_fails_cleanly(monkeypatch, home, tmp_path):
     assert result.exit_code == 1
     assert "boom" in result.output
     assert not (sdir / "graph").exists()
+
+
+# --- --debug (debug-logging design) ---------------------------------------------------
+
+
+def test_index_debug_disables_indexing_progress_bar(monkeypatch, home, tmp_path):
+    import rich.progress
+
+    disable_kwargs = []
+    original_init = rich.progress.Progress.__init__
+
+    def spy_init(self, *args, **kwargs):
+        disable_kwargs.append(kwargs.get("disable"))
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(rich.progress.Progress, "__init__", spy_init)
+
+    runner.invoke(app, ["init", "PDSS"])
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+
+    result = runner.invoke(app, ["index", "PDSS", str(f), "--debug"])
+    assert result.exit_code == 0, result.output
+    assert disable_kwargs == [True]
+
+
+def test_index_graph_debug_disables_both_progress_bars(monkeypatch, home, tmp_path):
+    import rich.progress
+
+    disable_kwargs = []
+    original_init = rich.progress.Progress.__init__
+
+    def spy_init(self, *args, **kwargs):
+        disable_kwargs.append(kwargs.get("disable"))
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(rich.progress.Progress, "__init__", spy_init)
+
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+    _stub_build_graph(monkeypatch)
+
+    result = runner.invoke(app, ["index", "PDSS", str(f), "--graph", "--yes", "--debug"])
+    assert result.exit_code == 0, result.output
+    assert disable_kwargs == [True, True]  # indexing bar, then graph bar
+
+
+def test_index_graph_debug_streams_logs_to_stderr(monkeypatch, home, tmp_path):
+    from groundly.core.manifest import Graphrag
+    from groundly.ingestion import graph as ingestion_graph
+
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+
+    def fake_build_graph(
+        subj,
+        store_obj,
+        *,
+        estimated_tokens=0,
+        estimated_cost_usd=None,
+        on_event=None,
+        verbose=False,
+    ):
+        logging.getLogger("groundly.ingestion.graph").debug("building graph for %s", subj.name)
+        (subj.root_dir / "graph").mkdir(exist_ok=True)
+        manifest = subj.load_manifest()
+        manifest.graphrag = Graphrag(
+            version="3.1.0",
+            extraction_model="m",
+            corpus_hash=ingestion_graph.corpus_hash(store_obj),
+        )
+        subj.save_manifest(manifest)
+
+    monkeypatch.setattr(ingestion_graph, "build_graph", fake_build_graph)
+
+    result = runner.invoke(app, ["index", "PDSS", str(f), "--graph", "--yes", "--debug"])
+    assert result.exit_code == 0, result.output
+    assert "building graph for PDSS" in result.stderr
+    assert "DEBUG groundly.ingestion.graph" in result.stderr
+
+
+def test_index_debug_invalid_log_level_fails_cleanly(monkeypatch, home, tmp_path):
+    monkeypatch.setenv("GROUNDLY_LOG_LEVEL", "BOGUS")
+    runner.invoke(app, ["init", "PDSS"])
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+
+    result = runner.invoke(app, ["index", "PDSS", str(f)])
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert "BOGUS" in result.output

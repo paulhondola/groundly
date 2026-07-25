@@ -11,6 +11,7 @@ If the subject has no graph built, both graph arms degrade to vector-only rather
 than failing `ask()` outright (`arm` in the trace reflects what actually ran, not
 what the router asked for)."""
 
+import logging
 import time
 from dataclasses import dataclass
 
@@ -23,6 +24,8 @@ from groundly.llm.chat import complete
 from groundly.llm.config import require_provider
 from groundly.retrieval.graph import GraphGlobalRetriever, GraphLocalRetriever, GraphNotBuiltError
 from groundly.retrieval.vector import VectorRetriever, rrf
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -82,6 +85,10 @@ def ask(
                 path = graph_retriever.path + vector_retriever.path
                 arm = "hybrid-local"
             except GraphNotBuiltError:
+                logger.info(
+                    "router picked multi-hop but no graph is built for %s — degrading to vector-only",
+                    subject,
+                )
                 nodes = vector_retriever.retrieve(query)
                 path = vector_retriever.path
                 arm = "vector"
@@ -92,6 +99,10 @@ def ask(
                 path = graph_retriever.path
                 arm = "graph-global"
             except GraphNotBuiltError:
+                logger.info(
+                    "router picked global but no graph is built for %s — degrading to vector-only",
+                    subject,
+                )
                 nodes = vector_retriever.retrieve(query)
                 path = vector_retriever.path
                 arm = "vector"

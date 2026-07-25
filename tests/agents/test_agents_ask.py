@@ -311,3 +311,31 @@ def test_ask_global_degrades_to_vector_when_graph_not_built(
     rows = _traces(retrievable_subject)
     assert rows[-1]["arm"] == "vector"
     assert rows[-1]["router_label"] == "global"
+
+
+def test_ask_graph_not_built_fallback_logs_info_and_still_answers(
+    retrievable_subject, monkeypatch, stub_chat, caplog
+):
+    """The single highest-value log line in the debug-logging design: today the
+    router-picked-graph-but-no-graph-built degradation is silent — `ask` must
+    still return a grounded vector answer, and now also say so at INFO."""
+    home = subject_dir(retrievable_subject).parent
+    _configure_chat(home)
+    chat = stub_chat("Deadlocks need mutual exclusion [chunk 1].")
+    monkeypatch.setattr("groundly.agents.ask.classify", lambda query, c: "multi-hop")
+    monkeypatch.setattr("groundly.agents.ask.complete", chat)
+    monkeypatch.setattr("groundly.agents.ask.GraphLocalRetriever", _NotBuiltRetriever)
+
+    with caplog.at_level("INFO", logger="groundly.agents.ask"):
+        result = ask(
+            retrievable_subject,
+            "what causes a deadlock?",
+            embedder=_near_embedder(),
+            rerank=False,
+        )
+
+    assert result.citations[0].chunk_id == 1
+    assert result.answer  # still returns a vector answer, not a refusal
+    assert any(
+        "degrading to vector-only" in r.message and r.levelname == "INFO" for r in caplog.records
+    )

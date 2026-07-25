@@ -136,7 +136,7 @@ def test_build_graph_feeds_input_documents_and_records_manifest(subj, store, hom
 
     captured = {}
 
-    async def fake_build_index(config, input_documents=None):
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
         captured["config"] = config
         captured["input_documents"] = input_documents
         return []
@@ -171,7 +171,7 @@ def test_build_graph_records_one_index_trace_row_on_success(subj, store, home, m
     _configure_extraction(home)
     _add_material(store, "a.pdf", "a" * 64)
 
-    async def fake_build_index(config, input_documents=None):
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
         return []
 
     monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
@@ -197,7 +197,7 @@ def test_build_graph_wraps_failure_in_graph_build_error(subj, store, home, monke
     _configure_extraction(home)
     _add_material(store, "a.pdf", "a" * 64)
 
-    async def failing_build_index(config, input_documents=None):
+    async def failing_build_index(config, input_documents=None, callbacks=None, verbose=False):
         raise RuntimeError("boom")
 
     monkeypatch.setattr("groundly.ingestion.graph.build_index", failing_build_index)
@@ -208,3 +208,95 @@ def test_build_graph_wraps_failure_in_graph_build_error(subj, store, home, monke
     # manifest must be untouched on failure
     manifest = subj.load_manifest()
     assert manifest.graphrag.corpus_hash is None
+
+
+# --- callbacks / results-error check (debug-logging design) ---------------------------
+
+
+def test_build_graph_passes_callbacks_and_never_enables_graphrag_verbose(
+    subj, store, home, monkeypatch
+):
+    """`verbose=True` would raise graphrag's loggers to DEBUG, and graphrag logs
+    `str(output.result)` at DEBUG — a sample DataFrame including the text column,
+    i.e. verbatim course material onto stderr and into graph/logs/. It must stay
+    at graphrag's own default."""
+    _configure_extraction(home)
+    _add_material(store, "a.pdf", "a" * 64)
+
+    captured = {}
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        captured["callbacks"] = callbacks
+        captured["verbose"] = verbose
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+
+    build_graph(subj, store)
+
+    assert captured["verbose"] is False
+    assert captured["callbacks"] is not None
+    assert len(captured["callbacks"]) == 1
+
+
+def test_build_graph_adapter_translates_lifecycle_into_on_event(subj, store, home, monkeypatch):
+    _configure_extraction(home)
+    _add_material(store, "a.pdf", "a" * 64)
+
+    events = []
+
+    def on_event(description, completed, total):
+        events.append((description, completed, total))
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        adapter = callbacks[0]
+        adapter.pipeline_start(["wf1", "wf2"])
+        adapter.workflow_start("wf1", None)
+        adapter.workflow_end("wf1", None)
+        adapter.workflow_start("wf2", None)
+        adapter.workflow_end("wf2", None)
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+
+    build_graph(subj, store, on_event=on_event)
+
+    assert ("starting…", 0, 2) == events[0]
+    assert ("wf1", 0, 2) in events  # workflow_start: description set, nothing completed yet
+    assert ("wf1", 1, 2) in events  # workflow_end: advances completed
+    assert ("wf2", 2, 2) in events
+
+
+def test_build_graph_raises_on_workflow_error_and_leaves_manifest_untouched(
+    subj, store, home, monkeypatch
+):
+    from graphrag.index.typing.pipeline_run_result import PipelineRunResult
+
+    _configure_extraction(home)
+    _add_material(store, "a.pdf", "a" * 64)
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        return [
+            PipelineRunResult(workflow="extract_graph", result=None, state={}, error=None),
+            PipelineRunResult(
+                workflow="community_reports", result=None, state={}, error=RuntimeError("boom")
+            ),
+        ]
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+
+    with pytest.raises(GraphBuildError, match="community_reports"):
+        build_graph(subj, store)
+
+    manifest = subj.load_manifest()
+    assert manifest.graphrag.corpus_hash is None
+
+    # the other half of the invariant: a failed build records no success trace either
+    from groundly.core.store import connect_progress
+
+    conn = connect_progress(subj.progress_db_path)
+    try:
+        rows = conn.execute("SELECT COUNT(*) FROM traces WHERE kind = 'index'").fetchone()
+    finally:
+        conn.close()
+    assert rows[0] == 0

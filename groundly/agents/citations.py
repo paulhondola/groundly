@@ -4,10 +4,13 @@ ids, drop hallucinated ones (not among the retrieved set), resolve survivors to
 file/page/heading via the store. Zero resolvable citations is an error, never a
 degraded answer (.claude/rules/grounding-and-privacy.md)."""
 
+import logging
 import re
 from dataclasses import dataclass
 
 from groundly.core.store import SQLiteSubjectStore
+
+logger = logging.getLogger(__name__)
 
 _CITATION_RE = re.compile(r"\[chunk (\d+)\]")
 
@@ -32,6 +35,13 @@ def resolve_citations(
     resolvable_ids = [
         cid for cid in retrieved_chunk_ids if cid in cited_ids
     ]  # hallucinated ids dropped
+    hallucinated_ids = cited_ids - set(retrieved_chunk_ids)
+    if hallucinated_ids:
+        logger.info(
+            "dropped %d hallucinated citation id(s): %s",
+            len(hallucinated_ids),
+            sorted(hallucinated_ids),
+        )
     if not resolvable_ids:
         raise NoCitationsError(
             "the model's response cited no chunk ids that resolve to retrieved chunks"
