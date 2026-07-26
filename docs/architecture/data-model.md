@@ -36,6 +36,7 @@ The storage backbone for [`overview.md`](overview.md). SQLite (WAL) per subject;
 | quiz_events | question FK, correctness, timestamp — feeds mastery |
 | notes | host-written `remember()` notes (layer-4 data on recall) |
 | traces | per query: arm, router label, retrieved chunk ids, tokens, latency, cost |
+| verifications | one row per verifier verdict: generation source, rejection reason (NULL = accepted), timestamp — the rejection-rate-by-source measurement |
 
 Traces contain every question the student ever asked — which is exactly why they live here and not in the exported file. Mastery per graph community = `quiz_events` joined to the graph's Leiden communities; recomputable, not stored.
 

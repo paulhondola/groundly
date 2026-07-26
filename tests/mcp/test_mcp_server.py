@@ -351,6 +351,151 @@ async def test_overview_no_provider_fails_with_specific_message(retrievable_subj
             await client.call_tool("overview", {"subject": "TEST", "topic": "deadlocks"})
 
 
+# --- submit_cards (thin door) --------------------------------------------------------
+
+
+async def test_submit_cards_round_trip_with_no_provider_configured(retrievable_subject):
+    """The zero-key proof: host generates, groundly verifies+stores — no [providers]
+    section exists anywhere in this test's GROUNDLY_HOME."""
+    cards = [
+        {"front": "What does deadlock need?", "back": "mutual exclusion", "chunk_ids": [1]},
+        {"front": "bogus", "back": "unsupported", "chunk_ids": [999]},
+    ]
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "submit_cards", {"subject": "TEST", "deck": "OS Deck", "cards": cards}
+        )
+    assert result.data["deck"] == "OS Deck"
+    assert [a["index"] for a in result.data["accepted"]] == [0]
+    assert result.data["accepted"][0]["question_id"] is not None
+    rejected = result.data["rejected"]
+    assert len(rejected) == 1 and rejected[0]["index"] == 1
+    assert rejected[0]["reason"] == "not_answerable_from_chunks"
+    assert "999" in rejected[0]["detail"]
+
+
+async def test_submit_cards_caps_batch_size(retrievable_subject):
+    from groundly.agents.decks import MAX_COUNT
+
+    too_many = [{"front": f"f{i}", "back": "b", "chunk_ids": [1]} for i in range(MAX_COUNT + 1)]
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="at most 50 cards per call"):
+            await client.call_tool(
+                "submit_cards", {"subject": "TEST", "deck": "OS Deck", "cards": too_many}
+            )
+
+
+async def test_submit_cards_hostile_deck_name_rejected(retrievable_subject):
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="invalid deck name"):
+            await client.call_tool(
+                "submit_cards",
+                {
+                    "subject": "TEST",
+                    "deck": "../escape",
+                    "cards": [{"front": "f", "back": "b", "chunk_ids": [1]}],
+                },
+            )
+
+
+async def test_submit_cards_unknown_subject_errors(subject_free_home):
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="unknown subject"):
+            await client.call_tool(
+                "submit_cards",
+                {"subject": "NOPE", "deck": "D", "cards": []},
+            )
+
+
+# --- generate_deck / get_job / list_decks (thick door) -------------------------------
+
+
+async def test_generate_deck_without_confirm_returns_estimate_and_starts_nothing(
+    retrievable_subject,
+):
+    from groundly.agents import jobs
+
+    before = dict(jobs._JOBS)
+    async with Client(mcp) as client:
+        result = await client.call_tool(
+            "generate_deck",
+            {"subject": "TEST", "topic": "deadlocks", "deck": "OS Deck"},
+        )
+    assert "estimated_tokens" in result.data
+    assert "confirm" in result.data["note"]
+    assert jobs._JOBS == before  # no job registered
+
+
+async def test_generate_deck_confirm_without_provider_fails_with_specific_message(
+    retrievable_subject,
+):
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match=r"generate_deck needs a configured generation"):
+            await client.call_tool(
+                "generate_deck",
+                {"subject": "TEST", "topic": "deadlocks", "deck": "OS Deck", "confirm": True},
+            )
+
+
+async def test_get_job_unknown_id_errors_with_session_scope_explanation():
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="do not survive a server restart"):
+            await client.call_tool("get_job", {"job_id": "nope"})
+
+
+async def test_list_decks_reports_names_and_counts(retrievable_subject):
+    async with Client(mcp) as client:
+        await client.call_tool(
+            "submit_cards",
+            {
+                "subject": "TEST",
+                "deck": "OS Deck",
+                "cards": [
+                    {
+                        "front": "What does deadlock need?",
+                        "back": "mutual exclusion",
+                        "chunk_ids": [1],
+                    }
+                ],
+            },
+        )
+        result = await client.call_tool("list_decks", {"subject": "TEST"})
+    assert result.data == [{"deck": "OS Deck", "cards": 1}]
+
+
+# --- export_deck ---------------------------------------------------------------------
+
+
+async def test_export_deck_returns_path_under_subject_exports(retrievable_subject):
+    from pathlib import Path
+
+    async with Client(mcp) as client:
+        await client.call_tool(
+            "submit_cards",
+            {
+                "subject": "TEST",
+                "deck": "OS Deck",
+                "cards": [
+                    {
+                        "front": "What does deadlock need?",
+                        "back": "mutual exclusion",
+                        "chunk_ids": [1],
+                    }
+                ],
+            },
+        )
+        result = await client.call_tool("export_deck", {"subject": "TEST", "deck": "OS Deck"})
+    path = Path(result.data["path"])
+    assert path.exists()
+    assert path == subject_dir("TEST") / "exports" / "OS Deck.apkg"
+
+
+async def test_export_deck_empty_deck_errors_with_named_cause(retrievable_subject):
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="has no cards"):
+            await client.call_tool("export_deck", {"subject": "TEST", "deck": "Nope"})
+
+
 # --- get_page -----------------------------------------------------------------------
 
 

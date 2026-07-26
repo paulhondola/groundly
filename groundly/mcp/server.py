@@ -8,8 +8,17 @@ host spawn -> handshake is fast and bge-m3/torch load lazily on first `search`/`
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ResourceError, ToolError
+from pydantic import BaseModel
 
 mcp = FastMCP("groundly")
+
+
+class CardIn(BaseModel):
+    """One flashcard candidate for `submit_cards`."""
+
+    front: str
+    back: str
+    chunk_ids: list[int]  # chunk_id values from `search` results this card is based on
 
 
 def _citation_uri(subject: str, filename: str, page: int | None) -> str:
@@ -218,6 +227,117 @@ def overview(subject: str, topic: str) -> dict:
         ],
         "communities": result.communities,
     }
+
+
+@mcp.tool
+def submit_cards(subject: str, deck: str, cards: list[CardIn]) -> dict:
+    """Verify flashcards you generated and store the ones that pass into `deck`
+    (created if new). Generate cards from `search` results and set each card's
+    `chunk_ids` to the chunk_id values of the chunks it is actually based on — the
+    verifier re-retrieves every card and rejects any whose cited chunks don't
+    support it. No LLM provider needed. Returns accepted cards (with their stored
+    question_id) and, per rejected card, a machine-readable `reason` plus a `detail`
+    explaining what to fix — usually: re-search, and cite chunks that genuinely
+    support the card. Fix and resubmit only the rejected ones."""
+    from groundly.agents.decks import MAX_COUNT, submit_cards as submit_cards_fn
+    from groundly.agents.verifier import CardCandidate
+    from groundly.llm.embeddings import ModelDownloadError
+
+    _subject_or_error(subject, ToolError)
+    if len(cards) > MAX_COUNT:
+        raise ToolError(
+            f"submit_cards accepts at most {MAX_COUNT} cards per call — split the batch"
+        )
+    candidates = [CardCandidate(front=c.front, back=c.back, chunk_ids=c.chunk_ids) for c in cards]
+    try:
+        outcomes = submit_cards_fn(subject, deck, candidates, generation_source="host")
+    except (ValueError, ModelDownloadError) as exc:  # ValueError: invalid deck name
+        raise ToolError(str(exc)) from exc
+    return {
+        "deck": deck,
+        "accepted": [
+            {"index": o.index, "question_id": o.question_id} for o in outcomes if o.accepted
+        ],
+        "rejected": [
+            {"index": o.index, "reason": o.rejection.reason, "detail": o.rejection.detail}
+            for o in outcomes
+            if not o.accepted
+        ],
+    }
+
+
+@mcp.tool
+def list_decks(subject: str) -> list[dict]:
+    """List `subject`'s flashcard decks with their card counts — deck names are what
+    `submit_cards`/`generate_deck` write into and `export_deck` reads from."""
+    from groundly.core.store import SQLiteSubjectStore
+
+    subj = _subject_or_error(subject, ToolError)
+    rows = SQLiteSubjectStore(subj.store_db_path).list_decks()
+    return [{"deck": r["name"], "cards": r["card_count"]} for r in rows]
+
+
+@mcp.tool
+def generate_deck(
+    subject: str, topic: str, deck: str, count: int = 20, confirm: bool = False
+) -> dict:
+    """Generate a verified flashcard deck about `topic` from `subject`'s materials,
+    server-side (needs a configured [providers.generation]; use `submit_cards` to
+    build decks yourself without one). Two-phase: with confirm=false (the default)
+    nothing runs — you get a token/cost estimate to relay to the student. Call again
+    with confirm=true to start the background job, then poll `get_job` with the
+    returned job_id for the batch report. Cards are machine-verified before storage;
+    unverifiable ones are regenerated up to twice, then dropped (reported in the
+    batch report, never stored)."""
+    from groundly.agents.decks import MAX_COUNT, estimate_generation, generate_deck_job
+    from groundly.agents.jobs import start_job
+    from groundly.llm.config import ProviderNotConfiguredError, require_provider
+
+    _subject_or_error(subject, ToolError)
+    count = max(1, min(count, MAX_COUNT))
+    if not confirm:
+        return estimate_generation(count)
+    try:
+        require_provider("generation")  # fail at submit time, not buried in the job
+    except ProviderNotConfiguredError as exc:
+        raise ToolError(
+            f"generate_deck needs a configured generation provider; submit_cards "
+            f"works without one — {exc}"
+        ) from exc
+    job = start_job(subject, lambda: generate_deck_job(subject, topic, deck, count))
+    return {"job_id": job.id, "status": job.status}
+
+
+@mcp.tool
+def get_job(job_id: str) -> dict:
+    """Status of a generate_deck job: 'queued'/'running' (poll again), 'done' (the
+    `report` field holds the batch report: accepted count, dropped cards with
+    machine-readable reasons, tokens, cost), or 'failed' (`error` names the cause)."""
+    from groundly.agents.jobs import get_job as get_job_fn
+
+    job = get_job_fn(job_id)
+    if job is None:
+        raise ToolError(
+            "unknown or expired job id — jobs do not survive a server restart; cards "
+            "already verified are stored, check list_decks"
+        )
+    return {"job_id": job.id, "status": job.status, "report": job.report, "error": job.error}
+
+
+@mcp.tool
+def export_deck(subject: str, deck: str) -> dict:
+    """Export a verified flashcard deck as an Anki .apkg file (citations on the card
+    backs) and return its absolute path for the student to import into Anki. The file
+    is written under the subject's exports/ directory; use `list_decks` to see which
+    decks exist."""
+    from groundly.core.anki import export_deck as export_deck_fn
+
+    _subject_or_error(subject, ToolError)
+    try:
+        path = export_deck_fn(subject, deck)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from exc
+    return {"path": str(path)}
 
 
 @mcp.tool
