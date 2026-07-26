@@ -61,16 +61,63 @@ confirmation —
 asked to confirm before anything is sent anywhere.
 
 Once a subject has a graph, `--graph` is no longer needed: every later
-`groundly index` run checks whether the corpus changed (a material was
-added, removed, or re-extracted) and rebuilds automatically if so — same
-confirmation gate, same `--yes` skip.
+`groundly index` run checks whether the graph still describes this subject —
+the corpus changed (a material was added, removed, or re-extracted), *or* the
+extraction prompt or entity types changed — and rebuilds automatically if so.
+Same confirmation gate, same `--yes` skip. The message names which of the two
+it was.
+
+## What the graph is built to look for
+
+Groundly ships its own entity-extraction prompt, tuned for course material.
+graphrag's default is aimed at news: its entity types are
+`organization/person/geo/event` and its worked examples are a stock-market
+report and a political summit. On a parallel-algorithms corpus that produced
+75 `ORGANIZATION` and 34 `EVENT` entities out of 115 — a graph of the wrong
+*kind*.
+
+The bundled prompt looks for:
+
+```
+concept, algorithm, data_structure, theorem, technique, tool, metric, person
+```
+
+`person` stays because courses cite Dijkstra and Lamport, and those are real
+nodes. These defaults lean CS-ward, matching the pilot subjects; a law or
+history course wants different ones:
+
+```bash
+groundly config set graph.entity_types "case,statute,court,doctrine,person"
+```
+
+You can replace the whole prompt too — this is also how the thesis evaluation
+compares prompts on the gold set:
+
+```bash
+groundly config set graph.extraction_prompt /path/to/my_prompt.txt
+```
+
+A custom prompt must keep `{entity_types}` and `{input_text}`, which graphrag
+substitutes, and must **not** contain `{tuple_delimiter}`, `{record_delimiter}`
+or `{completion_delimiter}` — despite appearing in older graphrag prompts,
+those are not substituted, and leaving one in makes every chunk fail silently.
+Both problems are refused by name before any call is made.
+
+Changing either setting changes the graph's extraction fingerprint, so the next
+`groundly index` offers a rebuild rather than quietly serving a graph built
+under different framing.
 
 ## Context size — the thing that actually bites
 
-Entity extraction is the largest prompt in the build: graphrag sends a
-~1620-token few-shot preamble plus one chunk, every time. Its own defaults
-assume a large cloud model — `community_reports` alone asks for 8000 tokens
-in and 2000 out — so stock graphrag wants roughly **16k of usable context**.
+Entity extraction is the largest prompt in the build: the whole few-shot
+preamble plus one chunk, every time. Because Groundly's chunks average ~156
+tokens, that preamble is the *majority* of every call — which is why the
+bundled prompt is ~700 tokens where graphrag's is ~1620, and why a 1194-chunk
+build costs ~1.0M tokens instead of ~2.1M.
+
+graphrag's own stage defaults still assume a large cloud model —
+`community_reports` alone asks for 8000 tokens in and 2000 out — so stock
+graphrag wants roughly **16k of usable context**.
 
 A local model loaded at 4096 (LM Studio's common default) fails every single
 call with `Context size has been exceeded`, and graphrag *swallows* those
@@ -127,10 +174,10 @@ independent; set whichever your tier publishes. Unset means unthrottled,
 which is the right default for LM Studio or Ollama.
 
 Note this cannot help with a **per-day** cap. Groq's free tier allows 100k
-tokens/day, and a 1200-chunk subject needs around 2.1M — roughly three weeks
-of quota. Throttling paces spending; it doesn't create budget. Size the job
-first: the confirmation prompt's token figure is the number to compare
-against your daily allowance.
+tokens/day, and a 1200-chunk subject needs around 1.0M with the bundled prompt
+— still ten days of quota. Throttling paces spending; it doesn't create
+budget. Size the job first: the confirmation prompt's token figure is the
+number to compare against your daily allowance.
 
 ## What else needs configuring
 
