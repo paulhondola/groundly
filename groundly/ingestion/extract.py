@@ -87,6 +87,10 @@ class SubprocessExtractor:
             # image-pixel cap via env: the worker reads positional argv and argv[3] is
             # already the optional ocr_lang, so a fourth positional would be ambiguous.
             env = {**os.environ, "GROUNDLY_MAX_IMAGE_PIXELS": str(int(self.max_image_pixels))}
+            # Never let the worker turn on logging: this parent reads only the *last
+            # line* of its stderr to name the failure cause (_stderr_tail below), so a
+            # log line written after the cause would silently replace it.
+            env.pop("GROUNDLY_LOG_LEVEL", None)
             with open(stderr_path, "wb") as stderr_file:
                 try:
                     proc = subprocess.run(

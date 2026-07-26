@@ -50,11 +50,23 @@ def index(
         ),
     ] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
+    debug: Annotated[
+        bool,
+        typer.Option(
+            "--debug", help="Stream debug logs to stderr (also: GROUNDLY_LOG_LEVEL=DEBUG)."
+        ),
+    ] = False,
 ) -> None:
     """Index course materials: hash-skip idempotent, per-file progress, resumable."""
+    from groundly.core.logs import setup_logging
     from groundly.core.subject import Subject
     from groundly.ingestion import pipeline
     from groundly.ingestion.results import Status
+
+    try:
+        debug_on = setup_logging(debug)
+    except ValueError as exc:
+        _fail(str(exc))
 
     try:
         subj = Subject(subject)
@@ -92,7 +104,11 @@ def index(
     }
 
     with Progress(
-        TextColumn("{task.description}"), BarColumn(), MofNCompleteColumn(), console=console
+        TextColumn("{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        console=console,
+        disable=debug_on,
     ) as progress:
         task = progress.add_task("indexing…", total=None)
 
@@ -122,13 +138,13 @@ def index(
     failed = sum(r.status in (Status.EXTRACTION_FAILED, Status.ERROR) for r in results)
     console.print(f"{indexed} indexed, {len(results) - indexed - failed} skipped, {failed} failed")
 
-    _maybe_build_graph(subj, graph=graph, yes=yes)
+    _maybe_build_graph(subj, graph=graph, yes=yes, debug=debug_on)
 
     if failed:
         raise typer.Exit(code=1)
 
 
-def _maybe_build_graph(subj, *, graph: bool, yes: bool) -> None:
+def _maybe_build_graph(subj, *, graph: bool, yes: bool, debug: bool = False) -> None:
     """Corpus state is final for this run — decide whether the graph needs a
     (re)build. Auto-rebuilds a stale graph unconditionally; a first build only
     happens opt-in via --graph. Zero-key `index` behavior is unchanged when
@@ -161,10 +177,28 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool) -> None:
     if not yes:
         typer.confirm(prompt, abort=True)
 
-    try:
-        build_graph(subj, store_obj, estimated_tokens=tokens, estimated_cost_usd=cost)
-    except (GraphBuildError, ProviderNotConfiguredError) as exc:
-        _fail(str(exc))
+    with Progress(
+        TextColumn("{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        console=console,
+        disable=debug,
+    ) as progress:
+        task = progress.add_task("building graph…", total=None)
+
+        def on_event(description: str, completed: int, total: int) -> None:
+            progress.update(task, description=description, completed=completed, total=total)
+
+        try:
+            build_graph(
+                subj,
+                store_obj,
+                estimated_tokens=tokens,
+                estimated_cost_usd=cost,
+                on_event=on_event,
+            )
+        except (GraphBuildError, ProviderNotConfiguredError) as exc:
+            _fail(str(exc))
     console.print(f"Graph built for [bold]{subj.name}[/bold]")
 
 

@@ -7,6 +7,7 @@ metadata shape (docs/architecture/retrieval.md).
 call directly; it never requires a provider and always logs a `kind='search'` trace.
 """
 
+import logging
 import time
 
 from llama_index.core.callbacks import CallbackManager
@@ -14,6 +15,8 @@ from llama_index.core.retrievers import BaseRetriever
 from llama_index.core.schema import NodeWithScore, QueryBundle, TextNode
 
 from groundly.core.store import SQLiteSubjectStore
+
+logger = logging.getLogger(__name__)
 
 CHANNEL_K = 50  # candidates pulled per channel before fusion
 RRF_K = 60  # standard reciprocal-rank-fusion constant
@@ -89,8 +92,15 @@ class VectorRetriever(BaseRetriever):
         sparse_ids = self.store.sparse_search(sparse[0], self.channel_k)
         bm25_ids = self.store.bm25_search(query, self.channel_k)
         path = ["dense", "sparse", "bm25", "rrf"]
+        logger.debug(
+            "channel hits: dense=%d sparse=%d bm25=%d",
+            len(dense_ids),
+            len(sparse_ids),
+            len(bm25_ids),
+        )
 
         fused = rrf([dense_ids, sparse_ids, bm25_ids])[: self.rerank_pool]
+        logger.debug("fused pool size=%d rerank=%s", len(fused), self.rerank)
         if not fused:
             self.path = path
             return []
@@ -112,6 +122,7 @@ class VectorRetriever(BaseRetriever):
         for chunk_id, score in ranked[: self.context_k]:
             row = details.get(chunk_id)
             if row is None:  # removed between fusion and detail lookup — skip, don't crash
+                logger.debug("chunk %s vanished between fusion and detail lookup", chunk_id)
                 continue
             node = TextNode(
                 text=row["text"],
@@ -124,6 +135,9 @@ class VectorRetriever(BaseRetriever):
                 },
             )
             nodes.append(NodeWithScore(node=node, score=float(score)))
+        logger.debug(
+            "path=%s top=%s", path, [(n.node.metadata["chunk_id"], n.score) for n in nodes]
+        )
         return nodes
 
 

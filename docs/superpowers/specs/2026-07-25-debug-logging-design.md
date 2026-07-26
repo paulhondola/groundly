@@ -145,6 +145,23 @@ Logs on stderr only; stdout carries nothing but protocol.
 
 Deck-parse diagnostics ([agents/decks.py:100-125](groundly/agents/decks.py:100)), the cost-computation swallow ([llm/chat.py:79-83](groundly/llm/chat.py:79)), `cached_snapshot`'s double-`None` ([llm/embeddings.py:46-56](groundly/llm/embeddings.py:46)), the `IntegrityError` pass ([ingestion/pipeline.py:201](groundly/ingestion/pipeline.py:201)), job tracebacks ([agents/jobs.py:47](groundly/agents/jobs.py:47)), OCR-fired visibility, a `groundly traces` verb to read the trace rows nothing currently surfaces, and any `config.toml` log setting.
 
+## Amendments from review
+
+Three changes to the design above, all from the `spec-guardian` / `security-reviewer` pass. Each was verified empirically before the fix landed.
+
+1. **`groundly/__init__.py` attaches a `NullHandler`** (not in the original plan). The plan claimed "configure nothing and return `False`, so default behavior is byte-for-byte unchanged" — false as written. Stdlib's `logging.lastResort` is a WARNING-level stderr handler that fires whenever no handler is found in the chain, so the one `logger.error` in `_ProgressCallbacks.pipeline_error` printed a raw traceback to stderr with logging *off*, breaking both that promise and `GraphBuildError`'s "no raw traceback ever surfaces" guarantee. A `NullHandler` on the package-root logger suppresses `lastResort` without affecting propagation to the root handler when logging is on. Pinned by two tests in `tests/core/test_logs.py`.
+
+2. **`verbose` is gone from `build_graph`; graphrag stays at its own default INFO.** The plan passed `verbose=debug` through to `build_index`. That raises graphrag's loggers to DEBUG, and `graphrag/api/index.py:90` does `logger.debug(str(output.result))` — for the text-unit workflows `result` is a sample DataFrame *including the text column*, i.e. verbatim course material onto stderr and persisted into `<subject>/graph/logs/indexing-engine.log`. That violates the design's own "ids and scores only, never full chunk text" rule. INFO already carries the workflow names and `ProgressTicker` counts that `--debug` exists to surface, so dropping the parameter costs nothing and also resolves a second finding (`verbose` had been bound to "logging is on at any level", so `GROUNDLY_LOG_LEVEL=WARNING` would have enabled graphrag DEBUG).
+
+3. **`_build_config` moved out of the broad `try`.** The config embeds the `extraction` provider's `api_key`, and a pydantic `ValidationError` echoes the offending input value — so the new `exc_info=True` debug log, and the pre-existing wrapped message, could both carry the key. It now has its own guard raising a `GraphBuildError` that names the cause without interpolating the exception.
+
+Two fixes outside the plan's stated scope, both directly on the stdout boundary the design is built on:
+
+- **`llm/chat.py` sets `litellm.suppress_debug_info = True`.** litellm `print()`s an ANSI-coloured "Give Feedback / Get Help" banner to **stdout** on any provider exception (verified: 116 bytes). `groundly mcp` speaks MCP over stdout and calls `complete()` in-process, so an unreachable LM Studio corrupted the JSON-RPC stream. Pre-existing, but it falsified this design's hard constraint, so it is fixed here.
+- **`ingestion/extract.py` pops `GROUNDLY_LOG_LEVEL` from the extraction worker's env.** The parent reads only the *last line* of worker stderr to name the failure cause, so the "don't instrument the worker" rule was protected by convention alone; now it's structural.
+
+Smaller: `cli/mcp.py` prints a named cause to stderr and exits 1 on a bad `GROUNDLY_LOG_LEVEL` rather than surfacing a rich traceback (verified: stdout stays 0 bytes); the router's logged raw reply is truncated to 80 chars.
+
 ## Execution
 
 Branch `logging` off `verified-cards`. This plan gets committed to `docs/superpowers/specs/2026-07-25-debug-logging-design.md` as the first commit on the branch, matching the convention used for the P5 and P6 slices. Implementation by a Sonnet subagent; `spec-guardian` and `security-reviewer` before commit (the stdio/stdout boundary and the no-log-file privacy decision are exactly their beat).

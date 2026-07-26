@@ -9,10 +9,13 @@ no sidecar mapping table needed.
 
 import asyncio
 import hashlib
+import logging
+from collections.abc import Callable
 from importlib.metadata import version as _package_version
 
 import pandas as pd
 from graphrag.api.index import build_index
+from graphrag.callbacks.noop_workflow_callbacks import NoopWorkflowCallbacks
 from graphrag.config.models.graph_rag_config import GraphRagConfig
 from graphrag.config.models.reporting_config import ReportingConfig
 from graphrag_cache import CacheConfig
@@ -31,6 +34,8 @@ from groundly.llm.graphrag_adapter import (
     register_bge_m3_embedding,
 )
 
+logger = logging.getLogger(__name__)
+
 # Generously above manifest.CHUNK_MAX_TOKENS (512) so graphrag's own chunker never
 # splits a Groundly chunk further — one text unit per document, guaranteed.
 # Internal-only: never exposed in the manifest or CLI (not an interchange knob).
@@ -41,6 +46,30 @@ _EMBEDDING_MODEL_ID = "default_embedding_model"
 
 class GraphBuildError(Exception):
     """Wraps any graphrag indexing failure — no raw traceback ever surfaces."""
+
+
+class _ProgressCallbacks(NoopWorkflowCallbacks):
+    """Translates graphrag's workflow lifecycle into `on_event(description,
+    completed, total)` — plain types, so the CLI never imports graphrag."""
+
+    def __init__(self, on_event: Callable[[str, int, int], None]) -> None:
+        self._on_event = on_event
+        self._total = 0
+        self._completed = 0
+
+    def pipeline_start(self, names: list[str]) -> None:
+        self._total = len(names)
+        self._on_event("starting…", self._completed, self._total)
+
+    def workflow_start(self, name: str, instance: object) -> None:
+        self._on_event(name, self._completed, self._total)
+
+    def workflow_end(self, name: str, instance: object) -> None:
+        self._completed += 1
+        self._on_event(name, self._completed, self._total)
+
+    def pipeline_error(self, error: BaseException) -> None:
+        logger.error("graphrag pipeline error: %s", error, exc_info=error)
 
 
 def corpus_hash(store: SQLiteSubjectStore) -> str:
@@ -93,6 +122,7 @@ def build_graph(
     *,
     estimated_tokens: int = 0,
     estimated_cost_usd: float | None = None,
+    on_event: Callable[[str, int, int], None] | None = None,
 ) -> None:
     """Batch build graphrag's graph for a subject (parquet artifacts + a LanceDB
     vector store under <subject>/graph/). Cost-estimate confirmation is the CLI's
@@ -100,8 +130,31 @@ def build_graph(
 
     `estimated_tokens`/`estimated_cost_usd` are the CLI's already-computed
     `graphrag_adapter.estimate_cost()` figures, threaded through so this function
-    doesn't recompute them — recorded into progress.db as a trace row on success."""
+    doesn't recompute them — recorded into progress.db as a trace row on success.
+
+    `on_event` reports workflow-level progress (mirrors ingestion/pipeline.py's
+    own `on_event` contract).
+
+    graphrag is deliberately left at its own default INFO level — `build_index`'s
+    `verbose=True` would raise its loggers to DEBUG, and `graphrag/api/index.py`
+    logs `str(output.result)` at DEBUG, which for the text-unit workflows is a
+    sample DataFrame *including the text column*: verbatim course material onto
+    stderr and into graph/logs/indexing-engine.log. INFO already carries the
+    workflow names and progress counts that `--debug` exists to show."""
+    on_event = on_event or (lambda description, completed, total: None)
     provider_cfg = require_provider("extraction")  # fail fast, before any chunk enumeration
+
+    # Outside the try below on purpose: the config embeds the extraction provider's
+    # api_key, and a pydantic ValidationError echoes the offending input value — so
+    # neither the wrapped message nor a logged traceback may ever carry this one.
+    try:
+        config = _build_config(subj)
+    except Exception as exc:
+        raise GraphBuildError(
+            "graphrag config is invalid — check [providers.extraction] in your config.toml "
+            f"against the pinned graphrag {_package_version('graphrag')} "
+            f"({type(exc).__name__}; details withheld, they would include your api_key)"
+        ) from exc
 
     try:
         register_bge_m3_embedding()
@@ -117,10 +170,24 @@ def build_graph(
             }
         )
 
-        config = _build_config(subj)
-        asyncio.run(build_index(config, input_documents=df))
+        logger.debug("starting graph build: %d chunks, model=%s", len(rows), provider_cfg.model)
+        results = asyncio.run(
+            build_index(
+                config,
+                input_documents=df,
+                callbacks=[_ProgressCallbacks(on_event)],
+            )
+        )
     except Exception as exc:
+        logger.debug("graph build failed", exc_info=True)
         raise GraphBuildError(f"graph build failed: {exc}") from exc
+
+    failed = [r for r in results if r.error is not None]
+    if failed:
+        for r in failed:
+            logger.debug("workflow %s failed", r.workflow, exc_info=r.error)
+        names = ", ".join(r.workflow for r in failed)
+        raise GraphBuildError(f"graph build failed: workflow(s) {names} failed")
 
     manifest = subj.load_manifest()
     manifest.graphrag = Graphrag(

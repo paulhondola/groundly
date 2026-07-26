@@ -19,13 +19,25 @@ def ask(
     no_rerank: Annotated[
         bool, typer.Option("--no-rerank", help="Skip the cross-encoder rerank step.")
     ] = False,
+    debug: Annotated[
+        bool,
+        typer.Option(
+            "--debug", help="Stream debug logs to stderr (also: GROUNDLY_LOG_LEVEL=DEBUG)."
+        ),
+    ] = False,
 ) -> None:
     """Ask a grounded question: a cited answer, or the refusal — never model knowledge."""
     from groundly.agents.ask import NoCitationsError
     from groundly.agents.ask import ask as ask_fn
+    from groundly.core.logs import setup_logging
     from groundly.llm.chat import ChatUnreachableError
     from groundly.llm.config import ProviderNotConfiguredError
     from groundly.llm.embeddings import ModelDownloadError
+
+    try:
+        setup_logging(debug)
+    except ValueError as exc:
+        _fail(str(exc))
 
     subj = _subject_checked(subject)
     _store_checked(subj)
@@ -65,11 +77,23 @@ def search(
             "--rerank/--no-rerank", help="Cross-encoder rerank (default: retrieval.rerank)."
         ),
     ] = None,
+    debug: Annotated[
+        bool,
+        typer.Option(
+            "--debug", help="Stream debug logs to stderr (also: GROUNDLY_LOG_LEVEL=DEBUG)."
+        ),
+    ] = False,
 ) -> None:
     """Raw retrieval: top-k chunks with text + citations. No LLM call, works with no
     provider configured — the host composes its own answer (best-effort grounding)."""
+    from groundly.core.logs import setup_logging
     from groundly.llm.embeddings import ModelDownloadError
     from groundly.retrieval.vector import search as search_fn
+
+    try:
+        setup_logging(debug)
+    except ValueError as exc:
+        _fail(str(exc))
 
     subj = _subject_checked(subject)
     _store_checked(subj)

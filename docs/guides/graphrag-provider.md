@@ -101,3 +101,19 @@ travels with the rest of the subject on export like `store.db` does).
   bundle's `graph/` didn't match its own `store.db` (tampered, stale export,
   or an embedding-pin change triggered a re-embed). Rebuild locally with
   `groundly index --graph` if you want one.
+- `graph build failed: workflow(s) <names> failed` — graphrag ran but one or
+  more of its workflows errored. The manifest is deliberately *not* stamped in
+  this case, so the graph stays marked stale and the next `groundly index`
+  retries it. Re-run with `--debug` for graphrag's own log lines naming the
+  cause (commonly the extraction provider rate-limiting or returning
+  unparseable output).
+- `graphrag config is invalid` — the pinned graphrag version rejected the
+  generated config. The details are withheld on purpose: they would include
+  your `extraction` api_key.
+- **The build looks stuck.** It isn't silent any more — `groundly index
+  --graph` shows a bar advancing through graphrag's workflows. For the detail
+  behind it, add `--debug` (or set `GROUNDLY_LOG_LEVEL=DEBUG`) to stream
+  graphrag's own log lines to stderr; the bar is suppressed while logging is
+  on so the two don't fight. graphrag also writes every build to
+  `<subject>/graph/logs/indexing-engine.log`, which never leaves your machine
+  (it's excluded from bundle export).

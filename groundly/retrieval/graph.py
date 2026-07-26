@@ -27,6 +27,7 @@ traces table (a framework-boundary limitation, not something this module fixes).
 """
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -48,6 +49,8 @@ from groundly.llm.graphrag_adapter import (
     completion_model_config,
     register_bge_m3_embedding,
 )
+
+logger = logging.getLogger(__name__)
 
 # Matches graphrag CLI's own default (`--community-level`, graphrag/cli/main.py). This
 # is a level *ceiling*, not an exact match (`df[df.level <= community_level]` —
@@ -118,6 +121,7 @@ def _nodes_from_chunk_ids(store: SQLiteSubjectStore, chunk_ids: list[int]) -> li
     for rank, chunk_id in enumerate(chunk_ids):
         row = details.get(chunk_id)
         if row is None:  # entity/text-unit pointed at a chunk since removed — skip
+            logger.debug("chunk %s vanished between fusion and detail lookup", chunk_id)
             continue
         node = TextNode(
             text=row["text"],
@@ -198,6 +202,12 @@ class GraphLocalRetriever(_GraphRetrieverBase):
                     if document_id is not None:
                         chunk_ids.append(int(document_id))
         self.path.append("text-unit-resolve")
+        logger.debug(
+            "local search: %d source(s) resolved to %d chunk id(s), path=%s",
+            0 if sources is None else len(sources),
+            len(chunk_ids),
+            self.path,
+        )
         return _nodes_from_chunk_ids(self.store, chunk_ids)
 
 
@@ -230,6 +240,7 @@ class GraphGlobalRetriever(_GraphRetrieverBase):
         if reports is None or reports.empty:
             self.path.append("entity-resolve")
             self.path.append("text-unit-resolve")
+            logger.debug("global search: no community reports matched, path=%s", self.path)
             return []
 
         self.communities = [
@@ -246,6 +257,11 @@ class GraphGlobalRetriever(_GraphRetrieverBase):
             for text_unit_id in (entity.text_unit_ids or [])
         }
         self.path.append("entity-resolve")
+        logger.debug(
+            "global search: %d community(s), %d matched entity(s)",
+            len(self.communities),
+            len(entities),
+        )
 
         text_units = artifacts.text_units.set_index("id")["document_id"]
         chunk_ids = sorted(
@@ -256,4 +272,5 @@ class GraphGlobalRetriever(_GraphRetrieverBase):
             }
         )
         self.path.append("text-unit-resolve")
+        logger.debug("global search resolved %d chunk id(s), path=%s", len(chunk_ids), self.path)
         return _nodes_from_chunk_ids(self.store, chunk_ids)
