@@ -306,6 +306,14 @@ def _stub_index_paths(monkeypatch, f):
     monkeypatch.setattr(pipeline, "index_paths", fake_index_paths)
 
 
+def _unwrapped(output: str) -> str:
+    """rich hard-wraps console output at the terminal width, so a long path or phrase
+    can land with a newline through the middle of it. Collapse whitespace before
+    asserting on message content — otherwise the assertion passes or fails depending on
+    how wide the terminal running pytest happens to be."""
+    return " ".join(output.split())
+
+
 def _stub_build_graph(monkeypatch, failed: int = 0):
     """Records each call and mimics build_graph's real success side effects (graph/
     directory + manifest.graphrag stamped with the current corpus hash) so a later
@@ -331,6 +339,9 @@ def _stub_build_graph(monkeypatch, failed: int = 0):
             version="3.1.0",
             extraction_model="m",
             corpus_hash=ingestion_graph.corpus_hash(store_obj),
+            # Real build_graph records this in the same write; without it the next
+            # `index` would see a framing change and re-offer a rebuild.
+            extraction_fingerprint=ingestion_graph.current_extraction_fingerprint(),
         )
         subj.save_manifest(manifest)
         return ingestion_graph.GraphBuildResult(chunks=1, failed=failed)
@@ -574,6 +585,9 @@ def test_index_graph_debug_streams_logs_to_stderr(monkeypatch, home, tmp_path):
             version="3.1.0",
             extraction_model="m",
             corpus_hash=ingestion_graph.corpus_hash(store_obj),
+            # Real build_graph records this in the same write; without it the next
+            # `index` would see a framing change and re-offer a rebuild.
+            extraction_fingerprint=ingestion_graph.current_extraction_fingerprint(),
         )
         subj.save_manifest(manifest)
         return ingestion_graph.GraphBuildResult(chunks=1, failed=0)
@@ -597,3 +611,54 @@ def test_index_debug_invalid_log_level_fails_cleanly(monkeypatch, home, tmp_path
     assert result.exit_code == 1
     assert "Traceback" not in result.output
     assert "BOGUS" in result.output
+
+
+def test_index_names_a_framing_change_rather_than_blaming_the_corpus(monkeypatch, home, tmp_path):
+    """The corpus is untouched — only graph.entity_types changed. Saying "the corpus
+    changed" here would be confidently wrong, which is the failure mode the staleness
+    reason exists to prevent."""
+    from groundly.core.config import set_key
+
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+    calls = _stub_build_graph(monkeypatch)
+
+    runner.invoke(app, ["index", "PDSS", str(f), "--graph", "--yes"])
+    assert calls == ["PDSS"]
+
+    set_key("graph.entity_types", "concept,proof")
+    result = runner.invoke(app, ["index", "PDSS", str(f), "--yes"])
+
+    assert result.exit_code == 0, result.output
+    output = _unwrapped(result.output)
+    assert "extraction prompt or entity types changed" in output
+    assert "corpus changed" not in output
+    assert calls == ["PDSS", "PDSS"]  # rebuilt under the new framing
+
+
+def test_index_names_a_broken_custom_prompt_without_a_traceback(monkeypatch, home, tmp_path):
+    """graph_is_stale resolves the configured prompt, so a bad path surfaces on the
+    staleness check — before the cost estimate, and before any LLM call."""
+    from groundly.core.config import set_key
+
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+    _stub_build_graph(monkeypatch)
+
+    runner.invoke(app, ["index", "PDSS", str(f), "--graph", "--yes"])
+    set_key("graph.extraction_prompt", str(tmp_path / "gone.txt"))
+
+    result = runner.invoke(app, ["index", "PDSS", str(f), "--yes"])
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    # rich can break a long path mid-word, so collapse whitespace away entirely for it
+    assert "gone.txt" in "".join(result.output.split())
+    assert "unset it to use the bundled course-tuned prompt" in _unwrapped(result.output)

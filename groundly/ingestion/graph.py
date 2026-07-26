@@ -11,7 +11,8 @@ import asyncio
 import hashlib
 import logging
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib.metadata import version as _package_version
 from pathlib import Path
@@ -37,10 +38,14 @@ from groundly.core.subject import Subject
 from groundly.llm.config import require_provider
 from groundly.llm.graphrag_adapter import (
     BGE_M3_EMBEDDING_TYPE,
+    ExtractionPromptError,
     allow_nonstandard_service_tier,
     completion_model_config,
+    extraction_entity_types,
+    extraction_fingerprint,
     prompt_budgets,
     register_bge_m3_embedding,
+    resolve_extraction_prompt,
 )
 
 logger = logging.getLogger(__name__)
@@ -165,17 +170,18 @@ def _probe_extraction(
     billable call, so each records its own trace row (.claude/rules/architecture.md:
     every LLM call records tokens + cost).
 
-    The extraction prompt comes from the *same config the build will use*, so a change to
-    entity types or a custom prompt can never leave the probe testing something the build
-    doesn't send."""
+    The extraction prompt comes from the *same config the build will use*, and is
+    formatted with the *same keys* graphrag formats it with — only `entity_types` and
+    `input_text` (graph_extractor._process_document). Passing the delimiter keys too, as
+    this used to, made the probe more forgiving than the build: a prompt containing
+    `{tuple_delimiter}` formatted fine here and then raised KeyError on every chunk of
+    the real run. graphrag_adapter rejects such a prompt outright now, and this stays
+    aligned so the probe can never be the laxer of the two."""
     from groundly.llm.chat import complete
 
     prompt = config.extract_graph.resolved_prompts().extraction_prompt.format(
         entity_types=",".join(config.extract_graph.entity_types),
         input_text=sample_text,
-        tuple_delimiter="<|>",
-        record_delimiter="##",
-        completion_delimiter="<|COMPLETE|>",
     )
     conn = connect_progress(subj.progress_db_path)
     try:
@@ -239,6 +245,18 @@ def _probe_call(conn, call: Callable[[], object], failure_message: str) -> None:
     )
 
 
+@contextmanager
+def _extraction_prompt() -> Iterator[tuple[Path, str]]:
+    """`resolve_extraction_prompt` with its named error mapped onto this module's, so the
+    CLI's existing `except GraphBuildError` covers a bad custom prompt with no new
+    handler — and so the message still names the cause."""
+    try:
+        with resolve_extraction_prompt() as resolved:
+            yield resolved
+    except ExtractionPromptError as exc:
+        raise GraphBuildError(str(exc)) from exc
+
+
 def corpus_hash(store: SQLiteSubjectStore) -> str:
     """sha256 over the subject's indexed materials' sha256s, sorted — stable across
     re-runs of the same corpus, changes iff a material is added/removed/re-extracted."""
@@ -246,24 +264,53 @@ def corpus_hash(store: SQLiteSubjectStore) -> str:
     return hashlib.sha256("\n".join(sha256s).encode()).hexdigest()
 
 
-def graph_is_stale(subj: Subject, store: SQLiteSubjectStore) -> bool:
-    """True if a graph build was recorded but its directory vanished (deleted
-    externally — be defensive), or if the corpus has changed since the last build."""
+def current_extraction_fingerprint() -> str:
+    """The fingerprint a build started right now would record. Raises
+    ExtractionPromptError if a configured custom prompt cannot be used."""
+    with resolve_extraction_prompt() as (_path, text):
+        return extraction_fingerprint(text, extraction_entity_types())
+
+
+def graph_is_stale(subj: Subject, store: SQLiteSubjectStore) -> str | None:
+    """Why the recorded graph no longer describes this subject, or None if it still does.
+
+    A reason string rather than a bool because there are now three causes and the CLI
+    quotes this to the student. Telling someone "the corpus changed" when what they
+    changed was `graph.entity_types` is exactly the kind of confident-but-wrong message
+    the gates in this module exist to prevent (conventions: name the cause specifically).
+    """
     manifest = subj.load_manifest()
-    if manifest.graphrag.corpus_hash is not None and not (subj.root_dir / "graph").exists():
-        return True
-    return manifest.graphrag.corpus_hash != corpus_hash(store)
+    if manifest.graphrag.corpus_hash is None:
+        return "no graph has been recorded for this subject"
+    if not (subj.root_dir / "graph").exists():
+        return "the graph directory is missing"
+    if manifest.graphrag.corpus_hash != corpus_hash(store):
+        return "the corpus changed since the last build"
+    if manifest.graphrag.extraction_fingerprint != current_extraction_fingerprint():
+        return "the extraction prompt or entity types changed since the last build"
+    return None
 
 
-def _build_config(subj: Subject, context_window: int) -> GraphRagConfig:
+def _build_config(
+    subj: Subject, context_window: int, prompt_path: Path, entity_types: list[str]
+) -> GraphRagConfig:
     """graphrag's config, rooted entirely under <subject>/graph/ — nothing touches
     cwd, nothing leaks outside the subject's own directory. Every prompt budget is
     scaled to `context_window` (graph.context_window in config.toml); graphrag's own
-    defaults assume ~16k and 400 out on a small local model."""
+    defaults assume ~16k and 400 out on a small local model.
+
+    `prompt_path`/`entity_types` come from the caller rather than being read here, so
+    the fingerprint recorded in the manifest is computed from the same resolution that
+    produced this config — they cannot drift apart."""
     graph_dir = subj.root_dir / "graph"
     budgets = prompt_budgets(context_window)
     return GraphRagConfig(
-        extract_graph=ExtractGraphConfig(max_gleanings=budgets.max_gleanings),
+        extract_graph=ExtractGraphConfig(
+            max_gleanings=budgets.max_gleanings,
+            # A path, not text — graphrag's resolved_prompts() reads it off disk.
+            prompt=str(prompt_path),
+            entity_types=entity_types,
+        ),
         summarize_descriptions=SummarizeDescriptionsConfig(
             max_input_tokens=budgets.summarize_max_input_tokens,
             max_length=budgets.summarize_max_length,
@@ -363,29 +410,35 @@ def build_graph(
     if not rows:
         raise GraphBuildError("nothing indexed yet — run `groundly index` before building a graph")
 
-    # Outside the try below on purpose: the config embeds the extraction provider's
-    # api_key, and a pydantic ValidationError echoes the offending input value — so
-    # neither the wrapped message nor a logged traceback may ever carry this one.
-    try:
-        config = _build_config(subj, context_window)
-    except Exception as exc:
-        raise GraphBuildError(
-            "graphrag config is invalid — check [providers.extraction] in your config.toml "
-            f"against the pinned graphrag {_package_version('graphrag')} "
-            f"({type(exc).__name__}; details withheld, they would include your api_key)"
-        ) from exc
-
-    _probe_extraction(subj, config, rows[0]["text"], context_window)
-
-    # After the probe on purpose: a misconfigured provider should fail without
-    # destroying a graph that still works, so nothing is cleared until the provider has
-    # answered a real extraction prompt and a JSON-mode call.
-    _reset_graph_artifacts(subj)
-
+    # The prompt context spans the whole pipeline: ExtractGraphConfig.prompt is a path
+    # graphrag re-reads at extraction time, so the file has to outlive build_index.
     with (
+        _extraction_prompt() as (prompt_path, prompt_text),
         _WorkflowErrorCounter(_EXTRACTION_ERROR_SOURCE) as counter,
         _WorkflowErrorCounter(_COMMUNITY_ERROR_SOURCE) as reports_counter,
     ):
+        entity_types = extraction_entity_types()
+        fingerprint = extraction_fingerprint(prompt_text, entity_types)
+
+        # Outside the try below on purpose: the config embeds the extraction provider's
+        # api_key, and a pydantic ValidationError echoes the offending input value — so
+        # neither the wrapped message nor a logged traceback may ever carry this one.
+        try:
+            config = _build_config(subj, context_window, prompt_path, entity_types)
+        except Exception as exc:
+            raise GraphBuildError(
+                "graphrag config is invalid — check [providers.extraction] in your config.toml "
+                f"against the pinned graphrag {_package_version('graphrag')} "
+                f"({type(exc).__name__}; details withheld, they would include your api_key)"
+            ) from exc
+
+        _probe_extraction(subj, config, rows[0]["text"], context_window)
+
+        # After the probe on purpose: a misconfigured provider should fail without
+        # destroying a graph that still works, so nothing is cleared until the provider
+        # has answered a real extraction prompt and a JSON-mode call.
+        _reset_graph_artifacts(subj)
+
         try:
             register_bge_m3_embedding()
             allow_nonstandard_service_tier()
@@ -484,6 +537,9 @@ def build_graph(
         version=_package_version("graphrag"),
         extraction_model=provider_cfg.model,
         corpus_hash=corpus_hash(store),
+        # Same write as corpus_hash, so a refused build records neither and the next
+        # `groundly index` re-offers the build.
+        extraction_fingerprint=fingerprint,
     )
     subj.save_manifest(manifest)
 

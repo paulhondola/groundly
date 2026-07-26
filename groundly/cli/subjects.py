@@ -152,13 +152,24 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool, debug: bool = False) -> 
     from groundly.core.store import SQLiteSubjectStore
     from groundly.ingestion.graph import GraphBuildError, build_graph, graph_is_stale
     from groundly.llm.config import ProviderNotConfiguredError
-    from groundly.llm.graphrag_adapter import estimate_cost
+    from groundly.llm.graphrag_adapter import ExtractionPromptError, estimate_cost
 
     store_obj = SQLiteSubjectStore(subj.store_db_path)
     graph_dir = subj.root_dir / "graph"
 
-    if graph_dir.exists() and graph_is_stale(subj, store_obj):
-        prompt = "the graph is now stale — the corpus changed since the last build. Rebuild now?"
+    # graph_is_stale resolves the configured extraction prompt, so a broken custom path
+    # surfaces here — named, and before any LLM call.
+    try:
+        reason = graph_is_stale(subj, store_obj) if graph_dir.exists() else None
+    except (GraphBuildError, ExtractionPromptError) as exc:
+        _fail(str(exc))
+
+    if reason:
+        # Printed rather than folded into the confirmation text: `--yes` skips the
+        # prompt, and a rebuild that silently re-spends the student's tokens should
+        # still say what triggered it.
+        console.print(f"[yellow]The graph is stale[/yellow] — {reason}.")
+        prompt = "Rebuild it now?"
     elif not graph_dir.exists() and graph:
         prompt = "Build the graphrag arm for this subject now?"
     else:

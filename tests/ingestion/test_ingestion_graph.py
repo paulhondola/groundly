@@ -3,14 +3,23 @@ monkeypatched here — no test ever runs a real graphrag pipeline or hits a real
 (matches the discipline around complete/classify/extractors/embedders elsewhere)."""
 
 import logging
+from pathlib import Path
 
 import pytest
 
+from groundly.core.config import set_key
 from groundly.core.manifest import EMBEDDING_DIM
 from groundly.core.store import SQLiteSubjectStore
 from groundly.core.subject import Subject, init_subject
 from groundly.ingestion.extract import ChunkData
-from groundly.ingestion.graph import GraphBuildError, build_graph, corpus_hash, graph_is_stale
+from groundly.ingestion.graph import (
+    GraphBuildError,
+    build_graph,
+    corpus_hash,
+    current_extraction_fingerprint,
+    graph_is_stale,
+)
+from groundly.llm.graphrag_adapter import extraction_entity_types
 
 _EXTRACT_ERR = "graphrag.index.operations.extract_graph.graph_extractor"
 _COMMUNITY_ERR = "graphrag.index.operations.summarize_communities.community_reports_extractor"
@@ -140,39 +149,82 @@ def test_corpus_hash_ignores_extraction_failed_materials(store):
 # --- graph_is_stale --------------------------------------------------------------------
 
 
+def _record_build(subj, store):
+    """Stamp the manifest the way a successful build_graph does — both the corpus hash
+    and the extraction fingerprint, in one write."""
+    manifest = subj.load_manifest()
+    manifest.graphrag.corpus_hash = corpus_hash(store)
+    manifest.graphrag.extraction_fingerprint = current_extraction_fingerprint()
+    subj.save_manifest(manifest)
+
+
 def test_graph_is_stale_true_when_no_build_recorded_and_corpus_nonempty(subj, store):
     _add_material(store, "a.pdf", "a" * 64)
-    assert graph_is_stale(subj, store) is True  # corpus_hash None != real hash
+    assert graph_is_stale(subj, store) == "no graph has been recorded for this subject"
 
 
 def test_graph_is_stale_false_when_hash_matches_and_dir_exists(subj, store):
     _add_material(store, "a.pdf", "a" * 64)
     (subj.root_dir / "graph").mkdir()
-    manifest = subj.load_manifest()
-    manifest.graphrag.corpus_hash = corpus_hash(store)
-    subj.save_manifest(manifest)
-    assert graph_is_stale(subj, store) is False
+    _record_build(subj, store)
+    assert graph_is_stale(subj, store) is None
 
 
 def test_graph_is_stale_true_when_corpus_changed(subj, store):
     _add_material(store, "a.pdf", "a" * 64)
     (subj.root_dir / "graph").mkdir()
-    manifest = subj.load_manifest()
-    manifest.graphrag.corpus_hash = corpus_hash(store)
-    subj.save_manifest(manifest)
+    _record_build(subj, store)
 
     _add_material(store, "b.pdf", "b" * 64)
-    assert graph_is_stale(subj, store) is True
+    assert graph_is_stale(subj, store) == "the corpus changed since the last build"
 
 
 def test_graph_is_stale_true_when_graph_dir_deleted_externally(subj, store):
     _add_material(store, "a.pdf", "a" * 64)
-    manifest = subj.load_manifest()
-    manifest.graphrag.corpus_hash = corpus_hash(store)  # a build was recorded...
-    subj.save_manifest(manifest)
+    _record_build(subj, store)  # a build was recorded...
     # ...but graph/ was never created (or got deleted) — defensive staleness
     assert not (subj.root_dir / "graph").exists()
-    assert graph_is_stale(subj, store) is True
+    assert graph_is_stale(subj, store) == "the graph directory is missing"
+
+
+def test_graph_is_stale_when_entity_types_change(subj, store, home):
+    """The load-bearing case: the corpus is untouched, but the graph was built looking
+    for different things. Without the fingerprint this returned None and every later
+    query answered from a graph built under different framing."""
+    _add_material(store, "a.pdf", "a" * 64)
+    (subj.root_dir / "graph").mkdir()
+    _record_build(subj, store)
+    assert graph_is_stale(subj, store) is None
+
+    set_key("graph.entity_types", "concept,algorithm")
+    assert graph_is_stale(subj, store) == (
+        "the extraction prompt or entity types changed since the last build"
+    )
+
+
+def test_graph_is_stale_when_the_extraction_prompt_changes(subj, store, home, tmp_path):
+    _add_material(store, "a.pdf", "a" * 64)
+    (subj.root_dir / "graph").mkdir()
+    _record_build(subj, store)
+
+    custom = tmp_path / "custom.txt"
+    custom.write_text("Types: [{entity_types}]\nText: {input_text}\nOutput:")
+    set_key("graph.extraction_prompt", str(custom))
+    assert graph_is_stale(subj, store) == (
+        "the extraction prompt or entity types changed since the last build"
+    )
+
+
+def test_reordering_entity_types_counts_as_a_change(subj, store, home):
+    """The fingerprint hashes the joined types in order, not sorted: graphrag
+    interpolates them in order, so a reorder genuinely changes the prompt sent."""
+    _add_material(store, "a.pdf", "a" * 64)
+    (subj.root_dir / "graph").mkdir()
+    set_key("graph.entity_types", "concept,algorithm")
+    _record_build(subj, store)
+
+    set_key("graph.entity_types", "algorithm,concept")
+    assert graph_is_stale(subj, store) is not None
 
 
 # --- build_graph -----------------------------------------------------------------------
@@ -216,10 +268,17 @@ def test_build_graph_feeds_input_documents_and_records_manifest(subj, store, hom
     assert str(subj.root_dir / "graph" / "lancedb") == config.vector_store.db_uri
     assert config.vector_store.vector_size == EMBEDDING_DIM
 
+    # The prompt graphrag is told to use is a real file it can read back — its `prompt`
+    # field is a path, resolved at extraction time, not the text itself.
+    assert Path(config.extract_graph.prompt).is_file()
+    assert config.extract_graph.entity_types == extraction_entity_types()
+    assert "{entity_types}" in config.extract_graph.resolved_prompts().extraction_prompt
+
     manifest = subj.load_manifest()
     assert manifest.graphrag.extraction_model == "gpt-4o-mini"
     assert manifest.graphrag.corpus_hash == corpus_hash(store)
     assert manifest.graphrag.version  # graphrag's installed package version
+    assert manifest.graphrag.extraction_fingerprint == current_extraction_fingerprint()
 
 
 def test_build_graph_traces_every_llm_call_it_makes(subj, store, home, monkeypatch):
@@ -780,3 +839,105 @@ def test_reset_is_safe_on_a_first_build_with_no_graph_dir(subj, store, home, mon
 
     monkeypatch.setattr("groundly.ingestion.graph.build_index", ok)
     assert build_graph(subj, store).chunks == 1
+
+
+# --- the extraction prompt on the build path (decision 22) ------------------------------
+
+
+def test_a_broken_custom_prompt_fails_before_any_llm_call(subj, store, home, monkeypatch, tmp_path):
+    """Criterion: a bad prompt path is a named cause, not a graphrag internal, and it
+    costs nothing — the probe is the first billable call and must never be reached."""
+    _configure_extraction(home)
+    set_key("graph.extraction_prompt", str(tmp_path / "nope.txt"))
+    _add_material(store, "a.pdf", "a" * 64)
+
+    calls = []
+    monkeypatch.setattr(
+        "groundly.llm.chat.complete", lambda *a, **k: calls.append(a) or ChatResultStub()
+    )
+
+    async def never(*a, **k):
+        raise AssertionError("the pipeline must not start")
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", never)
+
+    with pytest.raises(GraphBuildError, match="nope.txt"):
+        build_graph(subj, store)
+    assert calls == []
+
+
+class ChatResultStub:
+    model = "stub"
+    tokens = 1
+    cost_usd = None
+
+
+def test_a_broken_custom_prompt_leaves_the_existing_graph_intact(
+    subj, store, home, monkeypatch, tmp_path
+):
+    """Same contract as a failed probe: nothing is destroyed until the configuration is
+    known to work (_reset_graph_artifacts runs after resolution, not before)."""
+    _configure_extraction(home)
+    _add_material(store, "a.pdf", "a" * 64)
+    _write_entities(subj)
+    survivor = subj.root_dir / "graph" / "entities.parquet"
+    assert survivor.exists()
+
+    set_key("graph.extraction_prompt", str(tmp_path / "nope.txt"))
+    with pytest.raises(GraphBuildError):
+        build_graph(subj, store)
+    assert survivor.exists()
+
+
+def test_refused_build_records_neither_hash_nor_fingerprint(subj, store, home, monkeypatch):
+    """The gates and the provenance fields share one write, so a graph that was refused
+    can never be reported as current under *either* dimension."""
+    _configure_extraction(home)
+    _add_chunks(store, 10)
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        logging.getLogger(_EXTRACT_ERR).error("boom")  # every chunk fails
+        for _ in range(9):
+            logging.getLogger(_EXTRACT_ERR).error("boom")
+        _write_entities(subj)
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+
+    with pytest.raises(GraphBuildError):
+        build_graph(subj, store)
+
+    manifest = subj.load_manifest()
+    assert manifest.graphrag.corpus_hash is None
+    assert manifest.graphrag.extraction_fingerprint is None
+
+
+def test_probe_sends_the_bundled_prompt_formatted_as_graphrag_formats_it(
+    subj, store, home, monkeypatch
+):
+    """Regression: the probe must exercise the same prompt the build sends, with the
+    same substitutions. It used to pass `tuple_delimiter` &c, which graphrag does not —
+    making the probe laxer than the build it exists to predict."""
+    _configure_extraction(home)
+    _add_material(store, "a.pdf", "a" * 64)
+
+    prompts = []
+
+    def fake_complete(call_class, messages, **kwargs):
+        prompts.append(messages[0]["content"])
+        return ChatResultStub()
+
+    monkeypatch.setattr("groundly.llm.chat.complete", fake_complete)
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        _write_entities(subj)
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+    build_graph(subj, store)
+
+    extraction_prompt = prompts[0]
+    assert "PETERSON'S ALGORITHM" in extraction_prompt  # the bundled worked example
+    assert "some chunk text" in extraction_prompt  # the real chunk, substituted
+    assert "concept" in extraction_prompt  # the entity types, substituted
+    assert "{" not in extraction_prompt.split("-Real Data-")[-1]  # nothing left unsubstituted
