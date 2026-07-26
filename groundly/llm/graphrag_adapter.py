@@ -5,7 +5,12 @@ LiteLLM-based client speaks the same OpenAI-compatible base_url+model+key shape
 Groundly already assumes everywhere else.
 """
 
+import hashlib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
+from importlib.resources import as_file, files
+from pathlib import Path
 
 # litellm's env defaults (price map, log level) are set in groundly/__init__.py — here
 # was too late: graphrag_llm.embedding.embedding below pulls litellm in at *its* module
@@ -17,21 +22,116 @@ from graphrag_llm.embedding.embedding import LLMEmbedding
 from graphrag_llm.embedding.embedding_factory import register_embedding
 
 from groundly.llm.chat import _LOCAL_PLACEHOLDER_KEY
-from groundly.llm.config import ProviderConfig, load_provider, require_provider
+from groundly.llm.config import ProviderConfig, load_provider, load_settings, require_provider
 
 BGE_M3_EMBEDDING_TYPE = "bge_m3"
 
+_BUNDLED_PROMPT = ("groundly", "prompts/extract_graph.txt")
+
+# graphrag's extractor formats the prompt with exactly these two keys
+# (graph_extractor._process_document) — nothing else is interpolated.
+_REQUIRED_PLACEHOLDERS = ("{entity_types}", "{input_text}")
+
+# ...and these are *not*, despite reading like they would be. graphrag 3.1.0 writes the
+# delimiters into the prompt literally and parses with hardcoded TUPLE_DELIMITER /
+# RECORD_DELIMITER / COMPLETION_DELIMITER constants. A prompt carrying them raises
+# KeyError inside graph_extractor's per-chunk `except Exception`, which is swallowed and
+# logged — i.e. every chunk fails silently. Rejecting them up front is cheaper than
+# discovering that through the failure gate hours later.
+_FORBIDDEN_PLACEHOLDERS = ("{tuple_delimiter}", "{record_delimiter}", "{completion_delimiter}")
+
+
+class ExtractionPromptError(Exception):
+    """A configured `graph.extraction_prompt` that cannot be used — missing, unreadable,
+    or malformed. Named cause, raised before any LLM call.
+
+    Lives here rather than in ingestion/ because llm/ is a foundation *below* ingestion
+    (.claude/rules/architecture.md); the dependency may not point the other way.
+    """
+
+
+def _bundled_prompt_text() -> str:
+    return files(_BUNDLED_PROMPT[0]).joinpath(_BUNDLED_PROMPT[1]).read_text(encoding="utf-8")
+
+
+def _validate_prompt(text: str, source: str) -> None:
+    missing = [p for p in _REQUIRED_PLACEHOLDERS if p not in text]
+    if missing:
+        raise ExtractionPromptError(
+            f"{source} is missing the placeholder(s) {', '.join(missing)} — graphrag "
+            "substitutes the entity types and the chunk text there, so a prompt without "
+            "them would send every chunk the same literal text"
+        )
+    present = [p for p in _FORBIDDEN_PLACEHOLDERS if p in text]
+    if present:
+        raise ExtractionPromptError(
+            f"{source} contains {', '.join(present)}, which graphrag does not substitute "
+            "— it writes the delimiters into the prompt literally and parses with fixed "
+            "ones. Leaving these in makes every chunk fail silently; write the "
+            "delimiters out as <|>, ## and <|COMPLETE|> instead"
+        )
+
+
+@contextmanager
+def resolve_extraction_prompt() -> Iterator[tuple[Path, str]]:
+    """Yield `(path, text)` for the entity-extraction prompt the build will send.
+
+    A path, not just text: `ExtractGraphConfig.prompt` is a *filesystem path* and
+    `resolved_prompts()` does `Path(self.prompt).read_text()`, so the file has to exist
+    for as long as the build runs. `as_file()` is what makes that true for a zipped
+    install as well as an unzipped one, which is why this is a context manager.
+
+    Validated here so a bad override is a named error before any LLM call, rather than a
+    graphrag internal surfacing hours in.
+    """
+    configured = load_settings().graph.extraction_prompt
+    if configured:
+        path = Path(configured).expanduser()
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ExtractionPromptError(
+                f"graph.extraction_prompt points at {path}, which could not be read "
+                f"({exc.strerror or exc}). Fix the path in your config.toml, or unset it "
+                "to use the bundled course-tuned prompt"
+            ) from exc
+        _validate_prompt(text, f"the extraction prompt at {path}")
+        yield path, text
+        return
+
+    with as_file(files(_BUNDLED_PROMPT[0]).joinpath(_BUNDLED_PROMPT[1])) as path:
+        text = path.read_text(encoding="utf-8")
+        _validate_prompt(text, "the bundled extraction prompt")
+        yield path, text
+
+
+def extraction_entity_types() -> list[str]:
+    """`graph.entity_types`, split and stripped. Stored comma-separated (see
+    core/config.GraphSettings) because the config writer emits scalars only."""
+    return [t.strip() for t in load_settings().graph.entity_types.split(",") if t.strip()]
+
+
+def extraction_fingerprint(prompt_text: str, entity_types: list[str]) -> str:
+    """sha256 over exactly what the build sends: the prompt text and the entity-type
+    list as graphrag joins it. Not sorted — reordering the types genuinely changes the
+    prompt the model sees, so it counts as a change."""
+    return hashlib.sha256(f"{prompt_text}\n{','.join(entity_types)}".encode()).hexdigest()
+
 
 def _preamble_tokens() -> int:
-    """graphrag's few-shot extraction preamble, sent with every single chunk. Measured
-    off the real prompt rather than hardcoded, so it tracks a graphrag upgrade or a
-    custom prompt instead of quietly going stale."""
-    from graphrag.prompts.index.extract_graph import GRAPH_EXTRACTION_PROMPT
+    """The extraction preamble, sent with every single chunk. Measured off the prompt
+    that will actually be used, so it tracks a custom prompt instead of going stale.
 
-    return len(GRAPH_EXTRACTION_PROMPT) // 4
+    Falls back to the bundled prompt when an override is unreadable: this feeds
+    `estimate_cost`, which is an estimate and must degrade rather than fail. The named
+    failure is `build_graph`'s job, and it still fires before any LLM call.
+    """
+    try:
+        with resolve_extraction_prompt() as (_path, text):
+            return len(text) // 4
+    except ExtractionPromptError:
+        return len(_bundled_prompt_text()) // 4
 
-
-_EXTRACTION_PREAMBLE_TOKENS = _preamble_tokens()
 
 # Set once by allow_nonstandard_service_tier(); see there for why this is a flag rather
 # than a check against the field's current annotation.
@@ -256,12 +356,13 @@ def estimate_cost(total_chars: int, chunk_count: int) -> tuple[int, float | None
     `input_price_per_mtok` field is an override; unset, this falls back to litellm's
     local price map and finally to (tokens, None) for genuinely unmapped models.
 
-    Every chunk is sent with graphrag's whole few-shot extraction preamble, which at
-    Groundly's chunk size is the *majority* of the input — counting chunk text alone
-    understated a real 1194-chunk build by 11.4x. Still an estimate: it prices the
-    extraction pass only, not the summarize/community-report stages that follow, and
-    not output tokens."""
-    tokens = total_chars // 4 + chunk_count * _EXTRACTION_PREAMBLE_TOKENS
+    Every chunk is sent with the whole few-shot extraction preamble, which at Groundly's
+    chunk size is the *majority* of the input — counting chunk text alone understated a
+    real 1194-chunk build by 11.4x. Measured per call rather than at import: the prompt
+    is configurable now, so a module constant would price the wrong one. Still an
+    estimate: it prices the extraction pass only, not the summarize/community-report
+    stages that follow, and not output tokens."""
+    tokens = total_chars // 4 + chunk_count * _preamble_tokens()
     cfg = load_provider("extraction")
     if cfg is None:
         return tokens, None

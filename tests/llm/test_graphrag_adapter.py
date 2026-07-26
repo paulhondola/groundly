@@ -227,10 +227,10 @@ def test_prompt_budgets_enable_gleanings_only_on_a_large_window():
 
 
 def test_estimate_cost_counts_the_per_chunk_extraction_preamble(home):
-    """graphrag sends its whole few-shot preamble with every chunk, which at Groundly's
-    chunk size dominates the input — counting chunk text alone understated a real
-    1194-chunk build by ~4x."""
-    from groundly.llm.graphrag_adapter import _EXTRACTION_PREAMBLE_TOKENS
+    """The whole few-shot preamble is sent with every chunk, which at Groundly's chunk
+    size dominates the input — counting chunk text alone understated a real 1194-chunk
+    build by 11.4x."""
+    from groundly.llm.graphrag_adapter import _preamble_tokens
 
     (home / "config.toml").write_text(
         '[providers.extraction]\nbase_url = "http://x"\nmodel = "m"\ninput_price_per_mtok = 1.0\n'
@@ -238,8 +238,44 @@ def test_estimate_cost_counts_the_per_chunk_extraction_preamble(home):
     chunk_tokens = 512
     tokens, _ = estimate_cost(chunk_tokens * 4, 1)  # one chunk of 512 tokens
 
-    assert tokens == chunk_tokens + _EXTRACTION_PREAMBLE_TOKENS
-    assert tokens > 3 * chunk_tokens  # the preamble is the majority of every call
+    assert tokens == chunk_tokens + _preamble_tokens()
+
+
+def test_estimate_cost_prices_the_bundled_prompt_not_graphrags(home):
+    """The saving only reaches the student if the confirmation gate quotes it. Pricing
+    graphrag's 1620-token preamble here would over-quote every build by ~2x."""
+    from graphrag.prompts.index.extract_graph import GRAPH_EXTRACTION_PROMPT
+
+    from groundly.llm.graphrag_adapter import _bundled_prompt_text, _preamble_tokens
+
+    assert _preamble_tokens() == len(_bundled_prompt_text()) // 4
+    assert _preamble_tokens() < len(GRAPH_EXTRACTION_PROMPT) // 4 / 2
+
+
+def test_estimate_cost_measures_a_custom_prompt(home, tmp_path):
+    custom = tmp_path / "custom.txt"
+    custom.write_text("Types [{entity_types}] Text {input_text} Output:" + "x" * 4000)
+    (home / "config.toml").write_text(
+        '[providers.extraction]\nbase_url = "http://x"\nmodel = "m"\n'
+        f'\n[graph]\nextraction_prompt = "{custom}"\n'
+    )
+    from groundly.llm.graphrag_adapter import _preamble_tokens
+
+    assert _preamble_tokens() == len(custom.read_text()) // 4
+
+
+def test_estimate_cost_falls_back_when_a_custom_prompt_is_unreadable(home, tmp_path):
+    """estimate_cost feeds the cost line, not the build. It must degrade to a number
+    rather than raise — build_graph still refuses, with a named cause, before any call."""
+    (home / "config.toml").write_text(
+        '[providers.extraction]\nbase_url = "http://x"\nmodel = "m"\n'
+        f'\n[graph]\nextraction_prompt = "{tmp_path / "nope.txt"}"\n'
+    )
+    from groundly.llm.graphrag_adapter import _bundled_prompt_text, _preamble_tokens
+
+    assert _preamble_tokens() == len(_bundled_prompt_text()) // 4
+    tokens, _ = estimate_cost(2048, 1)
+    assert tokens > 0
 
 
 def test_estimate_cost_prices_a_provider_prefixed_model_by_suffix(monkeypatch, home):
@@ -412,3 +448,129 @@ def test_allow_nonstandard_service_tier_rebuilds_the_model_only_once(monkeypatch
         graphrag_adapter.allow_nonstandard_service_tier()
 
     assert len(rebuilds) == 1
+
+
+# --- the bundled extraction prompt (decision 22) ----------------------------------------
+
+
+def test_bundled_prompt_keeps_the_placeholders_graphrag_substitutes():
+    """graph_extractor._process_document formats with exactly these two keys. A prompt
+    missing one sends every chunk the same literal text."""
+    from groundly.llm.graphrag_adapter import _bundled_prompt_text
+
+    text = _bundled_prompt_text()
+    assert "{entity_types}" in text
+    assert "{input_text}" in text
+
+
+def test_bundled_prompt_has_no_delimiter_placeholders():
+    """graphrag 3.1.0 writes the delimiters into the prompt literally and parses with
+    hardcoded constants — it never substitutes these. One in the prompt raises KeyError
+    inside graph_extractor's per-chunk except, i.e. every chunk fails silently."""
+    from groundly.llm.graphrag_adapter import _bundled_prompt_text
+
+    text = _bundled_prompt_text()
+    for placeholder in ("{tuple_delimiter}", "{record_delimiter}", "{completion_delimiter}"):
+        assert placeholder not in text
+    # ...and the literal delimiters the parser does split on are present
+    assert "<|>" in text and "##" in text and "<|COMPLETE|>" in text
+
+
+def test_bundled_prompt_stays_within_its_token_budget():
+    """The whole point of decision 22: this preamble is sent once per chunk, so its size
+    *is* the build's bill. 700 tokens keeps a 1194-chunk apd build near 1.0M (from
+    2.12M). Growing the worked example past this silently re-inflates every build."""
+    from groundly.llm.graphrag_adapter import _bundled_prompt_text
+
+    assert len(_bundled_prompt_text()) // 4 <= 700
+
+
+def test_bundled_prompt_reuses_graphrags_instruction_block_verbatim():
+    """Only the worked examples are ours. The instruction block defines the record
+    format the downstream parser depends on, so it is copied byte-for-byte — this fails
+    if a graphrag upgrade changes it and the bundled prompt is not re-derived."""
+    from graphrag.prompts.index.extract_graph import GRAPH_EXTRACTION_PROMPT
+
+    from groundly.llm.graphrag_adapter import _bundled_prompt_text
+
+    instructions, _, rest = GRAPH_EXTRACTION_PROMPT.partition("######################\n-Examples-")
+    _, _, real_data = rest.partition("######################\n-Real Data-")
+
+    text = _bundled_prompt_text()
+    assert text.startswith(instructions)
+    assert text.endswith(real_data)
+
+
+def test_default_entity_types_target_course_material():
+    """graphrag's defaults are organization/person/geo/event, which produced 75
+    ORGANIZATION and 34 EVENT entities on a parallel-algorithms corpus."""
+    from groundly.llm.graphrag_adapter import extraction_entity_types
+
+    types = extraction_entity_types()
+    assert "concept" in types and "algorithm" in types
+    assert "person" in types  # courses cite Dijkstra and Lamport
+    for news_type in ("organization", "geo", "event"):
+        assert news_type not in types
+
+
+def test_entity_types_are_split_and_stripped(home):
+    from groundly.llm.graphrag_adapter import extraction_entity_types
+
+    (home / "config.toml").write_text('[graph]\nentity_types = "concept, algorithm ,, theorem"\n')
+    assert extraction_entity_types() == ["concept", "algorithm", "theorem"]
+
+
+def test_custom_prompt_missing_file_names_the_cause(home, tmp_path):
+    from groundly.llm.graphrag_adapter import ExtractionPromptError, resolve_extraction_prompt
+
+    missing = tmp_path / "nope.txt"
+    (home / "config.toml").write_text(f'[graph]\nextraction_prompt = "{missing}"\n')
+    with pytest.raises(ExtractionPromptError) as exc:
+        with resolve_extraction_prompt():
+            pass
+    assert str(missing) in str(exc.value)
+
+
+def test_custom_prompt_missing_a_placeholder_names_it(home, tmp_path):
+    from groundly.llm.graphrag_adapter import ExtractionPromptError, resolve_extraction_prompt
+
+    custom = tmp_path / "custom.txt"
+    custom.write_text("Types: [{entity_types}]\nOutput:")  # no {input_text}
+    (home / "config.toml").write_text(f'[graph]\nextraction_prompt = "{custom}"\n')
+    with pytest.raises(ExtractionPromptError, match=r"\{input_text\}"):
+        with resolve_extraction_prompt():
+            pass
+
+
+def test_custom_prompt_with_a_delimiter_placeholder_is_refused(home, tmp_path):
+    """The silent-failure case: graphrag does not substitute these, so .format() raises
+    KeyError per chunk and swallows it. Refuse up front instead."""
+    from groundly.llm.graphrag_adapter import ExtractionPromptError, resolve_extraction_prompt
+
+    custom = tmp_path / "custom.txt"
+    custom.write_text("Types [{entity_types}] Text {input_text} Sep {tuple_delimiter} Output:")
+    (home / "config.toml").write_text(f'[graph]\nextraction_prompt = "{custom}"\n')
+    with pytest.raises(ExtractionPromptError, match=r"tuple_delimiter"):
+        with resolve_extraction_prompt():
+            pass
+
+
+def test_resolved_prompt_is_a_real_readable_file(home):
+    """ExtractGraphConfig.prompt is a path graphrag re-reads at extraction time, so the
+    resolved file has to exist on disk for the duration of the build."""
+    from groundly.llm.graphrag_adapter import _bundled_prompt_text, resolve_extraction_prompt
+
+    with resolve_extraction_prompt() as (path, text):
+        assert path.is_file()
+        assert path.read_text(encoding="utf-8") == text == _bundled_prompt_text()
+
+
+def test_fingerprint_changes_with_prompt_and_with_types():
+    from groundly.llm.graphrag_adapter import extraction_fingerprint
+
+    base = extraction_fingerprint("prompt", ["concept", "algorithm"])
+    assert base == extraction_fingerprint("prompt", ["concept", "algorithm"])
+    assert base != extraction_fingerprint("other prompt", ["concept", "algorithm"])
+    assert base != extraction_fingerprint("prompt", ["concept"])
+    # order counts: graphrag interpolates the list as given, so a reorder is a change
+    assert base != extraction_fingerprint("prompt", ["algorithm", "concept"])
