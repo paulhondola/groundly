@@ -306,10 +306,11 @@ def _stub_index_paths(monkeypatch, f):
     monkeypatch.setattr(pipeline, "index_paths", fake_index_paths)
 
 
-def _stub_build_graph(monkeypatch):
+def _stub_build_graph(monkeypatch, failed: int = 0):
     """Records each call and mimics build_graph's real success side effects (graph/
     directory + manifest.graphrag stamped with the current corpus hash) so a later
-    `index` run's staleness check behaves like it would against a real build."""
+    `index` run's staleness check behaves like it would against a real build.
+    `failed` sets the dropped-chunk count the CLI reports."""
     from groundly.core.manifest import Graphrag
     from groundly.ingestion import graph as ingestion_graph
 
@@ -322,7 +323,6 @@ def _stub_build_graph(monkeypatch):
         estimated_tokens=0,
         estimated_cost_usd=None,
         on_event=None,
-        verbose=False,
     ):
         calls.append(subj.name)
         (subj.root_dir / "graph").mkdir(exist_ok=True)
@@ -333,6 +333,7 @@ def _stub_build_graph(monkeypatch):
             corpus_hash=ingestion_graph.corpus_hash(store_obj),
         )
         subj.save_manifest(manifest)
+        return ingestion_graph.GraphBuildResult(chunks=1, failed=failed)
 
     monkeypatch.setattr(ingestion_graph, "build_graph", fake_build_graph)
     return calls
@@ -565,7 +566,6 @@ def test_index_graph_debug_streams_logs_to_stderr(monkeypatch, home, tmp_path):
         estimated_tokens=0,
         estimated_cost_usd=None,
         on_event=None,
-        verbose=False,
     ):
         logging.getLogger("groundly.ingestion.graph").debug("building graph for %s", subj.name)
         (subj.root_dir / "graph").mkdir(exist_ok=True)
@@ -576,6 +576,7 @@ def test_index_graph_debug_streams_logs_to_stderr(monkeypatch, home, tmp_path):
             corpus_hash=ingestion_graph.corpus_hash(store_obj),
         )
         subj.save_manifest(manifest)
+        return ingestion_graph.GraphBuildResult(chunks=1, failed=0)
 
     monkeypatch.setattr(ingestion_graph, "build_graph", fake_build_graph)
 

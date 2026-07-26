@@ -10,27 +10,36 @@ no sidecar mapping table needed.
 import asyncio
 import hashlib
 import logging
+import shutil
 from collections.abc import Callable
+from dataclasses import dataclass
 from importlib.metadata import version as _package_version
+from pathlib import Path
 
 import pandas as pd
 from graphrag.api.index import build_index
 from graphrag.callbacks.noop_workflow_callbacks import NoopWorkflowCallbacks
+from graphrag.config.models.community_reports_config import CommunityReportsConfig
+from graphrag.config.models.extract_graph_config import ExtractGraphConfig
 from graphrag.config.models.graph_rag_config import GraphRagConfig
 from graphrag.config.models.reporting_config import ReportingConfig
+from graphrag.config.models.summarize_descriptions_config import SummarizeDescriptionsConfig
 from graphrag_cache import CacheConfig
 from graphrag_chunking.chunking_config import ChunkingConfig
 from graphrag_llm.config import ModelConfig
 from graphrag_storage import StorageConfig
 from graphrag_vectors import VectorStoreConfig
 
+from groundly.core.config import load_settings
 from groundly.core.manifest import EMBEDDING_DIM, Graphrag
 from groundly.core.store import SQLiteSubjectStore, connect_progress, record_trace
 from groundly.core.subject import Subject
 from groundly.llm.config import require_provider
 from groundly.llm.graphrag_adapter import (
     BGE_M3_EMBEDDING_TYPE,
+    allow_nonstandard_service_tier,
     completion_model_config,
+    prompt_budgets,
     register_bge_m3_embedding,
 )
 
@@ -43,9 +52,77 @@ _GRAPH_CHUNK_SIZE = 4096
 _COMPLETION_MODEL_ID = "default_completion_model"
 _EMBEDDING_MODEL_ID = "default_embedding_model"
 
+# Above this share of chunks failing entity extraction, the graph is missing too much
+# of the corpus to be presented as the corpus — refuse rather than stamp the manifest.
+# Below it, a transient blip shouldn't throw away a long build; the count is reported.
+_MAX_EXTRACTION_FAILURE_RATE = 0.05
+
+# graphrag swallows per-item LLM failures in both of these stages and only logs them,
+# so these loggers are the only signal that content is being dropped. Each stage logs a
+# failure *twice* — the extractor's own `logger.exception` plus the calling operation's
+# `on_error` — so attach to the extractor specifically or every count doubles (verified
+# on real runs: 252 records from each extract_graph logger, 44 from each community one).
+_EXTRACTION_ERROR_SOURCE = "graphrag.index.operations.extract_graph.graph_extractor"
+_COMMUNITY_ERROR_SOURCE = (
+    "graphrag.index.operations.summarize_communities.community_reports_extractor"
+)
+
+
+# A rebuild inherits nothing but these. `cache/` is graphrag's LLM response cache —
+# expensive and already paid for, so a retry must keep it; `logs/` is how a failed run
+# gets diagnosed. Everything else under graph/ is derived output.
+_PRESERVED_ON_REBUILD = frozenset({"cache", "logs"})
+
 
 class GraphBuildError(Exception):
     """Wraps any graphrag indexing failure — no raw traceback ever surfaces."""
+
+
+@dataclass(frozen=True)
+class GraphBuildResult:
+    """What the build actually managed to index. `failed` is chunks graphrag dropped
+    during entity extraction, `reports_failed` communities whose summary it dropped —
+    see _WorkflowErrorCounter for why neither can come from build_index."""
+
+    chunks: int
+    failed: int
+    reports_failed: int = 0
+
+
+class _WorkflowErrorCounter(logging.Handler):
+    """Counts per-item LLM failures for one graphrag stage, which reach us no other way.
+
+    graphrag catches them per item (an `except Exception` -> `logger.exception` ->
+    `on_error` callback) and carries on, so they never appear in
+    `PipelineRunResult.error` and a build that dropped most of its content still
+    reports success. Entity extraction drops chunks; community reports drop the
+    summaries that global search and `overview` answer from.
+
+    Attached to the exact extractor logger rather than to `graphrag`: `init_loggers`
+    clears handlers on `graphrag`/`graphrag_llm` when build_index starts, but never on
+    their descendants. Works with Groundly logging off too, since init_loggers always
+    raises that tree to at least INFO.
+    """
+
+    def __init__(self, source: str) -> None:
+        super().__init__(level=logging.ERROR)
+        self.source = source
+        self.count = 0
+        self.last_message = ""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.count += 1
+        if record.exc_info and record.exc_info[1] is not None:
+            self.last_message = str(record.exc_info[1])
+        else:
+            self.last_message = record.getMessage()
+
+    def __enter__(self) -> "_WorkflowErrorCounter":
+        logging.getLogger(self.source).addHandler(self)
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        logging.getLogger(self.source).removeHandler(self)
 
 
 class _ProgressCallbacks(NoopWorkflowCallbacks):
@@ -72,6 +149,96 @@ class _ProgressCallbacks(NoopWorkflowCallbacks):
         logger.error("graphrag pipeline error: %s", error, exc_info=error)
 
 
+def _probe_extraction(
+    subj: Subject, config: GraphRagConfig, sample_text: str, context_window: int
+) -> None:
+    """Send one real extraction prompt before committing to the whole corpus.
+
+    Entity extraction is the largest prompt graphrag sends per chunk, and its failure
+    mode is silent (see _WorkflowErrorCounter), so a model whose context is too
+    small burns hours producing an empty graph. One call up front turns that into a
+    named error in seconds.
+
+    Two calls, because the build depends on two independent provider capabilities and a
+    reachability check proves neither: the extraction prompt itself (size), and JSON mode
+    (community reports are the one stage that requests `response_format`). Each is a real
+    billable call, so each records its own trace row (.claude/rules/architecture.md:
+    every LLM call records tokens + cost).
+
+    The extraction prompt comes from the *same config the build will use*, so a change to
+    entity types or a custom prompt can never leave the probe testing something the build
+    doesn't send."""
+    from groundly.llm.chat import complete
+
+    prompt = config.extract_graph.resolved_prompts().extraction_prompt.format(
+        entity_types=",".join(config.extract_graph.entity_types),
+        input_text=sample_text,
+        tuple_delimiter="<|>",
+        record_delimiter="##",
+        completion_delimiter="<|COMPLETE|>",
+    )
+    conn = connect_progress(subj.progress_db_path)
+    try:
+        # Deliberately does not assert *why* this one failed: it catches every provider
+        # refusal, and guessing "your context is too small" sent a real user to check
+        # their context window over a 413 a ~1800-token prompt could not have caused.
+        _probe_call(
+            conn,
+            lambda: complete("extraction", [{"role": "user", "content": prompt}]),
+            f"a ~{len(prompt) // 4}-token probe prompt to the extraction model failed: {{exc}}. "
+            "That prompt is graphrag's few-shot preamble plus one chunk — the smallest call "
+            "the build makes. If the server reports a context or size limit, raise the model's "
+            "context window (for LM Studio, the model's load settings) or lower "
+            f"graph.context_window (currently {context_window}). If the prompt looks far too "
+            "small for that, check that extraction.model is a plain chat model — agentic or "
+            "tool-using endpoints have their own request limits and are the wrong fit here.",
+        )
+        # A separate capability: DeepSeek's deepseek-v4-flash answers plain completions
+        # fine and rejects response_format outright, which used to surface 80 minutes in
+        # as KeyError 'community' — pandas merging the empty reports frame every failed
+        # community call left behind.
+        _probe_call(
+            conn,
+            lambda: complete(
+                "extraction",
+                [{"role": "user", "content": 'Reply with the JSON object {"ok": true}'}],
+                json_object=True,
+            ),
+            "the extraction model rejected a JSON-mode (response_format) request: {exc}. "
+            "graphrag requires JSON mode for community reports — the summaries global "
+            "search and `overview` answer from — so a model without it cannot finish a "
+            "graph build. Switch extraction.model to one that supports structured output.",
+        )
+    finally:
+        conn.close()
+
+
+def _probe_call(conn, call: Callable[[], object], failure_message: str) -> None:
+    """Run one probe call, trace it either way, and wrap any failure as a named
+    GraphBuildError. Catches `Exception`, not just `ChatUnreachableError`: this runs
+    outside build_graph's own wrapper, so anything else escaping here would reach the
+    CLI as a raw traceback past its `except (GraphBuildError, ProviderNotConfiguredError)`.
+    `failure_message` is a template with a single `{exc}` placeholder."""
+    try:
+        result = call()
+    except Exception as exc:
+        record_trace(
+            conn, kind="index", query="", outcome="error", arm="graph-probe", error=str(exc)
+        )
+        logger.debug("extraction probe failed", exc_info=True)
+        raise GraphBuildError(failure_message.format(exc=exc)) from exc
+    record_trace(
+        conn,
+        kind="index",
+        query="",
+        outcome="built",
+        arm="graph-probe",
+        model=getattr(result, "model", None),
+        tokens=getattr(result, "tokens", None),
+        cost_usd=getattr(result, "cost_usd", None),
+    )
+
+
 def corpus_hash(store: SQLiteSubjectStore) -> str:
     """sha256 over the subject's indexed materials' sha256s, sorted — stable across
     re-runs of the same corpus, changes iff a material is added/removed/re-extracted."""
@@ -88,11 +255,23 @@ def graph_is_stale(subj: Subject, store: SQLiteSubjectStore) -> bool:
     return manifest.graphrag.corpus_hash != corpus_hash(store)
 
 
-def _build_config(subj: Subject) -> GraphRagConfig:
+def _build_config(subj: Subject, context_window: int) -> GraphRagConfig:
     """graphrag's config, rooted entirely under <subject>/graph/ — nothing touches
-    cwd, nothing leaks outside the subject's own directory."""
+    cwd, nothing leaks outside the subject's own directory. Every prompt budget is
+    scaled to `context_window` (graph.context_window in config.toml); graphrag's own
+    defaults assume ~16k and 400 out on a small local model."""
     graph_dir = subj.root_dir / "graph"
+    budgets = prompt_budgets(context_window)
     return GraphRagConfig(
+        extract_graph=ExtractGraphConfig(max_gleanings=budgets.max_gleanings),
+        summarize_descriptions=SummarizeDescriptionsConfig(
+            max_input_tokens=budgets.summarize_max_input_tokens,
+            max_length=budgets.summarize_max_length,
+        ),
+        community_reports=CommunityReportsConfig(
+            max_input_length=budgets.community_max_input_length,
+            max_length=budgets.community_max_length,
+        ),
         completion_models={_COMPLETION_MODEL_ID: completion_model_config()},
         embedding_models={
             _EMBEDDING_MODEL_ID: ModelConfig(
@@ -116,6 +295,41 @@ def _build_config(subj: Subject) -> GraphRagConfig:
     )
 
 
+def _reset_graph_artifacts(subj: Subject) -> None:
+    """Drop the previous build's outputs, and the manifest's claim to a graph, before a
+    rebuild starts.
+
+    graphrag writes into an existing `graph/` without clearing it, so a build that
+    produces nothing leaves the *previous* build's parquet in place — and the gates in
+    build_graph, which check that entities.parquet exists and has rows, pass on those and
+    stamp a fresh corpus_hash over a stale graph (verified: a second build writing nothing
+    and logging no failures inherited build 1's entities and was recorded as current).
+
+    Resetting `manifest.graphrag` in the same step is what makes this safe rather than a
+    new crash: `_require_graph` treats a non-None corpus_hash as "there is a graph here",
+    so clearing the artifacts while leaving the old hash behind would send the query path
+    into `_load_artifacts` looking for parquet that no longer exists. Cleared together,
+    a failed rebuild leaves an honest "no graph" that `graph_is_stale` re-prompts on.
+
+    The previous graph is genuinely lost if the rebuild fails — correct, because a rebuild
+    only runs when the corpus already changed, so that graph was no longer a graph *of
+    this corpus*. Serving it is the staleness lie the gates exist to prevent."""
+    graph_dir: Path = subj.root_dir / "graph"
+    if graph_dir.exists():
+        for entry in graph_dir.iterdir():
+            if entry.name in _PRESERVED_ON_REBUILD:
+                continue
+            if entry.is_dir():
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
+                entry.unlink(missing_ok=True)
+
+    manifest = subj.load_manifest()
+    if manifest.graphrag.corpus_hash is not None:
+        manifest.graphrag = Graphrag()
+        subj.save_manifest(manifest)
+
+
 def build_graph(
     subj: Subject,
     store: SQLiteSubjectStore,
@@ -123,7 +337,7 @@ def build_graph(
     estimated_tokens: int = 0,
     estimated_cost_usd: float | None = None,
     on_event: Callable[[str, int, int], None] | None = None,
-) -> None:
+) -> GraphBuildResult:
     """Batch build graphrag's graph for a subject (parquet artifacts + a LanceDB
     vector store under <subject>/graph/). Cost-estimate confirmation is the CLI's
     job, not this module's — ingestion never does interactive I/O.
@@ -143,12 +357,17 @@ def build_graph(
     workflow names and progress counts that `--debug` exists to show."""
     on_event = on_event or (lambda description, completed, total: None)
     provider_cfg = require_provider("extraction")  # fail fast, before any chunk enumeration
+    context_window = load_settings().graph.context_window
+
+    rows = store.all_chunks()
+    if not rows:
+        raise GraphBuildError("nothing indexed yet — run `groundly index` before building a graph")
 
     # Outside the try below on purpose: the config embeds the extraction provider's
     # api_key, and a pydantic ValidationError echoes the offending input value — so
     # neither the wrapped message nor a logged traceback may ever carry this one.
     try:
-        config = _build_config(subj)
+        config = _build_config(subj, context_window)
     except Exception as exc:
         raise GraphBuildError(
             "graphrag config is invalid — check [providers.extraction] in your config.toml "
@@ -156,38 +375,109 @@ def build_graph(
             f"({type(exc).__name__}; details withheld, they would include your api_key)"
         ) from exc
 
-    try:
-        register_bge_m3_embedding()
+    _probe_extraction(subj, config, rows[0]["text"], context_window)
 
-        rows = store.all_chunks()
-        df = pd.DataFrame(
-            {
-                "id": [str(row["chunk_id"]) for row in rows],
-                "text": [row["text"] for row in rows],
-                "title": [f"{row['filename']}#p{row['page']}" for row in rows],
-                "creation_date": ["" for _ in rows],
-                "raw_data": [None for _ in rows],
-            }
-        )
+    # After the probe on purpose: a misconfigured provider should fail without
+    # destroying a graph that still works, so nothing is cleared until the provider has
+    # answered a real extraction prompt and a JSON-mode call.
+    _reset_graph_artifacts(subj)
 
-        logger.debug("starting graph build: %d chunks, model=%s", len(rows), provider_cfg.model)
-        results = asyncio.run(
-            build_index(
-                config,
-                input_documents=df,
-                callbacks=[_ProgressCallbacks(on_event)],
+    with (
+        _WorkflowErrorCounter(_EXTRACTION_ERROR_SOURCE) as counter,
+        _WorkflowErrorCounter(_COMMUNITY_ERROR_SOURCE) as reports_counter,
+    ):
+        try:
+            register_bge_m3_embedding()
+            allow_nonstandard_service_tier()
+
+            df = pd.DataFrame(
+                {
+                    "id": [str(row["chunk_id"]) for row in rows],
+                    "text": [row["text"] for row in rows],
+                    "title": [f"{row['filename']}#p{row['page']}" for row in rows],
+                    "creation_date": ["" for _ in rows],
+                    "raw_data": [None for _ in rows],
+                }
             )
-        )
-    except Exception as exc:
-        logger.debug("graph build failed", exc_info=True)
-        raise GraphBuildError(f"graph build failed: {exc}") from exc
+
+            logger.debug("starting graph build: %d chunks, model=%s", len(rows), provider_cfg.model)
+            results = asyncio.run(
+                build_index(
+                    config,
+                    input_documents=df,
+                    callbacks=[_ProgressCallbacks(on_event)],
+                )
+            )
+        except Exception as exc:
+            logger.debug("graph build failed", exc_info=True)
+            raise GraphBuildError(f"graph build failed: {exc}") from exc
 
     failed = [r for r in results if r.error is not None]
     if failed:
         for r in failed:
             logger.debug("workflow %s failed", r.workflow, exc_info=r.error)
         names = ", ".join(r.workflow for r in failed)
-        raise GraphBuildError(f"graph build failed: workflow(s) {names} failed")
+        # A workflow error is graphrag's *symptom*; the swallowed per-item failures
+        # above are usually the cause. `create_community_reports` raising
+        # `KeyError: 'community'` is what an empty reports frame looks like when every
+        # report call failed — pandas merging a frame that has no columns.
+        cause = reports_counter.last_message or counter.last_message
+        detail = f" — last LLM error: {cause}" if cause else ""
+        raise GraphBuildError(f"graph build failed: workflow(s) {names} failed{detail}")
+
+    # graphrag swallows per-chunk extraction failures, so nothing above catches a
+    # graph that quietly omits most of the corpus. Refuse before the manifest is
+    # stamped: an unstamped manifest leaves the graph stale, so the next index retries.
+    if counter.count > len(rows) * _MAX_EXTRACTION_FAILURE_RATE:
+        raise GraphBuildError(
+            f"entity extraction failed for {counter.count} of {len(rows)} chunks — the graph "
+            f"would be missing most of the course, so it was not recorded and stays unusable "
+            f"until a build succeeds. Last error: {counter.last_message}. If this is a "
+            f"context-size error, raise your extraction model's context window or lower "
+            f"graph.context_window (currently {context_window})"
+        )
+
+    # The artifact retrieval/graph.py actually reads. Row count, not file size: a
+    # zero-row parquet is ~1.9 KB of schema, so a size check would pass an empty graph
+    # (reachable when a model returns unparseable output that never raises).
+    entities = subj.root_dir / "graph" / "entities.parquet"
+    if not entities.exists() or len(pd.read_parquet(entities)) == 0:
+        raise GraphBuildError(
+            "graph build produced no entities — nothing was extracted from the corpus. "
+            "Re-run with --debug to see graphrag's own errors"
+        )
+
+    # Community reports are what global search and `overview` answer from, and graphrag
+    # swallows their failures the same way it swallows extraction's. A graph with
+    # communities but no reports for them is a graph the global arm cannot use.
+    graph_dir = subj.root_dir / "graph"
+    communities = graph_dir / "communities.parquet"
+    reports = graph_dir / "community_reports.parquet"
+    community_count = len(pd.read_parquet(communities)) if communities.exists() else 0
+    report_count = len(pd.read_parquet(reports)) if reports.exists() else 0
+    if community_count and not report_count:
+        raise GraphBuildError(
+            f"none of the {community_count} community summaries could be generated, so "
+            f"global search and `overview` would have nothing to answer from. Last error: "
+            f"{reports_counter.last_message or 'unknown'}. Community reports are the one "
+            f"stage that requires JSON mode — if your provider reports response_format as "
+            f"unavailable, switch extraction.model to one that supports structured output"
+        )
+    if reports_counter.count:
+        logger.warning(
+            "community reports failed for %d of %d communities: %s",
+            reports_counter.count,
+            community_count,
+            reports_counter.last_message,
+        )
+
+    if counter.count:
+        logger.warning(
+            "entity extraction failed for %d of %d chunks: %s",
+            counter.count,
+            len(rows),
+            counter.last_message,
+        )
 
     manifest = subj.load_manifest()
     manifest.graphrag = Graphrag(
@@ -215,3 +505,7 @@ def build_graph(
         )
     finally:
         conn.close()
+
+    return GraphBuildResult(
+        chunks=len(rows), failed=counter.count, reports_failed=reports_counter.count
+    )

@@ -31,6 +31,17 @@ def test_settings_default_when_no_file():
     assert s.llm.timeout_seconds == 300
     assert s.retrieval.context_k == 8
     assert s.retrieval.rerank is True
+    assert s.graph.context_window == 4096  # LM Studio's common default
+
+
+def test_graph_context_window_round_trips_through_set_and_rewrite(home):
+    """The rewrite regenerates the whole file from the effective config, so a section
+    missing from the writer is silently dropped on the next `config set`."""
+    set_key("graph.context_window", "16384")
+    assert load_settings().graph.context_window == 16384
+
+    set_key("retrieval.context_k", "12")  # rewrite triggered by an unrelated section
+    assert load_settings().graph.context_window == 16384
 
 
 def test_render_then_load_round_trips(home):
@@ -120,3 +131,27 @@ def test_set_value_with_control_chars_stays_valid_toml(home):
     set_key("chat.model", "m")
     assert load_provider("router") is None  # no injected section
     assert "evil" in load_provider("chat").base_url  # round-trips as one string
+
+
+def test_provider_rate_limits_round_trip(home):
+    """Rate limits are provider/tier properties, so they live on the provider section
+    and must survive the whole-file rewrite like every other provider field."""
+    set_key("extraction.base_url", "https://api.groq.com/openai/v1")
+    set_key("extraction.model", "llama-3.3-70b-versatile")
+    set_key("extraction.tokens_per_minute", "6000")
+    set_key("extraction.requests_per_minute", "30")
+
+    cfg = load_provider("extraction")
+    assert (cfg.tokens_per_minute, cfg.requests_per_minute) == (6000, 30)
+
+    set_key("graph.context_window", "16384")  # unrelated rewrite must not drop them
+    cfg = load_provider("extraction")
+    assert (cfg.tokens_per_minute, cfg.requests_per_minute) == (6000, 30)
+
+
+def test_provider_rate_limits_default_to_unset(home):
+    (home / "config.toml").write_text(
+        '[providers.extraction]\nbase_url = "http://x"\nmodel = "m"\n'
+    )
+    cfg = load_provider("extraction")
+    assert cfg.tokens_per_minute is None and cfg.requests_per_minute is None

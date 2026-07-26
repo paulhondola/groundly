@@ -22,7 +22,7 @@ template from the effective config — always valid TOML, always self-documentin
 import tomllib
 from pathlib import Path
 
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from groundly.core.paths import groundly_home
 
@@ -34,7 +34,15 @@ _PROVIDER_COMMENTS = {
     "extraction": "graphrag entity extraction",
     "router": "cheap query classifier",
 }
-_PROVIDER_FIELDS = ("base_url", "model", "api_key", "input_price_per_mtok", "output_price_per_mtok")
+_PROVIDER_FIELDS = (
+    "base_url",
+    "model",
+    "api_key",
+    "input_price_per_mtok",
+    "output_price_per_mtok",
+    "requests_per_minute",
+    "tokens_per_minute",
+)
 
 
 class ProviderConfig(BaseModel):
@@ -43,6 +51,11 @@ class ProviderConfig(BaseModel):
     api_key: str = ""
     input_price_per_mtok: float | None = None
     output_price_per_mtok: float | None = None
+    # Provider/tier rate limits. Unset means no throttling — correct for a local
+    # runtime, which has none. Only the graphrag path honours these today (it is the
+    # only one that fires hundreds of concurrent calls); see llm/graphrag_adapter.py.
+    requests_per_minute: int | None = None
+    tokens_per_minute: int | None = None
 
 
 class IngestionSettings(BaseModel):
@@ -60,16 +73,28 @@ class RetrievalSettings(BaseModel):
     rerank: bool = True
 
 
+class GraphSettings(BaseModel):
+    # The extraction model's usable context. graphrag's own prompt budgets assume
+    # ~16k (community reports alone want 8000 in + 2000 out); llm/graphrag_adapter.py
+    # scales every stage down to whatever is set here. 4096 is LM Studio's common
+    # default, so a graph build works out of the box — raise it to match your model.
+    # Floored at 2048: graphrag's extraction preamble alone is ~1620 tokens, so
+    # anything smaller cannot fit a single call and would yield all-zero budgets.
+    context_window: int = Field(default=4096, ge=2048)
+
+
 class Settings(BaseModel):
     ingestion: IngestionSettings = IngestionSettings()
     llm: LlmSettings = LlmSettings()
     retrieval: RetrievalSettings = RetrievalSettings()
+    graph: GraphSettings = GraphSettings()
 
 
 _SETTINGS_SECTIONS: dict[str, type[BaseModel]] = {
     "ingestion": IngestionSettings,
     "llm": LlmSettings,
     "retrieval": RetrievalSettings,
+    "graph": GraphSettings,
 }
 
 
@@ -112,13 +137,16 @@ def require_provider(call_class: str) -> ProviderConfig:
     return cfg
 
 
-def load_settings() -> Settings:
-    data = _load_raw()
+def _settings_from_raw(data: dict) -> Settings:
+    """One construction site for both readers (load_settings and set_key's rewrite) —
+    a section added to only one of them would be silently dropped on the next write."""
     return Settings(
-        ingestion=IngestionSettings(**data.get("ingestion", {})),
-        llm=LlmSettings(**data.get("llm", {})),
-        retrieval=RetrievalSettings(**data.get("retrieval", {})),
+        **{name: model(**data.get(name, {})) for name, model in _SETTINGS_SECTIONS.items()}
     )
+
+
+def load_settings() -> Settings:
+    return _settings_from_raw(_load_raw())
 
 
 def mask_key(api_key: str) -> str:
@@ -163,11 +191,7 @@ def set_key(dotted_key: str, value: str) -> None:
         valid = ", ".join(CALL_CLASSES + tuple(_SETTINGS_SECTIONS))
         raise ConfigKeyError(f"unknown config section '{section}' — valid: {valid}")
 
-    settings = Settings(
-        ingestion=IngestionSettings(**data.get("ingestion", {})),
-        llm=LlmSettings(**data.get("llm", {})),
-        retrieval=RetrievalSettings(**data.get("retrieval", {})),
-    )
+    settings = _settings_from_raw(data)
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_config_toml(data.get("providers", {}), settings))
@@ -221,6 +245,8 @@ def render_config_toml(providers: dict, settings: Settings) -> str:
                     '# api_key  = "..."',
                     "# input_price_per_mtok  = 0.0   # optional USD/1M input tokens — override for local/unmapped models",
                     "# output_price_per_mtok = 0.0   # optional USD/1M output tokens (litellm's bundled price map costs mapped models automatically)",
+                    "# requests_per_minute   = 30    # optional; your provider tier's RPM. Unset = no throttling (right for local runtimes)",
+                    "# tokens_per_minute     = 6000  # optional; your provider tier's TPM. Set these on [providers.extraction] before a graph build — it fires hundreds of concurrent calls",
                 ]
         lines.append("")
 
@@ -246,6 +272,9 @@ def render_config_toml(providers: dict, settings: Settings) -> str:
         "[retrieval]",
         f"context_k = {_toml_value(settings.retrieval.context_k)}   # chunks assembled into the answer / prompt",
         f"rerank = {_toml_value(settings.retrieval.rerank)}   # cross-encoder rerank (off is faster on weak hardware)",
+        "",
+        "[graph]",
+        f"context_window = {_toml_value(settings.graph.context_window)}   # usable context of your extraction model; graphrag's per-stage prompt budgets are scaled to fit it",
         "",
     ]
     return "\n".join(lines)

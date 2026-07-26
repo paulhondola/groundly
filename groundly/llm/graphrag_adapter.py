@@ -5,17 +5,37 @@ LiteLLM-based client speaks the same OpenAI-compatible base_url+model+key shape
 Groundly already assumes everywhere else.
 """
 
+from dataclasses import dataclass
+
 # litellm's env defaults (price map, log level) are set in groundly/__init__.py — here
 # was too late: graphrag_llm.embedding.embedding below pulls litellm in at *its* module
 # load, and callers like ingestion/graph.py import graphrag before importing this module.
 from graphrag_llm.config import ModelConfig
+from graphrag_llm.config.rate_limit_config import RateLimitConfig
+from graphrag_llm.config.retry_config import RetryConfig
 from graphrag_llm.embedding.embedding import LLMEmbedding
 from graphrag_llm.embedding.embedding_factory import register_embedding
 
 from groundly.llm.chat import _LOCAL_PLACEHOLDER_KEY
-from groundly.llm.config import load_provider, require_provider
+from groundly.llm.config import ProviderConfig, load_provider, require_provider
 
 BGE_M3_EMBEDDING_TYPE = "bge_m3"
+
+
+def _preamble_tokens() -> int:
+    """graphrag's few-shot extraction preamble, sent with every single chunk. Measured
+    off the real prompt rather than hardcoded, so it tracks a graphrag upgrade or a
+    custom prompt instead of quietly going stale."""
+    from graphrag.prompts.index.extract_graph import GRAPH_EXTRACTION_PROMPT
+
+    return len(GRAPH_EXTRACTION_PROMPT) // 4
+
+
+_EXTRACTION_PREAMBLE_TOKENS = _preamble_tokens()
+
+# Set once by allow_nonstandard_service_tier(); see there for why this is a flag rather
+# than a check against the field's current annotation.
+_service_tier_widened = False
 
 
 def completion_model_config() -> ModelConfig:
@@ -33,6 +53,69 @@ def completion_model_config() -> ModelConfig:
         model=cfg.model,
         api_base=cfg.base_url,
         api_key=cfg.api_key or _LOCAL_PLACEHOLDER_KEY,
+        retry=_retry_config(),
+        rate_limit=_rate_limit_config(cfg),
+    )
+
+
+def _retry_config() -> RetryConfig:
+    """Always on. graphrag fires extraction concurrently across the whole corpus and
+    swallows a 429 per text unit exactly like any other failure, so without a retry a
+    rate-limited provider silently drops chunks — observed as 283 failures out of 304
+    against Groq. Jitter matters as much as the backoff: without it every concurrent
+    worker retries in lockstep and re-creates the burst that caused the 429.
+
+    base_delay must be strictly > 1.0 for exponential backoff (graphrag validates it);
+    2.0 gives 2/4/8/16/32s, capped at max_delay."""
+    return RetryConfig(max_retries=5, base_delay=2.0, max_delay=60.0, jitter=True)
+
+
+def _rate_limit_config(cfg: ProviderConfig) -> RateLimitConfig | None:
+    """Only when the provider's limits have been declared in config.toml. There is no
+    portable way to discover them, and guessing would throttle a local runtime that
+    has no limits at all — so unset means unthrottled, the previous behavior."""
+    if cfg.requests_per_minute is None and cfg.tokens_per_minute is None:
+        return None
+    return RateLimitConfig(
+        period_in_seconds=60,
+        requests_per_period=cfg.requests_per_minute,
+        tokens_per_period=cfg.tokens_per_minute,
+    )
+
+
+@dataclass(frozen=True)
+class PromptBudgets:
+    """graphrag's per-stage prompt sizing, scaled to the extraction model's context."""
+
+    max_gleanings: int
+    summarize_max_input_tokens: int
+    summarize_max_length: int
+    community_max_input_length: int
+    community_max_length: int
+
+
+def prompt_budgets(context_window: int) -> PromptBudgets:
+    """Scale graphrag's stage budgets to the model actually configured.
+
+    graphrag's defaults assume a large-context cloud model: community reports alone
+    ask for 8000 tokens in + 2000 out, and entity extraction sends a ~1620-token
+    few-shot preamble plus the chunk, then replays the whole conversation for a
+    gleaning round. On a 4096-token local model every one of those 400s with
+    "Context size has been exceeded", and graphrag swallows the failure per text
+    unit — an empty graph reported as a successful build.
+
+    Each budget is `min(graphrag's default, a share of the window)`, so this only
+    ever scales *down*: a large context_window reproduces stock graphrag behavior.
+    """
+    return PromptBudgets(
+        # The gleaning round re-sends prompt + chunk + the model's whole first answer.
+        # On a chunk capped at CHUNK_MAX_TOKENS (512) one pass has already seen
+        # everything, so it buys little and roughly doubles peak context.
+        max_gleanings=1 if context_window >= 16384 else 0,
+        summarize_max_input_tokens=min(4000, context_window // 2),
+        summarize_max_length=min(500, context_window // 4),
+        community_max_input_length=min(8000, context_window // 2),
+        community_max_length=min(2000, context_window // 4),
     )
 
 
@@ -98,6 +181,43 @@ class Bgem3GraphEmbedding(LLMEmbedding):
         return self._tokenizer
 
 
+def allow_nonstandard_service_tier() -> None:
+    """Widen `graphrag_llm.LLMCompletionResponse.service_tier` from OpenAI's literal
+    set to any string.
+
+    graphrag_llm builds its response as `LLMCompletionResponse(**response.model_dump())`
+    (lite_llm_completion.py) and types `service_tier` as
+    `Literal['auto','default','flex','scale','priority']` — OpenAI's exact enum. Groq
+    returns `'on_demand'`, so pydantic rejects **every** response: the HTTP calls
+    succeed, tokens are spent, and the results are discarded at parse time. Observed
+    as 258 requests, 258 failures, `No entities detected during extraction`.
+
+    Not a Groq special case — the field is provider-reported metadata that graphrag
+    never reads, and any OpenAI-compatible provider may put its own value there
+    (.claude/rules/architecture.md: never hardcode a provider). The construction site
+    is a closure inside a factory function, so there is no subclass or
+    `register_completion` seam to override; widening the field is the available fix.
+
+    Idempotent, and safe for OpenAI itself: `'default'` and `None` still validate.
+
+    The guard is a module flag, not a comparison against the annotation: `str | None`
+    builds a fresh `types.UnionType` on every evaluation, so `field.annotation is not
+    (str | None)` is *always* true and would re-run `model_rebuild(force=True)` on every
+    call — including once per graph query, concurrently, on a shared third-party model
+    class. pydantic makes no thread-safety promise for that.
+    """
+    global _service_tier_widened
+
+    if _service_tier_widened:
+        return
+
+    from graphrag_llm.types.types import LLMCompletionResponse
+
+    LLMCompletionResponse.model_fields["service_tier"].annotation = str | None
+    LLMCompletionResponse.model_rebuild(force=True)
+    _service_tier_widened = True
+
+
 def register_bge_m3_embedding() -> None:
     """Register Bgem3GraphEmbedding under the `bge_m3` strategy name. Idempotent:
     the factory's register() is a plain dict assignment (graphrag_common/factory.py),
@@ -105,23 +225,50 @@ def register_bge_m3_embedding() -> None:
     register_embedding(BGE_M3_EMBEDDING_TYPE, Bgem3GraphEmbedding)
 
 
-def estimate_cost(total_chars: int) -> tuple[int, float | None]:
+def _input_price_per_token(model: str) -> float | None:
+    """litellm's bundled price map, looked up by the bare model name from config.toml.
+
+    litellm keys OpenAI models bare (`gpt-4o-mini`) but everything else with its
+    provider (`groq/llama-3.3-70b-versatile`, `mistral/mistral-large-latest`) — 517
+    bare against 2199 prefixed. Groundly only ever knows the bare name, because the
+    provider is expressed as a `base_url`, so a plain `.get()` silently misses every
+    non-OpenAI model. Fall back to a suffix match, which stays provider-agnostic
+    (.claude/rules/architecture.md: never hardcode a provider).
+
+    Only a *unique* suffix match counts: an ambiguous bare name must return None
+    rather than quietly bill against some unrelated provider's price.
+    """
+    import litellm
+
+    entry = litellm.model_cost.get(model)
+    if entry is None:
+        hits = [v for k, v in litellm.model_cost.items() if k.rsplit("/", 1)[-1] == model]
+        if len(hits) != 1:
+            return None
+        entry = hits[0]
+    return entry.get("input_cost_per_token")
+
+
+def estimate_cost(total_chars: int, chunk_count: int) -> tuple[int, float | None]:
     """Rough heuristic graph-build cost estimate: no tokenizer, no LLM call. Uses
     `load_provider` (not `require_provider`) — this is an estimate, not the fail-fast
     build path, so an unconfigured provider degrades to (tokens, None). The manual
     `input_price_per_mtok` field is an override; unset, this falls back to litellm's
-    local price map (mapped cloud models get cost tracing with zero config) and
-    finally to (tokens, None) for local/unmapped models."""
-    tokens = total_chars // 4
+    local price map and finally to (tokens, None) for genuinely unmapped models.
+
+    Every chunk is sent with graphrag's whole few-shot extraction preamble, which at
+    Groundly's chunk size is the *majority* of the input — counting chunk text alone
+    understated a real 1194-chunk build by 11.4x. Still an estimate: it prices the
+    extraction pass only, not the summarize/community-report stages that follow, and
+    not output tokens."""
+    tokens = total_chars // 4 + chunk_count * _EXTRACTION_PREAMBLE_TOKENS
     cfg = load_provider("extraction")
     if cfg is None:
         return tokens, None
     if cfg.input_price_per_mtok is not None:
         return tokens, tokens * cfg.input_price_per_mtok / 1_000_000
 
-    import litellm
-
-    price = litellm.model_cost.get(cfg.model, {}).get("input_cost_per_token")
+    price = _input_price_per_token(cfg.model)
     if price is None:
         return tokens, None
     return tokens, tokens * price

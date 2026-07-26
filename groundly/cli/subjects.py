@@ -164,8 +164,9 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool, debug: bool = False) -> 
     else:
         return
 
-    total_chars = sum(len(row["text"]) for row in store_obj.all_chunks())
-    tokens, cost = estimate_cost(total_chars)
+    chunks = store_obj.all_chunks()
+    total_chars = sum(len(row["text"]) for row in chunks)
+    tokens, cost = estimate_cost(total_chars, len(chunks))
     if cost is None:
         console.print(
             "[dim]no cost estimate available — set input_price_per_mtok for "
@@ -190,7 +191,7 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool, debug: bool = False) -> 
             progress.update(task, description=description, completed=completed, total=total)
 
         try:
-            build_graph(
+            result = build_graph(
                 subj,
                 store_obj,
                 estimated_tokens=tokens,
@@ -199,7 +200,13 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool, debug: bool = False) -> 
             )
         except (GraphBuildError, ProviderNotConfiguredError) as exc:
             _fail(str(exc))
-    console.print(f"Graph built for [bold]{subj.name}[/bold]")
+    notes = []
+    if result.failed:
+        notes.append(f"{result.failed} of {result.chunks} chunks failed extraction")
+    if result.reports_failed:
+        notes.append(f"{result.reports_failed} community summaries failed")
+    dropped = f" ([yellow]{', '.join(notes)}[/yellow])" if notes else ""
+    console.print(f"Graph built for [bold]{subj.name}[/bold]{dropped}")
 
 
 @app.command(name="list")

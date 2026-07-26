@@ -36,7 +36,7 @@ api_key  = "..."
 [providers.router]      # cheap classifier
 ```
 
-The same file also carries operational settings (`[ingestion]`/`[llm]`/`[retrieval]`, decision 18) — tunable knobs like extraction/HTTP timeouts and size caps whose defaults equal the shipped constants. Config **parsing** lives in `groundly/core/config.py` (a foundation); `groundly/llm/` still constructs every client (parsing ≠ construction).
+The same file also carries operational settings (`[ingestion]`/`[llm]`/`[retrieval]`, decision 18, plus `[graph]`, decision 21) — tunable knobs like extraction/HTTP timeouts, size caps, and the extraction model's context window, whose defaults equal the shipped constants. Config **parsing** lives in `groundly/core/config.py` (a foundation); `groundly/llm/` still constructs every client (parsing ≠ construction).
 
 Rules that make this real:
 

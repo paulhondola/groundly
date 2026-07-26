@@ -46,6 +46,7 @@ def config(ctx: typer.Context) -> None:
     console.print(f"  llm.timeout_seconds        = {s.llm.timeout_seconds}")
     console.print(f"  retrieval.context_k        = {s.retrieval.context_k}")
     console.print(f"  retrieval.rerank           = {s.retrieval.rerank}")
+    console.print(f"  graph.context_window       = {s.graph.context_window}")
 
 
 @config_app.command(name="set")

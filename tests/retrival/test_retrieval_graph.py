@@ -40,6 +40,15 @@ def _write_graph_artifacts(
 ) -> None:
     graph_dir = subject_dir(subject) / "graph"
     graph_dir.mkdir(parents=True, exist_ok=True)
+    # The retrievers gate on manifest.graphrag.corpus_hash, not on the directory —
+    # a refused or interrupted build leaves partial parquet behind on purpose. A real
+    # completed build stamps the manifest, so this helper must too.
+    from groundly.core.subject import Subject
+
+    subj = Subject(subject)
+    manifest = subj.load_manifest()
+    manifest.graphrag.corpus_hash = "stamped-by-a-completed-build"
+    subj.save_manifest(manifest)
     entities.to_parquet(graph_dir / "entities.parquet")
     communities.to_parquet(graph_dir / "communities.parquet")
     community_reports.to_parquet(graph_dir / "community_reports.parquet")

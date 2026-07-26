@@ -37,7 +37,7 @@ class ChatUnreachableError(Exception):
     """The configured chat provider could not be reached (network/HTTP error)."""
 
 
-def complete(call_class: str, messages: list[dict]) -> ChatResult:
+def complete(call_class: str, messages: list[dict], *, json_object: bool = False) -> ChatResult:
     import litellm
     import openai
 
@@ -48,21 +48,35 @@ def complete(call_class: str, messages: list[dict]) -> ChatResult:
     litellm.suppress_debug_info = True
 
     cfg = require_provider(call_class)
+    # json_object is a provider *capability*, not universally available on
+    # OpenAI-compatible endpoints — graphrag's community-report stage requires it, so
+    # the graph build probes for it up front rather than discovering it mid-run.
+    extra = {"response_format": {"type": "json_object"}} if json_object else {}
     try:
         response = litellm.completion(
             model=f"openai/{cfg.model}",
             messages=messages,
             api_base=cfg.base_url,
             api_key=cfg.api_key or _LOCAL_PLACEHOLDER_KEY,
+            **extra,
             # Local runtimes (LM Studio, Ollama) JIT-load the model on first request
             # and can take minutes to first token; a dead host should still fail fast —
             # 10s connect, configurable read (litellm passes httpx.Timeout through).
             timeout=httpx.Timeout(10.0, read=load_settings().llm.timeout_seconds),
         )
+    except openai.APIStatusError as exc:
+        # The server answered and refused (400 context overflow, 401 bad key, 429).
+        # Checked before APIError below, which it subclasses: calling a rejected
+        # request "unreachable" sends people to debug their network instead of the
+        # actual cause (conventions.md — name the cause specifically).
+        raise ChatUnreachableError(
+            f"[providers.{call_class}] at {cfg.base_url} rejected the request "
+            f"(HTTP {getattr(exc, 'status_code', '?')}): {exc}"
+        ) from exc
     except openai.APIError as exc:
-        # Every litellm exception raised by completion() (connection failures,
-        # timeouts, HTTP status errors) subclasses openai.APIError — the tightest
-        # common base covering this call's whole failure surface.
+        # Every remaining litellm exception raised by completion() (connection
+        # failures, timeouts) subclasses openai.APIError — the tightest common base
+        # covering the rest of this call's failure surface.
         raise ChatUnreachableError(
             f"[providers.{call_class}] at {cfg.base_url} is unreachable: {exc}"
         ) from exc
