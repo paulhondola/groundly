@@ -5,15 +5,9 @@ LiteLLM-based client speaks the same OpenAI-compatible base_url+model+key shape
 Groundly already assumes everywhere else.
 """
 
-import os
-
-# Must be set before litellm is imported by anything — graphrag_llm.embedding.embedding
-# (below) pulls litellm in at *its* module load, ahead of groundly.llm.chat's own
-# setdefault, so this can't rely on chat.py having run first. Unset, litellm's
-# __init__ fetches its price map from GitHub — the privacy rule
-# (.claude/rules/grounding-and-privacy.md) forbids that.
-os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
-
+# litellm's env defaults (price map, log level) are set in groundly/__init__.py — here
+# was too late: graphrag_llm.embedding.embedding below pulls litellm in at *its* module
+# load, and callers like ingestion/graph.py import graphrag before importing this module.
 from graphrag_llm.config import ModelConfig
 from graphrag_llm.embedding.embedding import LLMEmbedding
 from graphrag_llm.embedding.embedding_factory import register_embedding

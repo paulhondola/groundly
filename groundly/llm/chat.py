@@ -4,19 +4,17 @@ LLM clients constructed only in llm/. Every call resolves its provider from
 groundly.llm.config, so callers only ever name a call class.
 
 litellm import stays lazy (inside complete()): cold import costs ~2.5s and must
-never happen at MCP spawn time. LITELLM_LOCAL_MODEL_COST_MAP must be set before
-litellm is imported anywhere in the process — otherwise litellm's own __init__
-fetches its price map from GitHub, violating the privacy rule
-(.claude/rules/grounding-and-privacy.md): nothing may leave the machine except
-calls to the student's own configured provider."""
+never happen at MCP spawn time. The env vars litellm reads at *its* import —
+LITELLM_LOCAL_MODEL_COST_MAP (unset, its __init__ fetches the price map from GitHub,
+violating the privacy rule in .claude/rules/grounding-and-privacy.md) and LITELLM_LOG
+— are set in groundly/__init__.py, not here: callers reach litellm transitively via
+graphrag before this module's body ever runs, so setting them here was a no-op on
+exactly those paths."""
 
-import os
 from dataclasses import dataclass
 from typing import Protocol
 
 import httpx
-
-os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 from groundly.llm.config import load_settings, require_provider
 

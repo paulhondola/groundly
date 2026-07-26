@@ -125,3 +125,38 @@ def test_propagation_survives_graphrag_handler_clear_and_suppresses_httpx(monkey
     captured = capsys.readouterr()
     assert "graph workflow started" in captured.err
     assert "http debug noise" not in captured.err
+
+
+def test_litellm_env_defaults_land_before_litellm_is_imported():
+    """A subprocess, because the regression is *ordering*, not the values.
+
+    litellm reads LITELLM_LOCAL_MODEL_COST_MAP and LITELLM_LOG at its own import. The
+    graph modules do `from graphrag.api... import ...` at the top, which pulls
+    graphrag -> graphrag_llm -> litellm before their own body runs — so a setdefault in
+    llm/ was a no-op on exactly those paths, and litellm both warned about absent
+    botocore and (for the cost map) would fetch its price map from GitHub, which the
+    privacy rule forbids. Only groundly/__init__.py runs early enough.
+
+    Asserting the env values in-process would pass even after a regression, since the
+    var still ends up set — just too late to matter."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[2]
+    env = {k: v for k, v in os.environ.items() if k not in ("LITELLM_LOG",)}
+
+    proc = subprocess.run(
+        [sys.executable, "-c", "import groundly.ingestion.graph"],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "could not pre-load" not in proc.stderr  # botocore/Bedrock noise
+    assert "LiteLLM:WARNING" not in proc.stderr
+    assert proc.stdout == ""  # nothing may reach stdout — `groundly mcp` speaks it
