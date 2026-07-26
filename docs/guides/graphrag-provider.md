@@ -140,22 +140,44 @@ Raising the model's context is the better fix when your hardware allows it:
 more context means richer community reports, which is most of what the global
 arm answers from.
 
-## The extraction model must support JSON mode
+## The extraction model must support JSON-schema structured output
 
 Community reports — what global search and `overview` answer from — are the one
-stage graphrag requests structured output for (`response_format:
-{"type": "json_object"}`). Plenty of OpenAI-compatible models answer ordinary
-completions and reject that outright: DeepSeek's `deepseek-v4-flash` replies
-`This response_format type is unavailable now`.
+stage graphrag requests structured output for. It passes a Pydantic model, which
+litellm turns into `response_format: {"type": "json_schema", …, "strict": true}`.
 
-The preflight probe checks it with one tiny call, so a model that can't do it
-fails in seconds rather than after the whole extraction pass. If you see it,
-switch `extraction.model` to a model with structured-output support.
+**This is stricter than "JSON mode".** The older `{"type": "json_object"}` is a
+different capability, and endpoints disagree about which they accept — in both
+directions. Measured 2026-07-26:
+
+| endpoint | model | `json_object` | `json_schema` |
+| --- | --- | --- | --- |
+| api.deepseek.com | `deepseek-v4-flash` | yes | **no** |
+| api.deepseek.com | `deepseek-v4-pro` | yes | **no** |
+| api.deepseek.com | `deepseek-chat`, `deepseek-reasoner` | yes | **no** |
+| LM Studio | `qwen/qwen3.5-9b` | **no** | yes |
+
+So DeepSeek cannot build a graph today, whichever model you pick — it answers
+`This response_format type is unavailable now`. LM Studio is the exact inverse
+and refuses `json_object` with `'response_format.type' must be 'json_schema' or
+'text'`.
+
+Support is a property of the **model**, not the provider — on Groq,
+`llama-3.3-70b-versatile` has no schema support while `openai/gpt-oss-120b` and
+`llama-4-scout` do. Don't reason about it one provider at a time.
+
+Nor can you trust a capability table, litellm's included: its bundled map marks
+`deepseek-chat` as supporting response schemas, and the live API rejects it. The
+preflight probe is the only reliable answer, which is why it sends graphrag's own
+response model rather than an approximation of it — a model that can't do this
+fails in seconds instead of after the whole extraction pass.
 
 Left unchecked, the failure is confusing: every report call fails, graphrag is
 left with an empty reports table, and it dies merging that table on a column an
 empty frame doesn't have — `KeyError: 'community'`, tens of minutes into a run
-whose extraction stage worked perfectly.
+whose extraction stage worked perfectly. That is exactly what happened on
+2026-07-26 — 679s and 2.96M tokens of flawless extraction, then 436 failed
+reports — because the probe was checking `json_object`, which DeepSeek accepts.
 
 ## Rate limits, if your provider has them
 

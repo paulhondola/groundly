@@ -35,12 +35,12 @@ def home(monkeypatch, tmp_path):
 @pytest.fixture(autouse=True)
 def stub_probe(monkeypatch):
     """build_graph probes the provider before running the pipeline — a real extraction
-    prompt plus a JSON-mode capability call. These tests point at an unreachable fake
-    provider, so stub it; probe-specific tests override this with their own fake.
+    prompt plus a structured-output capability call. These tests point at an unreachable
+    fake provider, so stub it; probe-specific tests override this with their own fake.
 
-    **kwargs absorbs json_object=True (the second call). Without this fixture the probe
-    reaches the network, which is how `http://x` connection errors show up in tests that
-    look unrelated."""
+    **kwargs absorbs response_format=CommunityReportResponse (the second call). Without
+    this fixture the probe reaches the network, which is how `http://x` connection errors
+    show up in tests that look unrelated."""
     from groundly.llm.chat import ChatResult
 
     monkeypatch.setattr(
@@ -495,11 +495,11 @@ def test_probe_failure_names_the_cause_and_never_starts_the_pipeline(
     assert subj.load_manifest().graphrag.corpus_hash is None
 
 
-def test_probe_checks_json_mode_separately_and_says_so(subj, store, home, monkeypatch):
-    """A provider can answer plain completions and still reject response_format —
-    DeepSeek's deepseek-v4-flash does. The message must name JSON mode, not context
-    size: an earlier version reused the extraction-prompt wording and misdirected a
-    real user to check their context window."""
+def test_probe_checks_structured_output_separately_and_says_so(subj, store, home, monkeypatch):
+    """A provider can answer plain completions and still reject response_format — every
+    DeepSeek model does. The message must name structured output, not context size: an
+    earlier version reused the extraction-prompt wording and misdirected a real user to
+    check their context window."""
     from groundly.llm.chat import ChatResult, ChatUnreachableError
 
     _configure_extraction(home)
@@ -507,18 +507,55 @@ def test_probe_checks_json_mode_separately_and_says_so(subj, store, home, monkey
 
     calls = []
 
-    def fake_complete(call_class, messages, *, json_object=False):
-        calls.append(json_object)
-        if json_object:
+    def fake_complete(call_class, messages, *, response_format=None):
+        calls.append(response_format)
+        if response_format is not None:
             raise ChatUnreachableError("This response_format type is unavailable now")
         return ChatResult(text="ok", tokens=1, cost_usd=None, model="stub")
 
     monkeypatch.setattr("groundly.llm.chat.complete", fake_complete)
 
-    with pytest.raises(GraphBuildError, match="JSON-mode"):
+    with pytest.raises(GraphBuildError, match="structured-output"):
         build_graph(subj, store)
 
-    assert calls == [False, True]  # plain completion first, then the capability check
+    # Plain completion first, then the capability check.
+    assert [c is None for c in calls] == [True, False]
+
+
+def test_probe_sends_graphrags_own_response_model(subj, store, home, monkeypatch):
+    """The probe must pass the *same object* community_reports_extractor passes, so litellm
+    derives the same wire request for both and the probe cannot test a shape the build never
+    sends. A hand-written `{"type": "json_object"}` stood here and was wrong in both
+    directions at once (2026-07-26): DeepSeek accepts json_object and refuses the json_schema
+    litellm derives from the model class, so a doomed build ran a full extraction pass; LM
+    Studio refuses json_object and requires json_schema, so a local model that builds graphs
+    fine would have been refused before starting.
+
+    Asserting on the class itself, not on a dict shaped like it, is the point — a copy of
+    the shape is exactly what drifts when graphrag changes its response model."""
+    from graphrag.index.operations.summarize_communities.community_reports_extractor import (
+        CommunityReportResponse,
+    )
+
+    from groundly.llm.chat import ChatResult
+
+    _configure_extraction(home)
+    _add_material(store, "a.pdf", "a" * 64)
+
+    formats = []
+
+    def fake_complete(call_class, messages, *, response_format=None):
+        formats.append(response_format)
+        return ChatResult(text="ok", tokens=1, cost_usd=None, model="stub")
+
+    monkeypatch.setattr("groundly.llm.chat.complete", fake_complete)
+
+    # The build itself still fails (the fake provider is unreachable) — only the probe's
+    # two calls are under test here.
+    with pytest.raises(GraphBuildError):
+        build_graph(subj, store)
+
+    assert formats[1] is CommunityReportResponse
 
 
 def test_probe_contains_unexpected_exceptions_as_named_errors(subj, store, home, monkeypatch):

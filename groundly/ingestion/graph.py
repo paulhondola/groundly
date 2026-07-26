@@ -25,6 +25,9 @@ from graphrag.config.models.extract_graph_config import ExtractGraphConfig
 from graphrag.config.models.graph_rag_config import GraphRagConfig
 from graphrag.config.models.reporting_config import ReportingConfig
 from graphrag.config.models.summarize_descriptions_config import SummarizeDescriptionsConfig
+from graphrag.index.operations.summarize_communities.community_reports_extractor import (
+    CommunityReportResponse,
+)
 from graphrag_cache import CacheConfig
 from graphrag_chunking.chunking_config import ChunkingConfig
 from graphrag_llm.config import ModelConfig
@@ -165,18 +168,29 @@ def _probe_extraction(
     named error in seconds.
 
     Two calls, because the build depends on two independent provider capabilities and a
-    reachability check proves neither: the extraction prompt itself (size), and JSON mode
-    (community reports are the one stage that requests `response_format`). Each is a real
-    billable call, so each records its own trace row (.claude/rules/architecture.md:
+    reachability check proves neither: the extraction prompt itself (size), and structured
+    output (community reports are the one stage that requests `response_format`). Each is a
+    real billable call, so each records its own trace row (.claude/rules/architecture.md:
     every LLM call records tokens + cost).
 
-    The extraction prompt comes from the *same config the build will use*, and is
-    formatted with the *same keys* graphrag formats it with — only `entity_types` and
-    `input_text` (graph_extractor._process_document). Passing the delimiter keys too, as
-    this used to, made the probe more forgiving than the build: a prompt containing
-    `{tuple_delimiter}` formatted fine here and then raised KeyError on every chunk of
-    the real run. graphrag_adapter rejects such a prompt outright now, and this stays
-    aligned so the probe can never be the laxer of the two."""
+    **Both probes send what the build sends, object for object.** A probe that merely
+    approximates the build tests a capability nobody exercises, and has been wrong in both
+    directions here:
+
+    - The extraction prompt comes from the *same config the build will use*, formatted with
+      the *same keys* graphrag formats it with — only `entity_types` and `input_text`
+      (graph_extractor._process_document). Passing the delimiter keys too, as this used to,
+      made the probe more forgiving than the build: a prompt containing `{tuple_delimiter}`
+      formatted fine here and then raised KeyError on every chunk of the real run.
+      graphrag_adapter rejects such a prompt outright now.
+    - The structured-output probe passes graphrag's own `CommunityReportResponse`, not a
+      hand-written `{"type": "json_object"}`. That shortcut was too lax for DeepSeek, which
+      accepts json_object and refuses the json_schema litellm derives from the model class
+      (one full extraction pass wasted, 2.96M tokens), *and* too strict for LM Studio, which
+      refuses json_object and requires json_schema — it would have refused a local model
+      that builds graphs fine, on the zero-key path that is meant to be first-class.
+
+    So the probe can never be the laxer of the two, nor the stricter."""
     from groundly.llm.chat import complete
 
     prompt = config.extract_graph.resolved_prompts().extraction_prompt.format(
@@ -199,21 +213,32 @@ def _probe_extraction(
             "small for that, check that extraction.model is a plain chat model — agentic or "
             "tool-using endpoints have their own request limits and are the wrong fit here.",
         )
-        # A separate capability: DeepSeek's deepseek-v4-flash answers plain completions
-        # fine and rejects response_format outright, which used to surface 80 minutes in
-        # as KeyError 'community' — pandas merging the empty reports frame every failed
-        # community call left behind.
+        # A separate capability: every DeepSeek model answers plain completions fine and
+        # rejects graphrag's structured-output request outright, which used to surface 80
+        # minutes in as KeyError 'community' — pandas merging the empty reports frame every
+        # failed community call left behind.
+        #
+        # `CommunityReportResponse` is graphrag's *own* response model, passed here exactly
+        # as community_reports_extractor passes it, so litellm derives the same wire request
+        # both times. Sending a hand-written `{"type": "json_object"}` instead is what let
+        # the DeepSeek run start: measured 2026-07-26, DeepSeek accepts json_object and
+        # refuses json_schema, and LM Studio refuses json_object and requires json_schema —
+        # so that shortcut was simultaneously too lax for one provider and too strict for
+        # the other, and would have refused a local model that builds graphs fine.
         _probe_call(
             conn,
             lambda: complete(
                 "extraction",
-                [{"role": "user", "content": 'Reply with the JSON object {"ok": true}'}],
-                json_object=True,
+                [{"role": "user", "content": "Summarise a one-entity community."}],
+                response_format=CommunityReportResponse,
             ),
-            "the extraction model rejected a JSON-mode (response_format) request: {exc}. "
-            "graphrag requires JSON mode for community reports — the summaries global "
-            "search and `overview` answer from — so a model without it cannot finish a "
-            "graph build. Switch extraction.model to one that supports structured output.",
+            "the extraction model rejected graphrag's structured-output request: {exc}. "
+            "Community reports — the summaries global search and `overview` answer from — "
+            "are sent as `response_format: json_schema`, and a model that refuses it cannot "
+            "finish a graph build. Note this is a *stricter* capability than JSON mode: "
+            'providers that accept `{{"type": "json_object"}}` may still refuse '
+            "`json_schema` (every DeepSeek model does). Switch extraction.model to one whose "
+            "endpoint supports JSON-schema structured output.",
         )
     finally:
         conn.close()
