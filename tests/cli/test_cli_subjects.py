@@ -306,14 +306,6 @@ def _stub_index_paths(monkeypatch, f):
     monkeypatch.setattr(pipeline, "index_paths", fake_index_paths)
 
 
-def _unwrapped(output: str) -> str:
-    """rich hard-wraps console output at the terminal width, so a long path or phrase
-    can land with a newline through the middle of it. Collapse whitespace before
-    asserting on message content — otherwise the assertion passes or fails depending on
-    how wide the terminal running pytest happens to be."""
-    return " ".join(output.split())
-
-
 def _stub_build_graph(monkeypatch, failed: int = 0):
     """Records each call and mimics build_graph's real success side effects (graph/
     directory + manifest.graphrag stamped with the current corpus hash) so a later
@@ -634,9 +626,8 @@ def test_index_names_a_framing_change_rather_than_blaming_the_corpus(monkeypatch
     result = runner.invoke(app, ["index", "PDSS", str(f), "--yes"])
 
     assert result.exit_code == 0, result.output
-    output = _unwrapped(result.output)
-    assert "extraction prompt or entity types changed" in output
-    assert "corpus changed" not in output
+    assert "extraction prompt or entity types changed" in result.output
+    assert "corpus changed" not in result.output
     assert calls == ["PDSS", "PDSS"]  # rebuilt under the new framing
 
 
@@ -659,6 +650,5 @@ def test_index_names_a_broken_custom_prompt_without_a_traceback(monkeypatch, hom
     result = runner.invoke(app, ["index", "PDSS", str(f), "--yes"])
     assert result.exit_code == 1
     assert "Traceback" not in result.output
-    # rich can break a long path mid-word, so collapse whitespace away entirely for it
-    assert "gone.txt" in "".join(result.output.split())
-    assert "unset it to use the bundled course-tuned prompt" in _unwrapped(result.output)
+    assert "gone.txt" in result.output
+    assert "unset it to use the bundled course-tuned prompt" in result.output
