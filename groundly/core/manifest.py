@@ -30,6 +30,12 @@ class Graphrag(BaseModel):
     version: str | None = None
     extraction_model: str | None = None
     corpus_hash: str | None = None
+    # sha256 over the extraction prompt text + entity types the graph was built with.
+    # corpus_hash alone answers "is this a graph of this corpus?"; without this a
+    # student could swap the prompt or the entity types and keep querying a graph built
+    # under different framing, with nothing signalling it. Compared by
+    # ingestion/graph.graph_is_stale exactly as corpus_hash is.
+    extraction_fingerprint: str | None = None
 
 
 class Chunking(BaseModel):

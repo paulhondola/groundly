@@ -73,14 +73,36 @@ class RetrievalSettings(BaseModel):
     rerank: bool = True
 
 
+# Course-tuned defaults (decision 22). graphrag ships `organization,person,geo,event`
+# — news-wire types that produced 75 ORGANIZATION and 34 EVENT entities on a
+# parallel-algorithms corpus. `person` stays: courses cite Dijkstra and Lamport, and
+# those are legitimate nodes. These lean CS-ward, matching the pilot subjects
+# (decision 11); a law or history course retargets them via graph.entity_types.
+DEFAULT_ENTITY_TYPES = "concept,algorithm,data_structure,theorem,technique,tool,metric,person"
+
+
 class GraphSettings(BaseModel):
     # The extraction model's usable context. graphrag's own prompt budgets assume
     # ~16k (community reports alone want 8000 in + 2000 out); llm/graphrag_adapter.py
     # scales every stage down to whatever is set here. 4096 is LM Studio's common
     # default, so a graph build works out of the box — raise it to match your model.
-    # Floored at 2048: graphrag's extraction preamble alone is ~1620 tokens, so
-    # anything smaller cannot fit a single call and would yield all-zero budgets.
+    # Floored at 2048: the bundled extraction preamble is ~700 tokens and a chunk can
+    # reach CHUNK_MAX_TOKENS (512), so anything smaller cannot fit one call plus the
+    # room its stage budgets are carved from.
     context_window: int = Field(default=4096, ge=2048)
+
+    # Path to a custom entity-extraction prompt; unset uses the bundled course-tuned
+    # one (groundly/prompts/extract_graph.txt). Two real uses, not speculation: a
+    # student outside CS needs different framing, and the thesis's evaluation compares
+    # prompts on the gold set — swapping the prompt *is* the experiment. Validated at
+    # read time (llm/graphrag_adapter.resolve_extraction_prompt), never as a graphrag
+    # internal error. Changing it changes the extraction fingerprint, so the next
+    # `groundly index` offers a rebuild.
+    extraction_prompt: str | None = None
+
+    # Comma-separated, NOT list[str]: _toml_value emits scalars only, so a list would
+    # round-trip through `config set` as a Python repr and corrupt the file.
+    entity_types: str = DEFAULT_ENTITY_TYPES
 
 
 class Settings(BaseModel):
@@ -275,6 +297,15 @@ def render_config_toml(providers: dict, settings: Settings) -> str:
         "",
         "[graph]",
         f"context_window = {_toml_value(settings.graph.context_window)}   # usable context of your extraction model; graphrag's per-stage prompt budgets are scaled to fit it",
-        "",
+        f"entity_types = {_toml_value(settings.graph.entity_types)}   # comma-separated types entity extraction looks for; the defaults target course material",
     ]
+    if settings.graph.extraction_prompt:
+        lines.append(
+            f"extraction_prompt = {_toml_value(settings.graph.extraction_prompt)}   # custom extraction prompt; must keep {{entity_types}} and {{input_text}}"
+        )
+    else:
+        lines.append(
+            "# extraction_prompt =        # path to a custom extraction prompt; unset = the bundled course-tuned one"
+        )
+    lines.append("")
     return "\n".join(lines)

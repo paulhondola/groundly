@@ -32,6 +32,26 @@ def test_settings_default_when_no_file():
     assert s.retrieval.context_k == 8
     assert s.retrieval.rerank is True
     assert s.graph.context_window == 4096  # LM Studio's common default
+    assert s.graph.extraction_prompt is None  # unset = the bundled course-tuned prompt
+    assert s.graph.entity_types.startswith("concept,algorithm")
+
+
+def test_graph_prompt_settings_round_trip_through_set_and_rewrite(home, tmp_path):
+    """entity_types is a comma-separated *string*, not list[str], precisely so it
+    survives this: the writer emits scalars only, so a list would come back as a Python
+    repr and every later read would fail."""
+    custom = tmp_path / "custom.txt"
+    set_key("graph.entity_types", "concept,proof")
+    set_key("graph.extraction_prompt", str(custom))
+
+    s = load_settings()
+    assert s.graph.entity_types == "concept,proof"
+    assert s.graph.extraction_prompt == str(custom)
+
+    set_key("retrieval.context_k", "12")  # rewrite triggered by an unrelated section
+    s = load_settings()
+    assert s.graph.entity_types == "concept,proof"
+    assert s.graph.extraction_prompt == str(custom)
 
 
 def test_graph_context_window_round_trips_through_set_and_rewrite(home):
