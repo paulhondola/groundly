@@ -46,8 +46,11 @@ from groundly.llm.graphrag_adapter import (
     completion_model_config,
     extraction_entity_types,
     extraction_fingerprint,
+    metered_usage,
     prompt_budgets,
     register_bge_m3_embedding,
+    register_groundly_metrics_store,
+    reset_metered_usage,
     resolve_extraction_prompt,
 )
 
@@ -95,6 +98,11 @@ class GraphBuildResult:
     chunks: int
     failed: int
     reports_failed: int = 0
+    # Metered usage from graphrag's own aggregates — None when nothing was metered.
+    # `cost_usd` needs prices on top of that, so it can be None while the counts are not.
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    cost_usd: float | None = None
 
 
 class _WorkflowErrorCounter(logging.Handler):
@@ -344,7 +352,7 @@ def _build_config(
             max_input_length=budgets.community_max_input_length,
             max_length=budgets.community_max_length,
         ),
-        completion_models={_COMPLETION_MODEL_ID: completion_model_config()},
+        completion_models={_COMPLETION_MODEL_ID: completion_model_config(track_usage=True)},
         embedding_models={
             _EMBEDDING_MODEL_ID: ModelConfig(
                 type=BGE_M3_EMBEDDING_TYPE,
@@ -466,6 +474,8 @@ def build_graph(
 
         try:
             register_bge_m3_embedding()
+            register_groundly_metrics_store()
+            reset_metered_usage()
             allow_nonstandard_service_tier()
 
             df = pd.DataFrame(
@@ -568,10 +578,12 @@ def build_graph(
     )
     subj.save_manifest(manifest)
 
-    # This is the pre-build heuristic estimate (chars // 4), not metered actual usage —
-    # graphrag's own internal extraction LLM calls aren't instrumented through llm/, so
-    # exact tokens/cost are unknowable here (see retrieval/graph.py's module docstring
-    # for the query-side equivalent gap).
+    # Metered where possible, estimated only as a fallback. graphrag's extraction calls
+    # don't pass through llm/, but graphrag_llm aggregates their usage itself and
+    # `track_usage=True` above puts that aggregate somewhere this process can read — so
+    # the trace records what was spent rather than what was guessed.
+    # (retrieval/graph.py's query-side gap is unchanged.)
+    metered = metered_usage()
     conn = connect_progress(subj.progress_db_path)
     try:
         record_trace(
@@ -581,12 +593,17 @@ def build_graph(
             outcome="built",
             arm="graph-build",
             model=provider_cfg.model,
-            tokens=estimated_tokens,
-            cost_usd=estimated_cost_usd,
+            tokens=estimated_tokens if metered is None else metered.total_tokens,
+            cost_usd=estimated_cost_usd if metered is None else metered.cost_usd,
         )
     finally:
         conn.close()
 
     return GraphBuildResult(
-        chunks=len(rows), failed=counter.count, reports_failed=reports_counter.count
+        chunks=len(rows),
+        failed=counter.count,
+        reports_failed=reports_counter.count,
+        prompt_tokens=None if metered is None else metered.prompt_tokens,
+        completion_tokens=None if metered is None else metered.completion_tokens,
+        cost_usd=None if metered is None else metered.cost_usd,
     )

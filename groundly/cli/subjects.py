@@ -177,14 +177,8 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool, debug: bool = False) -> 
 
     chunks = store_obj.all_chunks()
     total_chars = sum(len(row["text"]) for row in chunks)
-    tokens, cost = estimate_cost(total_chars, len(chunks))
-    if cost is None:
-        console.print(
-            "[dim]no cost estimate available — set input_price_per_mtok for "
-            f"{escape('[providers.extraction]')} in config.toml to see one[/dim]"
-        )
-    else:
-        console.print(f"Estimated graph build cost: ~{tokens} tokens (${cost:.4f})")
+    est = estimate_cost(total_chars, len(chunks))
+    _print_cost_estimate(est)
 
     if not yes:
         typer.confirm(prompt, abort=True)
@@ -205,8 +199,8 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool, debug: bool = False) -> 
             result = build_graph(
                 subj,
                 store_obj,
-                estimated_tokens=tokens,
-                estimated_cost_usd=cost,
+                estimated_tokens=est.input_tokens,
+                estimated_cost_usd=est.low_usd,
                 on_event=on_event,
             )
         except (GraphBuildError, ProviderNotConfiguredError) as exc:
@@ -218,6 +212,55 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool, debug: bool = False) -> 
         notes.append(f"{result.reports_failed} community summaries failed")
     dropped = f" ([yellow]{', '.join(notes)}[/yellow])" if notes else ""
     console.print(f"Graph built for [bold]{subj.name}[/bold]{dropped}")
+    _print_actual_spend(result)
+
+
+def _usd(amount: float) -> str:
+    """Two decimals reads as money; below a cent it reads as zero, which is worse than
+    verbose. No four-decimal figures — this is a heuristic, and printing it to a
+    hundredth of a cent claims a precision it does not have."""
+    return f"${amount:,.2f}" if amount >= 1 else f"${amount:.3f}"
+
+
+def _print_cost_estimate(est) -> None:
+    """The spend gate (conventions.md: print cost estimates before spending the
+    student's tokens). A range, and every assumption behind it named — the previous
+    single figure priced input tokens for the extraction pass only and said so nowhere,
+    which presented a build as costing a fraction of what it did."""
+    console.print(
+        f"Estimated graph build: ~{est.input_tokens:,} input tokens, "
+        f"up to ~{est.max_output_tokens:,} output"
+    )
+    if est.low_usd is None:
+        console.print(
+            "[dim]  no cost estimate available — set input_price_per_mtok and "
+            f"output_price_per_mtok for {escape('[providers.extraction]')} in "
+            "config.toml to see one[/dim]"
+        )
+    else:
+        console.print(f"  [bold]{_usd(est.low_usd)} to {_usd(est.high_usd)}[/bold]")
+        console.print(f"[dim]  prices: {escape(est.price_source)}[/dim]")
+    console.print(
+        "[dim]  extraction pass only — community reports and description summaries are "
+        "billed on top, and cannot be sized before the graph exists[/dim]"
+    )
+    if est.moving_alias:
+        console.print(
+            f"[yellow]  ⚠ {escape(est.moving_alias)} is a moving alias[/yellow] — it may now "
+            "point at a differently-priced model than the one priced above."
+        )
+
+
+def _print_actual_spend(result) -> None:
+    """What the build actually cost, metered by graphrag's own usage aggregates rather
+    than re-derived from the estimate. Absent when nothing was metered — a missing
+    number is not worth a warning."""
+    if result.prompt_tokens is None or result.completion_tokens is None:
+        return
+    line = f"[dim]  metered: {result.prompt_tokens:,} in / {result.completion_tokens:,} out"
+    if result.cost_usd is not None:
+        line += f" — {_usd(result.cost_usd)}"
+    console.print(f"{line}[/dim]")
 
 
 @app.command(name="list")

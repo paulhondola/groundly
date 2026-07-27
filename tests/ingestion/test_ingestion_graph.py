@@ -314,6 +314,124 @@ def test_build_graph_traces_every_llm_call_it_makes(subj, store, home, monkeypat
     assert row["cost_usd"] == 0.0045
 
 
+def _build_with_metrics(subj, store, monkeypatch, **metrics):
+    """Drive graphrag's *real* metrics path: build the completion model from the config
+    build_graph handed to build_index, then feed its store the usage a run would.
+
+    Deliberately not a fabricated file. graphrag_llm only ever *writes* its metrics from
+    an `atexit` hook, so a test that stubbed the output would have passed against code
+    that can never fire in production — which is exactly what happened to the first
+    version of this feature."""
+    from graphrag_llm.completion.completion_factory import create_completion
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        _write_entities(subj)
+        completion = create_completion(
+            config.get_completion_model_config("default_completion_model")
+        )
+        completion.metrics_store.update_metrics(
+            metrics={
+                "prompt_tokens": 1000,
+                "completion_tokens": 4000,
+                "responses_with_tokens": 100,
+                **metrics,
+            }
+        )
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+    return build_graph(subj, store, estimated_tokens=123, estimated_cost_usd=0.0045)
+
+
+def _build_trace(subj):
+    from groundly.core.store import connect_progress
+
+    conn = connect_progress(subj.progress_db_path)
+    try:
+        return conn.execute(
+            "SELECT * FROM traces WHERE arm = 'graph-build' ORDER BY id"
+        ).fetchall()[-1]
+    finally:
+        conn.close()
+
+
+def test_build_graph_traces_metered_usage_not_the_estimate(subj, store, home, monkeypatch):
+    """The trace used to store the pre-build heuristic as if it were metered. graphrag
+    swallows its own LLM calls, but graphrag_llm aggregates their usage in a store this
+    process can read — so the number recorded is what was spent."""
+    (home / "config.toml").write_text(
+        '[providers.extraction]\nbase_url = "http://x"\nmodel = "gpt-4o-mini"\n'
+        'api_key = "sk-secret"\ninput_price_per_mtok = 1.0\noutput_price_per_mtok = 2.0\n'
+    )
+    _add_material(store, "a.pdf", "a" * 64)
+
+    result = _build_with_metrics(subj, store, monkeypatch)
+
+    assert (result.prompt_tokens, result.completion_tokens) == (1000, 4000)
+    assert result.cost_usd == pytest.approx(1000 * 1e-06 + 4000 * 2e-06)
+
+    row = _build_trace(subj)
+    assert row["tokens"] == 5000  # not the 123 estimate
+    assert row["cost_usd"] == pytest.approx(result.cost_usd)
+
+
+def test_build_graph_metered_cost_excludes_cache_hits(subj, store, home, monkeypatch):
+    """Cached responses are counted in graphrag's token totals but were never paid for,
+    and decision 21 deliberately keeps `cache/` across a failed rebuild — so retrying
+    against a warm cache is the normal path, not an edge case. Tokens stay as metered;
+    only the cost is scaled to the responses that actually reached the provider."""
+    (home / "config.toml").write_text(
+        '[providers.extraction]\nbase_url = "http://x"\nmodel = "gpt-4o-mini"\n'
+        'api_key = "sk-secret"\ninput_price_per_mtok = 1.0\noutput_price_per_mtok = 2.0\n'
+    )
+    _add_material(store, "a.pdf", "a" * 64)
+
+    result = _build_with_metrics(subj, store, monkeypatch, cached_responses=100)
+
+    assert (result.prompt_tokens, result.completion_tokens) == (1000, 4000)
+    assert result.cost_usd == 0.0
+
+
+def test_build_graph_falls_back_to_the_estimate_without_metrics(subj, store, home, monkeypatch):
+    """A build that metered nothing is not a reason to fail one that otherwise
+    succeeded — it just means there is no metered number to report, and reporting
+    "0 tokens, $0.00" would read as a fact rather than as an absence."""
+    _configure_extraction(home)
+    _add_material(store, "a.pdf", "a" * 64)
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        _write_entities(subj)
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+    result = build_graph(subj, store, estimated_tokens=123, estimated_cost_usd=0.0045)
+
+    assert result.prompt_tokens is None and result.cost_usd is None
+    row = _build_trace(subj)
+    assert row["tokens"] == 123
+    assert row["cost_usd"] == 0.0045
+
+
+def test_build_graph_does_not_inherit_a_previous_builds_usage(subj, store, home, monkeypatch):
+    """graphrag registers metrics stores as singletons, so without a reset the second
+    build in a process would report the first one's tokens on top of its own."""
+    _configure_extraction(home)
+    _add_material(store, "a.pdf", "a" * 64)
+
+    first = _build_with_metrics(subj, store, monkeypatch)
+    assert first.prompt_tokens == 1000
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        _write_entities(subj)
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+    second = build_graph(subj, store, estimated_tokens=123, estimated_cost_usd=0.0045)
+
+    assert second.prompt_tokens is None  # not 1000 carried over
+    assert _build_trace(subj)["tokens"] == 123
+
+
 def test_build_graph_wraps_failure_in_graph_build_error(subj, store, home, monkeypatch):
     _configure_extraction(home)
     _add_material(store, "a.pdf", "a" * 64)

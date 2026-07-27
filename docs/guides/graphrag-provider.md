@@ -29,10 +29,12 @@ groundly config set extraction.key <your-api-key>
 ```
 
 If `<mid-tier-model>` is in litellm's bundled price map (most mainstream cloud
-models are), cost tracing works automatically — no extra config. For a
-local/unmapped model, set the optional per-token override fields instead:
-without them, `groundly index --graph` still prompts for confirmation before
-building, but can't show you a dollar estimate first:
+models are), cost tracing works automatically — no extra config. That map ships
+with litellm and can be months behind the provider's real rates, so every cost
+line names where its prices came from; if yours are wrong, set both override
+fields below and they win. For a local/unmapped model they're the only way to
+get a dollar figure at all — without them `groundly index --graph` still prompts
+for confirmation before building, it just can't price it:
 
 ```sh
 groundly config set extraction.input_price_per_mtok <price per 1M input tokens>
@@ -48,17 +50,51 @@ class, including `extraction`.
 groundly index <SUBJECT> --graph
 ```
 
-On first build, this prints a rough cost estimate — chunk text ÷ 4 **plus
-graphrag's ~1620-token few-shot preamble for every chunk**, which is usually
-the bulk of it (on a 1194-chunk corpus averaging 156 tokens per chunk, the
-preamble is 91% of every call and 1.9M of the 2.1M total tokens). Priced
-against `extraction.input_price_per_mtok` if set, else litellm's bundled
-price map for `extraction.model`, matched either bare (`gpt-4o-mini`) or by
-provider prefix (`groq/llama-3.3-70b-versatile`). It then asks for
-confirmation —
-`--yes`/`-y` skips the prompt. If the model is priced by neither, you'll see
-"no cost estimate available" instead of a dollar figure, but you're still
-asked to confirm before anything is sent anywhere.
+On first build, this prints a cost **range** and then asks for confirmation
+(`--yes`/`-y` skips the prompt):
+
+```
+Estimated graph build: ~1,017,519 input tokens, up to ~3,448,272 output
+  $0.061 to $0.682
+  prices: litellm 1.86.2's bundled price map ('mistral/mistral-small-latest') — may be out of date
+  extraction pass only — community reports and description summaries are billed on top, and cannot be sized before the graph exists
+  ⚠ mistral-small-latest is a moving alias — it may now point at a differently-priced model than the one priced above.
+```
+
+Reading it:
+
+- **Input tokens** are chunk text ÷ 4 **plus the ~696-token extraction preamble
+  for every chunk**, which is usually the bulk of it (on a 1194-chunk corpus
+  averaging 156 tokens per chunk, the preamble is most of every call).
+- **The upper bound** assumes every call fills the room it has left to answer in
+  — `graph.context_window` minus the preamble minus one full chunk. Real output
+  is normally well under that, but *how far* under depends on the model, not on
+  your corpus: on one 355-chunk build, output ran 0.87× the input on four runs
+  and 4.06× on a fifth with a reasoning model. That's why it's a range.
+- **Both ends cover the extraction pass only.** Community reports and
+  description summaries are billed on top and genuinely can't be sized in
+  advance — they're sized by the graph that doesn't exist yet, and the same
+  corpus produced 23 communities on one build and 436 on another. Expect the
+  real bill to land above the upper bound.
+- **Prices** come from `extraction.input_price_per_mtok` /
+  `output_price_per_mtok` if both are set, else litellm's bundled map for
+  `extraction.model`, matched either bare (`gpt-4o-mini`) or by provider prefix
+  (`groq/llama-3.3-70b-versatile`). The line always says which.
+- **The moving-alias warning** appears for any model named `*-latest`. Those
+  aliases get repointed at new models with new prices while the bundled map
+  keeps the old ones — `mistral-small-latest` is priced at $0.06/$0.18 per Mtok
+  by litellm 1.86.2 and costs $0.15/$0.60 today, so the range above is really
+  $0.153 to $2.22. Pin the dated model id (`mistral-small-2603`), or set the
+  override fields, if you want the estimate to mean something.
+
+If the model is priced by neither source you'll see "no cost estimate
+available" instead of dollar figures, but you still get the token counts and
+you're still asked to confirm before anything is sent anywhere.
+
+When the build finishes it prints what it **actually** spent, metered from
+graphrag's own usage aggregates rather than re-estimated — cached responses
+counted in the tokens but excluded from the cost, since a retry doesn't pay for
+them twice.
 
 Once a subject has a graph, `--graph` is no longer needed: every later
 `groundly index` run checks whether the graph still describes this subject —
