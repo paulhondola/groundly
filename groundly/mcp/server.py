@@ -61,7 +61,11 @@ def list_subjects() -> list[dict]:
                 "materials": len(indexed),
                 "pages": sum(r["pages"] or 0 for r in indexed),
                 "chunks": sum(r["chunk_count"] for r in rows),
-                "graph_built": (subj.root_dir / "graph").exists(),
+                # Manifest, not directory: a refused or interrupted build leaves
+                # partial parquet on disk that must never be reported as a graph
+                # (same gate as retrieval/graph.py's _require_graph).
+                "graph_built": (subj.root_dir / "graph").exists()
+                and subj.load_manifest().graphrag.corpus_hash is not None,
             }
         )
     return result

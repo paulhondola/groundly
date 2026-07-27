@@ -306,10 +306,19 @@ def _stub_index_paths(monkeypatch, f):
     monkeypatch.setattr(pipeline, "index_paths", fake_index_paths)
 
 
-def _stub_build_graph(monkeypatch):
+def _stub_build_graph(
+    monkeypatch,
+    failed: int = 0,
+    *,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+    cost_usd: float | None = None,
+):
     """Records each call and mimics build_graph's real success side effects (graph/
     directory + manifest.graphrag stamped with the current corpus hash) so a later
-    `index` run's staleness check behaves like it would against a real build."""
+    `index` run's staleness check behaves like it would against a real build.
+    `failed` sets the dropped-chunk count the CLI reports; the token/cost arguments
+    stand in for graphrag's metered usage aggregates, which default to unavailable."""
     from groundly.core.manifest import Graphrag
     from groundly.ingestion import graph as ingestion_graph
 
@@ -322,7 +331,6 @@ def _stub_build_graph(monkeypatch):
         estimated_tokens=0,
         estimated_cost_usd=None,
         on_event=None,
-        verbose=False,
     ):
         calls.append(subj.name)
         (subj.root_dir / "graph").mkdir(exist_ok=True)
@@ -331,8 +339,18 @@ def _stub_build_graph(monkeypatch):
             version="3.1.0",
             extraction_model="m",
             corpus_hash=ingestion_graph.corpus_hash(store_obj),
+            # Real build_graph records this in the same write; without it the next
+            # `index` would see a framing change and re-offer a rebuild.
+            extraction_fingerprint=ingestion_graph.current_extraction_fingerprint(),
         )
         subj.save_manifest(manifest)
+        return ingestion_graph.GraphBuildResult(
+            chunks=1,
+            failed=failed,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_usd=cost_usd,
+        )
 
     monkeypatch.setattr(ingestion_graph, "build_graph", fake_build_graph)
     return calls
@@ -352,6 +370,174 @@ def test_index_graph_flag_triggers_first_build(monkeypatch, home, tmp_path):
     assert calls == ["PDSS"]
     assert (sdir / "graph").exists()
     assert "Graph built" in result.output
+    # `0/?` reads as a broken bar, not an unknown one — and the longest silent stretch of
+    # a real build (the two probe calls) happens before graphrag reports any total.
+    assert "?" not in result.output
+
+
+def _write_extraction_provider(home, model: str = "m", *, priced: bool = True) -> None:
+    body = f'[providers.extraction]\nbase_url = "http://x"\nmodel = "{model}"\n'
+    if priced:
+        body += "input_price_per_mtok = 5.0\noutput_price_per_mtok = 10.0\n"
+    (home / "config.toml").write_text(body)
+
+
+def _invoke_graph_build(monkeypatch, home, tmp_path, **stub_kwargs):
+    runner.invoke(app, ["init", "PDSS"])
+    _seed_material(subject_dir("PDSS"), "a.pdf", "a" * 64)
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+    _stub_build_graph(monkeypatch, **stub_kwargs)
+    return runner.invoke(app, ["index", "PDSS", str(f), "--graph", "--yes"])
+
+
+def test_index_graph_cost_estimate_is_a_range_with_its_assumptions_named(
+    monkeypatch, home, tmp_path
+):
+    """conventions.md: print a cost estimate before spending the student's tokens. The
+    previous line was a bare dollar figure that priced *input tokens for the extraction
+    pass only* and said so nowhere, presenting a build as costing a fraction of what it
+    did. Every part of this is load-bearing: the range, the exclusion, the source."""
+    _write_extraction_provider(home)
+    result = _invoke_graph_build(monkeypatch, home, tmp_path)
+
+    assert result.exit_code == 0, result.output
+    assert "input tokens" in result.output and "output" in result.output
+    assert " to $" in result.output  # a range, not a point
+    assert "extraction pass only" in result.output
+    assert "community reports" in result.output
+    assert "prices: config.toml" in result.output
+
+
+def test_index_graph_cost_estimate_names_the_litellm_price_map_and_its_version(
+    monkeypatch, home, tmp_path
+):
+    """A price the student cannot attribute is a price they cannot sanity-check — and
+    litellm's map is bundled, so it can be months behind the provider's real rates."""
+    _write_extraction_provider(home, "gpt-4o-mini", priced=False)
+    import litellm
+
+    monkeypatch.setattr(
+        litellm,
+        "model_cost",
+        {"gpt-4o-mini": {"input_cost_per_token": 1.5e-07, "output_cost_per_token": 6e-07}},
+    )
+    result = _invoke_graph_build(monkeypatch, home, tmp_path)
+
+    assert "litellm " in result.output and "gpt-4o-mini" in result.output
+    assert "may be out of date" in result.output
+
+
+def test_index_graph_warns_about_a_moving_alias(monkeypatch, home, tmp_path):
+    """Drift is certain for an unpinned alias, not merely possible: litellm prices
+    mistral-small-latest at $0.06/$0.18 per Mtok while the alias resolves today to
+    Mistral Small 4 at $0.15/$0.60. Warn, never block — confirmation still gates it."""
+    _write_extraction_provider(home, "mistral-small-latest")
+    result = _invoke_graph_build(monkeypatch, home, tmp_path)
+
+    assert "moving alias" in result.output
+    assert "mistral-small-latest" in result.output
+    assert result.exit_code == 0, result.output
+
+
+def test_index_graph_does_not_warn_for_a_pinned_model(monkeypatch, home, tmp_path):
+    _write_extraction_provider(home, "mistral-small-2603")
+    assert "moving alias" not in _invoke_graph_build(monkeypatch, home, tmp_path).output
+
+
+def test_index_graph_unpriced_provider_still_confirms(monkeypatch, home, tmp_path):
+    """No price is not a reason to skip the gate — the token counts and the confirmation
+    both still appear, and the message names both fields that would fix it."""
+    _write_extraction_provider(home, priced=False)
+    result = _invoke_graph_build(monkeypatch, home, tmp_path)
+
+    assert "no cost estimate available" in result.output
+    assert "input_price_per_mtok" in result.output and "output_price_per_mtok" in result.output
+    assert "input tokens" in result.output
+    assert "Graph built" in result.output
+
+
+def test_index_graph_reports_metered_spend_after_the_build(monkeypatch, home, tmp_path):
+    """Closes the loop: the student saw an estimated range before, and what was actually
+    metered after. Absent when build_graph couldn't read graphrag's usage aggregates."""
+    _write_extraction_provider(home)
+    result = _invoke_graph_build(
+        monkeypatch, home, tmp_path, prompt_tokens=1234, completion_tokens=5678, cost_usd=0.42
+    )
+
+    assert "metered: 1,234 in / 5,678 out" in result.output
+    assert "$0.42" in result.output
+
+
+def test_index_graph_omits_metered_spend_when_unavailable(monkeypatch, home, tmp_path):
+    _write_extraction_provider(home)
+    assert "metered:" not in _invoke_graph_build(monkeypatch, home, tmp_path).output
+
+
+def _leave_failed_build_artifacts(sdir) -> None:
+    """The state a refused or Ctrl-C'd build leaves behind: `graph/` on disk (decision 21
+    keeps cache/ and logs/ so a retry doesn't re-buy the LLM responses) and
+    `manifest.graphrag` reset, i.e. no recorded corpus_hash."""
+    (sdir / "graph" / "cache").mkdir(parents=True)
+    (sdir / "graph" / "logs").mkdir(parents=True)
+
+
+def test_index_after_a_failed_build_does_not_offer_a_graph_without_the_flag(
+    monkeypatch, home, tmp_path
+):
+    """A first build is opt-in via --graph. A failed one leaves `graph/` on disk with no
+    recorded corpus_hash, and keying off the *directory* read that as a stale graph — so
+    every later plain `groundly index` prompted to "rebuild" a graph that never existed.
+    The rest of the tree already gates on the manifest (mcp/server.py, _require_graph)."""
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+    calls = _stub_build_graph(monkeypatch)
+    _leave_failed_build_artifacts(sdir)
+
+    result = runner.invoke(app, ["index", "PDSS", str(f)])
+
+    assert result.exit_code == 0, result.output
+    assert calls == []
+    assert "stale" not in result.output
+    assert "Rebuild" not in result.output
+
+
+def test_index_after_a_failed_build_offers_a_first_build_with_the_flag(monkeypatch, home, tmp_path):
+    """--graph still works in that state, and calls it what it is: a first build, not a
+    rebuild of something that was never recorded."""
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+    calls = _stub_build_graph(monkeypatch)
+    _leave_failed_build_artifacts(sdir)
+
+    result = runner.invoke(app, ["index", "PDSS", str(f), "--graph", "--yes"])
+
+    assert result.exit_code == 0, result.output
+    assert calls == ["PDSS"]
+    assert "stale" not in result.output
+
+
+def test_remove_only_calls_the_graph_stale_when_one_was_recorded(monkeypatch, home, tmp_path):
+    """Same predicate, same wrong message: `graph/` left by a failed build made `remove`
+    promise a rebuild that no later index run would trigger."""
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    _leave_failed_build_artifacts(sdir)
+
+    result = runner.invoke(app, ["remove", "PDSS", "a.pdf", "--yes"])
+
+    assert result.exit_code == 0, result.output
+    assert "stale" not in result.output
 
 
 def test_index_without_graph_flag_or_existing_graph_does_nothing(monkeypatch, home, tmp_path):
@@ -565,7 +751,6 @@ def test_index_graph_debug_streams_logs_to_stderr(monkeypatch, home, tmp_path):
         estimated_tokens=0,
         estimated_cost_usd=None,
         on_event=None,
-        verbose=False,
     ):
         logging.getLogger("groundly.ingestion.graph").debug("building graph for %s", subj.name)
         (subj.root_dir / "graph").mkdir(exist_ok=True)
@@ -574,8 +759,12 @@ def test_index_graph_debug_streams_logs_to_stderr(monkeypatch, home, tmp_path):
             version="3.1.0",
             extraction_model="m",
             corpus_hash=ingestion_graph.corpus_hash(store_obj),
+            # Real build_graph records this in the same write; without it the next
+            # `index` would see a framing change and re-offer a rebuild.
+            extraction_fingerprint=ingestion_graph.current_extraction_fingerprint(),
         )
         subj.save_manifest(manifest)
+        return ingestion_graph.GraphBuildResult(chunks=1, failed=0)
 
     monkeypatch.setattr(ingestion_graph, "build_graph", fake_build_graph)
 
@@ -596,3 +785,52 @@ def test_index_debug_invalid_log_level_fails_cleanly(monkeypatch, home, tmp_path
     assert result.exit_code == 1
     assert "Traceback" not in result.output
     assert "BOGUS" in result.output
+
+
+def test_index_names_a_framing_change_rather_than_blaming_the_corpus(monkeypatch, home, tmp_path):
+    """The corpus is untouched — only graph.entity_types changed. Saying "the corpus
+    changed" here would be confidently wrong, which is the failure mode the staleness
+    reason exists to prevent."""
+    from groundly.core.config import set_key
+
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+    calls = _stub_build_graph(monkeypatch)
+
+    runner.invoke(app, ["index", "PDSS", str(f), "--graph", "--yes"])
+    assert calls == ["PDSS"]
+
+    set_key("graph.entity_types", "concept,proof")
+    result = runner.invoke(app, ["index", "PDSS", str(f), "--yes"])
+
+    assert result.exit_code == 0, result.output
+    assert "extraction prompt or entity types changed" in result.output
+    assert "corpus changed" not in result.output
+    assert calls == ["PDSS", "PDSS"]  # rebuilt under the new framing
+
+
+def test_index_names_a_broken_custom_prompt_without_a_traceback(monkeypatch, home, tmp_path):
+    """graph_is_stale resolves the configured prompt, so a bad path surfaces on the
+    staleness check — before the cost estimate, and before any LLM call."""
+    from groundly.core.config import set_key
+
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+    _stub_build_graph(monkeypatch)
+
+    runner.invoke(app, ["index", "PDSS", str(f), "--graph", "--yes"])
+    set_key("graph.extraction_prompt", str(tmp_path / "gone.txt"))
+
+    result = runner.invoke(app, ["index", "PDSS", str(f), "--yes"])
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert "gone.txt" in result.output
+    assert "unset it to use the bundled course-tuned prompt" in result.output

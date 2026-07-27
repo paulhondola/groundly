@@ -110,10 +110,14 @@ def index(
         console=console,
         disable=debug_on,
     ) as progress:
-        task = progress.add_task("indexing…", total=None)
+        # Named phase and a real total from the first frame. `total=None` renders as
+        # `0/?`, and the stretch before `on_discovered` fires is a directory walk with
+        # `.groundlyignore` pruning — on a large tree that is the slowest silent part of
+        # the run, showing an unknown file count exactly when the user wants one.
+        task = progress.add_task("discovering files…", total=1)
 
         def on_discovered(total: int) -> None:
-            progress.update(task, total=total)
+            progress.update(task, description="indexing…", total=total)
 
         def on_event(path: Path, stage: str) -> None:
             if stage in ("extracting", "embedding"):
@@ -152,27 +156,38 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool, debug: bool = False) -> 
     from groundly.core.store import SQLiteSubjectStore
     from groundly.ingestion.graph import GraphBuildError, build_graph, graph_is_stale
     from groundly.llm.config import ProviderNotConfiguredError
-    from groundly.llm.graphrag_adapter import estimate_cost
+    from groundly.llm.graphrag_adapter import ExtractionPromptError, estimate_cost
 
     store_obj = SQLiteSubjectStore(subj.store_db_path)
-    graph_dir = subj.root_dir / "graph"
+    # The manifest, not the directory: a refused or Ctrl-C'd build deliberately leaves
+    # graph/ behind so the retry keeps graphrag's paid-for cache (decision 21), and
+    # reading that as "there is a graph here" turned every later plain `groundly index`
+    # into a prompt to *rebuild* a graph that was never recorded — the opt-in this
+    # function documents, bypassed. Same gate as mcp/server.py and _require_graph.
+    recorded = subj.load_manifest().graphrag.corpus_hash is not None
 
-    if graph_dir.exists() and graph_is_stale(subj, store_obj):
-        prompt = "the graph is now stale — the corpus changed since the last build. Rebuild now?"
-    elif not graph_dir.exists() and graph:
+    # graph_is_stale resolves the configured extraction prompt, so a broken custom path
+    # surfaces here — named, and before any LLM call.
+    try:
+        reason = graph_is_stale(subj, store_obj) if recorded else None
+    except (GraphBuildError, ExtractionPromptError) as exc:
+        _fail(str(exc))
+
+    if reason:
+        # Printed rather than folded into the confirmation text: `--yes` skips the
+        # prompt, and a rebuild that silently re-spends the student's tokens should
+        # still say what triggered it.
+        console.print(f"[yellow]The graph is stale[/yellow] — {reason}.")
+        prompt = "Rebuild it now?"
+    elif not recorded and graph:
         prompt = "Build the graphrag arm for this subject now?"
     else:
         return
 
-    total_chars = sum(len(row["text"]) for row in store_obj.all_chunks())
-    tokens, cost = estimate_cost(total_chars)
-    if cost is None:
-        console.print(
-            "[dim]no cost estimate available — set input_price_per_mtok for "
-            f"{escape('[providers.extraction]')} in config.toml to see one[/dim]"
-        )
-    else:
-        console.print(f"Estimated graph build cost: ~{tokens} tokens (${cost:.4f})")
+    chunks = store_obj.all_chunks()
+    total_chars = sum(len(row["text"]) for row in chunks)
+    est = estimate_cost(total_chars, len(chunks))
+    _print_cost_estimate(est)
 
     if not yes:
         typer.confirm(prompt, abort=True)
@@ -184,22 +199,80 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool, debug: bool = False) -> 
         console=console,
         disable=debug,
     ) as progress:
-        task = progress.add_task("building graph…", total=None)
+        # A real total from the first frame: `total=None` renders as `0/?`, which reads as
+        # a broken bar rather than an unknown one. build_graph replaces both the
+        # description and the total as soon as it knows them.
+        task = progress.add_task("preparing…", total=1)
 
         def on_event(description: str, completed: int, total: int) -> None:
             progress.update(task, description=description, completed=completed, total=total)
 
         try:
-            build_graph(
+            result = build_graph(
                 subj,
                 store_obj,
-                estimated_tokens=tokens,
-                estimated_cost_usd=cost,
+                estimated_tokens=est.input_tokens,
+                estimated_cost_usd=est.low_usd,
                 on_event=on_event,
             )
         except (GraphBuildError, ProviderNotConfiguredError) as exc:
             _fail(str(exc))
-    console.print(f"Graph built for [bold]{subj.name}[/bold]")
+    notes = []
+    if result.failed:
+        notes.append(f"{result.failed} of {result.chunks} chunks failed extraction")
+    if result.reports_failed:
+        notes.append(f"{result.reports_failed} community summaries failed")
+    dropped = f" ([yellow]{', '.join(notes)}[/yellow])" if notes else ""
+    console.print(f"Graph built for [bold]{subj.name}[/bold]{dropped}")
+    _print_actual_spend(result)
+
+
+def _usd(amount: float) -> str:
+    """Two decimals reads as money; below a cent it reads as zero, which is worse than
+    verbose. No four-decimal figures — this is a heuristic, and printing it to a
+    hundredth of a cent claims a precision it does not have."""
+    return f"${amount:,.2f}" if amount >= 1 else f"${amount:.3f}"
+
+
+def _print_cost_estimate(est) -> None:
+    """The spend gate (conventions.md: print cost estimates before spending the
+    student's tokens). A range, and every assumption behind it named — the previous
+    single figure priced input tokens for the extraction pass only and said so nowhere,
+    which presented a build as costing a fraction of what it did."""
+    console.print(
+        f"Estimated graph build: ~{est.input_tokens:,} input tokens, "
+        f"up to ~{est.max_output_tokens:,} output"
+    )
+    if est.low_usd is None:
+        console.print(
+            "[dim]  no cost estimate available — set input_price_per_mtok and "
+            f"output_price_per_mtok for {escape('[providers.extraction]')} in "
+            "config.toml to see one[/dim]"
+        )
+    else:
+        console.print(f"  [bold]{_usd(est.low_usd)} to {_usd(est.high_usd)}[/bold]")
+        console.print(f"[dim]  prices: {escape(est.price_source)}[/dim]")
+    console.print(
+        "[dim]  extraction pass only — community reports and description summaries are "
+        "billed on top, and cannot be sized before the graph exists[/dim]"
+    )
+    if est.moving_alias:
+        console.print(
+            f"[yellow]  ⚠ {escape(est.moving_alias)} is a moving alias[/yellow] — it may now "
+            "point at a differently-priced model than the one priced above."
+        )
+
+
+def _print_actual_spend(result) -> None:
+    """What the build actually cost, metered by graphrag's own usage aggregates rather
+    than re-derived from the estimate. Absent when nothing was metered — a missing
+    number is not worth a warning."""
+    if result.prompt_tokens is None or result.completion_tokens is None:
+        return
+    line = f"[dim]  metered: {result.prompt_tokens:,} in / {result.completion_tokens:,} out"
+    if result.cost_usd is not None:
+        line += f" — {_usd(result.cost_usd)}"
+    console.print(f"{line}[/dim]")
 
 
 @app.command(name="list")
@@ -307,7 +380,10 @@ def remove(
             if stored.exists():
                 stored.unlink()
         console.print(f"Removed [bold]{escape(target['filename'])}[/bold] from {subject}")
-        if (subj.root_dir / "graph").exists():
+        # Recorded, not just present: leftover artifacts from a failed build are not a
+        # graph, and promising a rebuild that no index run will trigger is the same
+        # confident-but-wrong message the gates in ingestion/graph.py exist to prevent.
+        if subj.load_manifest().graphrag.corpus_hash is not None:
             console.print(
                 "[dim]Note: the graph is now stale — it rebuilds on the next"
                 " corpus-hash-triggered index run[/dim]"

@@ -36,6 +36,19 @@ def stub_embedder():
 
 
 @pytest.fixture(autouse=True)
+def _fixed_console_width(monkeypatch):
+    """The CLI's rich console wraps to the terminal it was built for — and `Console()`
+    freezes that width at construction, i.e. when `groundly.cli.app` is first imported,
+    so setting COLUMNS from a fixture is too late. Unpinned, a long path or phrase in
+    CliRunner output wraps mid-word (`PDSS_PARTIAL` arriving as "P\\nDSS_PARTIAL") and
+    content assertions pass or fail depending on how wide the developer's terminal
+    happens to be. Pin it wide enough that nothing wraps; no test asserts on wrapping."""
+    from groundly.cli.app import console
+
+    monkeypatch.setattr(console, "width", 1000)
+
+
+@pytest.fixture(autouse=True)
 def _reset_shared_embedder():
     """`llm/embeddings.py`'s shared_embedder() is a process-level singleton (perf
     fix: one resident bge-m3 model per process) — reset it around every test so one

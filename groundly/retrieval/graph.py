@@ -46,6 +46,7 @@ from groundly.core.store import SQLiteSubjectStore
 from groundly.core.subject import Subject
 from groundly.llm.graphrag_adapter import (
     BGE_M3_EMBEDDING_TYPE,
+    allow_nonstandard_service_tier,
     completion_model_config,
     register_bge_m3_embedding,
 )
@@ -87,6 +88,11 @@ def _load_artifacts(graph_dir: Path) -> _GraphArtifacts:
     """Read the parquet artifacts graphrag's build wrote, plus a query-time config
     reusing the `extraction` provider (local/global search both do their own
     synthesis LLM call — same call class as the graph build)."""
+    # Here rather than in either retriever: this is the one place that builds the
+    # completion config, so both arms are covered and a future third one can't miss it.
+    # Global search was previously left out, so a provider returning a non-OpenAI
+    # service_tier still failed every synthesis call on that arm.
+    allow_nonstandard_service_tier()
     config = GraphRagConfig(
         completion_models={_COMPLETION_MODEL_ID: completion_model_config()},
         embedding_models={
@@ -157,7 +163,12 @@ class _GraphRetrieverBase(BaseRetriever):
         return self._subj.root_dir / "graph"
 
     def _require_graph(self) -> None:
-        if not self.graph_dir.exists():
+        # Directory presence is not proof of a usable graph. A build that failed the
+        # extraction gate — or was interrupted mid-run — leaves partial parquet behind
+        # on purpose, so graphrag's LLM cache survives for the retry. `corpus_hash` is
+        # written only by a build that passed every check, so it is the honest record
+        # of "there is a graph here", and the same field graph_is_stale reads.
+        if not self.graph_dir.exists() or self._subj.load_manifest().graphrag.corpus_hash is None:
             raise GraphNotBuiltError()
 
     @property
@@ -173,7 +184,7 @@ class GraphLocalRetriever(_GraphRetrieverBase):
     def _retrieve(self, query_bundle: QueryBundle) -> list[NodeWithScore]:
         self._require_graph()
         register_bge_m3_embedding()  # local search embeds the query to find entities
-        artifacts = self.artifacts
+        artifacts = self.artifacts  # _load_artifacts widens service_tier for both arms
 
         _response, context_data = asyncio.run(
             local_search(
