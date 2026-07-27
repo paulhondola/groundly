@@ -502,10 +502,36 @@ def test_build_graph_adapter_translates_lifecycle_into_on_event(subj, store, hom
 
     build_graph(subj, store, on_event=on_event)
 
-    assert ("starting…", 0, 2) == events[0]
     assert ("wf1", 0, 2) in events  # workflow_start: description set, nothing completed yet
     assert ("wf1", 1, 2) in events  # workflow_end: advances completed
     assert ("wf2", 2, 2) in events
+
+
+def test_build_graph_reports_progress_for_the_probe(subj, store, home, monkeypatch):
+    """The probe is two real network calls and runs before graphrag's pipeline emits
+    anything, so it was the longest stretch of the build with no progress at all — the
+    bar sat at "building graph…" and an unknown total while the model was being called.
+    It reports its own phase now, with a total, so nothing renders as `0/?`."""
+    _configure_extraction(home)
+    _add_material(store, "a.pdf", "a" * 64)
+
+    events = []
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        _write_entities(subj)
+        callbacks[0].pipeline_start(["wf1"])
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+
+    build_graph(subj, store, on_event=lambda d, c, t: events.append((d, c, t)))
+
+    pipeline_start = next(i for i, e in enumerate(events) if e[0] == "starting…")
+    before_pipeline = events[:pipeline_start]
+
+    assert before_pipeline, "the probe ran with no progress reported at all"
+    assert all(total > 0 for _d, _c, total in before_pipeline), before_pipeline
+    assert before_pipeline[-1][1] == before_pipeline[-1][2]  # probe finishes at n/n
 
 
 def test_build_graph_raises_on_workflow_error_and_leaves_manifest_untouched(

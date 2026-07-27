@@ -78,6 +78,12 @@ _COMMUNITY_ERROR_SOURCE = (
     "graphrag.index.operations.summarize_communities.community_reports_extractor"
 )
 
+# The preflight probe's own progress phase. Two calls, because it checks two independent
+# provider capabilities (see _probe_extraction) — and it needs a phase at all because it
+# runs before graphrag's pipeline reports anything.
+_PROBE_STEP = "checking the extraction model…"
+_PROBE_CALLS = 2
+
 
 # A rebuild inherits nothing but these. `cache/` is graphrag's LLM response cache —
 # expensive and already paid for, so a retry must keep it; `logs/` is how a failed run
@@ -166,7 +172,11 @@ class _ProgressCallbacks(NoopWorkflowCallbacks):
 
 
 def _probe_extraction(
-    subj: Subject, config: GraphRagConfig, sample_text: str, context_window: int
+    subj: Subject,
+    config: GraphRagConfig,
+    sample_text: str,
+    context_window: int,
+    on_event: Callable[[str, int, int], None],
 ) -> None:
     """Send one real extraction prompt before committing to the whole corpus.
 
@@ -198,13 +208,18 @@ def _probe_extraction(
       refuses json_object and requires json_schema — it would have refused a local model
       that builds graphs fine, on the zero-key path that is meant to be first-class.
 
-    So the probe can never be the laxer of the two, nor the stricter."""
+    So the probe can never be the laxer of the two, nor the stricter.
+
+    Reports its own progress, because it runs *before* graphrag's pipeline emits
+    anything: two real network calls against a model that may still be loading, under a
+    300s timeout each, showing the caller nothing. That silence read as a hang."""
     from groundly.llm.chat import complete
 
     prompt = config.extract_graph.resolved_prompts().extraction_prompt.format(
         entity_types=",".join(config.extract_graph.entity_types),
         input_text=sample_text,
     )
+    on_event(_PROBE_STEP, 0, _PROBE_CALLS)
     conn = connect_progress(subj.progress_db_path)
     try:
         # Deliberately does not assert *why* this one failed: it catches every provider
@@ -221,6 +236,7 @@ def _probe_extraction(
             "small for that, check that extraction.model is a plain chat model — agentic or "
             "tool-using endpoints have their own request limits and are the wrong fit here.",
         )
+        on_event(_PROBE_STEP, 1, _PROBE_CALLS)
         # A separate capability: every DeepSeek model answers plain completions fine and
         # rejects graphrag's structured-output request outright, which used to surface 80
         # minutes in as KeyError 'community' — pandas merging the empty reports frame every
@@ -248,6 +264,7 @@ def _probe_extraction(
             "`json_schema` (every DeepSeek model does). Switch extraction.model to one whose "
             "endpoint supports JSON-schema structured output.",
         )
+        on_event(_PROBE_STEP, _PROBE_CALLS, _PROBE_CALLS)
     finally:
         conn.close()
 
@@ -465,7 +482,7 @@ def build_graph(
                 f"({type(exc).__name__}; details withheld, they would include your api_key)"
             ) from exc
 
-        _probe_extraction(subj, config, rows[0]["text"], context_window)
+        _probe_extraction(subj, config, rows[0]["text"], context_window, on_event)
 
         # After the probe on purpose: a misconfigured provider should fail without
         # destroying a graph that still works, so nothing is cleared until the provider

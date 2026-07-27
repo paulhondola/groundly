@@ -110,10 +110,14 @@ def index(
         console=console,
         disable=debug_on,
     ) as progress:
-        task = progress.add_task("indexing…", total=None)
+        # Named phase and a real total from the first frame. `total=None` renders as
+        # `0/?`, and the stretch before `on_discovered` fires is a directory walk with
+        # `.groundlyignore` pruning — on a large tree that is the slowest silent part of
+        # the run, showing an unknown file count exactly when the user wants one.
+        task = progress.add_task("discovering files…", total=1)
 
         def on_discovered(total: int) -> None:
-            progress.update(task, total=total)
+            progress.update(task, description="indexing…", total=total)
 
         def on_event(path: Path, stage: str) -> None:
             if stage in ("extracting", "embedding"):
@@ -155,12 +159,17 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool, debug: bool = False) -> 
     from groundly.llm.graphrag_adapter import ExtractionPromptError, estimate_cost
 
     store_obj = SQLiteSubjectStore(subj.store_db_path)
-    graph_dir = subj.root_dir / "graph"
+    # The manifest, not the directory: a refused or Ctrl-C'd build deliberately leaves
+    # graph/ behind so the retry keeps graphrag's paid-for cache (decision 21), and
+    # reading that as "there is a graph here" turned every later plain `groundly index`
+    # into a prompt to *rebuild* a graph that was never recorded — the opt-in this
+    # function documents, bypassed. Same gate as mcp/server.py and _require_graph.
+    recorded = subj.load_manifest().graphrag.corpus_hash is not None
 
     # graph_is_stale resolves the configured extraction prompt, so a broken custom path
     # surfaces here — named, and before any LLM call.
     try:
-        reason = graph_is_stale(subj, store_obj) if graph_dir.exists() else None
+        reason = graph_is_stale(subj, store_obj) if recorded else None
     except (GraphBuildError, ExtractionPromptError) as exc:
         _fail(str(exc))
 
@@ -170,7 +179,7 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool, debug: bool = False) -> 
         # still say what triggered it.
         console.print(f"[yellow]The graph is stale[/yellow] — {reason}.")
         prompt = "Rebuild it now?"
-    elif not graph_dir.exists() and graph:
+    elif not recorded and graph:
         prompt = "Build the graphrag arm for this subject now?"
     else:
         return
@@ -190,7 +199,10 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool, debug: bool = False) -> 
         console=console,
         disable=debug,
     ) as progress:
-        task = progress.add_task("building graph…", total=None)
+        # A real total from the first frame: `total=None` renders as `0/?`, which reads as
+        # a broken bar rather than an unknown one. build_graph replaces both the
+        # description and the total as soon as it knows them.
+        task = progress.add_task("preparing…", total=1)
 
         def on_event(description: str, completed: int, total: int) -> None:
             progress.update(task, description=description, completed=completed, total=total)
@@ -368,7 +380,10 @@ def remove(
             if stored.exists():
                 stored.unlink()
         console.print(f"Removed [bold]{escape(target['filename'])}[/bold] from {subject}")
-        if (subj.root_dir / "graph").exists():
+        # Recorded, not just present: leftover artifacts from a failed build are not a
+        # graph, and promising a rebuild that no index run will trigger is the same
+        # confident-but-wrong message the gates in ingestion/graph.py exist to prevent.
+        if subj.load_manifest().graphrag.corpus_hash is not None:
             console.print(
                 "[dim]Note: the graph is now stale — it rebuilds on the next"
                 " corpus-hash-triggered index run[/dim]"

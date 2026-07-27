@@ -370,6 +370,9 @@ def test_index_graph_flag_triggers_first_build(monkeypatch, home, tmp_path):
     assert calls == ["PDSS"]
     assert (sdir / "graph").exists()
     assert "Graph built" in result.output
+    # `0/?` reads as a broken bar, not an unknown one — and the longest silent stretch of
+    # a real build (the two probe calls) happens before graphrag reports any total.
+    assert "?" not in result.output
 
 
 def _write_extraction_provider(home, model: str = "m", *, priced: bool = True) -> None:
@@ -470,6 +473,71 @@ def test_index_graph_reports_metered_spend_after_the_build(monkeypatch, home, tm
 def test_index_graph_omits_metered_spend_when_unavailable(monkeypatch, home, tmp_path):
     _write_extraction_provider(home)
     assert "metered:" not in _invoke_graph_build(monkeypatch, home, tmp_path).output
+
+
+def _leave_failed_build_artifacts(sdir) -> None:
+    """The state a refused or Ctrl-C'd build leaves behind: `graph/` on disk (decision 21
+    keeps cache/ and logs/ so a retry doesn't re-buy the LLM responses) and
+    `manifest.graphrag` reset, i.e. no recorded corpus_hash."""
+    (sdir / "graph" / "cache").mkdir(parents=True)
+    (sdir / "graph" / "logs").mkdir(parents=True)
+
+
+def test_index_after_a_failed_build_does_not_offer_a_graph_without_the_flag(
+    monkeypatch, home, tmp_path
+):
+    """A first build is opt-in via --graph. A failed one leaves `graph/` on disk with no
+    recorded corpus_hash, and keying off the *directory* read that as a stale graph — so
+    every later plain `groundly index` prompted to "rebuild" a graph that never existed.
+    The rest of the tree already gates on the manifest (mcp/server.py, _require_graph)."""
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+    calls = _stub_build_graph(monkeypatch)
+    _leave_failed_build_artifacts(sdir)
+
+    result = runner.invoke(app, ["index", "PDSS", str(f)])
+
+    assert result.exit_code == 0, result.output
+    assert calls == []
+    assert "stale" not in result.output
+    assert "Rebuild" not in result.output
+
+
+def test_index_after_a_failed_build_offers_a_first_build_with_the_flag(monkeypatch, home, tmp_path):
+    """--graph still works in that state, and calls it what it is: a first build, not a
+    rebuild of something that was never recorded."""
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    _stub_index_paths(monkeypatch, f)
+    calls = _stub_build_graph(monkeypatch)
+    _leave_failed_build_artifacts(sdir)
+
+    result = runner.invoke(app, ["index", "PDSS", str(f), "--graph", "--yes"])
+
+    assert result.exit_code == 0, result.output
+    assert calls == ["PDSS"]
+    assert "stale" not in result.output
+
+
+def test_remove_only_calls_the_graph_stale_when_one_was_recorded(monkeypatch, home, tmp_path):
+    """Same predicate, same wrong message: `graph/` left by a failed build made `remove`
+    promise a rebuild that no later index run would trigger."""
+    runner.invoke(app, ["init", "PDSS"])
+    sdir = subject_dir("PDSS")
+    _seed_material(sdir, "a.pdf", "a" * 64)
+    _leave_failed_build_artifacts(sdir)
+
+    result = runner.invoke(app, ["remove", "PDSS", "a.pdf", "--yes"])
+
+    assert result.exit_code == 0, result.output
+    assert "stale" not in result.output
 
 
 def test_index_without_graph_flag_or_existing_graph_does_nothing(monkeypatch, home, tmp_path):
