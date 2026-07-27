@@ -1,4 +1,20 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(uv run *)",
+      "Bash(ruff check *)",
+      "Bash(ruff format *)",
+      "Bash(pytest *)",
+      "Bash(groundly *)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh issue list:*)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
