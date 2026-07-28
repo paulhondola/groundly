@@ -36,7 +36,8 @@ from graphrag_vectors import VectorStoreConfig
 
 from groundly.core.config import load_settings
 from groundly.core.manifest import EMBEDDING_DIM, Graphrag
-from groundly.core.store import SQLiteSubjectStore, connect_progress, record_trace
+from groundly.core.progress import connect_progress, record_trace
+from groundly.core.store import SQLiteSubjectStore
 from groundly.core.subject import Subject
 from groundly.llm.config import require_provider
 from groundly.llm.graphrag_adapter import (

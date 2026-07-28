@@ -11,7 +11,7 @@ from llama_index.core.schema import NodeWithScore, TextNode
 from groundly.agents.citations import NoCitationsError
 from groundly.agents.study_modes import drill_down, overview
 from groundly.core.paths import subject_dir
-from groundly.core.store import connect_progress
+from groundly.core.progress import connect_progress
 from groundly.retrieval.graph import GraphNotBuiltError
 
 

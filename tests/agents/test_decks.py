@@ -7,7 +7,8 @@ from groundly.agents.decks import submit_cards
 from groundly.agents.verifier import CardCandidate
 from groundly.core.manifest import EMBEDDING_DIM
 from groundly.core.paths import subject_dir
-from groundly.core.store import SQLiteSubjectStore, connect_progress
+from groundly.core.progress import connect_progress
+from groundly.core.store import SQLiteSubjectStore
 
 
 class AlignedEmbedder:

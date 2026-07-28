@@ -8,7 +8,7 @@ from llama_index.core.schema import NodeWithScore, TextNode
 
 from groundly.agents.ask import NoCitationsError, ask
 from groundly.core.paths import subject_dir
-from groundly.core.store import connect_progress
+from groundly.core.progress import connect_progress
 from groundly.llm.config import ProviderNotConfiguredError
 from groundly.retrieval.graph import GraphNotBuiltError
 

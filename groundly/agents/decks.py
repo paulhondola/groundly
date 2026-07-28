@@ -11,12 +11,8 @@ from dataclasses import dataclass
 
 from groundly.agents.prompts import assemble_cards, assemble_cards_retry
 from groundly.agents.verifier import CardCandidate, Rejection, verify_card
-from groundly.core.store import (
-    SQLiteSubjectStore,
-    connect_progress,
-    record_trace,
-    record_verification,
-)
+from groundly.core.progress import connect_progress, record_trace, record_verification
+from groundly.core.store import SQLiteSubjectStore
 from groundly.core.subject import Subject
 from groundly.retrieval.vector import VectorRetriever
 

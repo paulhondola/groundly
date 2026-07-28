@@ -287,7 +287,7 @@ def test_build_graph_traces_every_llm_call_it_makes(subj, store, home, monkeypat
     billable calls (extraction prompt, then JSON-mode capability), so there must be a
     trace row for each — an earlier version discarded the second call's result, and the
     test that asserted a single probe row is what pinned that bug in place."""
-    from groundly.core.store import connect_progress
+    from groundly.core.progress import connect_progress
 
     _configure_extraction(home)
     _add_material(store, "a.pdf", "a" * 64)
@@ -345,7 +345,7 @@ def _build_with_metrics(subj, store, monkeypatch, **metrics):
 
 
 def _build_trace(subj):
-    from groundly.core.store import connect_progress
+    from groundly.core.progress import connect_progress
 
     conn = connect_progress(subj.progress_db_path)
     try:
@@ -561,7 +561,7 @@ def test_build_graph_raises_on_workflow_error_and_leaves_manifest_untouched(
 
     # the other half of the invariant: no *build* trace for a build that failed.
     # (The probe's own rows are expected — those were real LLM calls that succeeded.)
-    from groundly.core.store import connect_progress
+    from groundly.core.progress import connect_progress
 
     conn = connect_progress(subj.progress_db_path)
     try:
@@ -720,7 +720,7 @@ def test_probe_contains_unexpected_exceptions_as_named_errors(subj, store, home,
 
 
 def test_probe_records_a_trace_row_on_failure(subj, store, home, monkeypatch):
-    from groundly.core.store import connect_progress
+    from groundly.core.progress import connect_progress
     from groundly.llm.chat import ChatUnreachableError
 
     _configure_extraction(home)

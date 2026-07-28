@@ -18,7 +18,8 @@ from dataclasses import dataclass
 from groundly.agents.citations import Citation, NoCitationsError, resolve_citations  # noqa: F401  re-exported: mcp/server.py + cli/ask.py import NoCitationsError from here
 from groundly.agents.prompts import REFUSAL, assemble
 from groundly.agents.router import classify
-from groundly.core.store import SQLiteSubjectStore, connect_progress, record_trace
+from groundly.core.progress import connect_progress, record_trace
+from groundly.core.store import SQLiteSubjectStore
 from groundly.core.subject import Subject
 from groundly.llm.chat import complete
 from groundly.llm.config import require_provider

@@ -142,7 +142,7 @@ def test_search_returns_nodes_and_records_trace(retrievable_subject):
     assert nodes
     conn = connect(subject_dir(retrievable_subject) / "store.db")
     conn.close()
-    from groundly.core.store import connect_progress
+    from groundly.core.progress import connect_progress
 
     pconn = connect_progress(subject_dir(retrievable_subject) / "progress.db")
     try:

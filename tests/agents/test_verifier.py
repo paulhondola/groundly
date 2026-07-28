@@ -98,7 +98,7 @@ def test_cited_chunk_outside_top_k_rejected(retrievable_subject, monkeypatch):
 def test_no_search_trace_written_by_verification(retrievable_subject):
     # Verifier retrieval is internal machinery, not student activity — it must not
     # pollute the traces table (kind='search' rows are the search tool's).
-    from groundly.core.store import connect_progress
+    from groundly.core.progress import connect_progress
 
     card = CardCandidate(front="What does deadlock need?", back="mutual exclusion", chunk_ids=[1])
     verify_card(card, _store(retrievable_subject), embedder=_chunk1_embedder())
