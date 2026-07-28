@@ -40,6 +40,7 @@ from groundly.core.progress import connect_progress, record_trace
 from groundly.core.store import SQLiteSubjectStore
 from groundly.core.subject import Subject
 from groundly.llm.config import require_provider
+from groundly.llm.graph_cost import metered_usage, reset_metered_usage
 from groundly.llm.graphrag_adapter import (
     BGE_M3_EMBEDDING_TYPE,
     ExtractionPromptError,
@@ -47,11 +48,9 @@ from groundly.llm.graphrag_adapter import (
     completion_model_config,
     extraction_entity_types,
     extraction_fingerprint,
-    metered_usage,
     prompt_budgets,
     register_bge_m3_embedding,
     register_groundly_metrics_store,
-    reset_metered_usage,
     resolve_extraction_prompt,
 )
 
@@ -441,7 +440,7 @@ def build_graph(
     job, not this module's — ingestion never does interactive I/O.
 
     `estimated_tokens`/`estimated_cost_usd` are the CLI's already-computed
-    `graphrag_adapter.estimate_cost()` figures, threaded through so this function
+    `graph_cost.estimate_cost()` figures, threaded through so this function
     doesn't recompute them — recorded into progress.db as a trace row on success.
 
     `on_event` reports workflow-level progress (mirrors ingestion/pipeline.py's

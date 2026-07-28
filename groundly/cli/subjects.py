@@ -155,7 +155,8 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool, debug: bool = False) -> 
     from groundly.core.store import SQLiteSubjectStore
     from groundly.ingestion.graph import GraphBuildError, build_graph, graph_is_stale
     from groundly.llm.config import ProviderNotConfiguredError
-    from groundly.llm.graphrag_adapter import ExtractionPromptError, estimate_cost
+    from groundly.llm.graph_cost import estimate_cost
+    from groundly.llm.graphrag_adapter import ExtractionPromptError
 
     store_obj = SQLiteSubjectStore(subj.store_db_path)
     # The manifest, not the directory: a refused or Ctrl-C'd build deliberately leaves
