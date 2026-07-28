@@ -58,7 +58,7 @@ def import_(
     import tempfile
     import zipfile
 
-    from groundly.core import bundle, store
+    from groundly.core import bundle, progress, store
     from groundly.core.manifest import Embedding, Graphrag
     from groundly.core.paths import groundly_home, validate_subject_name
     from groundly.core.subject import Subject
@@ -139,7 +139,7 @@ def import_(
 
         manifest.subject = name
         manifest.save(tmp_dir / "manifest.json")
-        store.create_progress(tmp_dir / "progress.db")
+        progress.create_progress(tmp_dir / "progress.db")
         (tmp_dir / "materials").mkdir(exist_ok=True)
     except typer.Abort:
         shutil.rmtree(tmp_dir, ignore_errors=True)

@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from groundly.agents.ask import AskResult
 from groundly.agents.citations import Citation, resolve_citations
 from groundly.agents.prompts import REFUSAL, assemble, assemble_overview
-from groundly.core.store import SQLiteSubjectStore, connect_progress, record_trace
+from groundly.core.progress import connect_progress, record_trace
+from groundly.core.store import SQLiteSubjectStore
 from groundly.core.subject import Subject
 from groundly.llm.chat import complete
 from groundly.llm.config import require_provider

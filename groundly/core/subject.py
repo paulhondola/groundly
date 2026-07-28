@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from groundly.core import store
+from groundly.core import progress, store
 from groundly.core.config import Settings, render_config_toml
 from groundly.core.manifest import Manifest
 from groundly.core.paths import subject_dir, groundly_home
@@ -49,7 +49,7 @@ class Subject:
         self.root_dir.mkdir(parents=True, exist_ok=True)
         self.materials_dir.mkdir(exist_ok=True)
         store.create_store(self.store_db_path)
-        store.create_progress(self.progress_db_path)
+        progress.create_progress(self.progress_db_path)
         Manifest.new(self.name).save(self.manifest_path)
 
         config_path = groundly_home() / "config.toml"
@@ -62,14 +62,3 @@ class Subject:
 
     def save_manifest(self, manifest: Manifest) -> None:
         manifest.save(self.manifest_path)
-
-
-def init_subject(name: str) -> tuple[Path, bool]:
-    """Create ~/.groundly/<name>/ (manifest, materials/, store.db, progress.db).
-
-    Returns (subject_dir, created); created=False if already initialized (idempotent).
-    Also writes the top-level config.toml template on first ever init.
-    """
-    subject = Subject(name)
-    created = subject.initialize()
-    return subject.root_dir, created

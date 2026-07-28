@@ -11,12 +11,27 @@ configured endpoint.
 LM Studio/Ollama work mechanically for `extraction` — it's the same
 OpenAI-compatible `base_url`+`model`+`key` shape as every other call class,
 and an unset key is fine (Groundly passes a placeholder graphrag's own
-config validation requires, same as any local provider). But a weak
-extraction model produces a bad graph — sparse or wrong entities, garbled
-relationships — and a bad graph silently invalidates the whole point of
-having one. The rule
-is: extraction needs a mid-tier cloud model, never a small local model. If
-you don't want to spend on this, skip `--graph` entirely — the vector arm
+config validation requires, same as any local provider). The rule is still:
+extraction needs a mid-tier cloud model, never a small local model — but the
+reason is **time**, not quality.
+
+Measured 2026-07-27 on an M1 Pro / 16 GB, `gemma-4-12b-qat` at 16384 context
+produced a perfectly good graph: 12 entities and 11 relationships from a sample
+chunk with zero malformed records, and community reports that covered every
+supplied entity with no hallucinations. It took **199.9 s per chunk**:
+
+| corpus | serial | at LM Studio's default `--parallel 4`, optimistic |
+| --- | --- | --- |
+| 355 chunks | 19.7 h | 6.6 h |
+| 1194 chunks | 66.3 h | **22.1 h** |
+
+That's the extraction pass alone — community reports bill on top at 97–243 s
+each. So a small local model doesn't garble your graph; it builds a correct one
+about a day later. Add to that the structured-output failures below, which cost
+a full extraction pass before they surface, and the cloud model is the cheaper
+choice in wall-clock even when it isn't in dollars.
+
+If you don't want to spend on this, skip `--graph` entirely — the vector arm
 works with zero API key, and `groundly index` (without `--graph`) is
 completely unaffected.
 
@@ -155,10 +170,19 @@ graphrag's own stage defaults still assume a large cloud model —
 `community_reports` alone asks for 8000 tokens in and 2000 out — so stock
 graphrag wants roughly **16k of usable context**.
 
-A local model loaded at 4096 (LM Studio's common default) fails every single
-call with `Context size has been exceeded`, and graphrag *swallows* those
-failures per chunk, so without the guards below you'd get hours of work and
-an empty graph.
+A local model loaded at 4096 fails every single call, and graphrag *swallows*
+those failures per chunk, so without the guards below you'd get hours of work
+and an empty graph. It doesn't always announce itself as `Context size has been
+exceeded` either: on a reasoning model the thinking tokens are charged to the
+same budget, so the call returns HTTP 200 with an **empty body** and
+`finish_reason: "length"` — measured at prompt 2356 + reasoning 1737 = exactly
+4096, with three tokens left for the answer. Extraction at 4096 produced zero
+entities on the same model that produced twelve at 16384.
+
+Defaults differ sharply and neither is safe to assume: recent LM Studio loaded a
+9B at 32768 unprompted, while Ollama sizes from VRAM and picked **4096** on the
+same machine. Check with `lms ps` / `curl -s localhost:1234/api/v0/models`, or
+`ollama ps`.
 
 So Groundly scales every budget to one number:
 
@@ -168,7 +192,12 @@ groundly config set graph.context_window 8192
 
 Set it to whatever your model is actually loaded with — in LM Studio that's
 the context length in the model's load settings, not the model's advertised
-maximum. The default is 4096, which works out of the box but produces smaller
+maximum. Read it back rather than trusting what you asked for: `lms load -c` is
+honoured on the GGUF/llama.cpp engine and **ignored on the MLX engine**, which
+loaded one model at 32768 whether asked for 4096 or 16384. `curl -s
+localhost:1234/api/v0/models` reports the real `loaded_context_length`.
+
+The default is 4096, which works out of the box but produces smaller
 community summaries (weaker `overview`/global search). At 16384 and above,
 Groundly reproduces stock graphrag exactly, including the gleaning pass.
 
@@ -191,12 +220,14 @@ directions. Measured 2026-07-26:
 | api.deepseek.com | `deepseek-v4-flash` | yes | **no** |
 | api.deepseek.com | `deepseek-v4-pro` | yes | **no** |
 | api.deepseek.com | `deepseek-chat`, `deepseek-reasoner` | yes | **no** |
-| LM Studio | `qwen/qwen3.5-9b` | **no** | yes |
+| LM Studio | any model, either engine | **no** | yes |
+| Ollama | any model | yes | yes |
 
 So DeepSeek cannot build a graph today, whichever model you pick — it answers
 `This response_format type is unavailable now`. LM Studio is the exact inverse
 and refuses `json_object` with `'response_format.type' must be 'json_schema' or
-'text'`.
+'text'`. Ollama accepts both — note the two local runtimes disagree here, so
+"local" is not one behaviour.
 
 Support is a property of the **model**, not the provider — on Groq,
 `llama-3.3-70b-versatile` has no schema support while `openai/gpt-oss-120b` and
@@ -204,9 +235,11 @@ Support is a property of the **model**, not the provider — on Groq,
 
 Nor can you trust a capability table, litellm's included: its bundled map marks
 `deepseek-chat` as supporting response schemas, and the live API rejects it. The
-preflight probe is the only reliable answer, which is why it sends graphrag's own
-response model rather than an approximation of it — a model that can't do this
-fails in seconds instead of after the whole extraction pass.
+preflight probe is the more reliable answer, which is why it sends graphrag's own
+response model rather than an approximation of it — a model that outright refuses
+this fails in seconds instead of after the whole extraction pass. Note "outright
+refuses": the probe catches a *rejected request*, and nothing more. See the local
+section below for two ways a model accepts it and still builds you an empty graph.
 
 Left unchecked, the failure is confusing: every report call fails, graphrag is
 left with an empty reports table, and it dies merging that table on a column an
@@ -214,6 +247,69 @@ empty frame doesn't have — `KeyError: 'community'`, tens of minutes into a run
 whose extraction stage worked perfectly. That is exactly what happened on
 2026-07-26 — 679s and 2.96M tokens of flawless extraction, then 436 failed
 reports — because the probe was checking `json_object`, which DeepSeek accepts.
+
+### On a local runtime, "accepts json_schema" is close to meaningless
+
+LM Studio and Ollama enforce the schema by constrained decoding in the *server*,
+so essentially everything accepts the request. Acceptance is therefore not a
+useful filter locally, and the failures move somewhere the table above cannot
+show. Measured 2026-07-27 on an M1 Pro / 16 GB
+([full report](../superpowers/reviews/2026-07-27-local-json-schema-capability.md)):
+
+| runtime | model | engine | loaded ctx | usable report? |
+| --- | --- | --- | --- | --- |
+| LM Studio | `google/gemma-4-12b-qat` | gguf | 16384 | **yes — 3/3** |
+| Ollama | `gemma4:12b` | gguf | 16384 | **yes — 3/3** |
+| LM Studio | `google/gemma-4-12b-qat` | gguf | 4096 | no — 0/3, answer truncated away |
+| Ollama | `gemma4:12b` | gguf | 4096 *(its default)* | no — 0/3, 0 entities extracted |
+| LM Studio | `qwen/qwen3.5-9b` | mlx | 32768 | **no — 0/3, empty response body** |
+| LM Studio | `google/gemma-4-12b` | mlx | 19456 | no — 2/3 had zero findings |
+
+Two configurations in six, and both are the same gemma-class model at 16384.
+Every failure was silent. The two ways a model accepts the request and still
+gives you nothing:
+
+- **The answer goes to the wrong channel.** `qwen/qwen3.5-9b` returns HTTP 200
+  with `content: ""` on *every* structured-output call — `finish_reason: "stop"`,
+  29k tokens to spare, and the complete report sitting in `reasoning_content`
+  instead. The schema grammar constrains the content channel only, so a model
+  whose template never exits its thinking channel never fills it. **Do not use
+  `qwen/qwen3.5-9b` for `extraction`** — it is fine for `chat`/`generation`,
+  which never request structured output.
+- **The report is valid and empty.** `google/gemma-4-12b` (MLX) returned
+  `"findings": []` in 2 of 3 samples — schema-valid, parses fine, and `findings`
+  is where the entire body of a community report lives. Nothing errors; the
+  graph just gets thinner.
+
+**On Ollama, the default is the failing one.** It sizes context from VRAM and
+says so at startup — `vram-based default context … default_num_ctx=4096` — and
+at 4096 the run above extracted **zero entities**. LM Studio, by contrast,
+loaded a 9B at 32768 unprompted. Worse, `graph.context_window` cannot fix it:
+that setting tells Groundly what budget to *assume*, and Ollama's context is
+set server-side only —
+
+```bash
+OLLAMA_CONTEXT_LENGTH=16384 ollama serve   # or PARAMETER num_ctx in a Modelfile
+```
+
+— because the OpenAI-compatible `/v1/chat/completions` route Groundly calls has
+no per-request field for it. Check what you actually got with `ollama ps`; the
+`CONTEXT` column is the real number. Set the server first, then match
+`graph.context_window` to it.
+
+Both channel failures above are per **model and build**, not per engine: the
+same gemma weights spent 1737 tokens on reasoning as a GGUF build and 0 as an
+MLX build. Reasoning tokens
+also count against the context window, which is what kills the 4096 row above —
+prompt 2356 + reasoning 1737 = exactly 4096, and three tokens reached the answer.
+
+**The preflight probe does not catch either of these.** It sends a 24-token
+prompt and only checks that no exception was raised — not that a response body
+came back. A model that fails the way `qwen/qwen3.5-9b` does passes preflight and
+then produces an empty report for every community, which surfaces as the same
+`KeyError: 'community'` after the whole extraction pass has been paid for.
+If you use a local model for `extraction`, build one small subject first and look
+at the community reports before trusting a large run.
 
 ## Rate limits, if your provider has them
 
@@ -292,6 +388,16 @@ travels with the rest of the subject on export like `store.db` does).
   prompt; if it comes back `Context size has been exceeded`, the build stops
   in seconds instead of failing silently for hours. Raise your model's
   context, or lower `graph.context_window` (see above).
+- **The probe passed, extraction worked, and every community report is empty.**
+  A local-model failure the preflight check cannot see: the model accepts the
+  structured-output request and answers it with an empty body (or with
+  `findings: []`). Measured on `qwen/qwen3.5-9b`, whose answer lands in
+  `reasoning_content` instead of `content`. Confirm with one call —
+  `curl -s localhost:1234/v1/chat/completions -d '{"model":"…","messages":[…],
+  "response_format":{"type":"json_schema",…}}'` — and check whether
+  `choices[0].message.content` is `""` while `reasoning_content` holds the
+  answer. If so, that model cannot do `extraction`; it is still fine for
+  `chat`/`generation`.
 - `entity extraction failed for N of M chunks — … not recorded and stays
   unusable until a build succeeds` — graphrag catches extraction errors per
   chunk and carries on, so a build can "succeed" having indexed almost

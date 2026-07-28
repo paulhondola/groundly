@@ -152,7 +152,7 @@ def search(
 ) -> list[NodeWithScore]:
     """The raw retrieval path: query -> ranked chunks, no LLM call, no provider
     needed. Shared by `groundly search` and the MCP `search` tool (P4)."""
-    from groundly.core.store import connect_progress, record_trace
+    from groundly.core.progress import connect_progress, record_trace
     from groundly.core.subject import Subject
 
     subj = Subject(subject)

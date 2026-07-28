@@ -9,6 +9,7 @@ from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
 from rich.table import Table
 
 from groundly.cli.app import _fail, _subject_checked, _store_checked, app, console
+from groundly.cli.cost_display import _print_actual_spend, _print_cost_estimate
 
 
 @app.command()
@@ -92,7 +93,6 @@ def index(
             subj.save_manifest(manifest)
         elif not ocr_lang:
             ocr_lang = recorded
-    # else: not initialized — pipeline.index_paths names the fix below
 
     labels = {
         Status.INDEXED: "[green]indexed[/green]",
@@ -156,7 +156,8 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool, debug: bool = False) -> 
     from groundly.core.store import SQLiteSubjectStore
     from groundly.ingestion.graph import GraphBuildError, build_graph, graph_is_stale
     from groundly.llm.config import ProviderNotConfiguredError
-    from groundly.llm.graphrag_adapter import ExtractionPromptError, estimate_cost
+    from groundly.llm.graph_cost import estimate_cost
+    from groundly.llm.graphrag_adapter import ExtractionPromptError
 
     store_obj = SQLiteSubjectStore(subj.store_db_path)
     # The manifest, not the directory: a refused or Ctrl-C'd build deliberately leaves
@@ -225,54 +226,6 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool, debug: bool = False) -> 
     dropped = f" ([yellow]{', '.join(notes)}[/yellow])" if notes else ""
     console.print(f"Graph built for [bold]{subj.name}[/bold]{dropped}")
     _print_actual_spend(result)
-
-
-def _usd(amount: float) -> str:
-    """Two decimals reads as money; below a cent it reads as zero, which is worse than
-    verbose. No four-decimal figures — this is a heuristic, and printing it to a
-    hundredth of a cent claims a precision it does not have."""
-    return f"${amount:,.2f}" if amount >= 1 else f"${amount:.3f}"
-
-
-def _print_cost_estimate(est) -> None:
-    """The spend gate (conventions.md: print cost estimates before spending the
-    student's tokens). A range, and every assumption behind it named — the previous
-    single figure priced input tokens for the extraction pass only and said so nowhere,
-    which presented a build as costing a fraction of what it did."""
-    console.print(
-        f"Estimated graph build: ~{est.input_tokens:,} input tokens, "
-        f"up to ~{est.max_output_tokens:,} output"
-    )
-    if est.low_usd is None:
-        console.print(
-            "[dim]  no cost estimate available — set input_price_per_mtok and "
-            f"output_price_per_mtok for {escape('[providers.extraction]')} in "
-            "config.toml to see one[/dim]"
-        )
-    else:
-        console.print(f"  [bold]{_usd(est.low_usd)} to {_usd(est.high_usd)}[/bold]")
-        console.print(f"[dim]  prices: {escape(est.price_source)}[/dim]")
-    console.print(
-        "[dim]  extraction pass only — community reports and description summaries are "
-        "billed on top, and cannot be sized before the graph exists[/dim]"
-    )
-    if est.moving_alias:
-        console.print(
-            f"[yellow]  ⚠ {escape(est.moving_alias)} is a moving alias[/yellow] — it may now "
-            "point at a differently-priced model than the one priced above."
-        )
-
-
-def _print_actual_spend(result) -> None:
-    """What the build actually cost, metered by graphrag's own usage aggregates rather
-    than re-derived from the estimate. Absent when nothing was metered — a missing
-    number is not worth a warning."""
-    if result.prompt_tokens is None or result.completion_tokens is None:
-        return
-    line = f"[dim]  metered: {result.prompt_tokens:,} in / {result.completion_tokens:,} out"
-    if result.cost_usd is not None:
-        line += f" — {_usd(result.cost_usd)}"
-    console.print(f"{line}[/dim]")
 
 
 @app.command(name="list")

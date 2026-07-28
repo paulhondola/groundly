@@ -3,14 +3,8 @@ alongside embeddings.py (model clients constructed only here); local and key-fre
 lazy-loaded — never at import/spawn time (.claude/rules/architecture.md). Pinned at
 the resolved hf_revision, same interchange-compatibility contract as bge-m3."""
 
-from typing import Protocol
-
 RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 RERANKER_HF_REVISION = "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"  # pinned 2026-07-18 (P3 start)
-
-
-class Reranker(Protocol):
-    def compute_score(self, pairs: list[tuple[str, str]]) -> list[float]: ...
 
 
 class BgeReranker:
