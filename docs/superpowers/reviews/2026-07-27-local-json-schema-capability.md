@@ -18,13 +18,15 @@ produces an empty community report on every single call.
 
 | # | Finding | Severity |
 | --- | --- | --- |
-| 1 | `qwen/qwen3.5-9b` returns **HTTP 200 with `content: ""`** for every structured-output call. The complete, correct JSON is stranded in `reasoning_content`. | **critical** |
+| 1 | `qwen/qwen3.5-9b` returns **HTTP 200 with `content: ""`** for every structured-output call. The complete, correct JSON is stranded in `reasoning_content`. This is the **model**, not the MLX engine — a controlled same-engine comparison is in the finding. | **critical** |
 | 2 | The preflight probe cannot detect this — it checks only that no exception was raised, never that a response body exists. | **critical** |
 | 3 | Reasoning tokens are billed against the context window, so a reasoning model at 4096 spends the entire budget thinking and emits nothing. | high |
 | 4 | `lms load -c` is honored by the GGUF/llama.cpp engine and **ignored by the MLX engine**. | medium |
 | 5 | LM Studio no longer defaults to 4096 context, as the guide states — it defaulted to 32768. | low |
 | 6 | Where structured output does work, fidelity is good; **latency** is what rules out local extraction (~22 h optimistic for the guide's reference corpus). | high |
 | 7 | `openai/gpt-oss-20b` cannot load on 16 GB at all. | informational |
+| 8 | A model can pass T0 **and** T1 and still return a substantively empty report: `findings: []` plus an invented out-of-schema key, 2/3 samples. | high |
+| 9 | Ollama produces usable reports at 16384, but **defaults to 4096** — and its context cannot be set per request through the OpenAI route Groundly uses. It also accepts `json_object`, which LM Studio refuses. | high |
 
 ## The four tiers
 
@@ -56,15 +58,22 @@ value requested (see finding 4). Reports are n=3 against a fixed community input
 | `google/gemma-4-12b-qat` | gguf | 4096 | pass | refused | **0/3** | n/a | 0 entities (truncated) |
 | `google/gemma-4-12b-qat` | gguf | 16384 | pass | refused | **3/3** | good, unstable rating | 12 ent / 11 rel / 0 malformed, 199.9 s |
 | `qwen/qwen3.5-9b` | mlx | 32768 | "pass" | refused | **0/3** | n/a — no content at all | 10 ent / 11 rel / 0 malformed, 311.5 s |
-| `google/gemma-4-12b` | mlx | 19456 | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
+| `google/gemma-4-12b` | mlx | 19456 | pass | refused | 3/3 | **2/3 empty `findings`** | not measured |
 | `openai/gpt-oss-20b` | mlx | — | **cannot load** | — | — | — | — |
+| `gemma4:12b` (Ollama) | gguf | 4096 **(default)** | pass | **accepted** | **0/3** | n/a | 0 entities (truncated) |
+| `gemma4:12b` (Ollama) | gguf | 16384 | pass | **accepted** | **3/3** | good, stable rating | 7 ent / 5 rel / 0 malformed, 269.2 s |
 
-Both engines refuse the older JSON-mode capability identically, reproducing the string the
-guide already quotes — which is the harness's own correctness check:
+Both LM Studio engines refuse the older JSON-mode capability identically, reproducing the
+string the guide already quotes — which is the harness's own correctness check:
 
 ```
 HTTP 400: {'error': "'response_format.type' must be 'json_schema' or 'text'"}
 ```
+
+**Ollama does not.** It accepts `{"type": "json_object"}` *and* `json_schema`, so the
+`json_object` column separates the two local runtimes rather than being a uniform "local"
+property. Any statement of the form "local runtimes refuse `json_object`" is an
+over-generalisation from LM Studio alone.
 
 ### Finding 1 — qwen3.5-9b emits the right answer into the wrong channel
 
@@ -99,6 +108,26 @@ lands in `reasoning_content` is well-formed here by luck — graphrag's prompt d
 JSON shape in prose, so the model imitated it — not by enforcement.
 
 Reproduced 5/5 (three harness reports, one raw capture, plus the T0 probe itself).
+
+**Scope: this is the model, not the engine.** The obvious inference — "the MLX engine loses
+structured output" — is wrong, and the controlled experiment says so. Running
+`google/gemma-4-12b` as an **MLX** build, same engine, same schema, same fixed input:
+
+```
+finish_reason: "stop"
+completion_tokens_details: { reasoning_tokens: 0 }   ← qwen: 543 of 544
+content len: 909   reasoning len: 0
+```
+
+`content` is populated on all three samples and `reasoning_content` is empty every time. The
+MLX engine fills the content channel correctly for a model whose template exits its thinking
+channel. So the correct statement is **per model** (really per chat template), not per engine —
+which also means a capability table keyed on the runtime would be as wrong as one keyed on the
+provider.
+
+Worth noting the same weights behave differently per build: `gemma-4-12b-qat` on **GGUF**
+spent 1737 tokens on reasoning, while `gemma-4-12b` on **MLX** spent 0. The build, not just
+the model, decides this.
 
 ### Finding 2 — the preflight probe passes a model that produces nothing
 
@@ -215,24 +244,122 @@ Worth recording because `gpt-oss-120b` is named in the guide as schema-capable o
 locally-runnable sibling is not an option on a 16 GB machine. `lms load --estimate-only`
 answers this before a 12 GB download, which is the useful takeaway.
 
+### Finding 8 — schema-valid and substantively empty
+
+`google/gemma-4-12b` (MLX) passes T0 and T1 — the response is present, parses, and validates
+against `CommunityReportResponse`. It is still unusable 2 times in 3. n=3 on the fixed input:
+
+| | sample 1 | sample 2 | sample 3 |
+| --- | --- | --- | --- |
+| conforms | yes | yes | yes |
+| findings | **0** | 5 | **0** |
+| extra keys emitted | `findings_list` | — | `findings_list` |
+| entities covered | 7/7 | 7/7 | 4/7 |
+| rating | 4.0 | 4.0 | 4.0 |
+| completion tokens | 192 | 514 | 152 |
+
+In the two failing samples the model returned `"findings": []` and invented an out-of-schema
+key holding nothing:
+
+```json
+"findings": [], "rating": 4.0,
+"rating_explanation": "…",
+"findings_list": [null, null, null, null, null]
+```
+
+`findings` is where the entire body of a community report lives — graphrag's `_get_text_output`
+renders the stored report as `# title / summary / ## finding…` per finding, so an empty array
+yields a report that is a title and one paragraph. Global search and `overview` answer from
+these. Nothing errors; the graph just quietly gets thinner.
+
+Two things let this through:
+
+1. **`strict: true` without `additionalProperties: false`.** The schema graphrag sends is
+   Pydantic's `model_json_schema()`, which does not emit `additionalProperties: false`; litellm
+   adds `strict: true` beside it. Verified on the exact request body — the string
+   `additionalProperties` appears nowhere in it. So a decoy key is *permitted by the request as
+   sent*, and the runtime is not at fault for allowing it.
+2. **An empty array satisfies the schema.** `findings: list[FindingModel]` has no `minItems`,
+   so `[]` is valid. No validator anywhere in the path rejects it.
+
+This is the failure mode T0 and T1 are both blind to, and it is why acceptance and conformance
+had to be graded separately from fidelity. Note the rating was a stable 4.0 across all three
+here, where `gemma-4-12b-qat` on GGUF swung 4.0/4.0/8.0 — so rating stability and content
+completeness are independent, and this build trades one for the other.
+
+### Finding 9 — Ollama works, and its default is the one that doesn't
+
+Measured on Ollama 0.32.5 with `gemma4:12b` (7.6 GB), the closest available counterpart to the
+LM Studio GGUF build. Same harness, same fixed input, only `base_url` changed.
+
+Ollama states its context default in its own startup log, and it is the failing value:
+
+```
+msg="vram-based default context" total_vram="11.8 GiB" default_num_ctx=4096
+```
+
+`ollama ps` confirms `CONTEXT 4096` after load. At that default the run reproduces finding 3
+exactly — 0/3 reports, **0 entities** extracted, every call ending at exactly 4096 tokens. So
+**Ollama fails out of the box on this hardware**, and it is more likely to than LM Studio,
+which defaulted to 32768 unprompted (finding 5).
+
+Restarting with `OLLAMA_CONTEXT_LENGTH=16384` fixes it — `ollama ps` then reports
+`CONTEXT 16384` — and the matched comparison against the LM Studio GGUF row is close:
+
+| | Ollama `gemma4:12b` @16384 | LM Studio `gemma-4-12b-qat` @16384 |
+| --- | --- | --- |
+| conforms | 3/3 | 3/3 |
+| findings | 6, 5, 6 | 6, 5, 5 |
+| entities covered | 7/7, 7/7, 7/7 | 7/7, 7/7, 7/7 |
+| rating | 8.0, 8.0, 8.0 | 4.0, 4.0, 8.0 |
+| extraction yield | 7 ent / 5 rel / 0 malformed | 12 ent / 11 rel / 0 malformed |
+| extraction call | 269.2 s | 199.9 s |
+
+Two caveats on reading that table. The builds are not identical — Ollama's `gemma4:12b` and
+LM Studio's `gemma-4-12b-qat` are different quantisations of the same family, so the extraction
+yield gap (7/5 vs 12/11) is not cleanly attributable to the runtime. And Ollama was ~35 %
+slower per call here, putting the 1194-chunk corpus at **89.3 h serial**.
+
+The operationally important difference is the **knob**, not the numbers: `graph.context_window`
+tells Groundly what budget to assume, but it cannot make Ollama load at that size. Ollama's
+context is set server-side (`OLLAMA_CONTEXT_LENGTH`, or `PARAMETER num_ctx` in a Modelfile) —
+there is no per-request field for it on the OpenAI-compatible `/v1/chat/completions` route that
+Groundly calls through litellm. Setting `graph.context_window 16384` against an Ollama server
+still running its 4096 default produces exactly the silent empty graph in finding 3.
+
 ## What this means for the docs
 
 1. The table's `qwen/qwen3.5-9b` / `json_schema` = yes row is **wrong** and must be corrected —
    acceptance is not capability.
-2. "Support is a property of the model, not the provider" holds across cloud endpoints and is
-   misleading for local runtimes, where the constrained decoder makes T0 nearly uniform and the
-   binding constraint moves to T1 (channel routing) and T3 (latency).
+2. "Support is a property of the model, not the provider" survives, and for a reason the guide
+   does not give. On local runtimes the constrained decoder makes T0 nearly uniform, so the
+   binding constraint moves to T1 (channel routing) and T2 (empty findings) — and both of those
+   are still **per model/template**, as the gemma-on-MLX control shows. The sentence should keep
+   its conclusion and gain the local-runtime mechanism.
 3. "Never a small local model" is right for the wrong reason — replace the quality argument
    with the measured latency.
 4. The 4096-default claim is stale, and the `graph.context_window` advice needs an MLX caveat.
+5. Only **two** of six tested configurations produced usable structured output — the same
+   gemma-class model at ≥16384 on each runtime. Everything else failed, and every failure was
+   silent. The guide should say that plainly rather than implying local structured output
+   generally works.
+6. Ollama needs its own paragraph, not a slash after "LM Studio". It differs on the two things
+   that decide success: it accepts `json_object`, and its context default (4096) is the failing
+   one and is not settable per request.
 
 ## Scope and limits
 
 - One machine, one LM Studio install, one build each of four models. Engine behaviour may
   differ across LM Studio versions.
-- **Ollama was not measured** (not installed). The guide's claims about Ollama remain
-  unverified — including the `-c` equivalent and the reasoning-channel behaviour, both of which
-  differ per runtime.
+- `google/gemma-4-12b` (MLX) was measured with three direct POSTs rather than the harness: the
+  harness imports graphrag in-process, and that plus a 6.8 GB resident model was SIGKILLed
+  under memory pressure on 16 GB. Its T0/T0b/T3 cells therefore come from the report calls and
+  the load itself, not from a full harness run. Latency on this build was also wildly
+  inconsistent (41 s to >20 min for the identical request), so no T3 figure is quoted for it.
+- Ollama was measured on one model only (`gemma4:12b`, 0.32.5). The channel-routing failure in
+  finding 1 was **not** retested there — `qwen3.5-9b` was not pulled — so whether Ollama strands
+  a reasoning model's answer the way LM Studio's MLX engine does is still unknown, and is the
+  obvious next measurement.
 - No end-to-end `groundly index --graph` run; the latency figures are extrapolated from single
   calls and ignore graphrag's concurrency and its response cache.
 - `~/.groundly/` was never written to — the harness points `GROUNDLY_HOME` at a scratch
