@@ -427,6 +427,85 @@ def _reset_graph_artifacts(subj: Subject) -> None:
         subj.save_manifest(manifest)
 
 
+def _verify_build_output(
+    subj: Subject,
+    results,
+    counter: _WorkflowErrorCounter,
+    reports_counter: _WorkflowErrorCounter,
+    chunk_count: int,
+    context_window: int,
+) -> None:
+    """Refuse a build that reported success while producing an unusable graph.
+    graphrag swallows per-item failures, so nothing above this catches a graph
+    that quietly omits most of the corpus."""
+    failed = [r for r in results if r.error is not None]
+    if failed:
+        for r in failed:
+            logger.debug("workflow %s failed", r.workflow, exc_info=r.error)
+        names = ", ".join(r.workflow for r in failed)
+        # A workflow error is graphrag's *symptom*; the swallowed per-item failures
+        # above are usually the cause. `create_community_reports` raising
+        # `KeyError: 'community'` is what an empty reports frame looks like when every
+        # report call failed — pandas merging a frame that has no columns.
+        cause = reports_counter.last_message or counter.last_message
+        detail = f" — last LLM error: {cause}" if cause else ""
+        raise GraphBuildError(f"graph build failed: workflow(s) {names} failed{detail}")
+
+    # graphrag swallows per-chunk extraction failures, so nothing above catches a
+    # graph that quietly omits most of the corpus. Refuse before the manifest is
+    # stamped: an unstamped manifest leaves the graph stale, so the next index retries.
+    if counter.count > chunk_count * _MAX_EXTRACTION_FAILURE_RATE:
+        raise GraphBuildError(
+            f"entity extraction failed for {counter.count} of {chunk_count} chunks — the graph "
+            f"would be missing most of the course, so it was not recorded and stays unusable "
+            f"until a build succeeds. Last error: {counter.last_message}. If this is a "
+            f"context-size error, raise your extraction model's context window or lower "
+            f"graph.context_window (currently {context_window})"
+        )
+
+    # The artifact retrieval/graph.py actually reads. Row count, not file size: a
+    # zero-row parquet is ~1.9 KB of schema, so a size check would pass an empty graph
+    # (reachable when a model returns unparseable output that never raises).
+    entities = subj.root_dir / "graph" / "entities.parquet"
+    if not entities.exists() or len(pd.read_parquet(entities)) == 0:
+        raise GraphBuildError(
+            "graph build produced no entities — nothing was extracted from the corpus. "
+            "Re-run with --debug to see graphrag's own errors"
+        )
+
+    # Community reports are what global search and `overview` answer from, and graphrag
+    # swallows their failures the same way it swallows extraction's. A graph with
+    # communities but no reports for them is a graph the global arm cannot use.
+    graph_dir = subj.root_dir / "graph"
+    communities = graph_dir / "communities.parquet"
+    reports = graph_dir / "community_reports.parquet"
+    community_count = len(pd.read_parquet(communities)) if communities.exists() else 0
+    report_count = len(pd.read_parquet(reports)) if reports.exists() else 0
+    if community_count and not report_count:
+        raise GraphBuildError(
+            f"none of the {community_count} community summaries could be generated, so "
+            f"global search and `overview` would have nothing to answer from. Last error: "
+            f"{reports_counter.last_message or 'unknown'}. Community reports are the one "
+            f"stage that requires JSON mode — if your provider reports response_format as "
+            f"unavailable, switch extraction.model to one that supports structured output"
+        )
+    if reports_counter.count:
+        logger.warning(
+            "community reports failed for %d of %d communities: %s",
+            reports_counter.count,
+            community_count,
+            reports_counter.last_message,
+        )
+
+    if counter.count:
+        logger.warning(
+            "entity extraction failed for %d of %d chunks: %s",
+            counter.count,
+            chunk_count,
+            counter.last_message,
+        )
+
+
 def build_graph(
     subj: Subject,
     store: SQLiteSubjectStore,
@@ -517,72 +596,7 @@ def build_graph(
             logger.debug("graph build failed", exc_info=True)
             raise GraphBuildError(f"graph build failed: {exc}") from exc
 
-    failed = [r for r in results if r.error is not None]
-    if failed:
-        for r in failed:
-            logger.debug("workflow %s failed", r.workflow, exc_info=r.error)
-        names = ", ".join(r.workflow for r in failed)
-        # A workflow error is graphrag's *symptom*; the swallowed per-item failures
-        # above are usually the cause. `create_community_reports` raising
-        # `KeyError: 'community'` is what an empty reports frame looks like when every
-        # report call failed — pandas merging a frame that has no columns.
-        cause = reports_counter.last_message or counter.last_message
-        detail = f" — last LLM error: {cause}" if cause else ""
-        raise GraphBuildError(f"graph build failed: workflow(s) {names} failed{detail}")
-
-    # graphrag swallows per-chunk extraction failures, so nothing above catches a
-    # graph that quietly omits most of the corpus. Refuse before the manifest is
-    # stamped: an unstamped manifest leaves the graph stale, so the next index retries.
-    if counter.count > len(rows) * _MAX_EXTRACTION_FAILURE_RATE:
-        raise GraphBuildError(
-            f"entity extraction failed for {counter.count} of {len(rows)} chunks — the graph "
-            f"would be missing most of the course, so it was not recorded and stays unusable "
-            f"until a build succeeds. Last error: {counter.last_message}. If this is a "
-            f"context-size error, raise your extraction model's context window or lower "
-            f"graph.context_window (currently {context_window})"
-        )
-
-    # The artifact retrieval/graph.py actually reads. Row count, not file size: a
-    # zero-row parquet is ~1.9 KB of schema, so a size check would pass an empty graph
-    # (reachable when a model returns unparseable output that never raises).
-    entities = subj.root_dir / "graph" / "entities.parquet"
-    if not entities.exists() or len(pd.read_parquet(entities)) == 0:
-        raise GraphBuildError(
-            "graph build produced no entities — nothing was extracted from the corpus. "
-            "Re-run with --debug to see graphrag's own errors"
-        )
-
-    # Community reports are what global search and `overview` answer from, and graphrag
-    # swallows their failures the same way it swallows extraction's. A graph with
-    # communities but no reports for them is a graph the global arm cannot use.
-    graph_dir = subj.root_dir / "graph"
-    communities = graph_dir / "communities.parquet"
-    reports = graph_dir / "community_reports.parquet"
-    community_count = len(pd.read_parquet(communities)) if communities.exists() else 0
-    report_count = len(pd.read_parquet(reports)) if reports.exists() else 0
-    if community_count and not report_count:
-        raise GraphBuildError(
-            f"none of the {community_count} community summaries could be generated, so "
-            f"global search and `overview` would have nothing to answer from. Last error: "
-            f"{reports_counter.last_message or 'unknown'}. Community reports are the one "
-            f"stage that requires JSON mode — if your provider reports response_format as "
-            f"unavailable, switch extraction.model to one that supports structured output"
-        )
-    if reports_counter.count:
-        logger.warning(
-            "community reports failed for %d of %d communities: %s",
-            reports_counter.count,
-            community_count,
-            reports_counter.last_message,
-        )
-
-    if counter.count:
-        logger.warning(
-            "entity extraction failed for %d of %d chunks: %s",
-            counter.count,
-            len(rows),
-            counter.last_message,
-        )
+    _verify_build_output(subj, results, counter, reports_counter, len(rows), context_window)
 
     manifest = subj.load_manifest()
     manifest.graphrag = Graphrag(
