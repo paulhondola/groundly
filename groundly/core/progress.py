@@ -1,8 +1,15 @@
-"""store.db / progress.db access. Schema versioned via PRAGMA user_version — no
-migration framework; refuse to open a newer schema than this tool understands.
+"""progress.db access — traces, verification outcomes, and the study history built on
+top of them.
 
-Every connection gets WAL + busy_timeout: one-shot CLI runs and host-spawned MCP
-processes share the same files (.claude/rules/architecture.md).
+**Never exported.** The privacy boundary is a file
+(.claude/rules/grounding-and-privacy.md): progress.db never travels in a bundle and
+export code never reads it. core/bundle.py imports nothing from this module, by
+design — keep it that way.
+
+No PRAGMA user_version gate here, unlike store.db: progress.db never travels, so its
+schema grows locally through CREATE TABLE IF NOT EXISTS with no interchange impact.
+Every connection still gets WAL + busy_timeout — one-shot CLI runs and host-spawned
+MCP processes share the file (.claude/rules/architecture.md).
 """
 
 import json

@@ -8,7 +8,7 @@ P1 (indexing) is closed; branch `import-export` is clean and ready for P2. Per s
 - `core/manifest.py` — `Manifest`/`Embedding` pydantic models, `FORMAT_VERSION=1`, bge-m3 pin, `sync_counts`
 - `core/subject.py` — `Subject` (`.materials_dir`, `.store_db_path`, `.progress_db_path`, `.manifest_path`), `init_subject`
 - `core/paths.py` — `groundly_home()`, `subject_dir()`, `validate_subject_name` (path-safe names)
-- `core/store.py` — `connect()` (enforces `PRAGMA user_version` refusal — the imported-DB schema check for free), `create_progress()`
+- `core/store.py` — `connect()` (enforces `PRAGMA user_version` refusal — the imported-DB schema check for free), `create_progress()` (moved to `core/progress.py` 2026-07-28)
 - `cli/app.py` — `app`, `console`, `_fail`, `_subject_checked`
 - `llm/embeddings.py` — bge-m3 embedder (re-embed path only, lazy)
 
@@ -37,7 +37,7 @@ P1 (indexing) is closed; branch `import-export` is clean and ready for P2. Per s
   4. Extract into `tempfile.mkdtemp(dir=groundly_home()/".imports")` — dot-parent keeps half-imports out of `discover_subjects()`; same filesystem makes the final rename atomic.
   5. `check_counts` (includes the imported-store `user_version` check).
   6. Pin mismatch → confirm re-embed (local, free, minutes; `abort=True`) — only then `from groundly.llm.embeddings import ...` (zero-key path never imports it); rewrite `manifest.embedding = Embedding()` after.
-  7. `manifest.subject = name`; save manifest; `store.create_progress(...)` — **fresh empty progress.db**; ensure `materials/` exists (`--no-materials` bundles).
+  7. `manifest.subject = name`; save manifest; `store.create_progress(...)` (now `progress.create_progress(...)`) — **fresh empty progress.db**; ensure `materials/` exists (`--no-materials` bundles).
   8. On replace: rmtree the old subject only now; rename tmp → `subject_dir(name)`.
   - Any failure → rmtree tmp, `_fail(cause)`. Nothing half-installed; existing subject untouched until step 8.
 

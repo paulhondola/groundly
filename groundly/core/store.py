@@ -1,8 +1,13 @@
-"""store.db / progress.db access. Schema versioned via PRAGMA user_version — no
-migration framework; refuse to open a newer schema than this tool understands.
+"""store.db access — the file that travels on export. Schema versioned via PRAGMA
+user_version — no migration framework; refuse to open a newer schema than this tool
+understands.
 
 Every connection gets WAL + busy_timeout: one-shot CLI runs and host-spawned MCP
 processes share the same files (.claude/rules/architecture.md).
+
+progress.db is not served from here — it lives in core/progress.py and is never
+exported. Keep its accessors out of this module: this is the file that ships
+(.claude/rules/grounding-and-privacy.md — the privacy boundary is a file).
 """
 
 import json
