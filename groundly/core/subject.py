@@ -62,14 +62,3 @@ class Subject:
 
     def save_manifest(self, manifest: Manifest) -> None:
         manifest.save(self.manifest_path)
-
-
-def init_subject(name: str) -> tuple[Path, bool]:
-    """Create ~/.groundly/<name>/ (manifest, materials/, store.db, progress.db).
-
-    Returns (subject_dir, created); created=False if already initialized (idempotent).
-    Also writes the top-level config.toml template on first ever init.
-    """
-    subject = Subject(name)
-    created = subject.initialize()
-    return subject.root_dir, created

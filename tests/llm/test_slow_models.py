@@ -56,10 +56,10 @@ def test_cross_lingual_romanian_query_matches_english_deadlock_chunk(tmp_path, m
     caveat — only the dense channel, not sparse/BM25, matches across languages)."""
     from groundly.core.paths import subject_dir
     from groundly.core.store import SQLiteSubjectStore
-    from groundly.core.subject import init_subject
     from groundly.ingestion.extract import ChunkData
     from groundly.llm.embeddings import BgeM3Embedder
     from groundly.retrieval.vector import VectorRetriever
+    from tests.conftest import init_subject
 
     monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
     (tmp_path / "home").mkdir()

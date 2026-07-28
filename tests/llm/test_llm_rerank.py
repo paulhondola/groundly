@@ -5,11 +5,10 @@ import builtins
 
 import pytest
 
-from groundly.llm.rerank import RERANKER_HF_REVISION, RERANKER_MODEL, BgeReranker, Reranker
+from groundly.llm.rerank import RERANKER_HF_REVISION, RERANKER_MODEL, BgeReranker
 
 
-def test_bge_reranker_satisfies_the_reranker_protocol():
-    assert hasattr(Reranker, "compute_score")
+def test_bge_reranker_exposes_compute_score():
     assert callable(BgeReranker().compute_score)
 
 

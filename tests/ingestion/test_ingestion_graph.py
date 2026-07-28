@@ -10,7 +10,7 @@ import pytest
 from groundly.core.config import set_key
 from groundly.core.manifest import EMBEDDING_DIM
 from groundly.core.store import SQLiteSubjectStore
-from groundly.core.subject import Subject, init_subject
+from groundly.core.subject import Subject
 from groundly.ingestion.extract import ChunkData
 from groundly.ingestion.graph import (
     GraphBuildError,
@@ -20,6 +20,7 @@ from groundly.ingestion.graph import (
     graph_is_stale,
 )
 from groundly.llm.graphrag_adapter import extraction_entity_types
+from tests.conftest import init_subject
 
 _EXTRACT_ERR = "graphrag.index.operations.extract_graph.graph_extractor"
 _COMMUNITY_ERR = "graphrag.index.operations.summarize_communities.community_reports_extractor"

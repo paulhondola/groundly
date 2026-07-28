@@ -92,7 +92,6 @@ def index(
             subj.save_manifest(manifest)
         elif not ocr_lang:
             ocr_lang = recorded
-    # else: not initialized — pipeline.index_paths names the fix below
 
     labels = {
         Status.INDEXED: "[green]indexed[/green]",

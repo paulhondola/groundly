@@ -14,8 +14,9 @@ from groundly.core.manifest import EMBEDDING_DIM, HF_REVISION, Graphrag, Manifes
 from groundly.ingestion.graph import corpus_hash as _real_corpus_hash
 from groundly.core.paths import groundly_home, subject_dir
 from groundly.core.store import SQLiteSubjectStore
-from groundly.core.subject import Subject, init_subject
+from groundly.core.subject import Subject
 from groundly.ingestion.extract import ChunkData
+from tests.conftest import init_subject
 
 runner = CliRunner()
 

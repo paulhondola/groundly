@@ -2,12 +2,19 @@
 fixtures defined here for every test module in this directory — test modules
 request them by parameter name, they never import from this file."""
 
+from pathlib import Path
+
 import pytest
 
 from groundly.core import store
 from groundly.core.manifest import EMBEDDING_DIM
 from groundly.core.paths import subject_dir
-from groundly.core.subject import init_subject
+from groundly.core.subject import Subject
+
+
+def init_subject(name: str) -> tuple[Path, bool]:
+    subject = Subject(name)
+    return subject.root_dir, subject.initialize()
 
 
 class StubEmbedder:

@@ -52,11 +52,6 @@ def _store_checked(subj):
         _fail(str(exc))
 
 
-def _not_implemented(verb: str) -> None:
-    typer.echo(f"groundly {verb}: not implemented yet — arrives in a later phase")
-    raise typer.Exit(code=1)
-
-
 def _print_version(value: bool) -> None:
     if value:
         typer.echo(_package_version("groundly"))
