@@ -309,18 +309,27 @@ def test_bundled_prompt_stays_within_its_token_budget():
 
 def test_bundled_prompt_reuses_graphrags_instruction_block_verbatim():
     """Only the worked examples are ours. The instruction block defines the record
-    format the downstream parser depends on, so it is copied byte-for-byte — this fails
-    if a graphrag upgrade changes it and the bundled prompt is not re-derived."""
+    format the downstream parser depends on, so it is copied verbatim — this fails
+    if a graphrag upgrade changes it and the bundled prompt is not re-derived.
+
+    Compared modulo *trailing* whitespace: graphrag's block has five lines that are a lone
+    space and no final newline, and this repo strips both (73023cd did exactly that in
+    passing, while renaming something else — `git grep -l ' $'` finds no other tracked
+    file). Trailing whitespace cannot reach the delimited record format, so tolerating it
+    loses no detection and stops the guard firing on ordinary repo hygiene."""
     from graphrag.prompts.index.extract_graph import GRAPH_EXTRACTION_PROMPT
 
     from groundly.llm.graphrag_adapter import _bundled_prompt_text
 
+    def norm(s: str) -> str:
+        return "\n".join(line.rstrip() for line in s.split("\n")).rstrip("\n")
+
     instructions, _, rest = GRAPH_EXTRACTION_PROMPT.partition("######################\n-Examples-")
     _, _, real_data = rest.partition("######################\n-Real Data-")
 
-    text = _bundled_prompt_text()
-    assert text.startswith(instructions)
-    assert text.endswith(real_data)
+    text = norm(_bundled_prompt_text())
+    assert text.startswith(norm(instructions))
+    assert text.endswith(norm(real_data))
 
 
 def test_default_entity_types_target_course_material():
