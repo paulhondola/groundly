@@ -45,7 +45,7 @@ P1 (indexing) is closed; branch `import-export` is clean and ready for P2. Per s
 
 ### 4. `tests/test_bundle.py` (new) — mapped to UC-30 acceptance criteria
 
-Conventions: existing `subject` fixture (GROUNDLY_HOME → tmp), real SQLite, `StubEmbedder`, seed via `SQLiteSubjectStore.add_indexed` + `sync_counts` (no pipeline).
+Conventions: existing `subject` fixture (GROUNDLY_HOME → tmp), real SQLite, `StubEmbedder`, seed via `SubjectStore.add_indexed` + `sync_counts` (no pipeline).
 
 - **AC1 roundtrip**: export → repoint GROUNDLY_HOME ("machine B") → import → materials byte-identical, chunks/vectors/sparse row counts match, fresh empty progress.db. (Real `search` lands in P3; row-count equality is the honest P2 proxy.)
 - **AC2 pin mismatch**: rewrite `hf_revision` inside the bundle's manifest → confirm "y" with StubEmbedder → vectors regenerated, manifest pin updated; "n" → nothing installed.

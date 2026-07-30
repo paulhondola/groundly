@@ -47,13 +47,13 @@ def list_subjects() -> list[dict]:
     its knowledge graph has been built. Call this first to discover valid subject
     names for search/ask/get_page."""
     from groundly.core.paths import discover_subjects
-    from groundly.core.store import SQLiteSubjectStore
+    from groundly.core.store import SubjectStore
     from groundly.core.subject import Subject
 
     result = []
     for name in discover_subjects():
         subj = Subject(name)
-        rows = SQLiteSubjectStore(subj.store_db_path).list_materials()
+        rows = SubjectStore(subj.store_db_path).list_materials()
         indexed = [r for r in rows if r["status"] == "indexed"]
         result.append(
             {
@@ -274,10 +274,10 @@ def submit_cards(subject: str, deck: str, cards: list[CardIn]) -> dict:
 def list_decks(subject: str) -> list[dict]:
     """List `subject`'s flashcard decks with their card counts — deck names are what
     `submit_cards`/`generate_deck` write into and `export_deck` reads from."""
-    from groundly.core.store import SQLiteSubjectStore
+    from groundly.core.store import SubjectStore
 
     subj = _subject_or_error(subject, ToolError)
-    rows = SQLiteSubjectStore(subj.store_db_path).list_decks()
+    rows = SubjectStore(subj.store_db_path).list_decks()
     return [{"deck": r["name"], "cards": r["card_count"]} for r in rows]
 
 
@@ -349,10 +349,10 @@ def get_page(subject: str, filename: str, page: int) -> list[dict]:
     """Verbatim chunk text for one page of one material, in chunk order — the precise
     way to open what a search/ask citation points to. Never returns raw file bytes or
     a summary; empty list if the page/filename has no indexed chunks."""
-    from groundly.core.store import SQLiteSubjectStore
+    from groundly.core.store import SubjectStore
 
     subj = _subject_or_error(subject, ToolError)
-    rows = SQLiteSubjectStore(subj.store_db_path).page_chunks(filename, page)
+    rows = SubjectStore(subj.store_db_path).page_chunks(filename, page)
     return [
         {"chunk_id": r["chunk_id"], "text": r["text"], "heading_path": r["heading_path"]}
         for r in rows
@@ -367,7 +367,7 @@ def document(subject: str, filename: str) -> dict[str, list[dict]]:
     argument: it arrives concatenated onto `filename` (e.g. "lec.pdf#page=2"), so we
     parse it back out here and narrow to just that page when present; `get_page` is
     the precise tool either way and is what the gate demo uses."""
-    from groundly.core.store import SQLiteSubjectStore
+    from groundly.core.store import SubjectStore
 
     page: int | None = None
     if "#page=" in filename:
@@ -375,7 +375,7 @@ def document(subject: str, filename: str) -> dict[str, list[dict]]:
         page = int(frag) if frag.isdigit() else None
 
     subj = _subject_or_error(subject, ResourceError)
-    store = SQLiteSubjectStore(subj.store_db_path)
+    store = SubjectStore(subj.store_db_path)
 
     if page is not None:
         pages = {page: store.page_chunks(filename, page)}

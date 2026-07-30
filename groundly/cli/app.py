@@ -41,10 +41,10 @@ def _subject_checked(subject: str):
 
 
 def _store_checked(subj):
-    from groundly.core.store import SQLiteSubjectStore
+    from groundly.core.store import SubjectStore
 
     try:
-        store_obj = SQLiteSubjectStore(subj.store_db_path)
+        store_obj = SubjectStore(subj.store_db_path)
         conn = store_obj.connect()
         conn.close()
         return store_obj

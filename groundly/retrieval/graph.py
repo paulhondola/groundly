@@ -42,7 +42,7 @@ from llama_index.core.retrievers import BaseRetriever
 from llama_index.core.schema import NodeWithScore, QueryBundle, TextNode
 
 from groundly.core.manifest import EMBEDDING_DIM
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
 from groundly.llm.graphrag_adapter import (
     BGE_M3_EMBEDDING_TYPE,
@@ -116,7 +116,7 @@ def _load_artifacts(graph_dir: Path) -> _GraphArtifacts:
     )
 
 
-def _nodes_from_chunk_ids(store: SQLiteSubjectStore, chunk_ids: list[int]) -> list[NodeWithScore]:
+def _nodes_from_chunk_ids(store: SubjectStore, chunk_ids: list[int]) -> list[NodeWithScore]:
     """Resolve chunk ids to the shared metadata contract, in the given order (best
     first) — same shape `VectorRetriever` produces, so citation resolution and
     prompt assembly never special-case the graph arm."""
@@ -153,7 +153,7 @@ class _GraphRetrieverBase(BaseRetriever):
         super().__init__(callback_manager=CallbackManager([]))
         self.subject = subject
         self._subj = Subject(subject)
-        self.store = SQLiteSubjectStore(self._subj.store_db_path)
+        self.store = SubjectStore(self._subj.store_db_path)
         self.path: list[str] = []
         self.communities: list[dict] = []
         self._artifacts: _GraphArtifacts | None = None

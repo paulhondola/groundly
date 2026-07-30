@@ -8,7 +8,7 @@ from groundly.agents.verifier import CardCandidate
 from groundly.core.manifest import EMBEDDING_DIM
 from groundly.core.paths import subject_dir
 from groundly.core.progress import connect_progress
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SubjectStore
 
 
 class AlignedEmbedder:
@@ -46,7 +46,7 @@ def test_accepted_stored_with_source_rejected_stores_nothing(retrievable_subject
         generation_source="host",
         embedder=AlignedEmbedder(),
     )
-    store = SQLiteSubjectStore(subject_dir(retrievable_subject) / "store.db")
+    store = SubjectStore(subject_dir(retrievable_subject) / "store.db")
     conn = store.connect()
     try:
         rows = conn.execute("SELECT body, generation_source FROM questions").fetchall()
@@ -108,7 +108,7 @@ def test_thick_loop_retries_rejected_cards_with_reason_fed_back(retrievable_subj
     assert "not_answerable_from_chunks" in retry_text
     assert chat.calls[1][0] == "generation"
 
-    store = SQLiteSubjectStore(subject_dir(retrievable_subject) / "store.db")
+    store = SubjectStore(subject_dir(retrievable_subject) / "store.db")
     conn = store.connect()
     try:
         sources = {

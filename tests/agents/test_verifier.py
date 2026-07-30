@@ -13,7 +13,7 @@ from groundly.agents.verifier import (
 )
 from groundly.core.manifest import EMBEDDING_DIM
 from groundly.core.paths import subject_dir
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SubjectStore
 
 
 class AlignedEmbedder:
@@ -37,8 +37,8 @@ def _chunk2_embedder():
     return AlignedEmbedder([0.0, 1.0] + [0.0] * (EMBEDDING_DIM - 2), {3: 0.9})
 
 
-def _store(subject_name: str) -> SQLiteSubjectStore:
-    return SQLiteSubjectStore(subject_dir(subject_name) / "store.db")
+def _store(subject_name: str) -> SubjectStore:
+    return SubjectStore(subject_dir(subject_name) / "store.db")
 
 
 def test_rejection_reasons_are_the_canonical_four():

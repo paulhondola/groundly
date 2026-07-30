@@ -169,7 +169,7 @@ def retrievable_subject(monkeypatch, tmp_path):
     (tmp_path / "home").mkdir()
     init_subject("TEST")
 
-    from groundly.core.store import SQLiteSubjectStore
+    from groundly.core.store import SubjectStore
     from groundly.ingestion.extract import ChunkData
 
     chunks = [
@@ -183,7 +183,7 @@ def retrievable_subject(monkeypatch, tmp_path):
         [0.9, 0.1] + [0.0] * (EMBEDDING_DIM - 2),
     ]
     sparse = [{1: 0.9, 2: 0.1}, {3: 0.9}, {1: 0.4}]
-    SQLiteSubjectStore(subject_dir("TEST") / "store.db").add_indexed(
+    SubjectStore(subject_dir("TEST") / "store.db").add_indexed(
         "lec.pdf", "a" * 64, 3, chunks, zip(dense, sparse)
     )
     return "TEST"

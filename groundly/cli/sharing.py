@@ -110,7 +110,7 @@ def import_(
 
             graph_dir = tmp_dir / "graph"
             if graph_dir.exists():
-                actual_hash = corpus_hash(store.SQLiteSubjectStore(tmp_dir / "store.db"))
+                actual_hash = corpus_hash(store.SubjectStore(tmp_dir / "store.db"))
                 if manifest.graphrag.corpus_hash != actual_hash:
                     manifest = _drop_graph(
                         graph_dir,

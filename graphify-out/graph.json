@@ -2699,14 +2699,14 @@
       "norm_label": "check_deck_name()"
     },
     {
-      "label": "SQLiteSubjectStore",
+      "label": "SubjectStore",
       "file_type": "code",
       "source_file": "groundly/core/store.py",
       "source_location": "L157",
       "_origin": "ast",
-      "id": "groundly_core_store_sqlitesubjectstore",
+      "id": "groundly_core_store_SubjectStore",
       "community": 3,
-      "norm_label": "sqlitesubjectstore"
+      "norm_label": "SubjectStore"
     },
     {
       "label": ".__init__()",
@@ -2714,7 +2714,7 @@
       "source_file": "groundly/core/store.py",
       "source_location": "L161",
       "_origin": "ast",
-      "id": "groundly_core_store_sqlitesubjectstore_init",
+      "id": "groundly_core_store_SubjectStore_init",
       "community": 31,
       "norm_label": ".__init__()"
     },
@@ -2724,7 +2724,7 @@
       "source_file": "groundly/core/store.py",
       "source_location": "L164",
       "_origin": "ast",
-      "id": "groundly_core_store_sqlitesubjectstore_connect",
+      "id": "groundly_core_store_SubjectStore_connect",
       "community": 3,
       "norm_label": ".connect()"
     },
@@ -2734,7 +2734,7 @@
       "source_file": "groundly/core/store.py",
       "source_location": "L167",
       "_origin": "ast",
-      "id": "groundly_core_store_sqlitesubjectstore_list_materials",
+      "id": "groundly_core_store_SubjectStore_list_materials",
       "community": 3,
       "norm_label": ".list_materials()"
     },
@@ -2754,7 +2754,7 @@
       "source_file": "groundly/core/store.py",
       "source_location": "L181",
       "_origin": "ast",
-      "id": "groundly_core_store_sqlitesubjectstore_hash_status",
+      "id": "groundly_core_store_SubjectStore_hash_status",
       "community": 3,
       "norm_label": ".hash_status()"
     },
@@ -2764,7 +2764,7 @@
       "source_file": "groundly/core/store.py",
       "source_location": "L192",
       "_origin": "ast",
-      "id": "groundly_core_store_sqlitesubjectstore_find_materials",
+      "id": "groundly_core_store_SubjectStore_find_materials",
       "community": 3,
       "norm_label": ".find_materials()"
     },
@@ -2774,7 +2774,7 @@
       "source_file": "groundly/core/store.py",
       "source_location": "L205",
       "_origin": "ast",
-      "id": "groundly_core_store_sqlitesubjectstore_remove_material",
+      "id": "groundly_core_store_SubjectStore_remove_material",
       "community": 3,
       "norm_label": ".remove_material()"
     },
@@ -2784,7 +2784,7 @@
       "source_file": "groundly/core/store.py",
       "source_location": "L232",
       "_origin": "ast",
-      "id": "groundly_core_store_sqlitesubjectstore_add_extraction_failed",
+      "id": "groundly_core_store_SubjectStore_add_extraction_failed",
       "community": 3,
       "norm_label": ".add_extraction_failed()"
     },
@@ -2794,7 +2794,7 @@
       "source_file": "groundly/core/store.py",
       "source_location": "L244",
       "_origin": "ast",
-      "id": "groundly_core_store_sqlitesubjectstore_dense_search",
+      "id": "groundly_core_store_SubjectStore_dense_search",
       "community": 3,
       "norm_label": ".dense_search()"
     },
@@ -2804,7 +2804,7 @@
       "source_file": "groundly/core/store.py",
       "source_location": "L257",
       "_origin": "ast",
-      "id": "groundly_core_store_sqlitesubjectstore_sparse_search",
+      "id": "groundly_core_store_SubjectStore_sparse_search",
       "community": 3,
       "norm_label": ".sparse_search()"
     },
@@ -2814,7 +2814,7 @@
       "source_file": "groundly/core/store.py",
       "source_location": "L279",
       "_origin": "ast",
-      "id": "groundly_core_store_sqlitesubjectstore_bm25_search",
+      "id": "groundly_core_store_SubjectStore_bm25_search",
       "community": 3,
       "norm_label": ".bm25_search()"
     },
@@ -2824,7 +2824,7 @@
       "source_file": "groundly/core/store.py",
       "source_location": "L298",
       "_origin": "ast",
-      "id": "groundly_core_store_sqlitesubjectstore_chunk_details",
+      "id": "groundly_core_store_SubjectStore_chunk_details",
       "community": 3,
       "norm_label": ".chunk_details()"
     },
@@ -2834,7 +2834,7 @@
       "source_file": "groundly/core/store.py",
       "source_location": "L316",
       "_origin": "ast",
-      "id": "groundly_core_store_sqlitesubjectstore_all_chunks",
+      "id": "groundly_core_store_SubjectStore_all_chunks",
       "community": 3,
       "norm_label": ".all_chunks()"
     },
@@ -2844,7 +2844,7 @@
       "source_file": "groundly/core/store.py",
       "source_location": "L331",
       "_origin": "ast",
-      "id": "groundly_core_store_sqlitesubjectstore_page_chunks",
+      "id": "groundly_core_store_SubjectStore_page_chunks",
       "community": 3,
       "norm_label": ".page_chunks()"
     },
@@ -2854,7 +2854,7 @@
       "source_file": "groundly/core/store.py",
       "source_location": "L348",
       "_origin": "ast",
-      "id": "groundly_core_store_sqlitesubjectstore_add_indexed",
+      "id": "groundly_core_store_SubjectStore_add_indexed",
       "community": 3,
       "norm_label": ".add_indexed()"
     },
@@ -2864,7 +2864,7 @@
       "source_file": "groundly/core/store.py",
       "source_location": "L390",
       "_origin": "ast",
-      "id": "groundly_core_store_sqlitesubjectstore_get_or_create_deck",
+      "id": "groundly_core_store_SubjectStore_get_or_create_deck",
       "community": 28,
       "norm_label": ".get_or_create_deck()"
     },
@@ -2874,7 +2874,7 @@
       "source_file": "groundly/core/store.py",
       "source_location": "L401",
       "_origin": "ast",
-      "id": "groundly_core_store_sqlitesubjectstore_add_verified_card",
+      "id": "groundly_core_store_SubjectStore_add_verified_card",
       "community": 3,
       "norm_label": ".add_verified_card()"
     },
@@ -2884,7 +2884,7 @@
       "source_file": "groundly/core/store.py",
       "source_location": "L429",
       "_origin": "ast",
-      "id": "groundly_core_store_sqlitesubjectstore_deck_cards",
+      "id": "groundly_core_store_SubjectStore_deck_cards",
       "community": 3,
       "norm_label": ".deck_cards()"
     },
@@ -2894,7 +2894,7 @@
       "source_file": "groundly/core/store.py",
       "source_location": "L449",
       "_origin": "ast",
-      "id": "groundly_core_store_sqlitesubjectstore_list_decks",
+      "id": "groundly_core_store_SubjectStore_list_decks",
       "community": 3,
       "norm_label": ".list_decks()"
     },
@@ -9261,14 +9261,14 @@
       "norm_label": "test_export_no_materials_excludes_originals()"
     },
     {
-      "label": "UC-30 export/import. Seeds store.db directly via SQLiteSubjectStore.add_indexed",
+      "label": "UC-30 export/import. Seeds store.db directly via SubjectStore.add_indexed",
       "file_type": "rationale",
       "source_file": "tests/core/test_bundle.py",
       "source_location": "L1",
       "_origin": "ast",
       "id": "tests_core_test_bundle_rationale_1",
       "community": 19,
-      "norm_label": "uc-30 export/import. seeds store.db directly via sqlitesubjectstore.add_indexed"
+      "norm_label": "uc-30 export/import. seeds store.db directly via SubjectStore.add_indexed"
     },
     {
       "label": "Stamp a fake graph/ dir + manifest.graphrag for `name`, recorded against either",
@@ -18092,7 +18092,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_agents_ask",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -18316,7 +18316,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "groundly_agents_ask_askresult",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -18492,7 +18492,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_agents_ask_ask",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -18837,7 +18837,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_agents_citations",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -18895,7 +18895,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "groundly_agents_citations_citation",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -18952,7 +18952,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "groundly_agents_citations_nocitationserror",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -19078,7 +19078,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_agents_citations_resolve_citations",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -19397,7 +19397,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_agents_decks",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -19513,7 +19513,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "groundly_agents_decks_cardoutcome",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -19630,7 +19630,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_agents_decks_submit_cards",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -19880,7 +19880,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_agents_decks_generate_deck_job",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -20952,7 +20952,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_agents_study_modes",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -21094,7 +21094,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "groundly_agents_study_modes_overviewresult",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -21153,7 +21153,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_agents_study_modes_drill_down",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -21297,7 +21297,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_agents_study_modes_overview",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -21438,7 +21438,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_agents_verifier",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -21508,7 +21508,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "groundly_agents_verifier_cardcandidate",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -21695,7 +21695,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "groundly_agents_verifier_rejection",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -21764,7 +21764,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_agents_verifier_verify_card",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -22022,7 +22022,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_cli_app",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -22609,7 +22609,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_cli_app_store_checked",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -24652,7 +24652,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_cli_sharing_import",
-      "target": "groundly_core_store_sqlitesubjectstore"
+      "target": "groundly_core_store_SubjectStore"
     },
     {
       "relation": "calls",
@@ -24801,7 +24801,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_cli_subjects",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -25182,7 +25182,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_cli_subjects_maybe_build_graph",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -25356,7 +25356,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_core_anki",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -25463,7 +25463,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_core_anki_export_deck",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -31877,7 +31877,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_core_store",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -32150,7 +32150,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_core_store_connect",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -32377,7 +32377,7 @@
       "source_location": "L161",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_init",
+      "source": "groundly_core_store_SubjectStore_init",
       "target": "groundly_core_store_py_path",
       "confidence_score": 1.0
     },
@@ -32389,7 +32389,7 @@
       "source_location": "L164",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_connect",
+      "source": "groundly_core_store_SubjectStore_connect",
       "target": "groundly_core_store_py_connection",
       "confidence_score": 1.0
     },
@@ -32402,7 +32402,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_core_store_create_store",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -32568,7 +32568,7 @@
       "source_location": "L391",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_get_or_create_deck",
+      "source": "groundly_core_store_SubjectStore_get_or_create_deck",
       "target": "groundly_core_store_check_deck_name",
       "confidence_score": 1.0
     },
@@ -32580,7 +32580,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_core_store_rationale_158",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -32590,8 +32590,8 @@
       "source_location": "L232",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore",
-      "target": "groundly_core_store_sqlitesubjectstore_add_extraction_failed",
+      "source": "groundly_core_store_SubjectStore",
+      "target": "groundly_core_store_SubjectStore_add_extraction_failed",
       "confidence_score": 1.0
     },
     {
@@ -32601,8 +32601,8 @@
       "source_location": "L348",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore",
-      "target": "groundly_core_store_sqlitesubjectstore_add_indexed",
+      "source": "groundly_core_store_SubjectStore",
+      "target": "groundly_core_store_SubjectStore_add_indexed",
       "confidence_score": 1.0
     },
     {
@@ -32612,8 +32612,8 @@
       "source_location": "L401",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore",
-      "target": "groundly_core_store_sqlitesubjectstore_add_verified_card",
+      "source": "groundly_core_store_SubjectStore",
+      "target": "groundly_core_store_SubjectStore_add_verified_card",
       "confidence_score": 1.0
     },
     {
@@ -32623,8 +32623,8 @@
       "source_location": "L316",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore",
-      "target": "groundly_core_store_sqlitesubjectstore_all_chunks",
+      "source": "groundly_core_store_SubjectStore",
+      "target": "groundly_core_store_SubjectStore_all_chunks",
       "confidence_score": 1.0
     },
     {
@@ -32634,8 +32634,8 @@
       "source_location": "L279",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore",
-      "target": "groundly_core_store_sqlitesubjectstore_bm25_search",
+      "source": "groundly_core_store_SubjectStore",
+      "target": "groundly_core_store_SubjectStore_bm25_search",
       "confidence_score": 1.0
     },
     {
@@ -32645,8 +32645,8 @@
       "source_location": "L298",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore",
-      "target": "groundly_core_store_sqlitesubjectstore_chunk_details",
+      "source": "groundly_core_store_SubjectStore",
+      "target": "groundly_core_store_SubjectStore_chunk_details",
       "confidence_score": 1.0
     },
     {
@@ -32656,8 +32656,8 @@
       "source_location": "L164",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "source": "groundly_core_store_SubjectStore",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -32667,8 +32667,8 @@
       "source_location": "L429",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore",
-      "target": "groundly_core_store_sqlitesubjectstore_deck_cards",
+      "source": "groundly_core_store_SubjectStore",
+      "target": "groundly_core_store_SubjectStore_deck_cards",
       "confidence_score": 1.0
     },
     {
@@ -32678,8 +32678,8 @@
       "source_location": "L244",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore",
-      "target": "groundly_core_store_sqlitesubjectstore_dense_search",
+      "source": "groundly_core_store_SubjectStore",
+      "target": "groundly_core_store_SubjectStore_dense_search",
       "confidence_score": 1.0
     },
     {
@@ -32689,8 +32689,8 @@
       "source_location": "L192",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore",
-      "target": "groundly_core_store_sqlitesubjectstore_find_materials",
+      "source": "groundly_core_store_SubjectStore",
+      "target": "groundly_core_store_SubjectStore_find_materials",
       "confidence_score": 1.0
     },
     {
@@ -32700,8 +32700,8 @@
       "source_location": "L390",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore",
-      "target": "groundly_core_store_sqlitesubjectstore_get_or_create_deck",
+      "source": "groundly_core_store_SubjectStore",
+      "target": "groundly_core_store_SubjectStore_get_or_create_deck",
       "confidence_score": 1.0
     },
     {
@@ -32711,8 +32711,8 @@
       "source_location": "L181",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore",
-      "target": "groundly_core_store_sqlitesubjectstore_hash_status",
+      "source": "groundly_core_store_SubjectStore",
+      "target": "groundly_core_store_SubjectStore_hash_status",
       "confidence_score": 1.0
     },
     {
@@ -32722,8 +32722,8 @@
       "source_location": "L161",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore",
-      "target": "groundly_core_store_sqlitesubjectstore_init",
+      "source": "groundly_core_store_SubjectStore",
+      "target": "groundly_core_store_SubjectStore_init",
       "confidence_score": 1.0
     },
     {
@@ -32733,8 +32733,8 @@
       "source_location": "L449",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore",
-      "target": "groundly_core_store_sqlitesubjectstore_list_decks",
+      "source": "groundly_core_store_SubjectStore",
+      "target": "groundly_core_store_SubjectStore_list_decks",
       "confidence_score": 1.0
     },
     {
@@ -32744,8 +32744,8 @@
       "source_location": "L167",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore",
-      "target": "groundly_core_store_sqlitesubjectstore_list_materials",
+      "source": "groundly_core_store_SubjectStore",
+      "target": "groundly_core_store_SubjectStore_list_materials",
       "confidence_score": 1.0
     },
     {
@@ -32755,8 +32755,8 @@
       "source_location": "L331",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore",
-      "target": "groundly_core_store_sqlitesubjectstore_page_chunks",
+      "source": "groundly_core_store_SubjectStore",
+      "target": "groundly_core_store_SubjectStore_page_chunks",
       "confidence_score": 1.0
     },
     {
@@ -32766,8 +32766,8 @@
       "source_location": "L205",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore",
-      "target": "groundly_core_store_sqlitesubjectstore_remove_material",
+      "source": "groundly_core_store_SubjectStore",
+      "target": "groundly_core_store_SubjectStore_remove_material",
       "confidence_score": 1.0
     },
     {
@@ -32777,8 +32777,8 @@
       "source_location": "L257",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore",
-      "target": "groundly_core_store_sqlitesubjectstore_sparse_search",
+      "source": "groundly_core_store_SubjectStore",
+      "target": "groundly_core_store_SubjectStore_sparse_search",
       "confidence_score": 1.0
     },
     {
@@ -32790,7 +32790,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_ingestion_graph",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -32802,7 +32802,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_ingestion_graph_build_graph",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -32814,7 +32814,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_ingestion_graph_corpus_hash",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -32826,7 +32826,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_ingestion_graph_graph_is_stale",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -32837,7 +32837,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "groundly_ingestion_graph_graphbuilderror",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -32848,7 +32848,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "groundly_ingestion_graph_graphbuildresult",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -32859,7 +32859,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "groundly_ingestion_graph_progresscallbacks",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -32870,7 +32870,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "groundly_ingestion_graph_workflowerrorcounter",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -32882,7 +32882,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_ingestion_pipeline",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -32893,7 +32893,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "groundly_ingestion_pipeline_ingestionpipeline",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -32905,7 +32905,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_ingestion_pipeline_ingestionpipeline_init",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -32917,7 +32917,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_mcp_server",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -32928,7 +32928,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "groundly_mcp_server_cardin",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -32941,7 +32941,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_mcp_server_document",
-      "target": "groundly_core_store_sqlitesubjectstore"
+      "target": "groundly_core_store_SubjectStore"
     },
     {
       "relation": "calls",
@@ -32953,7 +32953,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_mcp_server_get_page",
-      "target": "groundly_core_store_sqlitesubjectstore"
+      "target": "groundly_core_store_SubjectStore"
     },
     {
       "relation": "calls",
@@ -32965,7 +32965,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_mcp_server_list_decks",
-      "target": "groundly_core_store_sqlitesubjectstore"
+      "target": "groundly_core_store_SubjectStore"
     },
     {
       "relation": "calls",
@@ -32977,7 +32977,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_mcp_server_list_subjects",
-      "target": "groundly_core_store_sqlitesubjectstore"
+      "target": "groundly_core_store_SubjectStore"
     },
     {
       "relation": "imports",
@@ -32988,7 +32988,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_retrieval_graph",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -32999,7 +32999,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "groundly_retrieval_graph_graphartifacts",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -33010,7 +33010,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "groundly_retrieval_graph_graphglobalretriever",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -33021,7 +33021,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "groundly_retrieval_graph_graphlocalretriever",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -33032,7 +33032,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "groundly_retrieval_graph_graphnotbuilterror",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -33043,7 +33043,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "groundly_retrieval_graph_graphretrieverbase",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -33055,7 +33055,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_retrieval_graph_graphretrieverbase_init",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33067,7 +33067,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_retrieval_graph_nodes_from_chunk_ids",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33079,7 +33079,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_retrieval_vector",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33091,7 +33091,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_retrieval_vector_search",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33102,7 +33102,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "groundly_retrieval_vector_vectorretriever",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -33114,7 +33114,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_retrieval_vector_vectorretriever_init",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33126,7 +33126,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_agents_test_decks",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33137,7 +33137,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "tests_agents_test_decks_alignedembedder",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -33149,7 +33149,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_agents_test_decks_test_accepted_stored_with_source_rejected_stores_nothing",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33161,7 +33161,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_agents_test_decks_test_thick_loop_retries_rejected_cards_with_reason_fed_back",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33173,7 +33173,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_agents_test_verifier",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33184,7 +33184,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "tests_agents_test_verifier_alignedembedder",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -33196,7 +33196,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_agents_test_verifier_store",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33208,7 +33208,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_cli_test_cli_decks",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33220,7 +33220,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_cli_test_cli_decks_seed_deck",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33232,7 +33232,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_conftest",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33245,7 +33245,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_conftest_retrievable_subject",
-      "target": "groundly_core_store_sqlitesubjectstore"
+      "target": "groundly_core_store_SubjectStore"
     },
     {
       "relation": "uses",
@@ -33255,7 +33255,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "tests_conftest_stubchat",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -33266,7 +33266,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "tests_conftest_stubembedder",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -33277,7 +33277,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "tests_conftest_stubextractor",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -33289,7 +33289,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_anki",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33301,7 +33301,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_anki_seed_deck",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33314,7 +33314,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_anki_test_hostile_deck_names_rejected_at_creation",
-      "target": "groundly_core_store_sqlitesubjectstore"
+      "target": "groundly_core_store_SubjectStore"
     },
     {
       "relation": "imports",
@@ -33325,7 +33325,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_bundle",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33337,7 +33337,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_bundle_seed",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33349,7 +33349,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_bundle_seed_graph",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33361,7 +33361,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33373,7 +33373,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_decks",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33385,7 +33385,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_decks_test_add_verified_card_bogus_chunk_id_rolls_back_everything",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33397,7 +33397,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_decks_test_add_verified_card_stores_question_and_citations",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33409,7 +33409,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_decks_test_deck_cards_shape_and_order",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33421,7 +33421,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_decks_test_deck_cards_unknown_deck_returns_empty",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33433,7 +33433,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_decks_test_get_or_create_deck_is_idempotent",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33445,7 +33445,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_decks_test_list_decks_reports_name_and_card_count",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33457,7 +33457,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_decks_test_remove_material_deletes_cards_stripped_of_all_citations",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33469,7 +33469,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_decks_test_remove_material_keeps_cards_still_cited_elsewhere",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33481,7 +33481,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_test_add_indexed_streams_vectors_from_lazy_iterable",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33493,7 +33493,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_test_all_chunks_empty_store_returns_empty",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33505,7 +33505,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_test_all_chunks_returns_every_chunk_joined_with_material",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33517,7 +33517,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_test_bm25_search_finds_repeated_term_first",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33529,7 +33529,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_test_bm25_search_is_safe_against_fts5_syntax_injection",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33541,7 +33541,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_test_chunk_details_empty_list_returns_empty",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33553,7 +33553,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_test_chunk_details_joins_material",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33565,7 +33565,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_test_dense_search_orders_by_distance",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33577,7 +33577,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_test_find_materials_by_filename_or_sha_prefix",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33589,7 +33589,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_test_page_chunks_joins_material_in_chunk_id_order",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33601,7 +33601,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_test_page_chunks_no_match_returns_empty",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33613,7 +33613,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_test_remove_material_leaves_no_rows_in_any_channel",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33625,7 +33625,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_test_removed_material_vanishes_from_all_search_channels",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33637,7 +33637,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_core_test_store_test_sparse_search_sums_weighted_overlap",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33649,7 +33649,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_ingestion_test_ingestion_graph",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33661,7 +33661,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_ingestion_test_ingestion_graph_add_material",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33672,7 +33672,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "tests_ingestion_test_ingestion_graph_chatresultstub",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -33684,7 +33684,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_ingestion_test_ingestion_graph_store",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33696,7 +33696,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_ingestion_test_pipeline_slow",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33708,7 +33708,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_llm_test_llm_embeddings",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33720,7 +33720,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_llm_test_llm_embeddings_test_shared_embedder_is_a_process_singleton_used_by_vector_retriever_default",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33732,7 +33732,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_llm_test_slow_models",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33744,7 +33744,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_llm_test_slow_models_test_cross_lingual_romanian_query_matches_english_deadlock_chunk",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33756,7 +33756,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_retrival_test_retrieval_vector",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33767,7 +33767,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "tests_retrival_test_retrieval_vector_queryembedder",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -33778,7 +33778,7 @@
       "weight": 0.8,
       "_origin": "ast",
       "source": "tests_retrival_test_retrieval_vector_stubreranker",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 0.5
     },
     {
@@ -33790,7 +33790,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_retrival_test_retrieval_vector_test_vector_retriever_empty_store_returns_no_nodes",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33802,7 +33802,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_retrival_test_retrieval_vector_test_vector_retriever_fuses_channels_and_ranks_relevant_chunk_first",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33814,7 +33814,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_retrival_test_retrieval_vector_test_vector_retriever_node_metadata_and_text",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33826,7 +33826,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_retrival_test_retrieval_vector_test_vector_retriever_path_without_rerank",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33838,7 +33838,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_retrival_test_retrieval_vector_test_vector_retriever_reranker_skipped_when_rerank_false",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33850,7 +33850,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_retrival_test_retrieval_vector_test_vector_retriever_reranks_when_enabled",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33862,7 +33862,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_retrival_test_retrieval_vector_test_vector_retriever_respects_context_k",
-      "target": "groundly_core_store_sqlitesubjectstore",
+      "target": "groundly_core_store_SubjectStore",
       "confidence_score": 1.0
     },
     {
@@ -33873,8 +33873,8 @@
       "source_location": "L233",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_add_extraction_failed",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "source": "groundly_core_store_SubjectStore_add_extraction_failed",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -33885,8 +33885,8 @@
       "source_location": "L359",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_add_indexed",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "source": "groundly_core_store_SubjectStore_add_indexed",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -33897,8 +33897,8 @@
       "source_location": "L412",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_add_verified_card",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "source": "groundly_core_store_SubjectStore_add_verified_card",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -33909,8 +33909,8 @@
       "source_location": "L319",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_all_chunks",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "source": "groundly_core_store_SubjectStore_all_chunks",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -33921,8 +33921,8 @@
       "source_location": "L287",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_bm25_search",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "source": "groundly_core_store_SubjectStore_bm25_search",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -33933,8 +33933,8 @@
       "source_location": "L302",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_chunk_details",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "source": "groundly_core_store_SubjectStore_chunk_details",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -33945,8 +33945,8 @@
       "source_location": "L430",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_deck_cards",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "source": "groundly_core_store_SubjectStore_deck_cards",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -33957,8 +33957,8 @@
       "source_location": "L247",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_dense_search",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "source": "groundly_core_store_SubjectStore_dense_search",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -33969,8 +33969,8 @@
       "source_location": "L194",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_find_materials",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "source": "groundly_core_store_SubjectStore_find_materials",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -33981,8 +33981,8 @@
       "source_location": "L392",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_get_or_create_deck",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "source": "groundly_core_store_SubjectStore_get_or_create_deck",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -33993,8 +33993,8 @@
       "source_location": "L183",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_hash_status",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "source": "groundly_core_store_SubjectStore_hash_status",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -34005,8 +34005,8 @@
       "source_location": "L450",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_list_decks",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "source": "groundly_core_store_SubjectStore_list_decks",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -34017,8 +34017,8 @@
       "source_location": "L168",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_list_materials",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "source": "groundly_core_store_SubjectStore_list_materials",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -34029,8 +34029,8 @@
       "source_location": "L334",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_page_chunks",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "source": "groundly_core_store_SubjectStore_page_chunks",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -34041,8 +34041,8 @@
       "source_location": "L208",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_remove_material",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "source": "groundly_core_store_SubjectStore_remove_material",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -34053,8 +34053,8 @@
       "source_location": "L261",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_sparse_search",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "source": "groundly_core_store_SubjectStore_sparse_search",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -34066,7 +34066,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_retrival_test_retrieval_vector",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -34078,7 +34078,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "tests_retrival_test_retrieval_vector_test_search_returns_nodes_and_records_trace",
-      "target": "groundly_core_store_sqlitesubjectstore_connect",
+      "target": "groundly_core_store_SubjectStore_connect",
       "confidence_score": 1.0
     },
     {
@@ -34089,7 +34089,7 @@
       "source_location": "L167",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_list_materials",
+      "source": "groundly_core_store_SubjectStore_list_materials",
       "target": "row",
       "confidence_score": 1.0
     },
@@ -34101,7 +34101,7 @@
       "source_location": "L316",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_all_chunks",
+      "source": "groundly_core_store_SubjectStore_all_chunks",
       "target": "row",
       "confidence_score": 1.0
     },
@@ -34113,7 +34113,7 @@
       "source_location": "L298",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_chunk_details",
+      "source": "groundly_core_store_SubjectStore_chunk_details",
       "target": "row",
       "confidence_score": 1.0
     },
@@ -34125,7 +34125,7 @@
       "source_location": "L429",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_deck_cards",
+      "source": "groundly_core_store_SubjectStore_deck_cards",
       "target": "row",
       "confidence_score": 1.0
     },
@@ -34137,7 +34137,7 @@
       "source_location": "L192",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_find_materials",
+      "source": "groundly_core_store_SubjectStore_find_materials",
       "target": "row",
       "confidence_score": 1.0
     },
@@ -34149,7 +34149,7 @@
       "source_location": "L449",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_list_decks",
+      "source": "groundly_core_store_SubjectStore_list_decks",
       "target": "row",
       "confidence_score": 1.0
     },
@@ -34161,7 +34161,7 @@
       "source_location": "L331",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "groundly_core_store_sqlitesubjectstore_page_chunks",
+      "source": "groundly_core_store_SubjectStore_page_chunks",
       "target": "row",
       "confidence_score": 1.0
     },
@@ -34173,7 +34173,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_core_store_rationale_182",
-      "target": "groundly_core_store_sqlitesubjectstore_hash_status",
+      "target": "groundly_core_store_SubjectStore_hash_status",
       "confidence_score": 1.0
     },
     {
@@ -34184,7 +34184,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_core_store_rationale_193",
-      "target": "groundly_core_store_sqlitesubjectstore_find_materials",
+      "target": "groundly_core_store_SubjectStore_find_materials",
       "confidence_score": 1.0
     },
     {
@@ -34195,7 +34195,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_core_store_rationale_206",
-      "target": "groundly_core_store_sqlitesubjectstore_remove_material",
+      "target": "groundly_core_store_SubjectStore_remove_material",
       "confidence_score": 1.0
     },
     {
@@ -34206,7 +34206,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_core_store_rationale_245",
-      "target": "groundly_core_store_sqlitesubjectstore_dense_search",
+      "target": "groundly_core_store_SubjectStore_dense_search",
       "confidence_score": 1.0
     },
     {
@@ -34217,7 +34217,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_core_store_rationale_258",
-      "target": "groundly_core_store_sqlitesubjectstore_sparse_search",
+      "target": "groundly_core_store_SubjectStore_sparse_search",
       "confidence_score": 1.0
     },
     {
@@ -34228,7 +34228,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_core_store_rationale_280",
-      "target": "groundly_core_store_sqlitesubjectstore_bm25_search",
+      "target": "groundly_core_store_SubjectStore_bm25_search",
       "confidence_score": 1.0
     },
     {
@@ -34239,7 +34239,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_core_store_rationale_299",
-      "target": "groundly_core_store_sqlitesubjectstore_chunk_details",
+      "target": "groundly_core_store_SubjectStore_chunk_details",
       "confidence_score": 1.0
     },
     {
@@ -34250,7 +34250,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_core_store_rationale_317",
-      "target": "groundly_core_store_sqlitesubjectstore_all_chunks",
+      "target": "groundly_core_store_SubjectStore_all_chunks",
       "confidence_score": 1.0
     },
     {
@@ -34261,7 +34261,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_core_store_rationale_332",
-      "target": "groundly_core_store_sqlitesubjectstore_page_chunks",
+      "target": "groundly_core_store_SubjectStore_page_chunks",
       "confidence_score": 1.0
     },
     {
@@ -34272,7 +34272,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_core_store_rationale_356",
-      "target": "groundly_core_store_sqlitesubjectstore_add_indexed",
+      "target": "groundly_core_store_SubjectStore_add_indexed",
       "confidence_score": 1.0
     },
     {
@@ -34283,7 +34283,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "groundly_core_store_rationale_409",
-      "target": "groundly_core_store_sqlitesubjectstore_add_verified_card",
+      "target": "groundly_core_store_SubjectStore_add_verified_card",
       "confidence_score": 1.0
     },
     {

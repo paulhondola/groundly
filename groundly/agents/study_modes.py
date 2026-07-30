@@ -13,7 +13,7 @@ from groundly.agents.ask import AskResult
 from groundly.agents.citations import Citation, resolve_citations
 from groundly.agents.prompts import REFUSAL, assemble, assemble_overview
 from groundly.core.progress import connect_progress, record_trace
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
 from groundly.llm.chat import complete
 from groundly.llm.config import require_provider
@@ -29,7 +29,7 @@ def drill_down(subject: str, entity: str) -> AskResult:
     require_provider("chat")  # fail before any model load; nothing started, nothing to trace
 
     subj = Subject(subject)
-    store = SQLiteSubjectStore(subj.store_db_path)
+    store = SubjectStore(subj.store_db_path)
     progress_conn = connect_progress(subj.progress_db_path)
 
     path: list[str] = []
@@ -97,7 +97,7 @@ def overview(subject: str, topic: str) -> OverviewResult:
     require_provider("chat")  # fail before any model load; nothing started, nothing to trace
 
     subj = Subject(subject)
-    store = SQLiteSubjectStore(subj.store_db_path)
+    store = SubjectStore(subj.store_db_path)
     progress_conn = connect_progress(subj.progress_db_path)
 
     path: list[str] = []

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import groundly.llm.embeddings as embeddings_mod
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SubjectStore
 from groundly.llm.embeddings import EMBEDDING_MODEL, BgeM3Embedder, ModelDownloadError
 
 
@@ -44,6 +44,6 @@ def test_shared_embedder_is_a_process_singleton_used_by_vector_retriever_default
     second = embeddings_mod.shared_embedder()
     assert first is second is fake_instance
 
-    store = SQLiteSubjectStore(Path("/nonexistent/store.db"))
+    store = SubjectStore(Path("/nonexistent/store.db"))
     retriever = VectorRetriever(store, rerank=False, context_k=1)
     assert retriever.embedder is fake_instance

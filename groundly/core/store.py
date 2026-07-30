@@ -154,7 +154,7 @@ def check_deck_name(name: str) -> None:
         )
 
 
-class SQLiteSubjectStore:
+class SubjectStore:
     """A subject's store.db: connection lifecycle + all reads/writes for materials,
     chunks, vectors and sparse terms."""
 

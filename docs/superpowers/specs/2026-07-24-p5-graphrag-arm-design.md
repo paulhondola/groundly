@@ -79,7 +79,7 @@ installed `graphrag==3.1.0` source.
    zero interchange-compatibility effect since `bundle.py`'s `pin_matches`
    only compares the `Embedding` block.
 
-2. **`groundly/core/store.py`** — add `SQLiteSubjectStore.all_chunks()`
+2. **`groundly/core/store.py`** — add `SubjectStore.all_chunks()`
    (id, text, filename, page, heading_path) to feed the batch builder.
    Corpus hash itself is computed from `list_materials()`'s existing sha256
    column, no new method needed for that.

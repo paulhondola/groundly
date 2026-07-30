@@ -1,4 +1,4 @@
-"""UC-30 export/import. Seeds store.db directly via SQLiteSubjectStore.add_indexed +
+"""UC-30 export/import. Seeds store.db directly via SubjectStore.add_indexed +
 sync_counts (no pipeline); real SQLite; StubEmbedder injected for the re-embed path."""
 
 import json
@@ -13,7 +13,7 @@ from groundly.core import bundle, store
 from groundly.core.manifest import EMBEDDING_DIM, HF_REVISION, Graphrag, Manifest, sync_counts
 from groundly.ingestion.graph import corpus_hash as _real_corpus_hash
 from groundly.core.paths import groundly_home, subject_dir
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
 from groundly.ingestion.extract import ChunkData
 from tests.conftest import init_subject
@@ -36,7 +36,7 @@ def _seed(name, filename="lec.pdf", content=b"lecture bytes", sha256="a" * 64, n
     ]
     dense = [[0.1] * EMBEDDING_DIM for _ in chunks]
     sparse = [{1: 0.5} for _ in chunks]
-    SQLiteSubjectStore(sdir / "store.db").add_indexed(
+    SubjectStore(sdir / "store.db").add_indexed(
         filename, sha256, 3, chunks, zip(dense, sparse)
     )
     conn = store.connect(sdir / "store.db")
@@ -78,7 +78,7 @@ def _seed_graph(name, matches_corpus=True):
     graph_dir.mkdir(exist_ok=True)
     (graph_dir / "entities.parquet").write_bytes(b"parquet data")
     manifest = Manifest.load(sdir / "manifest.json")
-    store_obj = SQLiteSubjectStore(sdir / "store.db")
+    store_obj = SubjectStore(sdir / "store.db")
     manifest.graphrag = Graphrag(
         version="3.1.0",
         extraction_model="m",

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from groundly.core.manifest import sync_counts
 from groundly.core.subject import Subject
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SubjectStore
 from groundly.ingestion.extract import ExtractionFailure, ModelUnavailable, SubprocessExtractor
 from groundly.ingestion.formats import SUPPORTED_SUFFIXES
 from groundly.ingestion.results import FileResult, OnEvent, Status
@@ -114,14 +114,14 @@ class IngestionPipeline:
     def __init__(
         self,
         subject: Subject,
-        store: SQLiteSubjectStore | None = None,
+        store: SubjectStore | None = None,
         extractor: SubprocessExtractor | None = None,
         embedder: Embedder | None = None,
         on_event: OnEvent | None = None,
         on_discovered: Callable[[int], None] | None = None,
     ) -> None:
         self.subject = subject
-        self.store = store or SQLiteSubjectStore(subject.store_db_path)
+        self.store = store or SubjectStore(subject.store_db_path)
         self.extractor = extractor or _default_extractor()
         self.embedder = embedder or BgeM3Embedder()
         self.on_event = on_event or (lambda path, stage: None)

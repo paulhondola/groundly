@@ -153,13 +153,13 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool, debug: bool = False) -> 
     (re)build. Auto-rebuilds a stale graph unconditionally; a first build only
     happens opt-in via --graph. Zero-key `index` behavior is unchanged when
     neither applies."""
-    from groundly.core.store import SQLiteSubjectStore
+    from groundly.core.store import SubjectStore
     from groundly.ingestion.graph import GraphBuildError, build_graph, graph_is_stale
     from groundly.llm.config import ProviderNotConfiguredError
     from groundly.llm.graph_cost import estimate_cost
     from groundly.llm.graphrag_adapter import ExtractionPromptError
 
-    store_obj = SQLiteSubjectStore(subj.store_db_path)
+    store_obj = SubjectStore(subj.store_db_path)
     # The manifest, not the directory: a refused or Ctrl-C'd build deliberately leaves
     # graph/ behind so the retry keeps graphrag's paid-for cache (decision 21), and
     # reading that as "there is a graph here" turned every later plain `groundly index`

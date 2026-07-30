@@ -1,5 +1,5 @@
 """store.db v2: decks/questions/question_citations, the v1 -> v2 migration, and the
-SQLiteSubjectStore deck/card methods (P6 slice 1 design doc)."""
+SubjectStore deck/card methods (P6 slice 1 design doc)."""
 
 import sqlite3
 
@@ -8,7 +8,7 @@ import sqlite_vec
 
 from groundly.core import store
 from groundly.core.manifest import EMBEDDING_DIM
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SubjectStore
 
 
 def _add_material_with_chunk(conn, filename="lec.pdf", sha="a" * 64):
@@ -72,7 +72,7 @@ def test_add_verified_card_stores_question_and_citations(tmp_path):
     _mid, cid = _add_material_with_chunk(conn)
     conn.close()
 
-    store_obj = SQLiteSubjectStore(path)
+    store_obj = SubjectStore(path)
     deck_id = store_obj.get_or_create_deck("Midterm")
     qid = store_obj.add_verified_card(deck_id, "front?", "back.", [cid], "host")
 
@@ -94,7 +94,7 @@ def test_add_verified_card_stores_question_and_citations(tmp_path):
 def test_add_verified_card_bogus_chunk_id_rolls_back_everything(tmp_path):
     path = tmp_path / "store.db"
     store.create_store(path)
-    store_obj = SQLiteSubjectStore(path)
+    store_obj = SubjectStore(path)
     deck_id = store_obj.get_or_create_deck("Midterm")
 
     with pytest.raises(sqlite3.IntegrityError):
@@ -111,7 +111,7 @@ def test_add_verified_card_bogus_chunk_id_rolls_back_everything(tmp_path):
 def test_get_or_create_deck_is_idempotent(tmp_path):
     path = tmp_path / "store.db"
     store.create_store(path)
-    store_obj = SQLiteSubjectStore(path)
+    store_obj = SubjectStore(path)
     id1 = store_obj.get_or_create_deck("Midterm")
     id2 = store_obj.get_or_create_deck("Midterm")
     assert id1 == id2
@@ -127,7 +127,7 @@ def test_remove_material_deletes_cards_stripped_of_all_citations(tmp_path):
     mid, cid = _add_material_with_chunk(conn)
     conn.close()
 
-    store_obj = SQLiteSubjectStore(path)
+    store_obj = SubjectStore(path)
     deck_id = store_obj.get_or_create_deck("Midterm")
     qid = store_obj.add_verified_card(deck_id, "front?", "back.", [cid], "host")
 
@@ -150,7 +150,7 @@ def test_remove_material_keeps_cards_still_cited_elsewhere(tmp_path):
     mid2, cid2 = _add_material_with_chunk(conn, "lec2.pdf", "b" * 64)
     conn.close()
 
-    store_obj = SQLiteSubjectStore(path)
+    store_obj = SubjectStore(path)
     deck_id = store_obj.get_or_create_deck("Midterm")
     qid = store_obj.add_verified_card(deck_id, "front?", "back.", [cid1, cid2], "host")
 
@@ -175,7 +175,7 @@ def test_deck_cards_shape_and_order(tmp_path):
     _mid, cid = _add_material_with_chunk(conn)
     conn.close()
 
-    store_obj = SQLiteSubjectStore(path)
+    store_obj = SubjectStore(path)
     deck_id = store_obj.get_or_create_deck("Midterm")
     qid = store_obj.add_verified_card(deck_id, "front?", "back.", [cid], "host")
 
@@ -194,7 +194,7 @@ def test_deck_cards_shape_and_order(tmp_path):
 def test_deck_cards_unknown_deck_returns_empty(tmp_path):
     path = tmp_path / "store.db"
     store.create_store(path)
-    store_obj = SQLiteSubjectStore(path)
+    store_obj = SubjectStore(path)
     assert store_obj.deck_cards("Nope") == []
 
 
@@ -205,7 +205,7 @@ def test_list_decks_reports_name_and_card_count(tmp_path):
     _mid, cid = _add_material_with_chunk(conn)
     conn.close()
 
-    store_obj = SQLiteSubjectStore(path)
+    store_obj = SubjectStore(path)
     deck_id = store_obj.get_or_create_deck("Midterm")
     store_obj.add_verified_card(deck_id, "f1", "b1", [cid], "host")
     store_obj.add_verified_card(deck_id, "f2", "b2", [cid], "host")

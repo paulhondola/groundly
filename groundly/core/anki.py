@@ -6,7 +6,7 @@ guids) so a re-export updates the deck in Anki instead of duplicating it."""
 import hashlib
 from pathlib import Path
 
-from groundly.core.store import SQLiteSubjectStore, check_deck_name
+from groundly.core.store import SubjectStore, check_deck_name
 from groundly.core.subject import Subject
 
 _MODEL_ID = 1607392319  # random-once constant, genanki's documented convention
@@ -32,7 +32,7 @@ def export_deck(subject_name: str, deck_name: str, out_path: Path | None = None)
 
     check_deck_name(deck_name)  # before any path is built — imported stores are untrusted
     subj = Subject(subject_name)
-    store = SQLiteSubjectStore(subj.store_db_path)
+    store = SubjectStore(subj.store_db_path)
     rows = store.deck_cards(deck_name)
     if not rows:
         raise ValueError(f"deck {deck_name!r} has no cards — list_decks shows what exists")

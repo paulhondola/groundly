@@ -4,13 +4,13 @@ from typer.testing import CliRunner
 
 from groundly.cli import app
 from groundly.core.paths import subject_dir
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SubjectStore
 
 runner = CliRunner()
 
 
 def _seed_deck(subject_name: str) -> None:
-    store = SQLiteSubjectStore(subject_dir(subject_name) / "store.db")
+    store = SubjectStore(subject_dir(subject_name) / "store.db")
     deck_id = store.get_or_create_deck("OS Deck")
     store.add_verified_card(deck_id, "front", "back", [1], "host")
 

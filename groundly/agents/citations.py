@@ -8,7 +8,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SubjectStore
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class NoCitationsError(Exception):
 
 
 def resolve_citations(
-    text: str, retrieved_chunk_ids: list[int], store: SQLiteSubjectStore
+    text: str, retrieved_chunk_ids: list[int], store: SubjectStore
 ) -> list[Citation]:
     cited_ids = {int(m) for m in _CITATION_RE.findall(text)}
     resolvable_ids = [

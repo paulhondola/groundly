@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from groundly.agents.prompts import assemble_cards, assemble_cards_retry
 from groundly.agents.verifier import CardCandidate, Rejection, verify_card
 from groundly.core.progress import connect_progress, record_trace, record_verification
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
 from groundly.retrieval.vector import VectorRetriever
 
@@ -40,7 +40,7 @@ def submit_cards(
     """Verify every card and store the ones that pass into `deck`. Zero-key: the
     verifier touches only local bge-m3 (lazily), never a provider."""
     subj = Subject(subject)
-    store = SQLiteSubjectStore(subj.store_db_path)
+    store = SubjectStore(subj.store_db_path)
     deck_id = store.get_or_create_deck(deck)
     progress_conn = connect_progress(subj.progress_db_path)
 
@@ -138,7 +138,7 @@ def generate_deck_job(
         from groundly.llm.chat import complete as chat  # noqa: PLW0127 — lazy, tests inject
 
     subj = Subject(subject)
-    store = SQLiteSubjectStore(subj.store_db_path)
+    store = SubjectStore(subj.store_db_path)
 
     start = time.monotonic()
     tokens_total = 0

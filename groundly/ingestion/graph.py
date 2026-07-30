@@ -37,7 +37,7 @@ from graphrag_vectors import VectorStoreConfig
 from groundly.core.config import load_settings
 from groundly.core.manifest import EMBEDDING_DIM, Graphrag
 from groundly.core.progress import connect_progress, record_trace
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
 from groundly.llm.config import require_provider
 from groundly.llm.graph_cost import metered_usage, reset_metered_usage
@@ -307,7 +307,7 @@ def _extraction_prompt() -> Iterator[tuple[Path, str]]:
         raise GraphBuildError(str(exc)) from exc
 
 
-def corpus_hash(store: SQLiteSubjectStore) -> str:
+def corpus_hash(store: SubjectStore) -> str:
     """sha256 over the subject's indexed materials' sha256s, sorted — stable across
     re-runs of the same corpus, changes iff a material is added/removed/re-extracted."""
     sha256s = sorted(row["sha256"] for row in store.list_materials() if row["status"] == "indexed")
@@ -321,7 +321,7 @@ def current_extraction_fingerprint() -> str:
         return extraction_fingerprint(text, extraction_entity_types())
 
 
-def graph_is_stale(subj: Subject, store: SQLiteSubjectStore) -> str | None:
+def graph_is_stale(subj: Subject, store: SubjectStore) -> str | None:
     """Why the recorded graph no longer describes this subject, or None if it still does.
 
     A reason string rather than a bool because there are now three causes and the CLI
@@ -508,7 +508,7 @@ def _verify_build_output(
 
 def build_graph(
     subj: Subject,
-    store: SQLiteSubjectStore,
+    store: SubjectStore,
     *,
     estimated_tokens: int = 0,
     estimated_cost_usd: float | None = None,

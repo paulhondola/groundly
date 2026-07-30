@@ -68,7 +68,7 @@ ruff clean; lazy-import guard test still passes.
 
 ## What I tried and could not break
 - fastmcp 3.4.4 accepts `run(transport="http", host=..., port=...)` exactly as coded — kwargs flow through `run_async` → `run_http_async`; no signature mismatch.
-- SQLite concurrency under multiple HTTP clients: every connection path (`store.connect`, `connect_progress`, `SQLiteSubjectStore.connect`) sets `journal_mode=WAL` + `busy_timeout=5000`; MCP tools are read-only, so no writer contention. Fine.
+- SQLite concurrency under multiple HTTP clients: every connection path (`store.connect`, `connect_progress`, `SubjectStore.connect`) sets `journal_mode=WAL` + `busy_timeout=5000`; MCP tools are read-only, so no writer contention. Fine.
 - Lazy loading: `serve.py` top-level imports are only `typer` + `groundly.cli.app`; service imports stay inside the tool bodies; `test_importing_server_never_pulls_in_heavy_ml_deps` passes.
 - No `--host` flag is exposed, so the "refuse non-loopback host" invariant can't be violated via CLI (the gap is F1, not a bad host value).
 - Test thread/socket lifecycle: ephemeral port + `server.started` poll + daemon thread + bounded join — no port race, no readiness race, no leaked listener across the session.

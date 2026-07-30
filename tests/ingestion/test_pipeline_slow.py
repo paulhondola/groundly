@@ -10,7 +10,7 @@ import pytest
 
 from groundly.core.manifest import Manifest
 from groundly.core.paths import subject_dir
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SubjectStore
 from groundly.ingestion import pipeline
 from groundly.ingestion.extract import SubprocessExtractor
 
@@ -184,7 +184,7 @@ def test_concurrent_index_race_reports_duplicate_not_crash(
     """Another process indexing the same content between our hash check and the
     write must surface as a skip, not an unhandled IntegrityError."""
     pipeline.index_paths(subject, [course / "notes.txt"], embedder=stub_embedder())
-    monkeypatch.setattr(SQLiteSubjectStore, "hash_status", lambda self: {})  # stale snapshot
+    monkeypatch.setattr(SubjectStore, "hash_status", lambda self: {})  # stale snapshot
     results = pipeline.index_paths(subject, [course / "notes.txt"], embedder=stub_embedder())
     assert results[0].status == "skipped_duplicate"
     assert "concurrent" in results[0].detail

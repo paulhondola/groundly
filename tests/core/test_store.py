@@ -5,7 +5,7 @@ import sqlite_vec
 
 from groundly.core import store
 from groundly.core.manifest import EMBEDDING_DIM, Manifest, sync_counts
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SubjectStore
 
 
 @pytest.fixture
@@ -73,7 +73,7 @@ def test_fts_search_finds_chunk_text(db):
 
 def test_remove_material_leaves_no_rows_in_any_channel(db, tmp_path):
     mid = _add_material(db)
-    SQLiteSubjectStore(tmp_path / "store.db").remove_material(mid)
+    SubjectStore(tmp_path / "store.db").remove_material(mid)
     for table in ["materials", "chunks", "sparse_terms", "vectors"]:
         assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0, table
     assert not db.execute(
@@ -86,7 +86,7 @@ def test_add_indexed_streams_vectors_from_lazy_iterable(db, tmp_path):
     so a document's vectors need never be materialized as a list at once (findings 3+4+1)."""
     from groundly.ingestion.extract import ChunkData
 
-    store_obj = SQLiteSubjectStore(tmp_path / "store.db")
+    store_obj = SubjectStore(tmp_path / "store.db")
     chunks = [
         ChunkData("first chunk", "Intro > A", 1, 5),
         ChunkData("second chunk", "Intro > B", 2, 5),
@@ -111,7 +111,7 @@ def test_add_indexed_streams_vectors_from_lazy_iterable(db, tmp_path):
 def test_find_materials_by_filename_or_sha_prefix(db, tmp_path):
     _add_material(db, "lec1.pdf", "a" * 64)
     _add_material(db, "lec2.pdf", "b" * 64)
-    store_obj = SQLiteSubjectStore(tmp_path / "store.db")
+    store_obj = SubjectStore(tmp_path / "store.db")
     assert len(store_obj.find_materials("lec1.pdf")) == 1
     assert len(store_obj.find_materials("bbbb")) == 1
     assert len(store_obj.find_materials("nope")) == 0
@@ -188,7 +188,7 @@ def ranked(db):
 
 
 def test_dense_search_orders_by_distance(db, tmp_path, ranked):
-    store_obj = SQLiteSubjectStore(tmp_path / "store.db")
+    store_obj = SubjectStore(tmp_path / "store.db")
     query_vec = [1.0] + [0.0] * (EMBEDDING_DIM - 1)
     ids = store_obj.dense_search(query_vec, k=3)
     assert ids[0] == ranked["near"]
@@ -196,21 +196,21 @@ def test_dense_search_orders_by_distance(db, tmp_path, ranked):
 
 
 def test_sparse_search_sums_weighted_overlap(db, tmp_path, ranked):
-    store_obj = SQLiteSubjectStore(tmp_path / "store.db")
+    store_obj = SubjectStore(tmp_path / "store.db")
     ids = store_obj.sparse_search({1: 1.0}, k=3)
     assert ids[0] == ranked["near"]  # weight 0.9 beats mid's 0.4
     assert ranked["far"] not in ids  # no overlap on token 1
 
 
 def test_bm25_search_finds_repeated_term_first(db, tmp_path, ranked):
-    store_obj = SQLiteSubjectStore(tmp_path / "store.db")
+    store_obj = SubjectStore(tmp_path / "store.db")
     ids = store_obj.bm25_search("deadlock", k=3)
     assert ids[0] == ranked["mid"]  # "deadlock" appears 3x
     assert ranked["far"] not in ids
 
 
 def test_bm25_search_is_safe_against_fts5_syntax_injection(db, tmp_path, ranked):
-    store_obj = SQLiteSubjectStore(tmp_path / "store.db")
+    store_obj = SubjectStore(tmp_path / "store.db")
     # a raw FTS5 MATCH string with this content raises "unterminated string" (verified
     # against sqlite3 directly); the query-safe path must not propagate that.
     ids = store_obj.bm25_search('"; DROP TABLE chunks_fts; --', k=3)
@@ -219,7 +219,7 @@ def test_bm25_search_is_safe_against_fts5_syntax_injection(db, tmp_path, ranked)
 
 
 def test_chunk_details_joins_material(db, tmp_path, ranked):
-    store_obj = SQLiteSubjectStore(tmp_path / "store.db")
+    store_obj = SubjectStore(tmp_path / "store.db")
     rows = store_obj.chunk_details([ranked["near"]])
     assert len(rows) == 1
     assert rows[0]["filename"] == "lec.pdf"
@@ -229,12 +229,12 @@ def test_chunk_details_joins_material(db, tmp_path, ranked):
 
 
 def test_chunk_details_empty_list_returns_empty(db, tmp_path, ranked):
-    store_obj = SQLiteSubjectStore(tmp_path / "store.db")
+    store_obj = SubjectStore(tmp_path / "store.db")
     assert store_obj.chunk_details([]) == []
 
 
 def test_all_chunks_returns_every_chunk_joined_with_material(db, tmp_path, ranked):
-    store_obj = SQLiteSubjectStore(tmp_path / "store.db")
+    store_obj = SubjectStore(tmp_path / "store.db")
     rows = store_obj.all_chunks()
     assert {r["chunk_id"] for r in rows} == {ranked["near"], ranked["far"], ranked["mid"]}
     by_id = {r["chunk_id"]: r for r in rows}
@@ -246,12 +246,12 @@ def test_all_chunks_returns_every_chunk_joined_with_material(db, tmp_path, ranke
 
 def test_all_chunks_empty_store_returns_empty(tmp_path):
     store.create_store(tmp_path / "store.db")
-    store_obj = SQLiteSubjectStore(tmp_path / "store.db")
+    store_obj = SubjectStore(tmp_path / "store.db")
     assert store_obj.all_chunks() == []
 
 
 def test_page_chunks_joins_material_in_chunk_id_order(db, tmp_path, ranked):
-    store_obj = SQLiteSubjectStore(tmp_path / "store.db")
+    store_obj = SubjectStore(tmp_path / "store.db")
     rows = store_obj.page_chunks("lec.pdf", 1)
     assert [r["chunk_id"] for r in rows] == [ranked["near"]]
     assert rows[0]["filename"] == "lec.pdf"
@@ -260,13 +260,13 @@ def test_page_chunks_joins_material_in_chunk_id_order(db, tmp_path, ranked):
 
 
 def test_page_chunks_no_match_returns_empty(db, tmp_path, ranked):
-    store_obj = SQLiteSubjectStore(tmp_path / "store.db")
+    store_obj = SubjectStore(tmp_path / "store.db")
     assert store_obj.page_chunks("nope.pdf", 1) == []
     assert store_obj.page_chunks("lec.pdf", 99) == []
 
 
 def test_removed_material_vanishes_from_all_search_channels(db, tmp_path, ranked):
-    store_obj = SQLiteSubjectStore(tmp_path / "store.db")
+    store_obj = SubjectStore(tmp_path / "store.db")
     store_obj.remove_material(ranked["material_id"])
     query_vec = [1.0] + [0.0] * (EMBEDDING_DIM - 1)
     assert store_obj.dense_search(query_vec, k=10) == []

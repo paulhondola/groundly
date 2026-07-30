@@ -11,7 +11,7 @@ code-execution checks arrive with UC-10/13, added as further checks inside
 
 from dataclasses import dataclass
 
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SubjectStore
 from groundly.retrieval.vector import VectorRetriever
 
 REJECTION_REASONS = (
@@ -38,7 +38,7 @@ class Rejection:
 
 
 def verify_card(
-    card: CardCandidate, store: SQLiteSubjectStore, *, embedder=None
+    card: CardCandidate, store: SubjectStore, *, embedder=None
 ) -> Rejection | None:
     """Fail-fast, cheapest check first. Returns None iff the card passes every
     check implemented so far."""

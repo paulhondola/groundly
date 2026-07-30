@@ -10,11 +10,11 @@ import pytest
 
 from groundly.core.anki import export_deck
 from groundly.core.paths import subject_dir
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SubjectStore
 
 
 def _seed_deck(subject_name: str) -> None:
-    store = SQLiteSubjectStore(subject_dir(subject_name) / "store.db")
+    store = SubjectStore(subject_dir(subject_name) / "store.db")
     deck_id = store.get_or_create_deck("OS Deck")
     store.add_verified_card(deck_id, "What does deadlock need?", "mutual exclusion", [1, 3], "host")
     store.add_verified_card(deck_id, "What synchronizes threads?", "semaphores", [2], "host")
@@ -97,6 +97,6 @@ def test_hostile_deck_names_rejected_before_any_path_use(retrievable_subject, ho
 
 @pytest.mark.parametrize("hostile", ["../escape", "/tmp/abs", "a/b", ""])
 def test_hostile_deck_names_rejected_at_creation(retrievable_subject, hostile):
-    store = SQLiteSubjectStore(subject_dir(retrievable_subject) / "store.db")
+    store = SubjectStore(subject_dir(retrievable_subject) / "store.db")
     with pytest.raises(ValueError, match="invalid deck name"):
         store.get_or_create_deck(hostile)

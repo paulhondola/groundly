@@ -19,7 +19,7 @@ from groundly.agents.citations import Citation, NoCitationsError, resolve_citati
 from groundly.agents.prompts import REFUSAL, assemble
 from groundly.agents.router import classify
 from groundly.core.progress import connect_progress, record_trace
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
 from groundly.llm.chat import complete
 from groundly.llm.config import require_provider
@@ -47,7 +47,7 @@ def ask(
     require_provider("chat")  # fail before any model load; nothing started, nothing to trace
 
     subj = Subject(subject)
-    store = SQLiteSubjectStore(subj.store_db_path)
+    store = SubjectStore(subj.store_db_path)
     progress_conn = connect_progress(subj.progress_db_path)
 
     router_label: str | None = None

@@ -4,7 +4,7 @@ import pytest
 
 from groundly.core.manifest import EMBEDDING_DIM
 from groundly.core.paths import subject_dir
-from groundly.core.store import SQLiteSubjectStore, connect
+from groundly.core.store import SubjectStore, connect
 from groundly.retrieval.vector import CONTEXT_K, VectorRetriever, rrf, search
 
 
@@ -66,7 +66,7 @@ def test_rrf_single_ranking_preserves_order():
 
 
 def test_vector_retriever_fuses_channels_and_ranks_relevant_chunk_first(retrievable_subject):
-    store_obj = SQLiteSubjectStore(subject_dir(retrievable_subject) / "store.db")
+    store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
     retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False)
     nodes = retriever.retrieve("deadlock")
     ids = [n.node.metadata["chunk_id"] for n in nodes]
@@ -75,7 +75,7 @@ def test_vector_retriever_fuses_channels_and_ranks_relevant_chunk_first(retrieva
 
 
 def test_vector_retriever_node_metadata_and_text(retrievable_subject):
-    store_obj = SQLiteSubjectStore(subject_dir(retrievable_subject) / "store.db")
+    store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
     retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False)
     nodes = retriever.retrieve("deadlock")
     node = next(n for n in nodes if n.node.metadata["chunk_id"] == 1)
@@ -86,14 +86,14 @@ def test_vector_retriever_node_metadata_and_text(retrievable_subject):
 
 
 def test_vector_retriever_path_without_rerank(retrievable_subject):
-    store_obj = SQLiteSubjectStore(subject_dir(retrievable_subject) / "store.db")
+    store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
     retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False)
     retriever.retrieve("deadlock")
     assert retriever.path == ["dense", "sparse", "bm25", "rrf"]
 
 
 def test_vector_retriever_reranker_skipped_when_rerank_false(retrievable_subject):
-    store_obj = SQLiteSubjectStore(subject_dir(retrievable_subject) / "store.db")
+    store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
     reranker = StubReranker(fail=True)
     retriever = VectorRetriever(
         store_obj, embedder=_near_embedder(), reranker=reranker, rerank=False
@@ -102,7 +102,7 @@ def test_vector_retriever_reranker_skipped_when_rerank_false(retrievable_subject
 
 
 def test_vector_retriever_reranks_when_enabled(retrievable_subject):
-    store_obj = SQLiteSubjectStore(subject_dir(retrievable_subject) / "store.db")
+    store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
     # invert the fused order: chunk 2 ("semaphores") scores highest under the reranker
     reranker = StubReranker(scores=None)
 
@@ -121,13 +121,13 @@ def test_vector_retriever_reranks_when_enabled(retrievable_subject):
 
 
 def test_vector_retriever_empty_store_returns_no_nodes(subject):
-    store_obj = SQLiteSubjectStore(subject_dir(subject) / "store.db")
+    store_obj = SubjectStore(subject_dir(subject) / "store.db")
     retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False)
     assert retriever.retrieve("anything") == []
 
 
 def test_vector_retriever_respects_context_k(retrievable_subject):
-    store_obj = SQLiteSubjectStore(subject_dir(retrievable_subject) / "store.db")
+    store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
     retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False, context_k=1)
     nodes = retriever.retrieve("deadlock")
     assert len(nodes) == 1

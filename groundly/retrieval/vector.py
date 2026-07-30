@@ -14,7 +14,7 @@ from llama_index.core.callbacks import CallbackManager
 from llama_index.core.retrievers import BaseRetriever
 from llama_index.core.schema import NodeWithScore, QueryBundle, TextNode
 
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SubjectStore
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ class VectorRetriever(BaseRetriever):
 
     def __init__(
         self,
-        store: SQLiteSubjectStore,
+        store: SubjectStore,
         embedder=None,
         reranker=None,
         rerank: bool | None = None,
@@ -156,7 +156,7 @@ def search(
     from groundly.core.subject import Subject
 
     subj = Subject(subject)
-    store = SQLiteSubjectStore(subj.store_db_path)
+    store = SubjectStore(subj.store_db_path)
     retriever = VectorRetriever(
         store, embedder=embedder, reranker=reranker, rerank=rerank, context_k=k
     )

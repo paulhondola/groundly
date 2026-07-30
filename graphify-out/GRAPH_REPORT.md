@@ -130,7 +130,7 @@
 - pyproject.toml Metadata
 
 ## God Nodes (most connected - your core abstractions)
-1. `SQLiteSubjectStore` - 138 edges
+1. `SubjectStore` - 138 edges
 2. `Subject` - 104 edges
 3. `subject_dir()` - 100 edges
 4. `build_graph()` - 63 edges
@@ -246,7 +246,7 @@ Nodes (20): check_counts(), Opens via store.connect (runs the user_version refus
 
 ### Community 19 - "Bundle Export Test Fixtures"
 Cohesion: 0.23
-Nodes (26): init_subject(), Path, UC-30 export/import. Seeds store.db directly via SQLiteSubjectStore.add_indexed, A materials/ file with no `materials` row (e.g. copied just before a transient, graph/cache/ (graphrag's own incremental-rebuild cache) and graph/logs/     (ope, Stamp a fake graph/ dir + manifest.graphrag for `name`, recorded against either, _rewrite_zip_manifest(), _row_counts() (+18 more)
+Nodes (26): init_subject(), Path, UC-30 export/import. Seeds store.db directly via SubjectStore.add_indexed, A materials/ file with no `materials` row (e.g. copied just before a transient, graph/cache/ (graphrag's own incremental-rebuild cache) and graph/logs/     (ope, Stamp a fake graph/ dir + manifest.graphrag for `name`, recorded against either, _rewrite_zip_manifest(), _row_counts() (+18 more)
 
 ### Community 20 - "Verifier & Deck Building"
 Cohesion: 0.18
@@ -510,12 +510,12 @@ _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Subject` connect `Subject Workspace & Pipeline` to `CLI Subjects & Ingestion Results`, `Config & LLM Call Classes`, `Agent Router & Ask Arm`, `Adaptive Retrieval Arm`, `Vector Retrieval Arm`, `GraphRAG Build Config`, `MCP Server Tools`, `Study Progress & Drill-down`, `Ask Pipeline & Citations`, `Graph Staleness Detection`, `Bundle Export/Import CLI`, `Manifest Integrity Checks`, `Bundle Export Test Fixtures`, `Verifier & Deck Building`, `Ingestion Test Fixtures`, `Deck Generation Job`, `Pipeline Indexing Tests`, `CLI App Shared Helpers`, `Anki Deck Export`, `GraphRAG Progress Callbacks`, `Ingestion Format Tables`, `Ingestion Chat Stubs`, `CLI Subjects Index/Init`, `Interchange Format Decision`, `Embeddings Default Extractor`, `Graph Not Built Error`?**
   _High betweenness centrality (0.161) - this node is a cross-community bridge._
-- **Why does `SQLiteSubjectStore` connect `Store.db Connection Layer` to `CLI Subjects & Ingestion Results`, `Agent Router & Ask Arm`, `Adaptive Retrieval Arm`, `Vector Retrieval Arm`, `GraphRAG Build Config`, `MCP Server Tools`, `Study Progress & Drill-down`, `Subject Workspace & Pipeline`, `Ask Pipeline & Citations`, `Graph Staleness Detection`, `Bundle Export/Import CLI`, `Bundle Export Test Fixtures`, `Verifier & Deck Building`, `Ingestion Test Fixtures`, `Deck Generation Job`, `Pipeline Indexing Tests`, `CLI App Shared Helpers`, `Anki Deck Export`, `Store Connection Tests`, `GraphRAG Progress Callbacks`, `Ingestion Format Tables`, `bge-m3 Embedder Encoding`, `Ingestion Chat Stubs`, `CLI Cost Display`, `Embeddings Default Extractor`, `Graph Not Built Error`?**
+- **Why does `SubjectStore` connect `Store.db Connection Layer` to `CLI Subjects & Ingestion Results`, `Agent Router & Ask Arm`, `Adaptive Retrieval Arm`, `Vector Retrieval Arm`, `GraphRAG Build Config`, `MCP Server Tools`, `Study Progress & Drill-down`, `Subject Workspace & Pipeline`, `Ask Pipeline & Citations`, `Graph Staleness Detection`, `Bundle Export/Import CLI`, `Bundle Export Test Fixtures`, `Verifier & Deck Building`, `Ingestion Test Fixtures`, `Deck Generation Job`, `Pipeline Indexing Tests`, `CLI App Shared Helpers`, `Anki Deck Export`, `Store Connection Tests`, `GraphRAG Progress Callbacks`, `Ingestion Format Tables`, `bge-m3 Embedder Encoding`, `Ingestion Chat Stubs`, `CLI Cost Display`, `Embeddings Default Extractor`, `Graph Not Built Error`?**
   _High betweenness centrality (0.153) - this node is a cross-community bridge._
 - **Why does `export_subject()` connect `Interchange Format Decision` to `Manifest Integrity Checks`, `Subject Workspace & Pipeline`, `Store Connection Tests`?**
   _High betweenness centrality (0.081) - this node is a cross-community bridge._
-- **Are the 27 inferred relationships involving `SQLiteSubjectStore` (e.g. with `AskResult` and `Citation`) actually correct?**
-  _`SQLiteSubjectStore` has 27 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 27 inferred relationships involving `SubjectStore` (e.g. with `AskResult` and `Citation`) actually correct?**
+  _`SubjectStore` has 27 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 21 inferred relationships involving `Subject` (e.g. with `AskResult` and `CardOutcome`) actually correct?**
   _`Subject` has 21 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `guard-pins.sh script`, `groundly`, `Correctness Review Priority` to the rest of the system?**

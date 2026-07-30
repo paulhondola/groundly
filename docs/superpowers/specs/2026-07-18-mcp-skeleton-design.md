@@ -23,7 +23,7 @@ the CLI (`cli/ask.py`) already demonstrates the pattern.
 - `groundly/cli/` — new `groundly mcp` verb that imports the server and
   calls `mcp.run()` (stdio). No daemon.
 - Layering: `mcp/` → `agents`/`retrieval`/`core` only. Nothing imports `mcp/`.
-- One new store method: `SQLiteSubjectStore.page_chunks(filename, page)` —
+- One new store method: `SubjectStore.page_chunks(filename, page)` —
   chunks joined to materials for one page, in chunk-id order.
 
 ## Tools

@@ -9,7 +9,7 @@ import pytest
 
 from groundly.core.config import set_key
 from groundly.core.manifest import EMBEDDING_DIM
-from groundly.core.store import SQLiteSubjectStore
+from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
 from groundly.ingestion.extract import ChunkData
 from groundly.ingestion.graph import (
@@ -52,7 +52,7 @@ def stub_probe(monkeypatch):
     )
 
 
-def _add_material(store: SQLiteSubjectStore, filename: str, sha256: str, status: str = "indexed"):
+def _add_material(store: SubjectStore, filename: str, sha256: str, status: str = "indexed"):
     if status == "indexed":
         chunks = [ChunkData("some chunk text", "Intro", 1, 5)]
         dense = [[0.1] * EMBEDDING_DIM]
@@ -70,7 +70,7 @@ def subj():
 
 @pytest.fixture
 def store(subj):
-    return SQLiteSubjectStore(subj.store_db_path)
+    return SubjectStore(subj.store_db_path)
 
 
 def _configure_extraction(home, model="gpt-4o-mini"):

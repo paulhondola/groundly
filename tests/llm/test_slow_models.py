@@ -55,7 +55,7 @@ def test_cross_lingual_romanian_query_matches_english_deadlock_chunk(tmp_path, m
     relevant chunk via the dense channel (docs/architecture/retrieval.md cross-lingual
     caveat — only the dense channel, not sparse/BM25, matches across languages)."""
     from groundly.core.paths import subject_dir
-    from groundly.core.store import SQLiteSubjectStore
+    from groundly.core.store import SubjectStore
     from groundly.ingestion.extract import ChunkData
     from groundly.llm.embeddings import BgeM3Embedder
     from groundly.retrieval.vector import VectorRetriever
@@ -72,11 +72,11 @@ def test_cross_lingual_romanian_query_matches_english_deadlock_chunk(tmp_path, m
     ]
     dense, sparse = embedder.encode(texts)
     chunks = [ChunkData(t, None, i + 1, 10) for i, t in enumerate(texts)]
-    SQLiteSubjectStore(subject_dir("PDA") / "store.db").add_indexed(
+    SubjectStore(subject_dir("PDA") / "store.db").add_indexed(
         "slides.pdf", "a" * 64, 2, chunks, zip(dense, sparse)
     )
 
-    store = SQLiteSubjectStore(subject_dir("PDA") / "store.db")
+    store = SubjectStore(subject_dir("PDA") / "store.db")
     retriever = VectorRetriever(store, embedder=embedder, rerank=False)
     nodes = retriever.retrieve("ce condiții sunt necesare pentru un deadlock?")
     assert nodes
