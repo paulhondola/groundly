@@ -69,6 +69,12 @@ def complete(
         if response_format is not None
         else {}
     )
+    # Nested under extra_body, never passed flat: litellm's drop_params is False, so a
+    # flat reasoning_effort kwarg raises UnsupportedParamsError on every call instead of
+    # degrading (measured — see llm/graphrag_adapter.completion_model_config, which nests
+    # the same way so the setting means the same thing on every call class).
+    if cfg.reasoning_effort:
+        extra["extra_body"] = {"reasoning_effort": cfg.reasoning_effort}
     try:
         response = litellm.completion(
             model=f"openai/{cfg.model}",

@@ -433,6 +433,137 @@ def test_build_graph_does_not_inherit_a_previous_builds_usage(subj, store, home,
     assert _build_trace(subj)["tokens"] == 123
 
 
+# --- report_call_class: a second completion model for community reports ----------------
+
+
+def _configure_extraction_and_chat(
+    home, *, extraction_model="gpt-4o-mini", chat_model="gpt-4o", priced=False
+):
+    """A second [providers.chat] section next to the usual [providers.extraction], plus
+    graph.report_call_class = "chat" — what every report_call_class test needs."""
+    extraction_prices = (
+        "input_price_per_mtok = 1.0\noutput_price_per_mtok = 2.0\n" if priced else ""
+    )
+    chat_prices = "input_price_per_mtok = 3.0\noutput_price_per_mtok = 4.0\n" if priced else ""
+    (home / "config.toml").write_text(
+        f'[providers.extraction]\nbase_url = "http://x"\nmodel = "{extraction_model}"\n'
+        f'api_key = "sk-secret"\n{extraction_prices}'
+        f'\n[providers.chat]\nbase_url = "http://y"\nmodel = "{chat_model}"\n'
+        f'api_key = "sk-chat"\n{chat_prices}'
+        '\n[graph]\nreport_call_class = "chat"\n'
+    )
+
+
+def test_default_report_call_class_registers_exactly_one_completion_model(
+    subj, store, home, monkeypatch
+):
+    """report_call_class defaults to "extraction" — this must reproduce today's build
+    exactly: one completion model, no second metrics store."""
+    _configure_extraction(home)
+    _add_material(store, "a.pdf", "a" * 64)
+
+    captured = {}
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        _write_entities(subj)
+        captured["config"] = config
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+    build_graph(subj, store)
+
+    config = captured["config"]
+    assert list(config.completion_models.keys()) == ["default_completion_model"]
+    assert config.community_reports.completion_model_id == "default_completion_model"
+
+
+def test_report_call_class_chat_registers_a_second_completion_model(subj, store, home, monkeypatch):
+    """report_call_class="chat" must register a SECOND completion model built from
+    [providers.chat] and point community_reports at it — the extraction model (and its
+    own completion_models entry) is untouched."""
+    _configure_extraction_and_chat(home)
+    _add_material(store, "a.pdf", "a" * 64)
+
+    captured = {}
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        _write_entities(subj)
+        captured["config"] = config
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+    build_graph(subj, store)
+
+    config = captured["config"]
+    assert set(config.completion_models) == {
+        "default_completion_model",
+        "report_completion_model",
+    }
+    assert config.completion_models["default_completion_model"].model == "gpt-4o-mini"
+    assert config.completion_models["report_completion_model"].model == "gpt-4o"
+    assert config.community_reports.completion_model_id == "report_completion_model"
+
+
+def test_report_call_class_outside_call_classes_is_rejected_at_config_load(home):
+    """A typo here would otherwise surface hours into a build, when the community
+    reports stage finally runs — GraphSettings' pydantic validator turns it into a
+    config-time failure instead."""
+    from pydantic import ValidationError
+
+    from groundly.core.config import load_settings
+
+    (home / "config.toml").write_text('[graph]\nreport_call_class = "bogus"\n')
+    with pytest.raises(ValidationError):
+        load_settings()
+
+
+def test_metered_usage_sums_two_stores_and_prices_each_by_its_own_model(
+    subj, store, home, monkeypatch
+):
+    """graphrag caches metrics stores as singletons keyed on hashed init args including
+    the model id (graphrag_llm/completion/completion_factory.py, graphrag_common's
+    Factory.create), so report_call_class's second completion model meters into a
+    SECOND store. Before this fix, metered_usage() read only the most recently created
+    store — silently dropping everything the report model spent, or worse, pricing it as
+    if it were the extraction model. This is the failure the split introduces and the one
+    nothing else here covers."""
+    from graphrag_llm.completion.completion_factory import create_completion
+
+    _configure_extraction_and_chat(home, priced=True)
+    _add_material(store, "a.pdf", "a" * 64)
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        _write_entities(subj)
+        extraction = create_completion(
+            config.get_completion_model_config("default_completion_model")
+        )
+        extraction.metrics_store.update_metrics(
+            metrics={
+                "prompt_tokens": 1000,
+                "completion_tokens": 4000,
+                "responses_with_tokens": 100,
+            }
+        )
+        report = create_completion(config.get_completion_model_config("report_completion_model"))
+        report.metrics_store.update_metrics(
+            metrics={
+                "prompt_tokens": 500,
+                "completion_tokens": 200,
+                "responses_with_tokens": 50,
+            }
+        )
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+    result = build_graph(subj, store, estimated_tokens=123, estimated_cost_usd=0.0045)
+
+    assert (result.prompt_tokens, result.completion_tokens) == (1500, 4200)
+    # extraction priced at $1/$2 per Mtok, chat at $3/$4 — summing tokens first and
+    # pricing once at either rate would give a different (wrong) number than this.
+    expected_cost = (1000 * 1e-6 + 4000 * 2e-6) + (500 * 3e-6 + 200 * 4e-6)
+    assert result.cost_usd == pytest.approx(expected_cost)
+
+
 def test_build_graph_wraps_failure_in_graph_build_error(subj, store, home, monkeypatch):
     _configure_extraction(home)
     _add_material(store, "a.pdf", "a" * 64)
@@ -701,6 +832,39 @@ def test_probe_sends_graphrags_own_response_model(subj, store, home, monkeypatch
         build_graph(subj, store)
 
     assert formats[1] is CommunityReportResponse
+
+
+def test_structured_output_probe_targets_the_report_call_class(subj, store, home, monkeypatch):
+    """The probe exists to check that whoever builds community reports accepts
+    json_schema. `graph.report_call_class` moves that stage to another provider, so a
+    probe hardcoded to "extraction" tests the wrong one — and is wrong in both directions
+    at once, the same way the json_object shortcut was: too lax when extraction accepts
+    json_schema and the report provider refuses (the whole extraction pass is spent before
+    the first report fails), too strict when extraction refuses it and the report provider
+    accepts, which would refuse the local-extraction/cloud-reports split this setting
+    exists to enable."""
+    from groundly.llm.chat import ChatResult
+
+    _configure_extraction_and_chat(home)
+    set_key("graph.report_call_class", "chat")
+    _add_material(store, "a.pdf", "a" * 64)
+
+    call_classes = []
+
+    def fake_complete(call_class, messages, *, response_format=None):
+        call_classes.append((call_class, response_format))
+        return ChatResult(text="ok", tokens=1, cost_usd=None, model="stub")
+
+    monkeypatch.setattr("groundly.llm.chat.complete", fake_complete)
+
+    with pytest.raises(GraphBuildError):
+        build_graph(subj, store)
+
+    # First probe call is the plain-completion reachability check against extraction;
+    # the structured-output one must follow the report stage to "chat".
+    assert call_classes[0][0] == "extraction"
+    assert call_classes[1][0] == "chat"
+    assert call_classes[1][1] is not None
 
 
 def test_probe_contains_unexpected_exceptions_as_named_errors(subj, store, home, monkeypatch):

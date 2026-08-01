@@ -48,7 +48,10 @@ Traces contain every question the student ever asked — which is exactly why th
   "subject": "PDSS",
   "embedding": { "model": "BAAI/bge-m3", "hf_revision": "<pin>", "dim": 1024,
                   "dtype": "float16", "normalized": true },
-  "graphrag":  { "version": "<exact pin>", "extraction_model": "<model used>" },
+  "graphrag":  { "version": "<exact pin>", "extraction_model": "<model used>",
+                  "report_model": "<model used, only if != extraction_model>",
+                  "corpus_hash": "<sha256 of the indexed corpus>",
+                  "extraction_fingerprint": "<sha256 of extraction prompt + entity types>" },
   "chunking":  { "strategy": "docling-hybrid", "max_tokens": 512, "overlap": 0 },
   "ocr":       { "engine": "rapidocr-onnxruntime", "lang": [] },
   "counts":    { "materials": 0, "chunks": 0 },
@@ -56,7 +59,7 @@ Traces contain every question the student ever asked — which is exactly why th
 }
 ```
 
-Semantics: vectors transfer **as-is only on exact embedding match** (model + revision + dim + dtype + normalization) — the global bge-m3 pin makes this the default. Mismatch → re-embed from chunk text (which is why chunk text always ships). The graph is text-only parquet — model-independent, always portable — but `extraction_model` is recorded because an imported graph built by a different model is a different experimental condition. `ocr.lang` records the subject's OCR language set via `groundly index --ocr-lang` (`[]` = bundled default model set); it is part of the interchange contract because it shapes extracted chunk text — a re-index with a different lang is a different corpus (decision 15).
+Semantics: vectors transfer **as-is only on exact embedding match** (model + revision + dim + dtype + normalization) — the global bge-m3 pin makes this the default. Mismatch → re-embed from chunk text (which is why chunk text always ships). The graph is text-only parquet — model-independent, always portable — but `extraction_model` is recorded because an imported graph built by a different model is a different experimental condition. `report_model` records the same thing for the community-report stage when `graph.report_call_class` moves it to a different provider — those summaries are what global search and `overview` answer from, so naming only the extraction model would under-describe the bundle's own provenance. It is absent (or null) on the default path, where reports were built by `extraction_model`; being optional and additive, it is not a `format_version` event. `ocr.lang` records the subject's OCR language set via `groundly index --ocr-lang` (`[]` = bundled default model set); it is part of the interchange contract because it shapes extracted chunk text — a re-index with a different lang is a different corpus (decision 15).
 
 ## Export / import
 

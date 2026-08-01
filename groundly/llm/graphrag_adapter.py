@@ -126,20 +126,35 @@ def extraction_fingerprint(prompt_text: str, entity_types: list[str]) -> str:
 _service_tier_widened = False
 
 
-def completion_model_config(track_usage: bool = False) -> ModelConfig:
-    """Build graphrag's ModelConfig from Groundly's `extraction` provider. Fails fast
-    (via require_provider) — a *configured* provider is always required, but not
-    necessarily a real API key: graphrag's own ModelConfig validator rejects an empty
-    api_key outright (unlike Groundly's own llm/chat.py, which just omits the
-    Authorization header when `cfg.api_key` is empty), so a local/keyless provider
-    (LM Studio, Ollama) needs a truthy placeholder here to pass that validation — the
-    placeholder is never checked by a local server, same as the empty-header path
+def completion_model_config(
+    track_usage: bool = False, call_class: str = "extraction"
+) -> ModelConfig:
+    """Build graphrag's ModelConfig from one of Groundly's provider sections
+    (`call_class`, default `extraction` — `graph.report_call_class` points community
+    reports at another one). Fails fast (via require_provider) — a *configured* provider
+    is always required, but not necessarily a real API key: graphrag's own ModelConfig
+    validator rejects an empty api_key outright (unlike Groundly's own llm/chat.py, which
+    just omits the Authorization header when `cfg.api_key` is empty), so a local/keyless
+    provider (LM Studio, Ollama) needs a truthy placeholder here to pass that validation —
+    the placeholder is never checked by a local server, same as the empty-header path
     already works for every other call class.
 
     `track_usage` swaps graphrag_llm's metrics store for one this process can read back
     (see `metered_usage`), which is how the *batch build* learns what it actually spent.
-    The query path leaves it off and keeps the stock store."""
-    cfg = require_provider("extraction")
+    The query path leaves it off and keeps the stock store.
+
+    `reasoning_effort`, when the provider sets it, goes into `call_args["extra_body"]` —
+    measured: `call_args={"reasoning_effort": ...}` makes litellm raise
+    UnsupportedParamsError on every call (its `drop_params` is False, so it never
+    degrades), while nesting the same value under `extra_body` reaches the provider
+    (93 -> 2 completion tokens on a local reasoning model). Omitted entirely when unset,
+    so `call_args` keeps its `{}` default and today's behavior is unchanged."""
+    cfg = require_provider(call_class)
+    extra = (
+        {"call_args": {"extra_body": {"reasoning_effort": cfg.reasoning_effort}}}
+        if cfg.reasoning_effort
+        else {}
+    )
     return ModelConfig(
         model_provider="openai",
         model=cfg.model,
@@ -152,11 +167,12 @@ def completion_model_config(track_usage: bool = False) -> ModelConfig:
         metrics=MetricsConfig(store=GROUNDLY_METRICS_STORE_TYPE)
         if track_usage
         else MetricsConfig(),
+        **extra,
     )
 
 
 class ReadableMetricsStore(MemoryMetricsStore):
-    """graphrag_llm's own in-memory metrics store, plus a handle on the instance.
+    """graphrag_llm's own in-memory metrics store, plus a handle on every instance.
 
     graphrag aggregates real per-model usage but only ever *writes* it from
     `MemoryMetricsStore._on_exit_`, registered with `atexit` — so the log line and the
@@ -164,13 +180,21 @@ class ReadableMetricsStore(MemoryMetricsStore):
     could read them. `get_metrics()` has the same numbers live; all that was missing was
     a reference to the store holding them. Keeping the log writer on means the indexing
     log still gets its end-of-run summary, unchanged.
+
+    Keyed by `id` (graphrag's `model_provider/model`) rather than held as a single
+    `latest` pointer, because graphrag_llm caches these as singletons keyed on hashed
+    init args *including* that `id` — see `graphrag_common/factory/factory.py`'s
+    `cache_key` and `graphrag_llm/metrics/metrics_store_factory.py` passing `"id": id`
+    into those args. So `graph.report_call_class` pointing community reports at a second
+    model produces a SECOND store here, not a second write into the first, and
+    `metered_usage` sums over every instance rather than trusting there is only ever one.
     """
 
-    latest: "ReadableMetricsStore | None" = None
+    instances: "dict[str, ReadableMetricsStore]" = {}
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        type(self).latest = self
+        type(self).instances[self.id] = self
 
 
 def register_groundly_metrics_store() -> None:

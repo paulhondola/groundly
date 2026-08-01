@@ -31,6 +31,29 @@ def test_estimate_cost_unconfigured_provider_returns_none_cost(home):
     assert est.price_source is None
 
 
+def test_estimate_cost_flags_a_report_provider_the_range_does_not_price(home):
+    """The range prices the extraction pass only. With one provider that is a caveat;
+    with `report_call_class` pointing elsewhere it is a hole, because the whole point of
+    the split is to run extraction somewhere cheap or free — so every dollar is on the
+    provider the figure never touched. The estimate has to name it or the spend gate
+    understates a paid build as free."""
+    (home / "config.toml").write_text(
+        '[providers.extraction]\nbase_url = "http://x"\nmodel = "m"\n'
+        '[providers.chat]\nbase_url = "http://y"\nmodel = "n"\n'
+        '[graph]\nreport_call_class = "chat"\n'
+    )
+    assert estimate_cost(4000, 0).report_call_class == "chat"
+
+
+def test_estimate_cost_omits_the_report_flag_on_the_default_path(home):
+    """Default `report_call_class` means reports run on the provider already priced —
+    no second bill, so no warning to print."""
+    (home / "config.toml").write_text(
+        '[providers.extraction]\nbase_url = "http://x"\nmodel = "m"\n'
+    )
+    assert estimate_cost(4000, 0).report_call_class is None
+
+
 def test_estimate_cost_unpriced_provider_returns_none_cost(home):
     (home / "config.toml").write_text(
         '[providers.extraction]\nbase_url = "http://x"\nmodel = "m"\n'

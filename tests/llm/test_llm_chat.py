@@ -115,6 +115,28 @@ def test_complete_sends_api_key_and_model_and_base_url(monkeypatch, home):
     assert capture["model"] == "openai/qwen2.5-7b"
 
 
+def test_complete_nests_reasoning_effort_under_extra_body(monkeypatch, home):
+    """Same nesting as llm/graphrag_adapter.completion_model_config, for the same
+    reason: litellm's drop_params is False, so a flat reasoning_effort kwarg raises
+    UnsupportedParamsError on every call instead of degrading — nesting under
+    extra_body is what actually reaches the provider."""
+    (home / "config.toml").write_text(
+        '[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "qwen2.5-7b"\n'
+        'api_key = "sk-local"\nreasoning_effort = "low"\n'
+    )
+    capture = {}
+    _stub_completion(monkeypatch, _response(), capture=capture)
+    complete("chat", [{"role": "user", "content": "hi"}])
+    assert capture["extra_body"] == {"reasoning_effort": "low"}
+
+
+def test_complete_omits_extra_body_when_reasoning_effort_unset(monkeypatch, home):
+    capture = {}
+    _stub_completion(monkeypatch, _response(), capture=capture)
+    complete("chat", [{"role": "user", "content": "hi"}])
+    assert "extra_body" not in capture
+
+
 def test_complete_keyless_provider_gets_placeholder_key(monkeypatch, tmp_path, home):
     (home / "config.toml").write_text(
         '[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "m"\n'

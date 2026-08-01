@@ -61,6 +61,7 @@ logger = logging.getLogger(__name__)
 # Internal-only: never exposed in the manifest or CLI (not an interchange knob).
 _GRAPH_CHUNK_SIZE = 4096
 _COMPLETION_MODEL_ID = "default_completion_model"
+_REPORT_COMPLETION_MODEL_ID = "report_completion_model"
 _EMBEDDING_MODEL_ID = "default_embedding_model"
 
 # Above this share of chunks failing entity extraction, the graph is missing too much
@@ -176,6 +177,7 @@ def _probe_extraction(
     config: GraphRagConfig,
     sample_text: str,
     context_window: int,
+    report_call_class: str,
     on_event: Callable[[str, int, int], None],
 ) -> None:
     """Send one real extraction prompt before committing to the whole corpus.
@@ -249,20 +251,28 @@ def _probe_extraction(
         # refuses json_schema, and LM Studio refuses json_object and requires json_schema —
         # so that shortcut was simultaneously too lax for one provider and too strict for
         # the other, and would have refused a local model that builds graphs fine.
+        # Probe the call class that will actually *serve* community reports, not always
+        # `extraction`: `graph.report_call_class` can point that stage at another provider,
+        # and probing the wrong one reintroduces exactly the drift this probe exists to
+        # close — too lax if extraction accepts json_schema and the report provider
+        # refuses (the whole extraction pass is spent before the first report fails), too
+        # strict if extraction refuses it while the report provider accepts, which would
+        # refuse the local-extraction/cloud-reports split outright.
         _probe_call(
             conn,
             lambda: complete(
-                "extraction",
+                report_call_class,
                 [{"role": "user", "content": "Summarise a one-entity community."}],
                 response_format=CommunityReportResponse,
             ),
-            "the extraction model rejected graphrag's structured-output request: {exc}. "
-            "Community reports — the summaries global search and `overview` answer from — "
-            "are sent as `response_format: json_schema`, and a model that refuses it cannot "
-            "finish a graph build. Note this is a *stricter* capability than JSON mode: "
-            'providers that accept `{{"type": "json_object"}}` may still refuse '
-            "`json_schema` (every DeepSeek model does). Switch extraction.model to one whose "
-            "endpoint supports JSON-schema structured output.",
+            f"the {report_call_class} model rejected graphrag's structured-output request: "
+            "{exc}. Community reports — the summaries global search and `overview` answer "
+            "from — are sent as `response_format: json_schema`, and a model that refuses it "
+            "cannot finish a graph build. Note this is a *stricter* capability than JSON "
+            'mode: providers that accept `{{"type": "json_object"}}` may still refuse '
+            f"`json_schema` (every DeepSeek model does). Switch {report_call_class}.model to one "
+            "whose endpoint supports JSON-schema structured output, or point "
+            "graph.report_call_class at a call class whose provider does.",
         )
         on_event(_PROBE_STEP, _PROBE_CALLS, _PROBE_CALLS)
     finally:
@@ -342,18 +352,42 @@ def graph_is_stale(subj: Subject, store: SubjectStore) -> str | None:
 
 
 def _build_config(
-    subj: Subject, context_window: int, prompt_path: Path, entity_types: list[str]
+    subj: Subject,
+    context_window: int,
+    prompt_path: Path,
+    entity_types: list[str],
+    report_call_class: str,
 ) -> GraphRagConfig:
     """graphrag's config, rooted entirely under <subject>/graph/ — nothing touches
     cwd, nothing leaks outside the subject's own directory. Every prompt budget is
     scaled to `context_window` (graph.context_window in config.toml); graphrag's own
     defaults assume ~16k and 400 out on a small local model.
 
-    `prompt_path`/`entity_types` come from the caller rather than being read here, so
-    the fingerprint recorded in the manifest is computed from the same resolution that
-    produced this config — they cannot drift apart."""
+    `prompt_path`/`entity_types`/`report_call_class` come from the caller rather than
+    being read here, so the fingerprint recorded in the manifest is computed from the
+    same resolution that produced this config — they cannot drift apart. That applies to
+    `report_call_class` for the same reason: the probe checks it, this registers a model
+    for it, and the manifest records the model it names, so all three must be one read.
+
+    `graph.report_call_class` (core/config.GraphSettings) can point community reports at
+    a second provider entirely. When it does, a SECOND completion model is registered
+    and `community_reports.completion_model_id` is pointed at it; left at its default
+    ("extraction"), exactly one completion model is registered, same as before this
+    setting existed."""
     graph_dir = subj.root_dir / "graph"
     budgets = prompt_budgets(context_window)
+
+    completion_models = {_COMPLETION_MODEL_ID: completion_model_config(track_usage=True)}
+    community_reports_kwargs: dict[str, int | str] = {
+        "max_input_length": budgets.community_max_input_length,
+        "max_length": budgets.community_max_length,
+    }
+    if report_call_class != "extraction":
+        completion_models[_REPORT_COMPLETION_MODEL_ID] = completion_model_config(
+            track_usage=True, call_class=report_call_class
+        )
+        community_reports_kwargs["completion_model_id"] = _REPORT_COMPLETION_MODEL_ID
+
     return GraphRagConfig(
         extract_graph=ExtractGraphConfig(
             max_gleanings=budgets.max_gleanings,
@@ -365,11 +399,8 @@ def _build_config(
             max_input_tokens=budgets.summarize_max_input_tokens,
             max_length=budgets.summarize_max_length,
         ),
-        community_reports=CommunityReportsConfig(
-            max_input_length=budgets.community_max_input_length,
-            max_length=budgets.community_max_length,
-        ),
-        completion_models={_COMPLETION_MODEL_ID: completion_model_config(track_usage=True)},
+        community_reports=CommunityReportsConfig(**community_reports_kwargs),
+        completion_models=completion_models,
         embedding_models={
             _EMBEDDING_MODEL_ID: ModelConfig(
                 type=BGE_M3_EMBEDDING_TYPE,
@@ -434,6 +465,7 @@ def _verify_build_output(
     reports_counter: _WorkflowErrorCounter,
     chunk_count: int,
     context_window: int,
+    report_call_class: str,
 ) -> None:
     """Refuse a build that reported success while producing an unusable graph.
     graphrag swallows per-item failures, so nothing above this catches a graph
@@ -487,7 +519,8 @@ def _verify_build_output(
             f"global search and `overview` would have nothing to answer from. Last error: "
             f"{reports_counter.last_message or 'unknown'}. Community reports are the one "
             f"stage that requires JSON mode — if your provider reports response_format as "
-            f"unavailable, switch extraction.model to one that supports structured output"
+            f"unavailable, switch {report_call_class}.model to one that supports structured "
+            f"output, or point graph.report_call_class at a call class whose provider does"
         )
     if reports_counter.count:
         logger.warning(
@@ -533,7 +566,20 @@ def build_graph(
     workflow names and progress counts that `--debug` exists to show."""
     on_event = on_event or (lambda description, completed, total: None)
     provider_cfg = require_provider("extraction")  # fail fast, before any chunk enumeration
-    context_window = load_settings().graph.context_window
+    settings = load_settings()
+    context_window = settings.graph.context_window
+    # Read ONCE and threaded from here into _build_config, _probe_extraction and
+    # _verify_build_output: the probe checks this call class, the config registers a model
+    # for it, and the manifest records that model's name. Re-reading it per site would let
+    # a concurrent `config set` land between them and produce a build whose probe, model
+    # and recorded provenance disagree — the same invariant _build_config's docstring
+    # already states for prompt_path/entity_types.
+    report_call_class = settings.graph.report_call_class
+    # Resolved here rather than at the manifest write so a report provider that is named
+    # but unconfigured fails alongside the extraction one, before any chunk enumeration.
+    report_provider_cfg = (
+        require_provider(report_call_class) if report_call_class != "extraction" else None
+    )
 
     rows = store.all_chunks()
     if not rows:
@@ -553,7 +599,9 @@ def build_graph(
         # api_key, and a pydantic ValidationError echoes the offending input value — so
         # neither the wrapped message nor a logged traceback may ever carry this one.
         try:
-            config = _build_config(subj, context_window, prompt_path, entity_types)
+            config = _build_config(
+                subj, context_window, prompt_path, entity_types, report_call_class
+            )
         except Exception as exc:
             raise GraphBuildError(
                 "graphrag config is invalid — check [providers.extraction] in your config.toml "
@@ -561,7 +609,9 @@ def build_graph(
                 f"({type(exc).__name__}; details withheld, they would include your api_key)"
             ) from exc
 
-        _probe_extraction(subj, config, rows[0]["text"], context_window, on_event)
+        _probe_extraction(
+            subj, config, rows[0]["text"], context_window, report_call_class, on_event
+        )
 
         # After the probe on purpose: a misconfigured provider should fail without
         # destroying a graph that still works, so nothing is cleared until the provider
@@ -596,12 +646,17 @@ def build_graph(
             logger.debug("graph build failed", exc_info=True)
             raise GraphBuildError(f"graph build failed: {exc}") from exc
 
-    _verify_build_output(subj, results, counter, reports_counter, len(rows), context_window)
+    _verify_build_output(
+        subj, results, counter, reports_counter, len(rows), context_window, report_call_class
+    )
 
     manifest = subj.load_manifest()
     manifest.graphrag = Graphrag(
         version=_package_version("graphrag"),
         extraction_model=provider_cfg.model,
+        # Left None on the default path, where reports are built by extraction_model
+        # and naming it twice would only invite the two to drift.
+        report_model=report_provider_cfg.model if report_provider_cfg else None,
         corpus_hash=corpus_hash(store),
         # Same write as corpus_hash, so a refused build records neither and the next
         # `groundly index` re-offers the build.
@@ -623,7 +678,14 @@ def build_graph(
             query="",
             outcome="built",
             arm="graph-build",
-            model=provider_cfg.model,
+            # `tokens`/`cost_usd` below are summed across every completion model the
+            # build metered, so naming only the extraction model would attribute the
+            # report model's spend to the wrong one. One row, both names.
+            model=(
+                provider_cfg.model
+                if report_provider_cfg is None
+                else f"{provider_cfg.model}+{report_provider_cfg.model}"
+            ),
             tokens=estimated_tokens if metered is None else metered.total_tokens,
             cost_usd=estimated_cost_usd if metered is None else metered.cost_usd,
         )

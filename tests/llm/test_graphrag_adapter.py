@@ -71,6 +71,36 @@ def test_completion_model_config_local_provider_gets_placeholder_key(home):
     assert cfg.api_key
 
 
+def test_completion_model_config_nests_reasoning_effort_under_extra_body(home):
+    """litellm's drop_params is False, so a flat call_args={"reasoning_effort": ...}
+    makes litellm raise UnsupportedParamsError on *every* call instead of degrading —
+    measured: nesting the same value under extra_body is what actually reaches the
+    provider (93 -> 2 completion tokens on a local reasoning model). Assert the nesting
+    specifically, not just that the value ends up somewhere in call_args."""
+    (home / "config.toml").write_text(
+        "[providers.extraction]\n"
+        'base_url = "http://localhost:1234/v1"\n'
+        'model = "gpt-4o-mini"\n'
+        'api_key = "sk-secret"\n'
+        'reasoning_effort = "none"\n'
+    )
+    cfg = completion_model_config()
+    assert cfg.call_args == {"extra_body": {"reasoning_effort": "none"}}
+
+
+def test_completion_model_config_omits_call_args_when_reasoning_effort_unset(home):
+    """The default path: no reasoning_effort configured must reproduce today's
+    ModelConfig exactly — call_args left at its own `{}` default, not an explicitly-set
+    empty dict standing in for one."""
+    (home / "config.toml").write_text(
+        "[providers.extraction]\n"
+        'base_url = "http://localhost:1234/v1"\n'
+        'model = "gpt-4o-mini"\n'
+        'api_key = "sk-secret"\n'
+    )
+    assert completion_model_config().call_args == {}
+
+
 # --- Bgem3GraphEmbedding -------------------------------------------------------------
 
 
