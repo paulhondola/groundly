@@ -11,7 +11,7 @@ import asyncio
 import hashlib
 import logging
 import shutil
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib.metadata import version as _package_version
@@ -39,13 +39,14 @@ from groundly.core.manifest import EMBEDDING_DIM, Graphrag
 from groundly.core.progress import connect_progress, record_trace
 from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
-from groundly.llm.config import require_provider
+from groundly.llm.config import ProviderConfig, require_provider
 from groundly.llm.graph_cost import metered_usage, reset_metered_usage
 from groundly.llm.graphrag_adapter import (
     BGE_M3_EMBEDDING_TYPE,
     ExtractionPromptError,
     allow_nonstandard_service_tier,
     completion_model_config,
+    concurrent_requests,
     extraction_entity_types,
     extraction_fingerprint,
     prompt_budgets,
@@ -215,7 +216,7 @@ def _probe_extraction(
     Reports its own progress, because it runs *before* graphrag's pipeline emits
     anything: two real network calls against a model that may still be loading, under a
     300s timeout each, showing the caller nothing. That silence read as a hang."""
-    from groundly.llm.chat import complete
+    from groundly.llm.chat import complete, loaded_context_length
 
     prompt = config.extract_graph.resolved_prompts().extraction_prompt.format(
         entity_types=",".join(config.extract_graph.entity_types),
@@ -239,6 +240,26 @@ def _probe_extraction(
             "tool-using endpoints have their own request limits and are the wrong fit here.",
         )
         on_event(_PROBE_STEP, 1, _PROBE_CALLS)
+        # After the first call, never before it: a local runtime JIT-loads on first
+        # request, so asking earlier reports "not loaded" and this would never fire.
+        #
+        # Warn, never refuse — this reads a field only LM Studio publishes, so its
+        # *absence* says nothing (see llm/chat.loaded_context_length). A mismatch is worth
+        # saying out loud anyway: every budget in this build is carved from
+        # graph.context_window, so serving a smaller window invalidates all of them at
+        # once, and the call that finally fails is a community report ~40 minutes in.
+        loaded = loaded_context_length("extraction")
+        if loaded is not None and loaded < context_window:
+            logger.warning(
+                "extraction model is loaded with a %d-token context but graph.context_window "
+                "is %d — every prompt budget in this build is sized for %d. Raise the model's "
+                "load setting to %d, or lower graph.context_window to %d",
+                loaded,
+                context_window,
+                context_window,
+                context_window,
+                loaded,
+            )
         # A separate capability: every DeepSeek model answers plain completions fine and
         # rejects graphrag's structured-output request outright, which used to surface 80
         # minutes in as KeyError 'community' — pandas merging the empty reports frame every
@@ -357,6 +378,7 @@ def _build_config(
     prompt_path: Path,
     entity_types: list[str],
     report_call_class: str,
+    build_providers: Sequence[ProviderConfig],
 ) -> GraphRagConfig:
     """graphrag's config, rooted entirely under <subject>/graph/ — nothing touches
     cwd, nothing leaks outside the subject's own directory. Every prompt budget is
@@ -373,7 +395,13 @@ def _build_config(
     a second provider entirely. When it does, a SECOND completion model is registered
     and `community_reports.completion_model_id` is pointed at it; left at its default
     ("extraction"), exactly one completion model is registered, same as before this
-    setting existed."""
+    setting existed.
+
+    `build_providers` is every provider this build will call, resolved once by the caller
+    for the same read-once reason as `report_call_class` above. It exists so
+    concurrent_requests() can see whether any of them is local: those per-stage budgets
+    are per *request*, while a llama.cpp-family runtime caps `in-flight x prompt` against
+    one shared KV cache, and graphrag's default of 25 in flight is what overran it."""
     graph_dir = subj.root_dir / "graph"
     budgets = prompt_budgets(context_window)
 
@@ -389,6 +417,10 @@ def _build_config(
         community_reports_kwargs["completion_model_id"] = _REPORT_COMPLETION_MODEL_ID
 
     return GraphRagConfig(
+        # graphrag defaults this to 25. Against a local runtime that is what exhausts the
+        # shared KV cache the prompt budgets above were sized against — see
+        # llm/graphrag_adapter.concurrent_requests.
+        concurrent_requests=concurrent_requests(*build_providers),
         extract_graph=ExtractGraphConfig(
             max_gleanings=budgets.max_gleanings,
             # A path, not text — graphrag's resolved_prompts() reads it off disk.
@@ -458,6 +490,39 @@ def _reset_graph_artifacts(subj: Subject) -> None:
         subj.save_manifest(manifest)
 
 
+# Substrings a runtime uses when it is out of *room*, not out of spec. llama.cpp/LM
+# Studio answer "Context size has been exceeded"; litellm's own overflow class stringifies
+# as "context window exceeded"; the OpenAI surface says "maximum context length".
+_CAPACITY_MARKERS = ("context size", "context window", "context length", "too many tokens")
+
+
+def _report_failure_hint(last_message: str) -> str:
+    """A sentence naming concurrency when the report stage died of context capacity,
+    otherwise "".
+
+    Community reports carry by far the largest prompt in the build (graphrag's stock
+    template is ~2,200 tokens before any content), so they are the first stage to overrun
+    a runtime whose real limit is `in-flight calls x prompt` rather than one prompt —
+    measured 2026-08-01: 8 of 11 died in waves of exactly n_slots while extraction, at
+    450-750 tokens a call, had just finished cleanly. The existing message blames JSON
+    mode, which is the right guess for a provider that refuses the request outright and
+    the wrong one here; without this, the reader tunes graph.context_window and watches it
+    fail again.
+
+    Matching on message text, which is inherently approximate — but it only ever *adds* a
+    sentence, so a miss costs nothing and a false positive costs one extra line."""
+    lowered = last_message.lower()
+    if not any(marker in lowered for marker in _CAPACITY_MARKERS):
+        return ""
+    return (
+        " That reads as a capacity limit rather than a rejected request: community reports "
+        "carry the build's largest prompt, and a local runtime serves several at once from "
+        "one shared KV cache, so what has to fit is in-flight calls x prompt. Reduce the "
+        "server's parallel slots to 1 (LM Studio: the model's load settings) before "
+        "touching graph.context_window."
+    )
+
+
 def _verify_build_output(
     subj: Subject,
     results,
@@ -517,17 +582,23 @@ def _verify_build_output(
         raise GraphBuildError(
             f"none of the {community_count} community summaries could be generated, so "
             f"global search and `overview` would have nothing to answer from. Last error: "
-            f"{reports_counter.last_message or 'unknown'}. Community reports are the one "
-            f"stage that requires JSON mode — if your provider reports response_format as "
-            f"unavailable, switch {report_call_class}.model to one that supports structured "
-            f"output, or point graph.report_call_class at a call class whose provider does"
+            f"{reports_counter.last_message or 'unknown'}."
+            + _report_failure_hint(reports_counter.last_message)
+            + f" Community reports are the one stage that requires JSON mode — if your "
+            f"provider reports response_format as unavailable, switch {report_call_class}.model "
+            f"to one that supports structured output, or point graph.report_call_class at a "
+            f"call class whose provider does"
         )
     if reports_counter.count:
+        # A partial failure still costs the global arm those communities, and it is the
+        # shape capacity exhaustion actually takes — the build that prompted this hint
+        # lost 8 of 11 reports and returned "success" for the rest.
         logger.warning(
-            "community reports failed for %d of %d communities: %s",
+            "community reports failed for %d of %d communities: %s%s",
             reports_counter.count,
             community_count,
             reports_counter.last_message,
+            _report_failure_hint(reports_counter.last_message),
         )
 
     if counter.count:
@@ -600,7 +671,12 @@ def build_graph(
         # neither the wrapped message nor a logged traceback may ever carry this one.
         try:
             config = _build_config(
-                subj, context_window, prompt_path, entity_types, report_call_class
+                subj,
+                context_window,
+                prompt_path,
+                entity_types,
+                report_call_class,
+                [cfg for cfg in (provider_cfg, report_provider_cfg) if cfg is not None],
             )
         except Exception as exc:
             raise GraphBuildError(
