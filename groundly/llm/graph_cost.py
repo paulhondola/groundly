@@ -297,9 +297,7 @@ def estimate_cost(total_chars: int, chunk_count: int) -> BuildEstimate:
     report_class = configured if configured != "extraction" else None
     alias = cfg.model if cfg is not None and cfg.model.endswith("-latest") else None
     if prices is None:
-        return BuildEstimate(
-            input_tokens, max_output_tokens, None, None, None, alias, report_class
-        )
+        return BuildEstimate(input_tokens, max_output_tokens, None, None, None, alias, report_class)
 
     low = input_tokens * prices.input_per_token
     return BuildEstimate(

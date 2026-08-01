@@ -36,9 +36,7 @@ def _seed(name, filename="lec.pdf", content=b"lecture bytes", sha256="a" * 64, n
     ]
     dense = [[0.1] * EMBEDDING_DIM for _ in chunks]
     sparse = [{1: 0.5} for _ in chunks]
-    SubjectStore(sdir / "store.db").add_indexed(
-        filename, sha256, 3, chunks, zip(dense, sparse)
-    )
+    SubjectStore(sdir / "store.db").add_indexed(filename, sha256, 3, chunks, zip(dense, sparse))
     conn = store.connect(sdir / "store.db")
     try:
         sync_counts(conn, sdir / "manifest.json")
