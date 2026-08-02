@@ -5,11 +5,12 @@ import pytest
 from graphrag_llm.config import ModelConfig
 from graphrag_llm.embedding.embedding_factory import embedding_factory
 
-from groundly.core.config import ProviderNotConfiguredError
+from groundly.core.config import ProviderConfig, ProviderNotConfiguredError
 from groundly.llm.graphrag_adapter import (
     BGE_M3_EMBEDDING_TYPE,
     Bgem3GraphEmbedding,
     completion_model_config,
+    concurrent_requests,
     register_bge_m3_embedding,
 )
 
@@ -264,6 +265,77 @@ def test_completion_model_config_builds_a_per_minute_rate_limit(home):
     assert rl.period_in_seconds == 60
     assert rl.requests_per_period == 30
     assert rl.tokens_per_period == 6000
+
+
+def test_retry_config_retries_a_capacity_400(home):
+    """A local runtime reports capacity exhaustion as a 400 ("Context size has been
+    exceeded" when concurrent slots overrun the shared KV cache), and litellm maps it to
+    the same BadRequestError as a malformed request — which graphrag never retries.
+    Measured 2026-08-01: 8 report calls failed, `"retries": 0`, and the wave that ran
+    with fewer in flight succeeded unaided."""
+    _write_extraction(home)
+    retry = completion_model_config().retry
+
+    assert retry is not None
+    skip = retry.model_dump()["exceptions_to_skip"]
+    assert "BadRequestError" not in skip
+    # only that one is lifted — an auth failure must still fail immediately
+    assert "AuthenticationError" in skip
+    assert "ContentPolicyViolationError" in skip
+
+
+def test_retry_config_reaches_the_retrier_that_graphrag_actually_builds(home):
+    """model_dump() -> ExponentialRetry(**init_args) only works because RetryConfig is
+    `extra="allow"`; asserting on the config alone would pass even if the extra field
+    were silently dropped on the way to the object that consults it."""
+    from graphrag_llm.retry.retry_factory import create_retry
+
+    _write_extraction(home)
+    retrier = create_retry(completion_model_config().retry)
+
+    assert "BadRequestError" not in retrier._exceptions_to_skip
+    assert "AuthenticationError" in retrier._exceptions_to_skip
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://localhost:1234/v1",
+        "http://127.0.0.1:1234/v1",
+        "http://[::1]:1234/v1",
+        "http://0.0.0.0:11434/v1",
+        "http://box.localhost:1234/v1",
+    ],
+)
+def test_concurrent_requests_serializes_a_local_runtime(base_url):
+    """graphrag's default of 25 assumes each call owns the context window. A llama.cpp
+    -family server serves several from ONE shared KV cache — measured 2026-08-01, 4 slots
+    x ~2,300-token report prompts against an 8192 cache, which llama.cpp answers with
+    `decode: Context size has been exceeded`."""
+    assert concurrent_requests(ProviderConfig(base_url=base_url, model="m")) == 1
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    ["https://api.openai.com/v1", "http://192.168.1.50:1234/v1", "https://api.groq.com/openai/v1"],
+)
+def test_concurrent_requests_leaves_a_remote_provider_at_graphrags_default(base_url):
+    """The cloud path must not slow down 25x. The LAN case is a known gap — a local
+    runtime reached over the network has the same shared cache and still needs its slots
+    reduced by hand (docs/guides/graphrag-provider.md says so)."""
+    assert concurrent_requests(ProviderConfig(base_url=base_url, model="m")) == 25
+
+
+def test_concurrent_requests_is_pessimistic_across_providers():
+    """graphrag has ONE global concurrency setting covering every stage, so a local
+    extraction provider binds the whole build even when graph.report_call_class points
+    community reports at a cloud model."""
+    local = ProviderConfig(base_url="http://localhost:1234/v1", model="m")
+    remote = ProviderConfig(base_url="https://api.openai.com/v1", model="m")
+
+    assert concurrent_requests(remote, local) == 1
+    assert concurrent_requests(local, remote) == 1
+    assert concurrent_requests(remote, remote) == 25
 
 
 def test_rate_limit_honours_either_limit_alone(home):

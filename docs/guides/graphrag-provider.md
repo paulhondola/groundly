@@ -345,6 +345,62 @@ what the global arm answers from — just know that 16384 is where that
 richness starts costing a second extraction call per chunk, not a free
 upgrade.
 
+### The table above is per *request*. Your server's limit is per *cache*.
+
+Every number so far assumes one call owns the whole window. A llama.cpp-family
+server does not work that way. LM Studio loads with several slots sharing a
+single KV cache:
+
+```
+srv load_model: initializing, n_slots = 4, n_ctx_slot = 8192, kv_unified = 'true'
+```
+
+`kv_unified = 'true'` means those 4 slots draw from **one** 8192-token cache —
+not 8192 each. So what has to fit is `in-flight calls × prompt`, and graphrag
+dispatches up to `concurrent_requests` at once, which it defaults to **25**.
+
+Measured 2026-08-01, `gemma-4-12b-qat` at 8192, the whole failure in one run:
+
+| | |
+| --- | --- |
+| Community-report prompts | 2,204 / 2,254 / 2,268 / 2,348 tokens each |
+| 4 slots in flight | ~9,200 tokens demanded of an 8,192 cache |
+| What llama.cpp did | walked its batch size 1024 → 512 → … → 1, then `decode: Context size has been exceeded` |
+| Casualties | 8 of 11 level-1 reports, dying in waves of exactly `n_slots` |
+| The tell | the final wave had only **3** left — 3 × 2,300 = 6,900 < 8,192 — and all three succeeded. Same prompts, same model. The only variable was how many were in flight. |
+| Why extraction survived | its prompts are 450–750 tokens; 4 × 750 = 3,000, comfortably inside 8,192 |
+
+Community reports are always the first stage to hit this, because they carry the
+build's largest prompt — the stock template is ~2,214 tokens before any content.
+A build can therefore finish extraction cleanly and still lose most of its
+reports.
+
+**Groundly now sets `concurrent_requests` to 1 whenever a provider's `base_url`
+is loopback**, so a local build serializes and the per-request budgets above mean
+what they say. This costs far less than it sounds: measured on the same run,
+prompt-eval ran at ~150 tok/s with one slot busy against 30–60 tok/s with four
+contending, because they share the same GPU either way. Cloud providers keep
+graphrag's default of 25 — they have no shared cache to exhaust.
+
+The heuristic errs in both directions. Only one of them can lose you a build:
+
+- **A local runtime reached over the LAN** (`http://192.168.1.50:1234/v1`) looks
+  remote and keeps 25 in flight — the failure above, undetected. Reduce the
+  server's parallel slots to 1 by hand.
+- **A cloud provider behind a local proxy** (LiteLLM, an OpenAI-compatible
+  gateway on `127.0.0.1`) looks local and serializes when it need not. The build
+  is correct, just slower than it could be — point `base_url` at the upstream
+  provider directly if that throughput matters.
+
+Groundly cannot close the first gap by measuring, because **`n_slots` is
+invisible to it**: no OpenAI-compatible endpoint reports it, and it is a
+load-time setting rather than a request parameter. To read it yourself, check LM
+Studio's server log (`~/.lmstudio/server-logs/`) for the
+`load_model: initializing` line above.
+
+Reducing slots to 1 in the server's load settings is the equivalent fix, and the
+right one if you also use that server for anything else.
+
 ## Community reports need JSON-schema structured output — by default, that's the extraction model
 
 Community reports — what global search and `overview` answer from — are the one
@@ -518,6 +574,12 @@ Both `tokens_per_minute` and `requests_per_minute` are optional and
 independent; set whichever your tier publishes. Unset means unthrottled,
 which is the right default for LM Studio or Ollama.
 
+These throttle the **rate** of calls, not how many are in flight at once, so
+they are not the fix for a local runtime overrunning its KV cache — see
+[the table above is per request](#the-table-above-is-per-request-your-servers-limit-is-per-cache).
+A provider can be well inside its RPM and still have four requests resident in
+one shared cache.
+
 Note this cannot help with a **per-day** cap. Groq's free tier allows 100k
 tokens/day, and a 1200-chunk subject needs around 1.0M with the bundled prompt
 — still ten days of quota. Throttling paces spending; it doesn't create
@@ -600,6 +662,19 @@ travels with the rest of the subject on export like `store.db` does).
   the count is printed alongside "Graph built".
 - `graph build produced no entities` — the pipeline ran but extracted
   nothing at all. Re-run with `--debug` for graphrag's own errors.
+- **Extraction finished, then most community reports failed with `Context size
+  has been exceeded` / `No report found for community: N`.** Not a prompt-size
+  problem, even though it reads like one — if extraction just succeeded, single
+  prompts clearly fit. Reports carry the build's largest prompt (~2,214 tokens of
+  template before content), and a local server runs several at once out of one
+  shared KV cache, so the limit is `in-flight × prompt`. Groundly serializes local
+  builds automatically; if you hit this anyway, the provider is probably reached
+  over the LAN rather than loopback. Check the server log for
+  `load_model: initializing, n_slots = …` and reduce the slots to 1. Full worked
+  example in [the section above](#the-table-above-is-per-request-your-servers-limit-is-per-cache).
+- **A report-stage failure that says nothing about context.** Then it *is* the
+  JSON-schema capability check two bullets up — reports are the one stage that
+  requires structured output.
 - **A failed rebuild leaves no graph, not the old one.** Every build starts by
   clearing the previous artifacts, keeping only graphrag's LLM cache (so the
   retry is cheap) and the log. That's deliberate: a rebuild only runs once your
