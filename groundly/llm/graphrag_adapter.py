@@ -11,6 +11,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib.resources import as_file, files
 from pathlib import Path
+from urllib.parse import urlparse
+
+from graphrag.config.defaults import graphrag_config_defaults
 
 # litellm's env defaults (price map, log level) are set in groundly/__init__.py — here
 # was too late: graphrag_llm.embedding.embedding below pulls litellm in at *its* module
@@ -22,6 +25,7 @@ from graphrag_llm.embedding.embedding import LLMEmbedding
 from graphrag_llm.embedding.embedding_factory import register_embedding
 from graphrag_llm.metrics.memory_metrics_store import MemoryMetricsStore
 from graphrag_llm.metrics.metrics_store_factory import register_metrics_store
+from graphrag_llm.retry.exceptions_to_skip import _default_exceptions_to_skip
 
 from groundly.llm.chat import _LOCAL_PLACEHOLDER_KEY
 from groundly.llm.config import ProviderConfig, load_settings, require_provider
@@ -126,20 +130,35 @@ def extraction_fingerprint(prompt_text: str, entity_types: list[str]) -> str:
 _service_tier_widened = False
 
 
-def completion_model_config(track_usage: bool = False) -> ModelConfig:
-    """Build graphrag's ModelConfig from Groundly's `extraction` provider. Fails fast
-    (via require_provider) — a *configured* provider is always required, but not
-    necessarily a real API key: graphrag's own ModelConfig validator rejects an empty
-    api_key outright (unlike Groundly's own llm/chat.py, which just omits the
-    Authorization header when `cfg.api_key` is empty), so a local/keyless provider
-    (LM Studio, Ollama) needs a truthy placeholder here to pass that validation — the
-    placeholder is never checked by a local server, same as the empty-header path
+def completion_model_config(
+    track_usage: bool = False, call_class: str = "extraction"
+) -> ModelConfig:
+    """Build graphrag's ModelConfig from one of Groundly's provider sections
+    (`call_class`, default `extraction` — `graph.report_call_class` points community
+    reports at another one). Fails fast (via require_provider) — a *configured* provider
+    is always required, but not necessarily a real API key: graphrag's own ModelConfig
+    validator rejects an empty api_key outright (unlike Groundly's own llm/chat.py, which
+    just omits the Authorization header when `cfg.api_key` is empty), so a local/keyless
+    provider (LM Studio, Ollama) needs a truthy placeholder here to pass that validation —
+    the placeholder is never checked by a local server, same as the empty-header path
     already works for every other call class.
 
     `track_usage` swaps graphrag_llm's metrics store for one this process can read back
     (see `metered_usage`), which is how the *batch build* learns what it actually spent.
-    The query path leaves it off and keeps the stock store."""
-    cfg = require_provider("extraction")
+    The query path leaves it off and keeps the stock store.
+
+    `reasoning_effort`, when the provider sets it, goes into `call_args["extra_body"]` —
+    measured: `call_args={"reasoning_effort": ...}` makes litellm raise
+    UnsupportedParamsError on every call (its `drop_params` is False, so it never
+    degrades), while nesting the same value under `extra_body` reaches the provider
+    (93 -> 2 completion tokens on a local reasoning model). Omitted entirely when unset,
+    so `call_args` keeps its `{}` default and today's behavior is unchanged."""
+    cfg = require_provider(call_class)
+    extra = (
+        {"call_args": {"extra_body": {"reasoning_effort": cfg.reasoning_effort}}}
+        if cfg.reasoning_effort
+        else {}
+    )
     return ModelConfig(
         model_provider="openai",
         model=cfg.model,
@@ -152,11 +171,12 @@ def completion_model_config(track_usage: bool = False) -> ModelConfig:
         metrics=MetricsConfig(store=GROUNDLY_METRICS_STORE_TYPE)
         if track_usage
         else MetricsConfig(),
+        **extra,
     )
 
 
 class ReadableMetricsStore(MemoryMetricsStore):
-    """graphrag_llm's own in-memory metrics store, plus a handle on the instance.
+    """graphrag_llm's own in-memory metrics store, plus a handle on every instance.
 
     graphrag aggregates real per-model usage but only ever *writes* it from
     `MemoryMetricsStore._on_exit_`, registered with `atexit` — so the log line and the
@@ -164,13 +184,21 @@ class ReadableMetricsStore(MemoryMetricsStore):
     could read them. `get_metrics()` has the same numbers live; all that was missing was
     a reference to the store holding them. Keeping the log writer on means the indexing
     log still gets its end-of-run summary, unchanged.
+
+    Keyed by `id` (graphrag's `model_provider/model`) rather than held as a single
+    `latest` pointer, because graphrag_llm caches these as singletons keyed on hashed
+    init args *including* that `id` — see `graphrag_common/factory/factory.py`'s
+    `cache_key` and `graphrag_llm/metrics/metrics_store_factory.py` passing `"id": id`
+    into those args. So `graph.report_call_class` pointing community reports at a second
+    model produces a SECOND store here, not a second write into the first, and
+    `metered_usage` sums over every instance rather than trusting there is only ever one.
     """
 
-    latest: "ReadableMetricsStore | None" = None
+    instances: "dict[str, ReadableMetricsStore]" = {}
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        type(self).latest = self
+        type(self).instances[self.id] = self
 
 
 def register_groundly_metrics_store() -> None:
@@ -188,8 +216,76 @@ def _retry_config() -> RetryConfig:
     worker retries in lockstep and re-creates the burst that caused the 429.
 
     base_delay must be strictly > 1.0 for exponential backoff (graphrag validates it);
-    2.0 gives 2/4/8/16/32s, capped at max_delay."""
-    return RetryConfig(max_retries=5, base_delay=2.0, max_delay=60.0, jitter=True)
+    2.0 gives 2/4/8/16/32s, capped at max_delay.
+
+    `exceptions_to_skip` drops BadRequestError from graphrag_llm's default never-retry
+    list. A local runtime reports *capacity* exhaustion as a 400 — llama.cpp/LM Studio
+    answer "Context size has been exceeded" when concurrent slots overrun the shared KV
+    cache — and litellm maps that to the same BadRequestError as a genuinely malformed
+    request, so graphrag retried it zero times and dropped the community report. Measured
+    2026-08-01: 8 of 11 report calls died in waves of exactly n_slots, and the final wave
+    of 3 succeeded unaided once the other slots had drained — which is precisely what a
+    backed-off retry recreates. `concurrent_requests()` below is the actual fix; this is
+    the backstop for the runtimes it cannot detect.
+
+    The cost when the 400 *is* structural: 2/4/8/16/32s before the failure surfaces.
+    Bounded and rare — ingestion/graph.py's probe screens that case up front, and it calls
+    llm/chat.py's complete() (litellm directly, not graphrag's retrier), so probe latency
+    is unchanged. Importing graphrag_llm's private default is deliberate: a pin bump that
+    renames it raises ImportError here rather than silently reinstating the old behavior."""
+    return RetryConfig(
+        max_retries=5,
+        base_delay=2.0,
+        max_delay=60.0,
+        jitter=True,
+        exceptions_to_skip=[e for e in _default_exceptions_to_skip if e != "BadRequestError"],
+    )
+
+
+# graphrag has ONE global concurrency setting covering every stage (extract_graph,
+# summarize_descriptions, create_community_reports all pass `num_threads=
+# config.concurrent_requests`), and leaves it at 25.
+_LOCAL_CONCURRENT_REQUESTS = 1
+
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
+
+
+def _is_loopback(cfg: ProviderConfig) -> bool:
+    host = urlparse(cfg.base_url).hostname
+    return bool(host) and (host in _LOOPBACK_HOSTS or host.endswith(".localhost"))
+
+
+def concurrent_requests(*cfgs: ProviderConfig) -> int:
+    """How many calls a graph build may keep in flight. 1 against a local runtime,
+    graphrag's own default against everything else.
+
+    prompt_budgets() below sizes every stage to fit `graph.context_window` *once*. A
+    llama.cpp-family server does not work that way: LM Studio loads with `n_slots = 4,
+    kv_unified = 'true'`, i.e. four concurrent requests drawing from ONE cache of that
+    size. Measured 2026-08-01 on gemma-4-12b-qat at 8192: community-report prompts are
+    ~2,300 tokens each, 4 in flight need ~9,200, and llama.cpp walks its batch size down
+    1024 -> 1 before answering `decode: Context size has been exceeded`. Extraction
+    survived the same build only because its prompts are 450-750 tokens.
+
+    So the budget is per *request* while the runtime's limit is per *cache*, and Groundly
+    cannot see the divisor — `n_slots` is a load-time setting no OpenAI-compatible
+    endpoint reports. Serializing is the honest answer, and it is close to free: measured
+    150 tok/s prompt-eval with one slot busy against 30-60 tok/s with four contending,
+    because they share the same GPU either way.
+
+    Loopback is the signal because a shared KV cache is what "the model runs on this
+    machine" means. It is a heuristic with one known gap — a local runtime reached over
+    the LAN looks remote and still needs its slots reduced by hand (docs/guides/
+    graphrag-provider.md says so).
+
+    Variadic and pessimistic ("any local wins") because of that single global setting:
+    with `graph.report_call_class` pointing reports at a cloud model, a local extraction
+    provider still binds the whole build."""
+    return (
+        _LOCAL_CONCURRENT_REQUESTS
+        if any(_is_loopback(cfg) for cfg in cfgs)
+        else graphrag_config_defaults.concurrent_requests
+    )
 
 
 def _rate_limit_config(cfg: ProviderConfig) -> RateLimitConfig | None:
@@ -228,6 +324,11 @@ def prompt_budgets(context_window: int) -> PromptBudgets:
 
     Each budget is `min(graphrag's default, a share of the window)`, so this only
     ever scales *down*: a large context_window reproduces stock graphrag behavior.
+
+    These are *per-request* budgets, and that is only half the constraint. A llama.cpp
+    -family runtime serves several requests from one shared KV cache, so what has to fit
+    is `in-flight calls x prompt`, not one prompt — see concurrent_requests() above, which
+    is what keeps the divisor at 1 locally so these numbers mean what they say.
     """
     return PromptBudgets(
         # The gleaning round re-sends prompt + chunk + the model's whole first answer.

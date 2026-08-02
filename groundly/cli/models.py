@@ -28,9 +28,13 @@ def config(ctx: typer.Context) -> None:
         section = providers.get(call_class) or {}
         if section.get("base_url") and section.get("model"):
             key = mask_key(section.get("api_key", ""))
+            # reasoning_effort silently changes every call this class makes, so it has to
+            # be visible here — but only when set, to keep the common line uncluttered.
+            effort = section.get("reasoning_effort")
             console.print(
                 f"  {call_class}: model={section['model']}  "
                 f"base_url={section['base_url']}  key={key}"
+                + (f"  reasoning_effort={effort}" if effort else "")
             )
         else:
             console.print(f"  {call_class}: [dim](not configured)[/dim]")
@@ -51,6 +55,7 @@ def config(ctx: typer.Context) -> None:
     console.print(
         f"  graph.extraction_prompt   = {s.graph.extraction_prompt or '(bundled course-tuned)'}"
     )
+    console.print(f"  graph.report_call_class   = {s.graph.report_call_class}")
 
 
 @config_app.command(name="set")

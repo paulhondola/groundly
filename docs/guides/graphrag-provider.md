@@ -6,34 +6,79 @@ your indexed materials. Extraction is a real LLM call per chunk — this is the
 one call class that needs a specific kind of provider, not just any
 configured endpoint.
 
-## Why extraction shouldn't be a small local model
+## Extraction needs a verified model, not necessarily a cloud one
 
 LM Studio/Ollama work mechanically for `extraction` — it's the same
 OpenAI-compatible `base_url`+`model`+`key` shape as every other call class,
 and an unset key is fine (Groundly passes a placeholder graphrag's own
-config validation requires, same as any local provider). The rule is still:
-extraction needs a mid-tier cloud model, never a small local model — but the
-reason is **time**, not quality.
+config validation requires, same as any local provider). **Cloud stays the
+default recommendation** — it needs no per-model verification and nothing
+below is required to make `--graph` work. But the old rule here — "never a
+small local model" — was right about *small* and wrong about *local*.
+Measured 2026-07-30 on an M1 Pro / 16 GB, Ollama 0.30.5, n=3 against a fixed
+sample chunk
+([full report](../superpowers/reviews/2026-07-30-local-extraction-feasibility.md)):
 
-Measured 2026-07-27 on an M1 Pro / 16 GB, `gemma-4-12b-qat` at 16384 context
-produced a perfectly good graph: 12 entities and 11 relationships from a sample
-chunk with zero malformed records, and community reports that covered every
-supplied entity with no hallucinations. It took **199.9 s per chunk**:
+- **The measured floor: `gemma4:12b`, reasoning off,
+  `graph.context_window` = 12288.** 42.2 s median per extraction call —
+  **9.2× faster** than the same model with reasoning left on (386.5 s
+  median) — with zero malformed records either way, and entity/relationship
+  counts as good or better (9/7, 8/7, 8/7 reasoning-off vs. 7/6, 11/10, 7/6
+  reasoning-on). Community reports, the one stage that genuinely needs
+  structured output, held up too: 3/3 conforming in both arms, 4.4× faster
+  (239.0 → 53.6 s median), and reasoning-off covered 7/7 input entities on
+  all three samples against 6/7 on one reasoning-on sample.
+- **The cautionary case: `qwen3.5:4b`.** Going smaller doesn't buy speed —
+  it's **4.8× slower than the 12B** (201.8 s median) because it emits 3–24×
+  more completion tokens (up to 12,959 against the 12B's 536), and it
+  produced **1–44 malformed records per call** against the 12B's zero.
+  Worse, `reasoning_effort: "none"` doesn't suppress its deliberation the
+  way it does on gemma — it empties `reasoning_content`, but the thinking
+  relocates into the content channel: one call returned 53,355 characters of
+  "extraction output" that read, mid-stream, "Wait, re-evaluating based on
+  strict entity types provided..." and ended "Final format check: ... Output
+  starts now...". Community reports fared no better — one returned
+  `findings: []` while still conforming to the schema. A build on this model
+  completes, reports success, and hands back a garbled graph: graphrag drops
+  malformed records silently, and Groundly's failure gate counts call
+  failures, not dropped records.
+
+So the reason to avoid a small local model is no longer mainly **time** —
+with reasoning verified off, a mid-tier local model is competitive with
+cloud on latency. For a model that's actually too small, like the 4B above,
+the disqualifying reason is **quality**: it can't reliably stop, and its
+failures don't surface as errors.
+
+For context, the old (reasoning-on) baseline this guide used to quote:
+measured 2026-07-27 on an M1 Pro / 16 GB, `gemma-4-12b-qat` at 16384 context
+on LM Studio produced a perfectly good graph — 12 entities and 11
+relationships from a sample chunk, zero malformed records, community reports
+covering every supplied entity — but took **199.9 s per chunk**:
 
 | corpus | serial | at LM Studio's default `--parallel 4`, optimistic |
 | --- | --- | --- |
 | 355 chunks | 19.7 h | 6.6 h |
 | 1194 chunks | 66.3 h | **22.1 h** |
 
-That's the extraction pass alone — community reports bill on top at 97–243 s
-each. So a small local model doesn't garble your graph; it builds a correct one
-about a day later. Add to that the structured-output failures below, which cost
-a full extraction pass before they surface, and the cloud model is the cheaper
-choice in wall-clock even when it isn't in dollars.
+With reasoning verified off and `graph.context_window` at 12288 (Ollama,
+extraction pass only, same optimistic parallel assumption):
 
-If you don't want to spend on this, skip `--graph` entirely — the vector arm
-works with zero API key, and `groundly index` (without `--graph`) is
-completely unaffected.
+| corpus | serial | at parallel-4 |
+| --- | --- | --- |
+| 355 chunks | 4.2 h | 1.4 h |
+| 1194 chunks | 14.0 h | **4.7 h** |
+
+Both tables cover the extraction pass only — community reports bill on top
+either way. **Nothing here has been validated end-to-end**: these are
+single-call measurements against one fixed chunk, excluding gleanings,
+community reports, description summaries, and graphrag's own response
+cache. Build one small subject and look at it before trusting a large run,
+local or cloud.
+
+If you don't want to deal with any of this — model choice, reasoning
+verification, context sizing — go straight to a cloud provider, or skip
+`--graph` entirely: the vector arm works with zero API key, and
+`groundly index` (without `--graph`) is completely unaffected either way.
 
 ## Configure it
 
@@ -58,6 +103,54 @@ groundly config set extraction.output_price_per_mtok <price per 1M output tokens
 
 `groundly config` shows the effective value (key masked) for every call
 class, including `extraction`.
+
+## Turn reasoning off before trusting a local model for extraction
+
+```bash
+groundly config set extraction.reasoning_effort none
+```
+
+`reasoning_effort` is settable under any call class the same way
+(`chat.reasoning_effort`, etc.) — **it's a passthrough value, not
+validated**; Groundly forwards whatever string you set. What it should be
+depends on the provider: `"none"` for Ollama; OpenAI's o-series reasoning
+models take `low`, `medium`, or `high` instead.
+
+**Only `extraction` is measured, and the recommendation stops there.** The
+9.2× above is an extraction result, and extraction is the one call class
+whose job — emit a delimited tuple list — genuinely has nothing to reason
+about. `chat` is a different task: it synthesises an answer *and* has to keep
+citation discipline while doing it. Setting `chat.reasoning_effort=none` on
+`gemma4:12b`, a broad "what is this course about" question came back with no
+resolvable citations at all (a refusal, since zero citations is an error and
+never a degraded answer), while narrow factoid questions answered fine with
+citations on repeated runs. That is one model on a handful of questions, not
+a characterised failure — but it is enough that you should not set it on
+`chat` or `generation` without checking your own grounded answers first.
+
+**Verify it with one call, per model — the setting doesn't mean the same
+thing on every model.** On `gemma4:12b`, `"none"` genuinely suppresses
+deliberation, which is what the numbers above depend on. On `qwen3.5:4b`,
+the same setting empties `reasoning_content`, but the deliberation doesn't
+go away — it relocates into the answer itself (see the cautionary case
+above), which nothing here catches automatically. So an empty
+`reasoning_content` is necessary but not sufficient: send one real
+extraction prompt and check that `content` actually came back as the
+delimited tuple format, not prose.
+
+**Both local runtimes behave the same way here** (measured 2026-08-01):
+`reasoning_effort: "none"` works, and the apparent alternative,
+`chat_template_kwargs: {"enable_thinking": false}`, is silently *ignored* by
+both. On `google/gemma-4-12b-qat` in LM Studio the switch took one trivial
+answer from 48 completion tokens to 2; on `qwen/qwen3.5-9b` there, 98 to 2;
+on `gemma4:12b` in Ollama, 68 to 2. So this setting is portable across LM
+Studio and Ollama, which is not something to assume of provider-specific
+parameters in general — verify it if you move to a third runtime.
+
+Ollama leaves `completion_tokens_details` null in the response, so you can't
+read reasoning-token counts directly there — the length of
+`reasoning_content` is the only signal. LM Studio reports neither field once
+reasoning is off, which is itself the confirmation you want.
 
 ## Build the graph
 
@@ -190,26 +283,137 @@ So Groundly scales every budget to one number:
 groundly config set graph.context_window 8192
 ```
 
-Set it to whatever your model is actually loaded with — in LM Studio that's
-the context length in the model's load settings, not the model's advertised
-maximum. Read it back rather than trusting what you asked for: `lms load -c` is
-honoured on the GGUF/llama.cpp engine and **ignored on the MLX engine**, which
-loaded one model at 32768 whether asked for 4096 or 16384. `curl -s
-localhost:1234/api/v0/models` reports the real `loaded_context_length`.
+**This is a budget Groundly assumes, not a measurement of anything real** —
+it feeds graphrag's own `prompt_budgets()`, and nothing checks it against
+what the endpoint will actually accept. It goes wrong in two directions:
 
-The default is 4096, which works out of the box but produces smaller
-community summaries (weaker `overview`/global search). At 16384 and above,
-Groundly reproduces stock graphrag exactly, including the gleaning pass.
+- **Set above the model's real window** — calls fail or truncate, exactly as
+  above: `Context size has been exceeded`, or the silent empty-body case
+  where reasoning tokens eat the budget before the answer does.
+- **Set below the model's real window** — nothing fails; Groundly just asks
+  for less than the model could give. Against a large cloud model this is
+  the intended use: a conservative budget produces smaller, cheaper
+  community summaries without touching correctness.
 
-Raising the model's context is the better fix when your hardware allows it:
-more context means richer community reports, which is most of what the global
-arm answers from.
+Which one applies depends entirely on what's actually loaded. Read the real
+number back rather than trusting what you asked for — in LM Studio that's
+the context length in the model's load settings, not its advertised
+maximum. `curl -s localhost:1234/api/v0/models` reports the real
+`loaded_context_length`, and that is the number to trust: on 2026-07-27
+`lms load -c` was honoured on the GGUF/llama.cpp engine and **ignored on the
+MLX engine**, which loaded one model at 32768 whether asked for 4096 or
+16384. That may no longer hold — on 2026-08-01 `lms load -c 12288` was
+honoured on an MLX model, reading back exactly 12288. One value on one model
+is not enough to call the earlier finding stale, which is precisely why the
+advice is to read it back rather than to trust any rule about which engine
+respects the flag.
 
-## The extraction model must support JSON-schema structured output
+**For a local model, set `graph.context_window` to that real number** —
+there's no cloud-scale headroom to budget conservatively against, so the
+setting should describe what's actually loaded. At that point, the shipped
+default of 4096 is not "works but smaller": the stock `community_report`
+template alone is 2,214 tokens, and the budget `prompt_budgets()` derives
+from a 4096 window allows only 2,048 more of packed context —
+**4,262 input tokens against a 4,096 window**, before a single output token.
+A local model loaded at 4096 cannot produce a community report at all; that
+isn't a quality tradeoff, it's arithmetic.
+
+**12288, not 16384, is the local recommendation.** Running the real
+`prompt_budgets()` against the measured 2,214-token template (full
+derivation in
+[2026-07-30-local-extraction-feasibility.md](../superpowers/reviews/2026-07-30-local-extraction-feasibility.md)):
+
+| `graph.context_window` | gleanings | extraction calls/chunk | report total | fits? |
+| --- | --- | --- | --- | --- |
+| 4096 | 0 | 1 | 5,286 | no — over by 1,190 |
+| 6144 | 0 | 1 | 6,822 | no — over by 678 |
+| 8192 | 0 | 1 | 8,310 | no — over by 118 |
+| **12288** | **0** | **1** | 10,358 | **yes** |
+| 16384 | 1 | **2** | 12,214 | yes |
+
+`max_gleanings` flips from 0 to 1 exactly at 16384, and a gleaning round is a
+**second full LLM call per chunk** — on the stage that already accounts for
+nearly all call volume. 16384 does reproduce stock graphrag exactly,
+including the gleaning pass, which is the right choice if you're paying a
+cloud provider for that fidelity. For a local model, that fidelity is a
+doubled extraction bill for no measured gain: 12288 fits a community report
+with room to spare and keeps extraction at one call.
+
+Raising the model's context past 12288 is still worth it if your hardware
+has room — more context means richer community reports, which is most of
+what the global arm answers from — just know that 16384 is where that
+richness starts costing a second extraction call per chunk, not a free
+upgrade.
+
+### The table above is per *request*. Your server's limit is per *cache*.
+
+Every number so far assumes one call owns the whole window. A llama.cpp-family
+server does not work that way. LM Studio loads with several slots sharing a
+single KV cache:
+
+```
+srv load_model: initializing, n_slots = 4, n_ctx_slot = 8192, kv_unified = 'true'
+```
+
+`kv_unified = 'true'` means those 4 slots draw from **one** 8192-token cache —
+not 8192 each. So what has to fit is `in-flight calls × prompt`, and graphrag
+dispatches up to `concurrent_requests` at once, which it defaults to **25**.
+
+Measured 2026-08-01, `gemma-4-12b-qat` at 8192, the whole failure in one run:
+
+| | |
+| --- | --- |
+| Community-report prompts | 2,204 / 2,254 / 2,268 / 2,348 tokens each |
+| 4 slots in flight | ~9,200 tokens demanded of an 8,192 cache |
+| What llama.cpp did | walked its batch size 1024 → 512 → … → 1, then `decode: Context size has been exceeded` |
+| Casualties | 8 of 11 level-1 reports, dying in waves of exactly `n_slots` |
+| The tell | the final wave had only **3** left — 3 × 2,300 = 6,900 < 8,192 — and all three succeeded. Same prompts, same model. The only variable was how many were in flight. |
+| Why extraction survived | its prompts are 450–750 tokens; 4 × 750 = 3,000, comfortably inside 8,192 |
+
+Community reports are always the first stage to hit this, because they carry the
+build's largest prompt — the stock template is ~2,214 tokens before any content.
+A build can therefore finish extraction cleanly and still lose most of its
+reports.
+
+**Groundly now sets `concurrent_requests` to 1 whenever a provider's `base_url`
+is loopback**, so a local build serializes and the per-request budgets above mean
+what they say. This costs far less than it sounds: measured on the same run,
+prompt-eval ran at ~150 tok/s with one slot busy against 30–60 tok/s with four
+contending, because they share the same GPU either way. Cloud providers keep
+graphrag's default of 25 — they have no shared cache to exhaust.
+
+The heuristic errs in both directions. Only one of them can lose you a build:
+
+- **A local runtime reached over the LAN** (`http://192.168.1.50:1234/v1`) looks
+  remote and keeps 25 in flight — the failure above, undetected. Reduce the
+  server's parallel slots to 1 by hand.
+- **A cloud provider behind a local proxy** (LiteLLM, an OpenAI-compatible
+  gateway on `127.0.0.1`) looks local and serializes when it need not. The build
+  is correct, just slower than it could be — point `base_url` at the upstream
+  provider directly if that throughput matters.
+
+Groundly cannot close the first gap by measuring, because **`n_slots` is
+invisible to it**: no OpenAI-compatible endpoint reports it, and it is a
+load-time setting rather than a request parameter. To read it yourself, check LM
+Studio's server log (`~/.lmstudio/server-logs/`) for the
+`load_model: initializing` line above.
+
+Reducing slots to 1 in the server's load settings is the equivalent fix, and the
+right one if you also use that server for anything else.
+
+## Community reports need JSON-schema structured output — by default, that's the extraction model
 
 Community reports — what global search and `overview` answer from — are the one
 stage graphrag requests structured output for. It passes a Pydantic model, which
 litellm turns into `response_format: {"type": "json_schema", …, "strict": true}`.
+
+**If your extraction model can't clear this bar, you don't have to replace it** —
+`graph.report_call_class` (default `"extraction"`; see "Routing community reports
+to a different provider" below) sends just the 23–436 community-report calls to a
+different configured call class, while extraction itself sends no `response_format`
+at all — it's plain delimited text. Everything below describes what happens when
+the model actually serving reports doesn't support the schema, whichever call
+class that is.
 
 **This is stricter than "JSON mode".** The older `{"type": "json_object"}` is a
 different capability, and endpoints disagree about which they accept — in both
@@ -311,6 +515,49 @@ then produces an empty report for every community, which surfaces as the same
 If you use a local model for `extraction`, build one small subject first and look
 at the community reports before trusting a large run.
 
+### Routing community reports to a different provider
+
+Community reports are the one stage that requires structured output, and —
+per the two local failure modes above — the stage where a local model most
+often fails silently even after "accepting" the schema.
+`graph.report_call_class` names which configured call class actually serves
+community reports, independent of `extraction`:
+
+```bash
+groundly config set graph.report_call_class chat
+```
+
+Default is `"extraction"` — reports go to the same provider as everything
+else in this guide, which is fine if that provider passed the JSON-schema
+checks above. Setting it to `"chat"` (or any other configured call class)
+routes just the 23–436 community-report calls to that provider's config,
+while the far larger extraction pass — up to 1,194 calls on the reference
+corpus — keeps running wherever you've pointed `extraction`, local included.
+This is the practical way to keep a local build cheap on the stage with all
+the call volume, and pay for schema support only on the stage that actually
+needs it.
+
+**This routes the build only.** Query-time global search — the `overview`
+tool, and any `ask` the router sends down the global arm — makes its own
+synthesis call through the `extraction` provider, not `report_call_class`
+(`retrieval/graph.py`'s query-time completion config is always `extraction`,
+for both local and global search). So if you set `report_call_class` because
+your `extraction` model can't do structured output, `overview` still calls
+that same model — a different, non-schema-gated call, but still the model
+you moved reports away from. Current limitation, not something you can
+configure around today.
+
+**A free local extraction model can blank the whole build's cost line.**
+`metered_usage()` sums tokens across both models regardless, but prices the
+whole build with one shared flag: if either model's price can't be resolved
+(no litellm entry, no manual override), the printed figure is the token
+counts with no dollar amount at all — even though the other model is
+priced. If `extraction` is local/unpriced and `report_call_class` points at
+a paid provider, set `extraction.input_price_per_mtok = 0` and
+`extraction.output_price_per_mtok = 0` explicitly (rather than leaving them
+unset) so the local model prices at $0 instead of unknown, and the paid
+report model's real cost still prints.
+
 ## Rate limits, if your provider has them
 
 A graph build fires hundreds of concurrent calls, and graphrag swallows a 429
@@ -326,6 +573,12 @@ groundly config set extraction.tokens_per_minute 6000
 Both `tokens_per_minute` and `requests_per_minute` are optional and
 independent; set whichever your tier publishes. Unset means unthrottled,
 which is the right default for LM Studio or Ollama.
+
+These throttle the **rate** of calls, not how many are in flight at once, so
+they are not the fix for a local runtime overrunning its KV cache — see
+[the table above is per request](#the-table-above-is-per-request-your-servers-limit-is-per-cache).
+A provider can be well inside its RPM and still have four requests resident in
+one shared cache.
 
 Note this cannot help with a **per-day** cap. Groq's free tier allows 100k
 tokens/day, and a 1200-chunk subject needs around 1.0M with the bundled prompt
@@ -409,6 +662,19 @@ travels with the rest of the subject on export like `store.db` does).
   the count is printed alongside "Graph built".
 - `graph build produced no entities` — the pipeline ran but extracted
   nothing at all. Re-run with `--debug` for graphrag's own errors.
+- **Extraction finished, then most community reports failed with `Context size
+  has been exceeded` / `No report found for community: N`.** Not a prompt-size
+  problem, even though it reads like one — if extraction just succeeded, single
+  prompts clearly fit. Reports carry the build's largest prompt (~2,214 tokens of
+  template before content), and a local server runs several at once out of one
+  shared KV cache, so the limit is `in-flight × prompt`. Groundly serializes local
+  builds automatically; if you hit this anyway, the provider is probably reached
+  over the LAN rather than loopback. Check the server log for
+  `load_model: initializing, n_slots = …` and reduce the slots to 1. Full worked
+  example in [the section above](#the-table-above-is-per-request-your-servers-limit-is-per-cache).
+- **A report-stage failure that says nothing about context.** Then it *is* the
+  JSON-schema capability check two bullets up — reports are the one stage that
+  requires structured output.
 - **A failed rebuild leaves no graph, not the old one.** Every build starts by
   clearing the previous artifacts, keeping only graphrag's LLM cache (so the
   retry is cheap) and the log. That's deliberate: a rebuild only runs once your

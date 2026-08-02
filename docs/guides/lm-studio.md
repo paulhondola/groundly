@@ -11,7 +11,10 @@ provider at all — this is only for `ask` (and later generation phases).
 
 1. Install LM Studio from [lmstudio.ai](https://lmstudio.ai), open it, and
    download a model from the search tab (e.g. `qwen2.5-7b-instruct` — any
-   instruct-tuned chat model works).
+   instruct-tuned chat model works for `chat`). That does **not** extend to
+   `extraction` — a model that's fine here can still garble a graph; see
+   [graphrag-provider.md](graphrag-provider.md) for the narrower bar that
+   call class needs.
 2. Go to the **Developer** tab and start the server. Default address:
    `http://localhost:1234`.
 3. Load the model (or enable **just-in-time model loading** in the server

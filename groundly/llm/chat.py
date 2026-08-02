@@ -13,6 +13,7 @@ exactly those paths."""
 
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 
@@ -35,6 +36,40 @@ class ChatFn(Protocol):
 
 class ChatUnreachableError(Exception):
     """The configured chat provider could not be reached (network/HTTP error)."""
+
+
+def loaded_context_length(call_class: str) -> int | None:
+    """The context length the provider *actually* loaded its model with, or None if it
+    does not say. Best-effort and never raises.
+
+    `graph.context_window` is a number Groundly asserts, not one it measures: every
+    prompt budget is carved from it and nothing checks it against the endpoint, so a
+    model reloaded at a smaller window silently invalidates the whole sizing. Observed
+    2026-08-01 — config said 12288, LM Studio was serving 8192 after a reload.
+
+    LM Studio is the only endpoint asked, via its own REST API (`GET /api/v0/models`,
+    `loaded_context_length`); the OpenAI-compatible surface has no equivalent field and
+    Ollama's context is server-side only. That makes this an unusually literal reading of
+    "never hardcode a provider" (.claude/rules/architecture.md): the rule protects the
+    *call* path, where a hardcoded provider would make some endpoints unusable. Nothing
+    here reaches an LLM or gates a build — a server that 404s, times out, or answers a
+    shape this does not recognise returns None and the build proceeds exactly as before.
+
+    Deliberately not raising on *anything*: this is a diagnostic, and the one failure mode
+    worse than missing the drift is refusing a build over an unrelated HTTP hiccup."""
+    cfg = require_provider(call_class)
+    # base_url is the OpenAI surface (…/v1); the REST API is a sibling at the origin.
+    origin = urlunparse(urlparse(cfg.base_url)._replace(path="", query="", fragment=""))
+    try:
+        response = httpx.get(f"{origin}/api/v0/models", timeout=2.0)
+        response.raise_for_status()
+        for entry in response.json()["data"]:
+            if entry["id"] == cfg.model:
+                length = entry.get("loaded_context_length")
+                return int(length) if length is not None else None
+    except Exception:
+        return None
+    return None
 
 
 def complete(
@@ -69,6 +104,12 @@ def complete(
         if response_format is not None
         else {}
     )
+    # Nested under extra_body, never passed flat: litellm's drop_params is False, so a
+    # flat reasoning_effort kwarg raises UnsupportedParamsError on every call instead of
+    # degrading (measured — see llm/graphrag_adapter.completion_model_config, which nests
+    # the same way so the setting means the same thing on every call class).
+    if cfg.reasoning_effort:
+        extra["extra_body"] = {"reasoning_effort": cfg.reasoning_effort}
     try:
         response = litellm.completion(
             model=f"openai/{cfg.model}",

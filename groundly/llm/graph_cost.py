@@ -35,28 +35,64 @@ class MeteredUsage:
 
 
 def metered_usage() -> MeteredUsage | None:
-    """The usage graphrag accumulated since `reset_metered_usage()`, priced.
+    """The usage graphrag accumulated since `reset_metered_usage()`, summed across every
+    metered completion model and priced.
+
+    There can be more than one store: `graph.report_call_class` (core/config.GraphSettings)
+    lets community reports run against a different model than extraction, and graphrag
+    caches metrics stores as singletons keyed on hashed init args *including* the model id
+    (see `ReadableMetricsStore`'s docstring) — so two models produce two stores, and
+    summing only the most recent one would silently under-report everything the other
+    model spent.
 
     **Cache hits are counted in the token totals but were never paid for** — a rebuild
     against a warm cache reported 420,965 prompt tokens at `cache_hit_rate: 1.0`, none of
     which cost anything. That is the normal path here, not an edge case: decision 21
     deliberately preserves `cache/` across a failed rebuild so the retry keeps the
     responses already bought. Tokens stay as metered (they were genuinely processed); the
-    *cost* is scaled to the responses that actually reached the provider.
+    *cost* is scaled to the responses that actually reached the provider — computed PER
+    STORE, because the billed fraction is a property of that store's own cache hits, not
+    a global average across models with different cache behavior.
 
     Returns None on anything unexpected. This is a number printed after a successful
     build — it must never be the reason one fails.
     """
-    store = ReadableMetricsStore.latest
-    if store is None:
+    stores = list(ReadableMetricsStore.instances.values())
+    if not stores:
         return None
     try:
-        metrics = store.get_metrics()
-        prompt_tokens = int(metrics["prompt_tokens"])
-        completion_tokens = int(metrics["completion_tokens"])
-        responses = int(metrics["responses_with_tokens"])
-        cached = int(metrics.get("cached_responses", 0))
-        prices = extraction_prices()
+        prompt_tokens = 0
+        completion_tokens = 0
+        cost_usd = 0.0
+        priced = True
+        for store in stores:
+            metrics = store.get_metrics()
+            store_prompt = int(metrics.get("prompt_tokens", 0))
+            store_completion = int(metrics.get("completion_tokens", 0))
+            if store_prompt == 0 and store_completion == 0:
+                # Two different things reach zero tokens, and only one is harmless.
+                # Registered but never *called* (no communities formed, so the report
+                # model never ran) contributes nothing and can be skipped. Called and
+                # metered nothing — a provider that omitted `usage` — is missing
+                # information, not absent spend: skipping it silently would print the
+                # other model's cost as if it were the whole bill. Decision 23's rule is
+                # that an absence must never read as a fact.
+                if int(metrics.get("attempted_request_count", 0)) > 0:
+                    priced = False
+                continue
+            prompt_tokens += store_prompt
+            completion_tokens += store_completion
+
+            responses = int(metrics.get("responses_with_tokens", 0))
+            cached = int(metrics.get("cached_responses", 0))
+            prices = _prices_for_model(store.id)
+            if prices is None or responses == 0:
+                priced = False
+                continue
+            billed = max(0, responses - cached) / responses
+            cost_usd += billed * (
+                store_prompt * prices.input_per_token + store_completion * prices.output_per_token
+            )
     except Exception:  # noqa: BLE001 — see the docstring: never fail a finished build
         return None
 
@@ -65,32 +101,31 @@ def metered_usage() -> MeteredUsage | None:
     if prompt_tokens + completion_tokens == 0:
         return None
 
-    cost = None
-    if prices is not None and responses > 0:
-        billed = max(0, responses - cached) / responses
-        cost = billed * (
-            prompt_tokens * prices.input_per_token + completion_tokens * prices.output_per_token
-        )
-    return MeteredUsage(prompt_tokens, completion_tokens, prompt_tokens + completion_tokens, cost)
+    return MeteredUsage(
+        prompt_tokens,
+        completion_tokens,
+        prompt_tokens + completion_tokens,
+        cost_usd if priced else None,
+    )
 
 
 def reset_metered_usage() -> None:
-    """Zero any store a previous build left behind, so `metered_usage()` can only ever
+    """Zero every store a previous build left behind, so `metered_usage()` can only ever
     return this build's numbers. graphrag registers stores as singletons, so a repeat
-    build in the same process reuses the first one's store and would otherwise keep
-    accumulating into its totals. The handle is deliberately *not* dropped — that reused
-    store is the one the repeat build writes into.
+    build in the same process reuses the same store(s) and would otherwise keep
+    accumulating into their totals. The handles are deliberately *not* dropped — those
+    reused stores are the ones the repeat build writes into.
 
-    That reuse is keyed on *hashed init args* (graphrag_common/factory.create), so it
-    only holds while the ModelConfig is unchanged. Change `extraction.model` or
-    `base_url` between two in-process builds and graphrag constructs a second store while
-    `latest` still points at the first, at which point `metered_usage()` reports None (or,
-    if the config is then changed back, an earlier build's totals). **One build per
-    process** is therefore the real constraint, and it is what `groundly index` does —
-    anything that grows a second in-process build must re-derive the handle rather than
-    trust this reset."""
-    if ReadableMetricsStore.latest is not None:
-        ReadableMetricsStore.latest.clear_metrics()
+    That reuse is keyed on *hashed init args* (graphrag_common/factory.create), so it only
+    holds while the ModelConfig is unchanged. Tracking every instance rather than a single
+    `latest` handle is what makes that survivable: change `extraction.model` or `base_url`
+    between two in-process builds and graphrag constructs a *new* store, but the old one is
+    cleared here and contributes zero, so `metered_usage()` reports the new build's real
+    totals instead of None or a previous build's. That repairs the "one build per process"
+    limitation this function used to carry — the reason the split needed it, since two
+    completion models are two stores within a *single* build."""
+    for instance in ReadableMetricsStore.instances.values():
+        instance.clear_metrics()
 
 
 @dataclass(frozen=True)
@@ -168,6 +203,33 @@ def extraction_prices() -> ModelPrices | None:
     return _litellm_prices(cfg.model)
 
 
+def _prices_for_model(store_id: str) -> ModelPrices | None:
+    """Prices for one metrics store's model, keyed off the store's own `id` rather than
+    always `extraction` — `metered_usage`'s per-store generalization of
+    `extraction_prices`, needed because `graph.report_call_class` can meter a second
+    model under a different provider section entirely.
+
+    `store_id` is graphrag's `model_provider/model` (`completion_model_config` always
+    sets `model_provider="openai"`, so this is always `openai/<cfg.model>` for any store
+    Groundly creates). Manual override first, matched against whichever of the two call
+    classes a graph build can register a completion model under (extraction, or
+    `report_call_class` when it differs) — else litellm's bundled map by bare model name,
+    which is call-class-agnostic already.
+    """
+    bare_model = store_id.removeprefix("openai/")
+    for call_class in ("extraction", load_settings().graph.report_call_class):
+        cfg = load_provider(call_class)
+        if cfg is not None and cfg.model == bare_model:
+            if cfg.input_price_per_mtok is not None and cfg.output_price_per_mtok is not None:
+                return ModelPrices(
+                    cfg.input_price_per_mtok / 1_000_000,
+                    cfg.output_price_per_mtok / 1_000_000,
+                    "config.toml",
+                )
+            break
+    return _litellm_prices(bare_model)
+
+
 @dataclass(frozen=True)
 class BuildEstimate:
     """What `groundly index --graph` prints before spending anything.
@@ -188,6 +250,13 @@ class BuildEstimate:
     # `mistral/mistral-small-latest` at $0.06/$0.18 per Mtok; the alias resolves today to
     # Mistral Small 4 at $0.15/$0.60 — 2.5x and 3.3x low, silently.
     moving_alias: str | None
+    # The call class serving community reports, when it is not `extraction`. The range
+    # above prices the extraction pass only, which is a caveat when one provider does
+    # everything and a *hole* when two do: in the split this exists to enable — local
+    # extraction, cloud reports — every dollar the build spends is on this provider and
+    # none of it is in the figure above. Naming it is all that can honestly be done;
+    # sizing it would need the community count, which only exists after the build.
+    report_call_class: str | None = None
 
 
 def _max_output_tokens_per_call() -> int:
@@ -222,9 +291,13 @@ def estimate_cost(total_chars: int, chunk_count: int) -> BuildEstimate:
 
     cfg = load_provider("extraction")
     prices = extraction_prices()
+    # None on the default path: reports run on the same provider the range already
+    # prices, so there is no second bill to warn about.
+    configured = load_settings().graph.report_call_class
+    report_class = configured if configured != "extraction" else None
     alias = cfg.model if cfg is not None and cfg.model.endswith("-latest") else None
     if prices is None:
-        return BuildEstimate(input_tokens, max_output_tokens, None, None, None, alias)
+        return BuildEstimate(input_tokens, max_output_tokens, None, None, None, alias, report_class)
 
     low = input_tokens * prices.input_per_token
     return BuildEstimate(
@@ -234,4 +307,5 @@ def estimate_cost(total_chars: int, chunk_count: int) -> BuildEstimate:
         low + max_output_tokens * prices.output_per_token,
         prices.source,
         alias,
+        report_class,
     )

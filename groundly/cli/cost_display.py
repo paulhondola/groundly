@@ -32,6 +32,16 @@ def _print_cost_estimate(est) -> None:
         "[dim]  extraction pass only — community reports and description summaries are "
         "billed on top, and cannot be sized before the graph exists[/dim]"
     )
+    if est.report_call_class:
+        # With one provider, "billed on top" is a caveat. With two it is a hole: the
+        # split exists so extraction can run somewhere cheap or free, which means the
+        # money is all on the *other* provider and none of it is in the range above.
+        # Saying "billed on top" without saying "on a provider this figure never
+        # priced" would be technically true and practically a lie.
+        console.print(
+            f"[yellow]  ⚠ community reports run on {escape(f'[providers.{est.report_call_class}]')}"
+            "[/yellow] — a different provider, whose cost is not included above at all."
+        )
     if est.moving_alias:
         console.print(
             f"[yellow]  ⚠ {escape(est.moving_alias)} is a moving alias[/yellow] — it may now "

@@ -64,6 +64,20 @@ def test_graph_context_window_round_trips_through_set_and_rewrite(home):
     assert load_settings().graph.context_window == 16384
 
 
+def test_graph_report_call_class_round_trips_through_set_and_rewrite(home):
+    """`config set graph.report_call_class chat` printed success and wrote nothing: the
+    key was missing from render_config_toml's [graph] block, and set_key regenerates the
+    whole file from that renderer, so the value was dropped on the way to disk and read
+    back as the default. The documented command was a silent no-op — and every other test
+    for this setting missed it by writing config.toml by hand instead of going through
+    set_key, which is the only path a user actually has."""
+    set_key("graph.report_call_class", "chat")
+    assert load_settings().graph.report_call_class == "chat"
+
+    set_key("retrieval.context_k", "12")  # rewrite triggered by an unrelated section
+    assert load_settings().graph.report_call_class == "chat"
+
+
 def test_render_then_load_round_trips(home):
     (home / "config.toml").write_text(render_config_toml({}, Settings()))
     s = load_settings()
@@ -121,6 +135,21 @@ def test_unknown_field_rejected(home):
 def test_bad_type_rejected(home):
     with pytest.raises(ConfigKeyError):
         set_key("ingestion.timeout_seconds", "abc")
+
+
+def test_model_validator_failures_are_named_not_raw_tracebacks(home):
+    """`_coerce` checks the field's annotation only; whole-model validators fire later,
+    in `_settings_from_raw`. They used to escape as a raw pydantic traceback — on the one
+    command whose entire job is rejecting bad input (conventions.md: name the cause,
+    never a generic error, and a stack dump is worse than generic). Both surfaces:
+    report_call_class's CALL_CLASSES check and context_window's pre-existing ge=2048."""
+    with pytest.raises(ConfigKeyError) as exc:
+        set_key("graph.report_call_class", "bogus")
+    assert "report_call_class" in str(exc.value) and "extraction" in str(exc.value)
+
+    with pytest.raises(ConfigKeyError) as exc:
+        set_key("graph.context_window", "512")
+    assert "2048" in str(exc.value)
 
 
 def test_non_dotted_key_rejected(home):

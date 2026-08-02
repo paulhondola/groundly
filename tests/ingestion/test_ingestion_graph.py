@@ -41,7 +41,12 @@ def stub_probe(monkeypatch):
 
     **kwargs absorbs response_format=CommunityReportResponse (the second call). Without
     this fixture the probe reaches the network, which is how `http://x` connection errors
-    show up in tests that look unrelated."""
+    show up in tests that look unrelated.
+
+    loaded_context_length is stubbed for the same reason and is easy to miss: it is a
+    plain httpx.get, so it never goes through `complete`, and a test whose base_url points
+    at localhost reaches a *real* LM Studio on the developer's machine — measured, it
+    added ~6s per test and made the result depend on which model happened to be loaded."""
     from groundly.llm.chat import ChatResult
 
     monkeypatch.setattr(
@@ -50,6 +55,7 @@ def stub_probe(monkeypatch):
             text="ok", tokens=1, cost_usd=None, model="stub"
         ),
     )
+    monkeypatch.setattr("groundly.llm.chat.loaded_context_length", lambda call_class: None)
 
 
 def _add_material(store: SubjectStore, filename: str, sha256: str, status: str = "indexed"):
@@ -433,6 +439,137 @@ def test_build_graph_does_not_inherit_a_previous_builds_usage(subj, store, home,
     assert _build_trace(subj)["tokens"] == 123
 
 
+# --- report_call_class: a second completion model for community reports ----------------
+
+
+def _configure_extraction_and_chat(
+    home, *, extraction_model="gpt-4o-mini", chat_model="gpt-4o", priced=False
+):
+    """A second [providers.chat] section next to the usual [providers.extraction], plus
+    graph.report_call_class = "chat" — what every report_call_class test needs."""
+    extraction_prices = (
+        "input_price_per_mtok = 1.0\noutput_price_per_mtok = 2.0\n" if priced else ""
+    )
+    chat_prices = "input_price_per_mtok = 3.0\noutput_price_per_mtok = 4.0\n" if priced else ""
+    (home / "config.toml").write_text(
+        f'[providers.extraction]\nbase_url = "http://x"\nmodel = "{extraction_model}"\n'
+        f'api_key = "sk-secret"\n{extraction_prices}'
+        f'\n[providers.chat]\nbase_url = "http://y"\nmodel = "{chat_model}"\n'
+        f'api_key = "sk-chat"\n{chat_prices}'
+        '\n[graph]\nreport_call_class = "chat"\n'
+    )
+
+
+def test_default_report_call_class_registers_exactly_one_completion_model(
+    subj, store, home, monkeypatch
+):
+    """report_call_class defaults to "extraction" — this must reproduce today's build
+    exactly: one completion model, no second metrics store."""
+    _configure_extraction(home)
+    _add_material(store, "a.pdf", "a" * 64)
+
+    captured = {}
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        _write_entities(subj)
+        captured["config"] = config
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+    build_graph(subj, store)
+
+    config = captured["config"]
+    assert list(config.completion_models.keys()) == ["default_completion_model"]
+    assert config.community_reports.completion_model_id == "default_completion_model"
+
+
+def test_report_call_class_chat_registers_a_second_completion_model(subj, store, home, monkeypatch):
+    """report_call_class="chat" must register a SECOND completion model built from
+    [providers.chat] and point community_reports at it — the extraction model (and its
+    own completion_models entry) is untouched."""
+    _configure_extraction_and_chat(home)
+    _add_material(store, "a.pdf", "a" * 64)
+
+    captured = {}
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        _write_entities(subj)
+        captured["config"] = config
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+    build_graph(subj, store)
+
+    config = captured["config"]
+    assert set(config.completion_models) == {
+        "default_completion_model",
+        "report_completion_model",
+    }
+    assert config.completion_models["default_completion_model"].model == "gpt-4o-mini"
+    assert config.completion_models["report_completion_model"].model == "gpt-4o"
+    assert config.community_reports.completion_model_id == "report_completion_model"
+
+
+def test_report_call_class_outside_call_classes_is_rejected_at_config_load(home):
+    """A typo here would otherwise surface hours into a build, when the community
+    reports stage finally runs — GraphSettings' pydantic validator turns it into a
+    config-time failure instead."""
+    from pydantic import ValidationError
+
+    from groundly.core.config import load_settings
+
+    (home / "config.toml").write_text('[graph]\nreport_call_class = "bogus"\n')
+    with pytest.raises(ValidationError):
+        load_settings()
+
+
+def test_metered_usage_sums_two_stores_and_prices_each_by_its_own_model(
+    subj, store, home, monkeypatch
+):
+    """graphrag caches metrics stores as singletons keyed on hashed init args including
+    the model id (graphrag_llm/completion/completion_factory.py, graphrag_common's
+    Factory.create), so report_call_class's second completion model meters into a
+    SECOND store. Before this fix, metered_usage() read only the most recently created
+    store — silently dropping everything the report model spent, or worse, pricing it as
+    if it were the extraction model. This is the failure the split introduces and the one
+    nothing else here covers."""
+    from graphrag_llm.completion.completion_factory import create_completion
+
+    _configure_extraction_and_chat(home, priced=True)
+    _add_material(store, "a.pdf", "a" * 64)
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        _write_entities(subj)
+        extraction = create_completion(
+            config.get_completion_model_config("default_completion_model")
+        )
+        extraction.metrics_store.update_metrics(
+            metrics={
+                "prompt_tokens": 1000,
+                "completion_tokens": 4000,
+                "responses_with_tokens": 100,
+            }
+        )
+        report = create_completion(config.get_completion_model_config("report_completion_model"))
+        report.metrics_store.update_metrics(
+            metrics={
+                "prompt_tokens": 500,
+                "completion_tokens": 200,
+                "responses_with_tokens": 50,
+            }
+        )
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+    result = build_graph(subj, store, estimated_tokens=123, estimated_cost_usd=0.0045)
+
+    assert (result.prompt_tokens, result.completion_tokens) == (1500, 4200)
+    # extraction priced at $1/$2 per Mtok, chat at $3/$4 — summing tokens first and
+    # pricing once at either rate would give a different (wrong) number than this.
+    expected_cost = (1000 * 1e-6 + 4000 * 2e-6) + (500 * 3e-6 + 200 * 4e-6)
+    assert result.cost_usd == pytest.approx(expected_cost)
+
+
 def test_build_graph_wraps_failure_in_graph_build_error(subj, store, home, monkeypatch):
     _configure_extraction(home)
     _add_material(store, "a.pdf", "a" * 64)
@@ -607,6 +744,75 @@ def test_build_config_scales_graphrag_budgets_to_the_configured_context_window(
     )
 
 
+def test_build_config_serializes_calls_against_a_local_runtime(subj, store, home, monkeypatch):
+    """The budgets above are per *request*; a llama.cpp-family server caps
+    `in-flight x prompt` against one shared KV cache. graphrag's default of 25 in flight
+    is what overran it — measured 2026-08-01, 4 slots x ~2,300-token report prompts
+    against an 8192 cache, 8 of 11 reports lost."""
+    (home / "config.toml").write_text(
+        '[providers.extraction]\nbase_url = "http://localhost:1234/v1"\n'
+        'model = "gemma-4-12b-qat"\napi_key = ""\n'
+    )
+    _add_material(store, "a.pdf", "a" * 64)
+
+    captured = {}
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        _write_entities(subj)
+        captured["config"] = config
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+    build_graph(subj, store)
+
+    assert captured["config"].concurrent_requests == 1
+
+
+def test_build_config_leaves_a_remote_provider_at_graphrags_default(subj, store, home, monkeypatch):
+    """A cloud provider has no shared cache to exhaust, and must not lose 25x throughput
+    to a fix aimed at local runtimes."""
+    _configure_extraction(home)  # http://x — not loopback
+    _add_material(store, "a.pdf", "a" * 64)
+
+    captured = {}
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        _write_entities(subj)
+        captured["config"] = config
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+    build_graph(subj, store)
+
+    assert captured["config"].concurrent_requests == 25
+
+
+def test_build_config_serializes_when_only_the_report_provider_is_local(
+    subj, store, home, monkeypatch
+):
+    """graphrag's concurrency setting is global, so the local half of a split build binds
+    the whole thing — the report provider is reached through graph.report_call_class and
+    would otherwise be invisible to this check."""
+    (home / "config.toml").write_text(
+        '[providers.extraction]\nbase_url = "http://x"\nmodel = "gpt-4o-mini"\napi_key = "sk-s"\n'
+        '\n[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "gemma"\napi_key = ""\n'
+        '\n[graph]\nreport_call_class = "chat"\n'
+    )
+    _add_material(store, "a.pdf", "a" * 64)
+
+    captured = {}
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        _write_entities(subj)
+        captured["config"] = config
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+    build_graph(subj, store)
+
+    assert captured["config"].concurrent_requests == 1
+
+
 # --- the preflight probe ----------------------------------------------------------------
 
 
@@ -701,6 +907,39 @@ def test_probe_sends_graphrags_own_response_model(subj, store, home, monkeypatch
         build_graph(subj, store)
 
     assert formats[1] is CommunityReportResponse
+
+
+def test_structured_output_probe_targets_the_report_call_class(subj, store, home, monkeypatch):
+    """The probe exists to check that whoever builds community reports accepts
+    json_schema. `graph.report_call_class` moves that stage to another provider, so a
+    probe hardcoded to "extraction" tests the wrong one — and is wrong in both directions
+    at once, the same way the json_object shortcut was: too lax when extraction accepts
+    json_schema and the report provider refuses (the whole extraction pass is spent before
+    the first report fails), too strict when extraction refuses it and the report provider
+    accepts, which would refuse the local-extraction/cloud-reports split this setting
+    exists to enable."""
+    from groundly.llm.chat import ChatResult
+
+    _configure_extraction_and_chat(home)
+    set_key("graph.report_call_class", "chat")
+    _add_material(store, "a.pdf", "a" * 64)
+
+    call_classes = []
+
+    def fake_complete(call_class, messages, *, response_format=None):
+        call_classes.append((call_class, response_format))
+        return ChatResult(text="ok", tokens=1, cost_usd=None, model="stub")
+
+    monkeypatch.setattr("groundly.llm.chat.complete", fake_complete)
+
+    with pytest.raises(GraphBuildError):
+        build_graph(subj, store)
+
+    # First probe call is the plain-completion reachability check against extraction;
+    # the structured-output one must follow the report stage to "chat".
+    assert call_classes[0][0] == "extraction"
+    assert call_classes[1][0] == "chat"
+    assert call_classes[1][1] is not None
 
 
 def test_probe_contains_unexpected_exceptions_as_named_errors(subj, store, home, monkeypatch):
@@ -921,6 +1160,140 @@ def test_partial_community_report_failures_are_counted_and_reported(subj, store,
     result = build_graph(subj, store)
     assert result.reports_failed == 2
     assert subj.load_manifest().graphrag.corpus_hash == corpus_hash(store)
+
+
+_REAL_CAPACITY_400 = (
+    "litellm.BadRequestError: OpenAIException - Error code: 400 - {'error': 'Engine "
+    'protocol predict stream returned an error: {"code":500,"message":"Context size '
+    'has been exceeded.","type":"server_error"}\'}'
+)
+
+
+def test_report_failure_hint_names_concurrency_on_a_capacity_error(subj, store, home, monkeypatch):
+    """The zero-reports message blamed JSON mode, which is right for a provider that
+    refuses the request and wrong for one that ran out of room — it sent a real
+    investigation at graph.context_window while the actual cause was 4 slots sharing an
+    8192 cache. Uses the verbatim error text from that build (2026-08-01)."""
+    _configure_extraction(home)
+    _add_material(store, "a.pdf", "a" * 64)
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        _write_entities(subj)
+        _write_communities(subj, n=11, reports=0)
+        logging.getLogger(_COMMUNITY_ERR).error(_REAL_CAPACITY_400)
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+
+    with pytest.raises(GraphBuildError, match="in-flight calls x prompt"):
+        build_graph(subj, store)
+
+
+def test_report_failure_hint_stays_quiet_on_a_structured_output_refusal(
+    subj, store, home, monkeypatch
+):
+    """The other half: a provider refusing response_format must still get the JSON-mode
+    advice and no concurrency noise."""
+    _configure_extraction(home)
+    _add_material(store, "a.pdf", "a" * 64)
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        _write_entities(subj)
+        _write_communities(subj, n=11, reports=0)
+        logging.getLogger(_COMMUNITY_ERR).error("This response_format type is unavailable now")
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+
+    with pytest.raises(GraphBuildError) as exc:
+        build_graph(subj, store)
+    assert "in-flight" not in str(exc.value)
+    assert "JSON mode" in str(exc.value)
+
+
+def test_partial_report_failures_carry_the_hint_too(subj, store, home, monkeypatch, caplog):
+    """Capacity exhaustion usually shows up as a *partial* loss — the build that prompted
+    this kept 3 of 11 reports and returned success — so the warning path needs the hint
+    as much as the refusal path does."""
+    _configure_extraction(home)
+    _add_material(store, "a.pdf", "a" * 64)
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        _write_entities(subj)
+        _write_communities(subj, n=11, reports=3)
+        logging.getLogger(_COMMUNITY_ERR).error(_REAL_CAPACITY_400)
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+
+    with caplog.at_level(logging.WARNING, logger="groundly.ingestion.graph"):
+        build_graph(subj, store)
+
+    assert "in-flight calls x prompt" in caplog.text
+
+
+# --- context_window drift ----------------------------------------------------------------
+
+
+def test_probe_warns_when_the_loaded_context_is_smaller_than_configured(
+    subj, store, home, monkeypatch, caplog
+):
+    """graph.context_window is asserted, never measured: every prompt budget is carved
+    from it, so a model reloaded at a smaller window invalidates all of them at once.
+    Observed 2026-08-01 — config said 12288, LM Studio was serving 8192."""
+    _configure_extraction(home)
+    (home / "config.toml").write_text(
+        (home / "config.toml").read_text() + "\n[graph]\ncontext_window = 12288\n"
+    )
+    _add_material(store, "a.pdf", "a" * 64)
+    monkeypatch.setattr("groundly.llm.chat.loaded_context_length", lambda call_class: 8192)
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        _write_entities(subj)
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+
+    with caplog.at_level(logging.WARNING, logger="groundly.ingestion.graph"):
+        build_graph(subj, store)
+
+    assert "8192" in caplog.text and "12288" in caplog.text
+
+
+@pytest.mark.parametrize("reported", [None, 12288, 32768])
+def test_probe_stays_silent_when_the_loaded_context_is_adequate_or_unknown(
+    subj, store, home, monkeypatch, caplog, reported
+):
+    """None is the common case, not an error: only LM Studio publishes the field, so a
+    warning on absence would fire against every other endpoint. Equal must not warn
+    either — 12288 configured against 12288 loaded is the intended setup."""
+    _configure_extraction(home)
+    (home / "config.toml").write_text(
+        (home / "config.toml").read_text() + "\n[graph]\ncontext_window = 12288\n"
+    )
+    _add_material(store, "a.pdf", "a" * 64)
+    monkeypatch.setattr("groundly.llm.chat.loaded_context_length", lambda call_class: reported)
+
+    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
+        _write_entities(subj)
+        return []
+
+    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
+
+    with caplog.at_level(logging.WARNING, logger="groundly.ingestion.graph"):
+        build_graph(subj, store)
+
+    assert "graph.context_window" not in caplog.text
+
+
+def test_loaded_context_length_never_raises_on_a_non_lm_studio_endpoint(home):
+    """It is a diagnostic, not a gate. A server that 404s, times out, or answers a shape
+    this doesn't recognise must return None and let the build proceed — refusing a build
+    over an unrelated HTTP hiccup is worse than missing the drift."""
+    from groundly.llm.chat import loaded_context_length
+
+    _configure_extraction(home)  # http://x — unresolvable
+    assert loaded_context_length("extraction") is None
 
 
 # --- rebuilds inherit nothing but the cache ----------------------------------------------

@@ -32,7 +32,7 @@ model    = "..."
 api_key  = "..."
 
 [providers.generation]  # exam/deck generation (thick path)
-[providers.extraction]  # graphrag entity extraction — mid-tier cloud model rule
+[providers.extraction]  # graphrag entity extraction — cloud default; local floor ~12B, reasoning off (decision 24)
 [providers.router]      # cheap classifier
 ```
 

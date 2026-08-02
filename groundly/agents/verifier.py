@@ -37,9 +37,7 @@ class Rejection:
     detail: str  # specific cause, host/human-readable
 
 
-def verify_card(
-    card: CardCandidate, store: SubjectStore, *, embedder=None
-) -> Rejection | None:
+def verify_card(card: CardCandidate, store: SubjectStore, *, embedder=None) -> Rejection | None:
     """Fail-fast, cheapest check first. Returns None iff the card passes every
     check implemented so far."""
     if not card.chunk_ids:

@@ -22,7 +22,7 @@ template from the effective config — always valid TOML, always self-documentin
 import tomllib
 from pathlib import Path
 
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator
 
 from groundly.core.paths import groundly_home
 
@@ -42,6 +42,7 @@ _PROVIDER_FIELDS = (
     "output_price_per_mtok",
     "requests_per_minute",
     "tokens_per_minute",
+    "reasoning_effort",
 )
 
 
@@ -56,6 +57,12 @@ class ProviderConfig(BaseModel):
     # only one that fires hundreds of concurrent calls); see llm/graphrag_adapter.py.
     requests_per_minute: int | None = None
     tokens_per_minute: int | None = None
+    # Passed through as `extra_body: {"reasoning_effort": ...}` (never flat — litellm's
+    # drop_params is False, so a flat reasoning_effort kwarg raises UnsupportedParamsError
+    # on every call instead of degrading). A plain str, not an enum: "none" is what Ollama
+    # honours, OpenAI's o-series takes low/medium/high, and providers are not enumerable
+    # here (architecture.md: never hardcode a provider).
+    reasoning_effort: str | None = None
 
 
 class IngestionSettings(BaseModel):
@@ -103,6 +110,25 @@ class GraphSettings(BaseModel):
     # Comma-separated, NOT list[str]: _toml_value emits scalars only, so a list would
     # round-trip through `config set` as a Python repr and corrupt the file.
     entity_types: str = DEFAULT_ENTITY_TYPES
+
+    # Which provider builds community reports. Defaults to "extraction" so an unset
+    # value reproduces today's single-model build exactly (one completion model, no
+    # second metrics store). A course that wants a stronger/cheaper model for report
+    # summarization than for entity extraction points this at another call class —
+    # see llm/graphrag_adapter.completion_model_config and ingestion/graph._build_config.
+    # Validated against CALL_CLASSES here rather than at the build's read site, so a typo
+    # fails immediately instead of surfacing hours in when the community-reports stage
+    # finally runs. Note the blast radius is wider than "config time": load_settings() is
+    # on the search and index paths too, so a bad value raises there as well — same as
+    # context_window's ge=2048 already does.
+    report_call_class: str = "extraction"
+
+    @field_validator("report_call_class")
+    @classmethod
+    def _report_call_class_is_known(cls, v: str) -> str:
+        if v not in CALL_CLASSES:
+            raise ValueError(f"report_call_class must be one of {CALL_CLASSES}, got {v!r}")
+        return v
 
 
 class Settings(BaseModel):
@@ -213,7 +239,16 @@ def set_key(dotted_key: str, value: str) -> None:
         valid = ", ".join(CALL_CLASSES + tuple(_SETTINGS_SECTIONS))
         raise ConfigKeyError(f"unknown config section '{section}' — valid: {valid}")
 
-    settings = _settings_from_raw(data)
+    # `_coerce` only checks the field's *annotation*; whole-model validators (
+    # `report_call_class` against CALL_CLASSES, `context_window`'s ge=2048) fire here.
+    # Without this they escape as a raw pydantic traceback — worse than the generic
+    # error conventions.md already forbids, and on a command whose whole job is to
+    # reject bad input. Nothing has been written at this point, so the file is untouched.
+    try:
+        settings = _settings_from_raw(data)
+    except ValidationError as exc:
+        reasons = "; ".join(e.get("msg", "invalid") for e in exc.errors())
+        raise ConfigKeyError(f"{dotted_key} rejected: {reasons}") from exc
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_config_toml(data.get("providers", {}), settings))
@@ -269,6 +304,7 @@ def render_config_toml(providers: dict, settings: Settings) -> str:
                     "# output_price_per_mtok = 0.0   # optional USD/1M output tokens (litellm's bundled price map costs mapped models automatically)",
                     "# requests_per_minute   = 30    # optional; your provider tier's RPM. Unset = no throttling (right for local runtimes)",
                     "# tokens_per_minute     = 6000  # optional; your provider tier's TPM. Set these on [providers.extraction] before a graph build — it fires hundreds of concurrent calls",
+                    '# reasoning_effort      = "none"  # optional; passed as extra_body — "none" for Ollama, low/medium/high for OpenAI-style o-series reasoning models',
                 ]
         lines.append("")
 
@@ -298,6 +334,7 @@ def render_config_toml(providers: dict, settings: Settings) -> str:
         "[graph]",
         f"context_window = {_toml_value(settings.graph.context_window)}   # usable context of your extraction model; graphrag's per-stage prompt budgets are scaled to fit it",
         f"entity_types = {_toml_value(settings.graph.entity_types)}   # comma-separated types entity extraction looks for; the defaults target course material",
+        f'report_call_class = {_toml_value(settings.graph.report_call_class)}   # which call class serves community reports; "extraction" keeps them on the extraction provider',
     ]
     if settings.graph.extraction_prompt:
         lines.append(
