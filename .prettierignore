@@ -1,0 +1,12 @@
+# Vendored third-party assets — byte-for-byte or not at all.
+#
+# groundly/assets/vis-network.min.js is pinned by SHA-384 (groundly/assets/VENDORED.md)
+# because `groundly export-graph` inlines it into every page it writes. Reformatting it is
+# not cosmetic: it changes the hash, and the pin is the only thing standing between a
+# reviewed 700 KB blob and a substituted one that no diff reader would ever catch.
+#
+# Measured 2026-08-02: an editor format-on-save expanded this file from 702,611 to
+# 1,160,728 bytes. tests/core/test_graph_html.py::test_vendored_vis_network_matches_its_
+# recorded_hash is what caught it; this file is what should stop it happening.
+groundly/assets/vis-network.min.js
+*.min.js
