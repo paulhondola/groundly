@@ -8,14 +8,20 @@ There is no server to deploy. The product is a local **core library** with three
 
 ```
 groundly/
-├── cli/         # typer verbs: init, index, list, remove, import, export, ask, config, mcp, serve
+├── cli/         # typer verbs: init, index, list, remove, import, export, export-deck,
+│             #   export-graph, ask, config, models, mcp, serve
 ├── mcp/         # FastMCP tool definitions over the core (stdio + streamable HTTP)
-├── web/         # static mastery dashboard, served by `serve`
+├── web/         # static mastery dashboard, served by `serve` (P7)
+├── assets/      # bundled data read via importlib.resources: theme.css, vendored
+│             #   vis-network (see assets/VENDORED.md). A bare data dir like prompts/,
+│             #   deliberately NOT under web/ so core/ can read it without a
+│             #   foundation→client dependency
 ├── agents/      # ask pipeline (trust layers → gen → citation check); exam verifier gate
 ├── retrieval/   # four arms, router, fusion, rerank, citation resolution
 ├── ingestion/   # docling subprocess → HybridChunker → embed → stores; graphrag batch
 ├── llm/         # THE provider boundary: OpenAI-compatible client factory per call class
-└── core/        # store access (SQLite WAL), manifest, subject registry, settings
+└── core/        # store access (SQLite WAL), manifest, subject registry, settings;
+                 #   artifact rendering to a file (bundle .zip, anki .apkg, graph HTML)
 ```
 
 ### Module dependency rules

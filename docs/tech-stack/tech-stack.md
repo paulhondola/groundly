@@ -16,7 +16,8 @@ Expands [`groundly-spec.md`](../groundly-spec.md) §4. Every row is a **decision
 | Agent loops | **Plain async functions** | Post-pivot roster = one pipeline + two bounded loops; a graph framework wraps nothing (LangGraph dropped) | — |
 | Flashcards | **genanki → .apkg** | Anki owns daily review; Groundly owns verified generation | — |
 | Observability | **Local `traces` table** in progress.db | Offline, private, shippable eval artifact (LangSmith dropped — cloud tracing inside a local-first tool) | — |
-| Dashboard | One **static HTML page** (theme as CSS variables in `groundly/web/static/theme.css`) | A React toolchain for one page was unjustifiable (final review) | — |
+| Dashboard | One **static HTML page** (theme as CSS variables in `groundly/assets/theme.css`) | A React toolchain for one page was unjustifiable (final review) | — |
+| Graph visualization | `groundly export-graph` → one self-contained HTML file; **vis-network 9.1.6 vendored** in `groundly/assets/`, inlined per page | No CDN is permitted (privacy rule), and the page must open offline years later — decision 26 | 9.1.6, SHA-384 pinned in `assets/VENDORED.md` |
 | Web serving | FastAPI + uvicorn, only inside `groundly serve` (loopback-only) | FastMCP mounts into it; dashboard rides along | — |
 
 ## LLM provider boundary
