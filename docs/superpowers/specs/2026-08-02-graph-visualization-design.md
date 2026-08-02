@@ -28,9 +28,10 @@ this is a one-shot CLI export, which is why `serve` needed no FastAPI wiring.
 | | |
 | --- | --- |
 | Generator | `groundly/core/graph_html.py` — `export_graph_html(subject_name, out_path, *, level=None) -> GraphHtmlResult` |
+| Page assets | `groundly/assets/graph.js`, `graph.css`, `theme.css`, vendored `vis-network.min.js` — all inlined at generation time |
 | CLI | `groundly/cli/graph.py` — `export-graph SUBJECT [-o PATH] [-l LEVEL]` |
 | Renderer | vis-network 9.1.6, vendored and inlined |
-| Tests | `tests/core/test_graph_html.py` (7), `tests/cli/test_cli_graph.py` (2) |
+| Tests | `tests/core/test_graph_html.py` (9), `tests/cli/test_cli_graph.py` (2) |
 
 `core/` is the layer by precedent, not exception: `core/anki.py` (`.apkg`) and `core/bundle.py` (`.zip`) are the
 existing "render an artifact to a file" modules. `cli/` holds the verb only.
@@ -151,3 +152,26 @@ citations, neighbours; level toggle re-colours and rebuilds the legend; legend l
 
 **The privacy property was verified live, not just statically**: loading the page issued exactly one network
 request — the document itself — and nothing else.
+
+## Why the page's JS and CSS are files, and the vendored blob is not formatted
+
+Two different questions with different answers.
+
+**Our own JS and CSS live in `groundly/assets/`, not in Python string literals.** They were literals first, which
+made `graph_html.py` 47% JavaScript by line count with no highlighting, no linting and no formatter. Moving them
+out was not free, though, and the way it failed is worth keeping: extracting the *source text* of a non-raw
+Python string doubles every backslash escape, so `\'` became `\\'`, which closes a JS string early. The
+exported page died with `SyntaxError: Unexpected identifier 's'` — **and all ten tests still passed**, because
+every one of them reads the page as text and none execute it. The re-extraction takes the parsed value instead,
+output is byte-identical to before the split, and `test_app_js_parses` now runs `node --check` over the emitted
+script (skipped where node is absent).
+
+**The output stays one file.** A folder breaks the moment someone moves one piece, and `file://` + `fetch()` is
+CORS-blocked in Chrome, so a sibling `data.json` would fail on the primary use case — opening the export
+directly. Composition of a real page: vendored library 84%, graph data 14%, our JS 1.4%, CSS 0.6%.
+
+**The vendored blob stays minified.** Not because it must run that way, but because reformatting costs both
+things the vendoring exists to buy. The SHA-384 in `assets/VENDORED.md` is verified against *what unpkg
+published*; reformat it and the pin can only answer "is this the file we produced", not "is this the file vis.js
+shipped". And it adds 447 KiB (+55%) to every exported page. Against that: we never read or debug into it — if
+we needed to, we would read upstream sources, not a prettified copy.

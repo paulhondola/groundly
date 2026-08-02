@@ -1,0 +1,131 @@
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+#graph { flex: 1; background: var(--bg); }
+#sidebar {
+  width: 280px;
+  background: var(--surface);
+  border-left: 1px solid var(--divider);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#search-wrap { padding: 12px; border-bottom: 1px solid var(--divider); position: relative; }
+#search {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--divider);
+  color: var(--text);
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  outline: none;
+  font-family: var(--font-body);
+}
+#search:focus { border-color: var(--primary); }
+#search-results {
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--divider);
+  display: none;
+}
+.search-item {
+  padding: 4px 6px;
+  cursor: pointer;
+  border-radius: var(--radius);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-left: 3px solid transparent;
+}
+.search-item:hover { background: var(--bg); }
+#notice {
+  display: none;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--warning);
+  border-bottom: 1px solid var(--divider);
+  line-height: 1.5;
+}
+#level-wrap {
+  display: none;
+  gap: 6px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--divider);
+}
+.level-btn {
+  background: var(--bg);
+  color: var(--text-secondary);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius);
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--font-body);
+}
+.level-btn.active { background: var(--button-primary); color: var(--text); border-color: var(--button-primary); }
+#info-panel { padding: 14px; border-bottom: 1px solid var(--divider); overflow-y: auto; max-height: 42vh; }
+#info-panel h3, #legend-wrap h3 {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-family: var(--font-heading);
+}
+#info-content { font-size: 13px; line-height: 1.6; }
+#info-content .field { margin-bottom: 5px; }
+#info-content .field.title { font-size: 14px; font-weight: 600; margin-bottom: 8px; font-family: var(--font-heading); }
+#info-content .field b { color: var(--text); }
+#info-content .description { margin: 6px 0; color: var(--text-secondary); }
+#info-content .empty { color: var(--text-secondary); font-style: italic; }
+#info-content .subhead {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.citation { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); padding: 2px 0; }
+.finding { margin-top: 6px; padding: 6px 8px; background: var(--bg); border-radius: var(--radius); font-size: 12px; }
+.finding-title { font-weight: 600; margin-bottom: 2px; }
+.neighbor-link {
+  display: block;
+  padding: 2px 6px;
+  margin: 2px 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-left: 3px solid var(--divider);
+}
+.neighbor-link:hover { background: var(--bg); }
+#neighbors-list { max-height: 160px; overflow-y: auto; margin-top: 4px; }
+#legend-wrap { flex: 1; overflow-y: auto; padding: 12px; }
+#legend-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.legend-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; border-radius: var(--radius); font-size: 12px; }
+.legend-item:hover { background: var(--bg); padding-left: 4px; }
+.legend-item.dimmed { opacity: 0.35; }
+.legend-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+.legend-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.legend-count { color: var(--text-secondary); font-size: 11px; }
+#stats { padding: 10px 14px; border-top: 1px solid var(--divider); font-size: 11px; color: var(--text-secondary); }

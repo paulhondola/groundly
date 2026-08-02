@@ -16,6 +16,8 @@ away — each half is a different join key):
 import base64
 import hashlib
 import re
+import shutil
+import subprocess
 import uuid
 from importlib.resources import files
 
@@ -289,6 +291,43 @@ def test_entity_text_cannot_break_out_of_the_script_block(subj, store):
     assert bodies, "no <script> block found — the embedded data blob is missing"
     for body in bodies:
         assert not re.search(r"(?i)</script", body)
+
+
+# --- the page's own JS actually parses -------------------------------------------------------
+
+
+def test_app_js_parses(subj, store):
+    """Every other test here inspects the page as *text* — structure, escaping, substrings —
+    and none of them execute it, so a page whose script cannot parse passes them all.
+
+    That is not hypothetical. Moving `_APP_JS` out of a Python string literal into
+    `assets/graph.js` doubled every backslash escape along the way: `\\'` became `\\\\'`,
+    which closes the JS string early, and the exported page died with
+    `SyntaxError: Unexpected identifier 's'` while the whole suite stayed green. The
+    escape-doubling class of bug is gone now that the JS is a plain file, but "the script
+    runs at all" deserves an assertion rather than an assumption.
+
+    Skipped where node is unavailable — this guards a real failure mode, not the CI image."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node not available to parse-check the emitted JS")
+
+    entity = _entity_row("Solo Entity", description="d")
+    _write_graph(
+        subj,
+        entities=[entity],
+        communities=[_community_row(0, 0, "Community 0", [entity["id"]])],
+        community_reports=[_report_row(0, 0, "Report", "summary")],
+    )
+    html = export_graph_html("TEST", subj.root_dir / "out.html").path.read_text()
+
+    # the third <script> is the app; the first is vendored vis-network, the second the data
+    app_js = re.findall(r"<script[^>]*>(.*?)</script>", html, re.S)[2]
+    checked = subj.root_dir / "app.js"
+    checked.write_text(app_js, encoding="utf-8")
+    result = subprocess.run([node, "--check", str(checked)], capture_output=True, text=True)
+
+    assert result.returncode == 0, f"emitted page JS does not parse:\n{result.stderr}"
 
 
 # --- the vendored blob ---------------------------------------------------------------------
