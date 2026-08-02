@@ -5,13 +5,18 @@ with a sidebar of community reports and citations back to source documents.
 Self-contained by requirement (.claude/rules/grounding-and-privacy.md: no egress beyond
 the student's own provider, HF downloads, and pinned OCR models — a CDN script is none
 of those). The page works offline forever, so everything is inlined at generation time:
-vendored vis-network, theme.css, and this page's own `assets/graph.js` + `graph.css`.
+vendored vis-network, theme.css, and this page's own `assets/graph.js`, `graph.css`,
+`graph.html` (outer shell) and `graph_body.html` (sidebar markup).
 
-Those last two are real files rather than Python string literals so an editor can lint and
-format them — and because a string literal actively hurt: the JS lived here until the
+Those last four are real files rather than Python string literals so an editor can lint
+and format them — and because a string literal actively hurt: the JS lived here until the
 escapes in it had to survive two parsers, and moving it out doubled every backslash
 (`\\'` -> `\\\\'`, closing a JS string early) while the whole test suite stayed green.
-`tests/core/test_graph_html.py::test_app_js_parses` exists because of that.
+`tests/core/test_graph_html.py::test_app_js_parses` exists because of that. `graph.html`'s
+`{{placeholder}}` tokens are filled by plain `str.replace()`, not `str.format()`, and in a
+fixed order with `data_blob` last — course text is attacker-controlled (layer 4 below), and
+a `.replace()` call after it would rescan, and could corrupt, any `{{...}}`-shaped substring
+that text injected.
 
 Entity titles/descriptions come from course PDFs, which a hostile `groundly import`
 bundle can populate with anything (layer 4, trusted content never trusted authority —
@@ -556,16 +561,19 @@ def export_graph_html(
     # data is not an import, pointing a foundation module at a client directory is an
     # invisible coupling no import graph would ever surface. `assets/` is a bare data
     # directory, the same shape as `prompts/`, which llm/graphrag_adapter.py already reads.
-    theme_css = _bundled_static_text("assets/theme.css")
-    vis_js = _bundled_static_text("assets/vis-network.min.js")
-    html = _HTML_TEMPLATE.format(
-        theme_css=theme_css,
-        page_css=_bundled_static_text("assets/graph.css"),
-        page_body=_PAGE_BODY,
-        vis_js=vis_js,
-        data_blob=_safe_json(payload),
-        app_js=_bundled_static_text("assets/graph.js"),
-    )
+    # data_blob goes last: it carries course text (attacker-controlled per
+    # grounding-and-privacy.md), and .replace() calls after it would rescan — and could
+    # corrupt — any "{{placeholder}}"-shaped substring the data injected earlier.
+    html = _bundled_static_text("assets/graph.html")
+    for placeholder, value in {
+        "theme_css": _bundled_static_text("assets/theme.css"),
+        "page_css": _bundled_static_text("assets/graph.css"),
+        "page_body": _bundled_static_text("assets/graph_body.html"),
+        "vis_js": _bundled_static_text("assets/vis-network.min.js"),
+        "app_js": _bundled_static_text("assets/graph.js"),
+        "data_blob": _safe_json(payload),
+    }.items():
+        html = html.replace("{{" + placeholder + "}}", value)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(html, encoding="utf-8")
@@ -583,57 +591,3 @@ def export_graph_html(
         communities=len(legend_by_level[chosen_level]) if chosen_level is not None else 0,
         aggregated=aggregated,
     )
-
-
-# Everything below is static — no Python-side interpolation inside these blocks, so
-# their CSS/JS braces never collide with str.format(). Only _HTML_TEMPLATE itself is
-# formatted, with these four blocks (plus the vendored library and the one JSON blob)
-# dropped in as opaque text.
-
-_HTML_TEMPLATE = """<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Groundly knowledge graph</title>
-<style>
-{theme_css}
-{page_css}
-</style>
-</head>
-<body>
-{page_body}
-<script>
-{vis_js}
-</script>
-<script>
-const DATA = {data_blob};
-</script>
-<script>
-{app_js}
-</script>
-</body>
-</html>
-"""
-
-
-_PAGE_BODY = """<div id="graph"></div>
-<div id="sidebar">
-  <div id="search-wrap">
-    <input id="search" type="text" placeholder="Search entities\u2026" autocomplete="off">
-    <div id="search-results"></div>
-  </div>
-  <div id="notice"></div>
-  <div id="level-wrap"></div>
-  <div id="info-panel">
-    <h3>Details</h3>
-    <div id="info-content"><span class="empty">Click a node to inspect it</span></div>
-  </div>
-  <div id="legend-wrap">
-    <h3>Communities</h3>
-    <div id="legend-controls">
-      <label><input type="checkbox" id="select-all-cb" checked> Select all</label>
-    </div>
-    <div id="legend"></div>
-  </div>
-  <div id="stats"></div>
-</div>"""
