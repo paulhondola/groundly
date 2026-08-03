@@ -17,3 +17,15 @@ fixtures/
 # OS
 .DS_Store
 Icon?
+
+# Eval run outputs — the gold sets are versioned, the results they produce are not.
+# Unanchored: `groundly eval --out` takes any path, and results carry chunk ids.
+results-*.json
+
+# graphrag logs into the CWD from the query path (docs/infrastructure/security.md)
+logs/
+
+# Locally generated course-material artifacts — these carry real lecture content
+# (filenames, headings, entity descriptions) and must never reach a public repo.
+*-graph.html
+graphify-out/

@@ -4,14 +4,17 @@ Expands [`groundly-spec.md`](../groundly-spec.md) §4. Companions: [`data-model.
 
 ## Shape: one package, core with interchangeable clients
 
-There is no server to deploy. The product is a local **core library** with three thin clients over it. In MCP's stdio transport the "server" is a subcommand *spawned by the host agent* — there is no daemon for the student to manage.
+There is no server to deploy. The product is a local **core library** with thin clients over it — three student-facing, plus one research client (`eval/`). In MCP's stdio transport the "server" is a subcommand *spawned by the host agent* — there is no daemon for the student to manage.
 
 ```
 groundly/
 ├── cli/         # typer verbs: init, index, list, remove, import, export, export-deck,
-│             #   export-graph, ask, config, models, mcp, serve
+│             #   export-graph, ask, eval, config, models, mcp, serve
 ├── mcp/         # FastMCP tool definitions over the core (stdio + streamable HTTP)
 ├── web/         # static mastery dashboard, served by `serve` (P7)
+├── eval/        # retrieval eval harness (decision 27): gold sets, metrics, runner.
+│             #   A client by dependency direction — drives the arms, imported by
+│             #   nothing. Research surface; no MCP tool or runtime path uses it.
 ├── assets/      # bundled data read via importlib.resources: theme.css, vendored
 │             #   vis-network (see assets/VENDORED.md). A bare data dir like prompts/,
 │             #   deliberately NOT under web/ so core/ can read it without a
@@ -26,7 +29,7 @@ groundly/
 
 ### Module dependency rules
 
-- **clients → services → foundations**, one direction: `cli`/`mcp`/`web` call `agents`/`retrieval`/`ingestion`; those call only `llm`/`core`. **Nothing imports the client layer.**
+- **clients → services → foundations**, one direction: `cli`/`mcp`/`web`/`eval` call `agents`/`retrieval`/`ingestion`; those call only `llm`/`core`. **Nothing imports the client layer.**
 - LLM and embedding clients are constructed **only** in `llm/` — no provider SDK usage anywhere else; every call passes through it and records cost into traces.
 - `agents` calls `retrieval` (as a tool) and the subprocess runner. `retrieval` never calls `agents`.
 - `ingestion` writes the stores; it never serves queries.

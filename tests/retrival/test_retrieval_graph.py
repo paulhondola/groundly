@@ -198,3 +198,44 @@ def test_graph_global_retriever_empty_reports_returns_no_nodes(monkeypatch, retr
     retriever = GraphGlobalRetriever(subject=retrievable_subject)
     assert retriever.retrieve("anything") == []
     assert retriever.communities == []
+
+
+def test_graph_global_retriever_resolves_colliding_text_unit_ids(monkeypatch, retrievable_subject):
+    """text_unit ids are content hashes, so two different chunks with byte-identical text
+    share one id (apd: 18 of 1193 — "REVIEW" heads two quiz decks). Both are real citation
+    targets. A pandas index lookup returns a Series for those and `int()` raises TypeError,
+    which took global search down entirely; core/graph_html.py hit the same bug first."""
+    entities = pd.DataFrame(
+        {
+            "id": ["e1"],
+            "title": ["Entity One"],
+            "human_readable_id": [0],
+            "type": ["concept"],
+            "description": ["d1"],
+            "degree": [1],
+            "description_embedding": [None],
+            "text_unit_ids": [["tu-dup"]],
+        }
+    )
+    communities = pd.DataFrame({"community": [0], "level": [0], "entity_ids": [["e1"]]})
+    # One id, two genuinely different chunks — identical text on different pages.
+    text_units = pd.DataFrame({"id": ["tu-dup", "tu-dup"], "document_id": ["1", "3"]})
+
+    _write_graph_artifacts(
+        retrievable_subject,
+        entities=entities,
+        communities=communities,
+        community_reports=_empty_frame(["id", "title"]),
+        text_units=text_units,
+        relationships=_empty_frame(["id"]),
+    )
+
+    async def fake_global_search(**kwargs):
+        return "answer", {"reports": pd.DataFrame({"id": ["0"], "title": ["Dup"]})}
+
+    monkeypatch.setattr(graph_module, "global_search", fake_global_search)
+
+    nodes = GraphGlobalRetriever(subject=retrievable_subject).retrieve("summarize")
+
+    # Both colliding chunks cited, not a TypeError and not one silently dropped.
+    assert sorted(n.node.metadata["chunk_id"] for n in nodes) == [1, 3]

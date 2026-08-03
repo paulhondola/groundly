@@ -274,14 +274,34 @@ class GraphGlobalRetriever(_GraphRetrieverBase):
             len(entities),
         )
 
-        text_units = artifacts.text_units.set_index("id")["document_id"]
-        chunk_ids = sorted(
-            {
-                int(text_units[tid])
-                for tid in text_unit_ids
-                if tid in text_units.index and text_units[tid] is not None
-            }
-        )
+        # A LIST of document_ids per text-unit id, not set_index()["document_id"]: text
+        # unit ids are content hashes, so two Groundly chunks with byte-identical text
+        # collide onto one id while remaining *different chunks* on different pages of
+        # different files (apd: 18 of 1193 ids collide — "REVIEW" heads two quiz decks,
+        # one QuickSort listing appears in two files). Under an index lookup those rows
+        # return a Series instead of a scalar and `int()` raises TypeError, which took
+        # global search down entirely. core/graph_html.py's `_entity_citations` resolves
+        # the same join the same way, for the same reason.
+        doc_ids_by_tu: dict[str, list] = {}
+        for tu_id, doc_id in zip(
+            artifacts.text_units["id"], artifacts.text_units["document_id"], strict=True
+        ):
+            doc_ids_by_tu.setdefault(tu_id, []).append(doc_id)
+
+        # The cast is guarded for the same reason graph_html.py guards it: `document_id`
+        # is only numeric because ingestion/graph.py sets it to str(chunk_id), and an
+        # unguarded int() turns any future deviation into a dead global-search arm rather
+        # than a citation quietly skipped.
+        resolved: set[int] = set()
+        for tid in text_unit_ids:
+            for doc_id in doc_ids_by_tu.get(tid, ()):
+                if doc_id is None:
+                    continue
+                try:
+                    resolved.add(int(doc_id))
+                except (TypeError, ValueError):
+                    logger.debug("skipping non-numeric document_id %r", doc_id)
+        chunk_ids = sorted(resolved)
         self.path.append("text-unit-resolve")
         logger.debug("global search resolved %d chunk id(s), path=%s", len(chunk_ids), self.path)
         return _nodes_from_chunk_ids(self.store, chunk_ids)

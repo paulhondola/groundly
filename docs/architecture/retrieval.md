@@ -102,8 +102,29 @@ MS `graphrag` runs its own chunking/extraction — the two backends do not share
 
 ## Evaluation protocol
 
-- **Gold set** per pilot subject from past exams, stratified by query class (factoid / multi-hop / global synthesis), RO and EN, **cross-lingual queries as a separate slice**. Professor spot-checks. Collection starts before implementation — it needs the professor, not code.
-- **Metrics per arm × class:** retrieval hit rate, RAGAS groundedness/faithfulness, citation accuracy, router accuracy, cost, latency — all from the traces table, all offline.
+The harness is `groundly/eval/`, driven by `groundly eval SUBJECT --gold PATH --arms ...` (decision 27). It is a **client-layer** package: it imports the service layer and nothing imports it.
+
+**Forcing an arm.** `ask()` normally derives the arm from the router label, which cannot express "this question through every arm". `retrieve_for_arm(subject, query, arm, ...)` in `agents/ask.py` runs exactly one arm, and `ask(arm=...)` skips the router entirely. An unknown arm raises — a typo in `--arms` must never silently score the baseline under another name. `traces` already separates `router_label` from `arm`, so nothing in the schema changed.
+
+**Gold set** per pilot subject from past exams, stratified by query class (factoid / multi-hop / global synthesis), RO and EN, **cross-lingual queries as a separate slice**. Professor spot-checks. Lives at `evals/<subject>/gold.jsonl`, version-controlled; results are gitignored. apd's is 48 questions (17 factoid / 22 multi-hop / 9 global; 39 EN / 9 RO), drawn from `Examen.md`, the two quiz decks, and hand-written RO items.
+
+- **Labels are `(filename, page)`, never chunk id** — chunk ids are SQLite rowids that shift on re-index; a filename and page survive one. `gold.py` resolves them against the live store at run time and warns (rather than crashing) on a label that no longer matches.
+- **The contamination guard.** Exam files are themselves indexed, so a question lifted from `Examen.md` retrieves `Examen.md` — a "hit" on the question, not the answer. `expected` may never name the question's own `source_file` (rejected at load), and `metrics.leakage` reports how often an arm retrieves it regardless. Measured at 10% for the vector arm on apd.
+
+**Metrics per arm × class × language.** Retrieval hit rate, recall, MRR, leakage, retrieved-set size, latency (slice 1, offline). RAGAS groundedness/faithfulness, citation accuracy, router accuracy and cost from the traces table (slice 2, needs a provider).
+
+- **Set size is not optional.** Arms do not return comparable numbers of chunks: the vector arm returns `context_k` (8), while `graph-global` measured **1,138 of apd's 1,193 chunks — 95% of the corpus — for every question**. Its recall of 1.00 and hit rate of 100% are artifacts of returning nearly everything; MRR of 0.02 is what exposes it. Hit-rate and recall comparisons across arms are invalid without `retrieved_n` beside them, and the CLI warns when arms differ by more than 4x. This is the global-citation-join open risk above, measured.
+- **Errors are excluded, not counted as misses.** A provider outage or context overflow is recorded per question and reported; folding it into hit rate would read as an arm retrieving badly.
+
+**Provider requirements are asymmetric, and the two graph arms are not comparable to each other on cost.** `vector` is genuinely zero-key. Both graph arms reach the `extraction` provider *inside* graphrag's own search call — spend that never passes through `llm/` and lands in no trace row (see the known gap above).
+
+- `hybrid-local`: ~1 synthesis call per question.
+- `graph-global`: **map-reduce over the community summaries**, batched to `GlobalSearchConfig.max_context_tokens` (12,000, unoverridden), so call count scales with total report volume. Measured on apd — 555 reports at `level <= 2`, ~389k tokens — that is **~33 map calls + 1 reduce per question**; a 48-question sweep is ~1,600 untraced provider calls, not 48.
+
+On the local floor (`gemma-4-12b-qat`) a graph query measured ~165 s against ~7 s for vector. The CLI states the two arms' costs separately before running; averaging them understates global search by more than an order of magnitude.
+
 - **Grounding-fidelity experiment:** the same gold questions answered (a) through the enforced `ask` pipeline and (b) host-composed from raw `search` results — compared on faithfulness + citation accuracy. Measures enforced vs agent-mediated grounding, the design's biggest real-world tension.
 - **Reproducibility:** a frozen `~/.groundly/<SUBJECT>/` directory is the experimental artifact — hashable, shippable with the thesis; all four arms re-runnable anywhere.
 - Expected result shape: per-class deltas ("hybrid matches the baseline on factoids at ~equal cost; improves multi-hop by X% at Y% cost"). GraphRAG is timeboxed; a negative result is a finding, not a failure.
+
+**First measured baseline** (vector arm, apd, 48 questions, 2026-08-03): hit rate 94% factoid / 59% multi-hop / 56% global; recall 0.76 / 0.39 / 0.22; MRR 0.49 / 0.30 / 0.17. The degradation from factoid to multi-hop and global is the gap the graph arms exist to close.

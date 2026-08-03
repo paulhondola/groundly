@@ -339,3 +339,100 @@ def test_ask_graph_not_built_fallback_logs_info_and_still_answers(
     assert any(
         "degrading to vector-only" in r.message and r.levelname == "INFO" for r in caplog.records
     )
+
+
+# --- explicit arm override (the eval harness's entry point) --------------------
+
+
+def test_retrieve_for_arm_rejects_an_unknown_arm(retrievable_subject):
+    """A typo in `groundly eval --arms` must fail loudly, not silently score the
+    baseline under another arm's name."""
+    from groundly.agents.ask import retrieve_for_arm
+    from groundly.core.store import SubjectStore
+
+    store = SubjectStore(subject_dir(retrievable_subject) / "store.db")
+    with pytest.raises(ValueError, match="unknown retrieval arm 'graph-locul'"):
+        retrieve_for_arm(retrievable_subject, "q", "graph-locul", store=store)
+
+
+def test_retrieve_for_arm_needs_no_chat_provider(retrievable_subject, monkeypatch):
+    """Zero-key retrieval is what makes the eval runnable offline — no provider is
+    configured in this test and none is required."""
+    from groundly.agents.ask import retrieve_for_arm
+    from groundly.core.store import SubjectStore
+
+    def _explode(*a, **k):
+        raise AssertionError("retrieval must not call an LLM")
+
+    monkeypatch.setattr("groundly.agents.ask.complete", _explode)
+    store = SubjectStore(subject_dir(retrievable_subject) / "store.db")
+    nodes, path, arm = retrieve_for_arm(
+        retrievable_subject, "deadlock", "vector", store=store, embedder=_near_embedder(),
+        rerank=False,
+    )
+    assert arm == "vector"
+    assert [n.node.metadata["chunk_id"] for n in nodes]
+    assert path
+
+
+def test_retrieve_for_arm_reports_degradation_in_arm_actual(retrievable_subject, monkeypatch):
+    from groundly.agents.ask import retrieve_for_arm
+    from groundly.core.store import SubjectStore
+
+    monkeypatch.setattr("groundly.agents.ask.GraphGlobalRetriever", _NotBuiltRetriever)
+    store = SubjectStore(subject_dir(retrievable_subject) / "store.db")
+    _nodes, _path, arm = retrieve_for_arm(
+        retrievable_subject, "deadlock", "graph-global", store=store,
+        embedder=_near_embedder(), rerank=False,
+    )
+    assert arm == "vector"  # caller sees the degradation; the eval treats it as fatal
+
+
+def test_ask_explicit_arm_skips_the_router(retrievable_subject, monkeypatch, stub_chat):
+    home = subject_dir(retrievable_subject).parent
+    _configure_chat(home)
+    chat = stub_chat("Deadlocks need mutual exclusion [chunk 1].")
+
+    def _must_not_classify(query, c):
+        raise AssertionError("an explicit arm must not consult the router")
+
+    monkeypatch.setattr("groundly.agents.ask.classify", _must_not_classify)
+    monkeypatch.setattr("groundly.agents.ask.complete", chat)
+
+    result = ask(
+        retrievable_subject,
+        "what causes a deadlock?",
+        embedder=_near_embedder(),
+        rerank=False,
+        arm="vector",
+    )
+
+    assert result.router_label is None
+    assert _traces(retrievable_subject)[-1]["arm"] == "vector"
+
+
+def test_ask_explicit_graph_arm_overrides_a_contradicting_router_label(
+    retrievable_subject, monkeypatch, stub_chat
+):
+    """The router would say factoid; the eval asks for the graph arm anyway. This is the
+    whole point of the override — one question through every arm."""
+    home = subject_dir(retrievable_subject).parent
+    _configure_chat(home)
+    chat = stub_chat("Deadlocks need mutual exclusion [chunk 2].")
+    monkeypatch.setattr("groundly.agents.ask.classify", lambda query, c: "factoid")
+    monkeypatch.setattr("groundly.agents.ask.complete", chat)
+    monkeypatch.setattr("groundly.agents.ask.GraphGlobalRetriever", _FakeGraphGlobalRetriever)
+    _FakeGraphGlobalRetriever.instances.clear()
+    _no_vector_retrieval(monkeypatch)
+
+    result = ask(
+        retrievable_subject,
+        "what causes a deadlock?",
+        embedder=_near_embedder(),
+        rerank=False,
+        arm="graph-global",
+    )
+
+    assert len(_FakeGraphGlobalRetriever.instances) == 1
+    assert result.citations[0].chunk_id == 2
+    assert _traces(retrievable_subject)[-1]["arm"] == "graph-global"
