@@ -90,7 +90,7 @@ def test_eval_bad_gold_set_fails_with_a_named_cause(retrievable_subject, tmp_pat
     )
     assert result.exit_code == 1
     assert "Error:" in result.output
-    assert "source file" in result.output
+    assert "a question source for this gold set" in result.output
 
 
 def test_eval_missing_gold_set_fails_with_a_named_cause(retrievable_subject, tmp_path):
@@ -140,3 +140,63 @@ def test_eval_defaults_the_gold_path_to_the_subject_convention(retrievable_subje
     result = runner.invoke(app, ["eval", retrievable_subject], catch_exceptions=False)
     assert result.exit_code == 1
     assert f"evals/{retrievable_subject}/gold.jsonl" in result.output
+
+
+def test_cli_renders_a_dash_and_explains_it_for_an_unranked_arm(
+    retrievable_subject, monkeypatch, tmp_path
+):
+    """graph-global has no relevance order, so its MRR cell must read '—' with a reason —
+    a number there would be read as ranking evidence. Forced onto the vector arm so the
+    rendering path is exercised without a built graph or a provider."""
+    monkeypatch.setattr(
+        "groundly.retrieval.vector.VectorRetriever.embedder",
+        property(lambda self: _near_embedder()),
+    )
+    monkeypatch.setattr("groundly.eval.runner.UNRANKED_ARMS", frozenset({"vector"}))
+
+    result = runner.invoke(
+        app,
+        [
+            "eval",
+            retrievable_subject,
+            "--gold",
+            str(_gold_file(tmp_path)),
+            "--arms",
+            "vector",
+            "--no-rerank",
+            "--out",
+            str(tmp_path / "out"),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "—" in result.output
+    assert "not relevance order" in result.output
+
+    payload = json.loads(next((tmp_path / "out").glob("results-*.json")).read_text())
+    assert payload["by_arm"][0]["mrr"] is None
+    assert payload["rows"][0]["reciprocal_rank"] is None
+
+
+def test_cli_still_reports_mrr_for_ranked_arms(retrievable_subject, monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "groundly.retrieval.vector.VectorRetriever.embedder",
+        property(lambda self: _near_embedder()),
+    )
+    result = runner.invoke(
+        app,
+        [
+            "eval",
+            retrievable_subject,
+            "--gold",
+            str(_gold_file(tmp_path)),
+            "--arms",
+            "vector",
+            "--no-rerank",
+            "--out",
+            str(tmp_path / "out"),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "not relevance order" not in result.output
+    payload = json.loads(next((tmp_path / "out").glob("results-*.json")).read_text())
+    assert payload["by_arm"][0]["mrr"] is not None

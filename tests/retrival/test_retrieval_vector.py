@@ -158,3 +158,24 @@ def test_search_returns_nodes_and_records_trace(retrievable_subject):
         assert row["latency_ms"] is not None
     finally:
         pconn.close()
+
+
+def test_rrf_breaks_ties_by_cross_ranking_agreement():
+    """Equal RRF scores must not be resolved by argument order. Both list A's rank-0 and
+    list B's rank-0 score 1/61; before the vote tie-break, stable `sorted` handed rank 1
+    to whichever list came first, which is how a weak graph ordering owned position 1 for
+    every hybrid-local query. Id 7 is found by both channels and must win."""
+    fused = rrf([[1, 7], [7, 2]], k=60)
+    ids = [doc_id for doc_id, _ in fused]
+    assert ids[0] == 7  # 1/61 + 1/62, strictly higher than either singleton
+    # 1 and 2 are exactly tied at 1/61 each; order must be deterministic, not positional
+    assert set(ids[1:]) == {1, 2}
+    assert rrf([[1, 7], [7, 2]], k=60) == rrf([[1, 7], [7, 2]], k=60)
+
+
+def test_rrf_tie_break_is_independent_of_argument_order():
+    """The same two rankings swapped must produce the same fused order — that is the
+    whole point of not letting `sorted`'s stability decide."""
+    a = [doc_id for doc_id, _ in rrf([[3], [4]], k=60)]
+    b = [doc_id for doc_id, _ in rrf([[4], [3]], k=60)]
+    assert a == b

@@ -20,17 +20,27 @@ from llama_index.core.schema import NodeWithScore
 from groundly.agents.citations import Citation, NoCitationsError, resolve_citations  # noqa: F401  re-exported: mcp/server.py + cli/ask.py import NoCitationsError from here
 from groundly.agents.prompts import REFUSAL, assemble
 from groundly.agents.router import classify
+from groundly.core.config import load_settings
 from groundly.core.progress import connect_progress, record_trace
 from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
 from groundly.llm.chat import complete
 from groundly.llm.config import require_provider
 from groundly.retrieval.graph import GraphGlobalRetriever, GraphLocalRetriever, GraphNotBuiltError
-from groundly.retrieval.vector import VectorRetriever, rrf
+from groundly.retrieval.vector import RERANK_POOL, VectorRetriever, rrf
 
 logger = logging.getLogger(__name__)
 
 ARMS = ("vector", "hybrid-local", "graph-global")
+
+# Arms whose returned order carries NO relevance signal. `graph-global` resolves its
+# citations through a set and emits `sorted(chunk_ids)` (retrieval/graph.py) — ascending
+# SQLite rowid, i.e. the order chunks happened to be indexed in. Rank-sensitive metrics
+# (MRR) must not be computed over it: they would report where a labelled chunk sits in
+# rowid order and read as evidence about retrieval quality. Order-insensitive metrics
+# (hit rate, recall) stay valid. This is a property of the arm, not of the eval, and it
+# disappears once global search ranks its output.
+UNRANKED_ARMS = frozenset({"graph-global"})
 
 # Router vocabulary -> arm. The router speaks query classes, the retrieval layer
 # speaks arms; keeping the two vocabularies separate is what lets the eval force an
@@ -59,6 +69,14 @@ def retrieve_for_arm(
     differs from `arm` only when a graph arm degraded to vector because no graph is
     built — that degradation is what the trace's `arm` column records.
 
+    **Returns each arm's full candidate list, not its top `context_k`.** Applying the cap
+    is the consumer's job (`ask()` does it). That split is what lets the eval score every
+    k from a single sweep instead of one full re-run per k — which matters because the
+    published comparison put an 8-chunk arm against a 33-chunk arm and called the
+    difference a result. The vector arm's honest ceiling is `RERANK_POOL` (20): beyond
+    that the fused order was never seen by the cross-encoder, so a longer list would mix
+    reranked and un-reranked positions and mean nothing.
+
     No arm calls `chat` here — that is why the eval harness can score retrieval without
     the generation step, and why this dispatch lives in its own function rather than
     inline in `ask()`. Note the asymmetry: `vector` needs no provider at all, while the
@@ -73,7 +91,13 @@ def retrieve_for_arm(
     if arm not in ARMS:
         raise ValueError(f"unknown retrieval arm {arm!r} — expected one of {', '.join(ARMS)}")
 
-    vector_retriever = VectorRetriever(store, embedder=embedder, reranker=reranker, rerank=rerank)
+    vector_retriever = VectorRetriever(
+        store,
+        embedder=embedder,
+        reranker=reranker,
+        rerank=rerank,
+        context_k=RERANK_POOL,
+    )
 
     if arm == "hybrid-local":
         try:
@@ -158,6 +182,13 @@ def ask(
             reranker=reranker,
         )
 
+        # `retrieve_for_arm` returns each arm's full candidate list — that is what lets
+        # the eval score every k from one run. Applying `context_k` is the *consumer's*
+        # job, and this is the consumer. Before this, hybrid-local assembled a median of
+        # 33 chunks against context_k=8 and graph-global assembled 1,138.
+        # Truncating here rather than after `chunk_ids` keeps citation resolution honest:
+        # a chunk the model never saw must not be resolvable.
+        nodes = nodes[: load_settings().retrieval.context_k]
         chunk_ids = [n.node.metadata["chunk_id"] for n in nodes]
 
         if not nodes:

@@ -1,6 +1,8 @@
 """groundly/eval/metrics.py: pure scoring functions over ranked id lists — no store,
 no model, no key."""
 
+
+import pytest
 from groundly.eval.metrics import (
     Scored,
     aggregate,
@@ -89,7 +91,8 @@ def test_aggregate_averages_across_questions():
 
 def test_aggregate_of_nothing_is_zero_not_a_crash():
     agg = aggregate([])
-    assert (agg.n, agg.hit_rate, agg.mrr, agg.median_latency_ms) == (0, 0.0, 0.0, None)
+    assert (agg.n, agg.hit_rate, agg.median_latency_ms) == (0, 0.0, None)
+    assert agg.mrr is None  # no ranked row to average — not a real 0.0
 
 
 def test_by_slice_groups_on_the_requested_keys():
@@ -123,3 +126,146 @@ def test_aggregate_reports_the_median_retrieved_set_size():
         _scored("vector", "factoid", [1] * 400, {1}),
     ]
     assert aggregate(rows, arm="vector").median_retrieved_n == 8
+
+
+def _row(qid, arm, retrieved, expected, *, hit_=True, err=None):
+    from groundly.eval.metrics import Scored
+
+    return Scored(
+        question_id=qid,
+        arm=arm,
+        klass="factoid",
+        lang="en",
+        retrieved=retrieved,
+        retrieved_n=len(retrieved),
+        hit=hit_,
+        recall=0.0,
+        reciprocal_rank=0.0,
+        leakage=0.0,
+        expected=expected,
+        error=err,
+    )
+
+
+def test_at_rescores_against_only_the_top_k():
+    """The whole point of storing the full candidate list plus its labels: a finished
+    results file can be re-cut at any k without the store that produced it."""
+    from groundly.eval.metrics import Scored
+
+    row = Scored.score(
+        question=_Q(),
+        arm="hybrid-local",
+        retrieved=[9, 8, 7, 3],
+        expected={3},
+        source=set(),
+    )
+    assert row.hit is True and row.reciprocal_rank == pytest.approx(0.25)
+
+    cut = row.at(2, set())
+    assert cut.retrieved == [9, 8]
+    assert cut.hit is False
+    assert cut.recall == 0.0
+    assert cut.reciprocal_rank == 0.0
+    # the un-cut row is untouched — `at` returns a new row, it does not mutate
+    assert row.hit is True
+
+
+def test_at_keeps_mrr_none_for_unranked_arms():
+    """An arm with no relevance order still has none after truncation."""
+    from groundly.eval.metrics import Scored
+
+    row = Scored.score(
+        question=_Q(),
+        arm="graph-global",
+        retrieved=[1, 2, 3],
+        expected={3},
+        source=set(),
+        ranked=False,
+    )
+    assert row.at(2, set()).reciprocal_rank is None
+
+
+def test_sweep_labels_every_slice_with_its_k():
+    from groundly.eval.metrics import sweep
+
+    rows = [_row("q1", "vector", [5, 1], [1]), _row("q1", "graph", [1, 5], [1])]
+    aggs = sweep(rows, [1, 2], set(), "arm")
+    by = {(a.slice["arm"], a.slice["k"]): a for a in aggs}
+    assert set(by) == {("vector", "1"), ("vector", "2"), ("graph", "1"), ("graph", "2")}
+    # at k=1 only `graph` has the labelled chunk; at k=2 both do
+    assert by[("graph", "1")].hit_rate == 1.0
+    assert by[("vector", "1")].hit_rate == 0.0
+    assert by[("vector", "2")].hit_rate == 1.0
+
+
+def test_sweep_passes_errored_rows_through_untouched():
+    """An errored row has no candidate list to truncate and must stay excluded, not
+    become a miss at every k."""
+    from groundly.eval.metrics import sweep
+
+    rows = [_row("q1", "vector", [], [1], err="provider down")]
+    agg = sweep(rows, [5], set(), "arm")[0]
+    assert agg.n == 0 and agg.errors == 1
+
+
+def test_mcnemar_reproduces_the_published_split_as_a_tie():
+    """1 win / 4 losses over 48 questions — the exact split the GraphRAG review reported
+    as 'net -3'. Five discordant pairs cannot clear p < 0.05 at any imbalance."""
+    from groundly.eval.metrics import mcnemar
+
+    a = [_row(f"q{i}", "hybrid", [], [], hit_=i < 1) for i in range(48)]
+    b = [_row(f"q{i}", "vector", [], [], hit_=1 <= i < 5) for i in range(48)]
+    arm_only, baseline_only, p = mcnemar(a, b)
+    assert (arm_only, baseline_only) == (1, 4)
+    assert p == pytest.approx(0.375)
+
+
+def test_mcnemar_detects_a_real_effect_and_handles_no_disagreement():
+    from groundly.eval.metrics import mcnemar
+
+    a = [_row(f"q{i}", "a", [], [], hit_=True) for i in range(10)]
+    b = [_row(f"q{i}", "b", [], [], hit_=False) for i in range(10)]
+    assert mcnemar(a, b)[2] < 0.05
+    assert mcnemar(a, a) == (0, 0, 1.0)
+
+
+def test_mcnemar_drops_errored_rows_from_both_sides():
+    """An outage on one arm is not a win for the other."""
+    from groundly.eval.metrics import mcnemar
+
+    a = [_row("q1", "a", [], [], hit_=True), _row("q2", "a", [], [], err="down")]
+    b = [_row("q1", "b", [], [], hit_=True), _row("q2", "b", [], [], hit_=True)]
+    assert mcnemar(a, b) == (0, 0, 1.0)
+
+
+def test_sweep_omits_unranked_arms_entirely():
+    """`graph-global` emits sorted(chunk_ids) — ascending rowid. Its 'top 8' is the eight
+    lowest-numbered chunks in the corpus, a number that looks like precision@8 and
+    measures ingestion order. It is withheld for the same reason MRR is."""
+    from groundly.eval.metrics import sweep, unranked_arms
+
+    ranked = Scored.score(
+        question=_Q("q1"), arm="vector", retrieved=[1, 2], expected={2}, source=set()
+    )
+    unranked = Scored.score(
+        question=_Q("q1"),
+        arm="graph-global",
+        retrieved=[1, 2],
+        expected={2},
+        source=set(),
+        ranked=False,
+    )
+
+    aggs = sweep([ranked, unranked], [1, 2], set(), "arm")
+    assert {a.slice["arm"] for a in aggs} == {"vector"}
+    assert unranked_arms([ranked, unranked]) == ["graph-global"]
+
+
+def test_sweep_keeps_errored_rows_of_ranked_arms():
+    """An error is not the same as having no rank — the row must still be counted as an
+    error rather than dropped from the table along with the unranked arms."""
+    from groundly.eval.metrics import sweep
+
+    failed = Scored.failed(question=_Q("q1"), arm="vector", error="provider down")
+    aggs = sweep([failed], [5], set(), "arm")
+    assert len(aggs) == 1 and aggs[0].errors == 1 and aggs[0].n == 0

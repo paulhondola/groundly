@@ -67,12 +67,6 @@ def _question(raw: dict, lineno: int) -> GoldQuestion:
     for item in raw["expected"]:
         if "file" not in item:
             raise GoldSetError(f"line {lineno} ({qid}): an expected entry has no 'file'")
-        if source_file is not None and item["file"] == source_file:
-            raise GoldSetError(
-                f"line {lineno} ({qid}): expected points at {source_file!r}, the question's own "
-                "source file — that scores retrieving the question, not the answer. Label the "
-                "lecture material that answers it instead."
-            )
         expected.append(Expected(file=item["file"], page=item.get("page")))
 
     return GoldQuestion(
@@ -109,7 +103,31 @@ def load(path: Path) -> list[GoldQuestion]:
 
     if not questions:
         raise GoldSetError(f"{path} contains no questions")
+
+    # The contamination guard runs corpus-wide, not per row. Labelling ANY question
+    # source as the answer is wrong regardless of which row it came from: those files
+    # hold questions, so an arm "finding" one has found the prompt, not the material.
+    # The per-row check this replaces missed the case where two rows share a question —
+    # apd-006 is verbatim in both Examen.md and Quiz 2, and a row sourced from one could
+    # legally label the other.
+    sources = question_sources(questions)
+    for q in questions:
+        for want in q.expected:
+            if want.file in sources:
+                raise GoldSetError(
+                    f"{q.id}: expected points at {want.file!r}, which is a question source "
+                    "for this gold set — that scores retrieving a question, not the answer. "
+                    "Label the lecture material that answers it instead."
+                )
     return questions
+
+
+def question_sources(questions: list[GoldQuestion]) -> frozenset[str]:
+    """Every file any question was drawn from. Leakage is measured against this whole
+    set for *every* question, including hand-written ones with `source_file: null` —
+    retrieving an exam file is retrieving question text whether or not it happens to be
+    the file this particular question came from."""
+    return frozenset(q.source_file for q in questions if q.source_file)
 
 
 def _index(chunks) -> tuple[dict[tuple[str, int | None], set[int]], dict[str, set[int]]]:
@@ -123,19 +141,41 @@ def _index(chunks) -> tuple[dict[tuple[str, int | None], set[int]], dict[str, se
 
 def resolve(
     questions: list[GoldQuestion], store
-) -> tuple[dict[str, set[int]], dict[str, set[int]], list[str]]:
+) -> tuple[dict[str, set[int]], dict[str, set[int]], list[str], float]:
     """Resolve labels against the live store in one pass over `all_chunks()`.
 
-    Returns (expected chunk ids per question, source-file chunk ids per question,
-    warnings). A label that resolves to nothing is a warning naming the label, not a
-    crash — a partly-stale gold set should still produce numbers for the rows that
-    are fine, with the bad rows called out.
+    Returns (expected chunk ids per question, question-source chunk ids per question,
+    warnings, question-source base rate). A label that resolves to nothing is a warning
+    naming the label, not a crash — a partly-stale gold set should still produce numbers
+    for the rows that are fine, with the bad rows called out.
+
+    The base rate is the share of the whole corpus that is question-source material
+    (apd: 45 of 1,193 = 3.77%). Raw leakage is not readable without it: an arm returning
+    95% of the corpus lands at the base rate by construction and so looks *cleaner* than
+    a precise arm that genuinely over-retrieves exam text. `leakage / base_rate` is the
+    figure that means something — the same set-size confound `retrieved_n` guards for
+    hit rate and recall.
+
+    The source set is **the same for every question**: the union of every question
+    source in the gold set (`question_sources`). Scoping it per row understated real
+    contamination, because a question can appear in more than one indexed file and 16
+    of apd's 48 rows declare no source at all — those reported leakage 0.0 by
+    construction while still retrieving exam chunks.
     """
     by_page, by_file = _index(store.all_chunks())
 
     expected: dict[str, set[int]] = {}
     source: dict[str, set[int]] = {}
     warnings: list[str] = []
+
+    source_chunks: set[int] = set()
+    for filename in sorted(question_sources(questions)):
+        found = by_file.get(filename, set())
+        if not found:
+            # Silently measuring leakage against a file that is not in the index would
+            # report 0.0 and look like a clean result.
+            warnings.append(f"source_file {filename} matches no chunk in this subject")
+        source_chunks |= found
 
     for q in questions:
         hits: set[int] = set()
@@ -150,6 +190,8 @@ def resolve(
                 warnings.append(f"{q.id}: expected {where} matches no chunk in this subject")
             hits |= found
         expected[q.id] = hits
-        source[q.id] = by_file.get(q.source_file, set()) if q.source_file else set()
+        source[q.id] = source_chunks
 
-    return expected, source, warnings
+    total = sum(len(ids) for ids in by_file.values())
+    base_rate = len(source_chunks) / total if total else 0.0
+    return expected, source, warnings, base_rate

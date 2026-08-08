@@ -367,7 +367,11 @@ def test_retrieve_for_arm_needs_no_chat_provider(retrievable_subject, monkeypatc
     monkeypatch.setattr("groundly.agents.ask.complete", _explode)
     store = SubjectStore(subject_dir(retrievable_subject) / "store.db")
     nodes, path, arm = retrieve_for_arm(
-        retrievable_subject, "deadlock", "vector", store=store, embedder=_near_embedder(),
+        retrievable_subject,
+        "deadlock",
+        "vector",
+        store=store,
+        embedder=_near_embedder(),
         rerank=False,
     )
     assert arm == "vector"
@@ -382,8 +386,12 @@ def test_retrieve_for_arm_reports_degradation_in_arm_actual(retrievable_subject,
     monkeypatch.setattr("groundly.agents.ask.GraphGlobalRetriever", _NotBuiltRetriever)
     store = SubjectStore(subject_dir(retrievable_subject) / "store.db")
     _nodes, _path, arm = retrieve_for_arm(
-        retrievable_subject, "deadlock", "graph-global", store=store,
-        embedder=_near_embedder(), rerank=False,
+        retrievable_subject,
+        "deadlock",
+        "graph-global",
+        store=store,
+        embedder=_near_embedder(),
+        rerank=False,
     )
     assert arm == "vector"  # caller sees the degradation; the eval treats it as fatal
 
@@ -436,3 +444,43 @@ def test_ask_explicit_graph_arm_overrides_a_contradicting_router_label(
     assert len(_FakeGraphGlobalRetriever.instances) == 1
     assert result.citations[0].chunk_id == 2
     assert _traces(retrievable_subject)[-1]["arm"] == "graph-global"
+
+
+def test_ask_truncates_candidates_to_context_k(retrievable_subject, monkeypatch, stub_chat):
+    """`retrieve_for_arm` returns each arm's full candidate list so the eval can score
+    every k from one sweep; applying `context_k` is `ask()`'s job. Before this, the
+    `global` router label assembled 1,138 chunks into a 16,384-token window.
+
+    The cap must land *before* `chunk_ids`, or `resolve_citations` would accept a citation
+    to a chunk the model was never shown."""
+    from groundly.core.config import load_settings
+
+    home = subject_dir(retrievable_subject).parent
+    _configure_chat(home)
+    context_k = load_settings().retrieval.context_k
+
+    wide = [
+        NodeWithScore(
+            node=TextNode(
+                text=f"text {i}",
+                id_=str(i),
+                metadata={"chunk_id": i, "filename": "f.md", "page": None, "heading_path": ""},
+            ),
+            score=1.0 / (i + 1),
+        )
+        for i in range(context_k + 40)
+    ]
+    monkeypatch.setattr(
+        "groundly.agents.ask.retrieve_for_arm",
+        lambda *a, **kw: (wide, ["stub"], "vector"),
+    )
+    chat = stub_chat("Grounded [chunk 0].")
+    monkeypatch.setattr("groundly.agents.ask.classify", lambda query, c: "factoid")
+    monkeypatch.setattr("groundly.agents.ask.complete", chat)
+
+    ask(retrievable_subject, "anything?", embedder=_near_embedder(), rerank=False)
+
+    rows = _traces(retrievable_subject)
+    assert len(json.loads(rows[-1]["chunk_ids"])) == context_k
+    # a chunk past the cap must not be citable, even though retrieval returned it
+    assert json.loads(rows[-1]["chunk_ids"]) == list(range(context_k))

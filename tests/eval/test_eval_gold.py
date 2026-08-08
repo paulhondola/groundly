@@ -63,8 +63,22 @@ def test_expected_pointing_at_its_own_source_file_is_rejected(tmp_path):
     """The contamination guard. A question lifted from Examen.md that labels Examen.md
     scores retrieving the question text, not the material that answers it."""
     row = _ROW | {"expected": [{"file": "Examen.md", "page": None}]}
-    with pytest.raises(GoldSetError, match="the question's own source file"):
+    with pytest.raises(GoldSetError, match="a question source for this gold set"):
         load(_write(tmp_path, row))
+
+
+def test_expected_pointing_at_another_rows_source_file_is_rejected(tmp_path):
+    """The guard is corpus-wide, not per row. apd-006's question is verbatim in both
+    Examen.md and Quiz 2, so a row sourced from one could otherwise legally label the
+    other — still scoring retrieval of a question rather than of the answer."""
+    from_examen = _ROW
+    from_quiz = _ROW | {
+        "id": "q2",
+        "source_file": "Quiz 2.pdf",
+        "expected": [{"file": "Examen.md"}],  # a DIFFERENT row's source
+    }
+    with pytest.raises(GoldSetError, match="q2: expected points at 'Examen.md'"):
+        load(_write(tmp_path, from_examen, from_quiz))
 
 
 def test_source_file_none_permits_any_expected(tmp_path):
@@ -121,22 +135,51 @@ def test_resolve_maps_labels_to_chunk_ids(tmp_path):
             _chunk(9, "Examen.md", None),
         ]
     )
-    expected, source, warnings = resolve(questions, store)
+    expected, source, warnings, _base = resolve(questions, store)
     assert expected["q1"] == {1, 2}  # page 8 is a different label
-    assert source["q1"] == {9}  # the question's own file, for leakage
+    assert source["q1"] == {9}  # the gold set's question sources, for leakage
     assert warnings == []
 
 
 def test_resolve_matches_whole_file_when_page_is_null(tmp_path):
     row = _ROW | {"expected": [{"file": "notes.md"}]}
     store = StubStore([_chunk(1, "notes.md", None), _chunk(2, "notes.md", None)])
-    expected, _source, _warnings = resolve(load(_write(tmp_path, row)), store)
+    expected, _source, _warnings, _base = resolve(load(_write(tmp_path, row)), store)
     assert expected["q1"] == {1, 2}
 
 
 def test_resolve_warns_but_does_not_crash_on_a_stale_label(tmp_path):
     """A partly-stale gold set should still score its good rows, with the bad ones named."""
-    store = StubStore([_chunk(1, "other.pdf", 1)])
-    expected, _source, warnings = resolve(load(_write(tmp_path, _ROW)), store)
+    store = StubStore([_chunk(1, "other.pdf", 1), _chunk(9, "Examen.md", None)])
+    expected, _source, warnings, _base = resolve(load(_write(tmp_path, _ROW)), store)
     assert expected["q1"] == set()
     assert warnings == ["q1: expected lec.pdf p.7 matches no chunk in this subject"]
+
+
+def test_resolve_warns_when_a_question_source_is_not_in_the_index(tmp_path):
+    """Measuring leakage against a file that is not indexed reports 0.0 and reads as a
+    clean result — the one way a contamination metric can lie reassuringly."""
+    store = StubStore([_chunk(1, "lec.pdf", 7)])  # no Examen.md
+    _expected, source, warnings, _base = resolve(load(_write(tmp_path, _ROW)), store)
+    assert source["q1"] == set()
+    assert "source_file Examen.md matches no chunk in this subject" in warnings
+
+
+def test_resolve_measures_leakage_against_every_question_source(tmp_path):
+    """The source set is corpus-wide and identical for every question, including rows
+    with `source_file: null` — retrieving an exam file is retrieving question text
+    whoever's question it was."""
+    rows = [
+        _ROW,  # source_file: Examen.md
+        _ROW | {"id": "q2", "source_file": "Quiz 2.pdf"},
+        _ROW | {"id": "q3", "source_file": None},  # hand-written
+    ]
+    store = StubStore(
+        [
+            _chunk(1, "lec.pdf", 7),
+            _chunk(9, "Examen.md", None),
+            _chunk(10, "Quiz 2.pdf", 3),
+        ]
+    )
+    _expected, source, _warnings, _base = resolve(load(_write(tmp_path, *rows)), store)
+    assert source["q1"] == source["q2"] == source["q3"] == {9, 10}

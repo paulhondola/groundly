@@ -20,10 +20,11 @@ member entities (via graphrag's own `read_indexer_entities`, same community
 join it uses internally) and those entities' contributing text units, then
 resolve text units to chunk_ids the same way as local search.
 
-Known gap: the synthesis LLM call graphrag makes internally inside `local_search`/
-`global_search` is NOT traced/metered by Groundly — graphrag's own LiteLLM client
-doesn't report usage back through our `llm/` layer, so this call is invisible to the
-traces table (a framework-boundary limitation, not something this module fixes).
+Known gap: the synthesis LLM call graphrag makes internally inside `global_search` is
+NOT traced/metered by Groundly — graphrag's own LiteLLM client doesn't report usage back
+through our `llm/` layer, so this call is invisible to the traces table (a
+framework-boundary limitation, not something this module fixes). Local search no longer
+has this gap: it never reaches a provider at all (see `_AbortAfterContext`).
 """
 
 import asyncio
@@ -33,6 +34,7 @@ from pathlib import Path
 
 import pandas as pd
 from graphrag.api.query import global_search, local_search
+from graphrag.callbacks.query_callbacks import QueryCallbacks
 from graphrag.config.models.graph_rag_config import GraphRagConfig
 from graphrag.query.indexer_adapters import read_indexer_entities
 from graphrag_llm.config import ModelConfig
@@ -44,10 +46,12 @@ from llama_index.core.schema import NodeWithScore, QueryBundle, TextNode
 from groundly.core.manifest import EMBEDDING_DIM
 from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
+from groundly.llm.config import require_provider
 from groundly.llm.graphrag_adapter import (
     BGE_M3_EMBEDDING_TYPE,
     allow_nonstandard_service_tier,
     completion_model_config,
+    concurrent_requests,
     register_bge_m3_embedding,
 )
 
@@ -72,6 +76,39 @@ class GraphNotBuiltError(Exception):
         super().__init__(f"graph not built for this subject — {message}")
 
 
+class _ContextBuilt(Exception):  # noqa: N818 — control flow, not a failure
+    """Carries local search's context out of graphrag before the synthesis runs."""
+
+    def __init__(self, context_records) -> None:
+        super().__init__("local search context built")
+        self.context_records = context_records
+
+
+class _AbortAfterContext(QueryCallbacks):
+    """Stops `local_search` at the point its answer stops being needed.
+
+    `LocalSearch.stream_search` builds the entire context, hands it to `on_context`, and
+    only *then* streams a prose answer. Groundly discards that answer — `ask()` writes
+    its own from the same chunks, through `llm/` where it is traced — so raising here
+    skips a call whose output nothing reads. The chunk ids provably cannot depend on it:
+    they are read off `context_records`, which is already complete when this fires.
+
+    Measured on apd, same process, same queries, real provider: 152-208 s with the
+    synthesis against 3.6-6.2 s without it (33-49x), and **identical chunk ids in
+    identical order** on every question tested. On an idle machine the remaining graph
+    half is 0.21-0.45 s. The synthesis was also the only reason this arm needed a
+    provider, so aborting makes it zero-key — what `.claude/rules/architecture.md` asks
+    of the retrieval path.
+
+    Ordering note: graphrag appends its own `on_context` callback *after* any we pass, so
+    this raises before graphrag records the context itself — hence the records travel out
+    on the exception rather than through graphrag's return value.
+    """
+
+    def on_context(self, context) -> None:
+        raise _ContextBuilt(context)
+
+
 @dataclass
 class _GraphArtifacts:
     """A subject's graphrag build artifacts, loaded once per retriever instance."""
@@ -84,17 +121,39 @@ class _GraphArtifacts:
     relationships: pd.DataFrame
 
 
-def _load_artifacts(graph_dir: Path) -> _GraphArtifacts:
-    """Read the parquet artifacts graphrag's build wrote, plus a query-time config
-    reusing the `extraction` provider (local/global search both do their own
-    synthesis LLM call — same call class as the graph build)."""
+def _load_artifacts(graph_dir: Path, *, synthesises: bool = True) -> _GraphArtifacts:
+    """Read the parquet artifacts graphrag's build wrote, plus a query-time config.
+
+    `synthesises=False` is local search, which aborts at `on_context` and so never
+    reaches a completion model (`_AbortAfterContext`). graphrag still validates a
+    `completion_models` entry, so an unreachable placeholder goes in — that is what
+    keeps the arm runnable with no `[providers.extraction]` section configured at all,
+    rather than merely not *calling* one. Global search still synthesises for real
+    (its map-reduce runs before `on_context` fires), so it keeps requiring a provider
+    and fails loudly when none is set.
+    """
     # Here rather than in either retriever: this is the one place that builds the
     # completion config, so both arms are covered and a future third one can't miss it.
     # Global search was previously left out, so a provider returning a non-OpenAI
     # service_tier still failed every synthesis call on that arm.
     allow_nonstandard_service_tier()
+    completion = (
+        completion_model_config()
+        if synthesises
+        else ModelConfig(model_provider="openai", model="unused", api_key="unused")
+    )
     config = GraphRagConfig(
-        completion_models={_COMPLETION_MODEL_ID: completion_model_config()},
+        completion_models={_COMPLETION_MODEL_ID: completion},
+        # graphrag defaults this to 25. Only global search's map phase ever spends it,
+        # and 25 concurrent ~12k-token calls is what exhausts a local runtime's shared
+        # KV cache — the failure `_map_response_single_batch` swallows into
+        # {"answer": "", "score": 0}. The build path has always got this right
+        # (ingestion/graph.py); the query path never inherited it.
+        # 1 in the non-synthesising case is not a tuning choice — local search issues no
+        # completion at all, so the value is unreachable either way.
+        concurrent_requests=(
+            concurrent_requests(require_provider("extraction")) if synthesises else 1
+        ),
         embedding_models={
             _EMBEDDING_MODEL_ID: ModelConfig(
                 type=BGE_M3_EMBEDDING_TYPE,
@@ -171,35 +230,55 @@ class _GraphRetrieverBase(BaseRetriever):
         if not self.graph_dir.exists() or self._subj.load_manifest().graphrag.corpus_hash is None:
             raise GraphNotBuiltError()
 
+    # Whether this arm ever reaches a completion model — see `_load_artifacts`.
+    synthesises = True
+
     @property
     def artifacts(self) -> _GraphArtifacts:
         if self._artifacts is None:
-            self._artifacts = _load_artifacts(self.graph_dir)
+            self._artifacts = _load_artifacts(self.graph_dir, synthesises=self.synthesises)
         return self._artifacts
 
 
 class GraphLocalRetriever(_GraphRetrieverBase):
-    """Entity-anchored local search — multi-hop queries."""
+    """Entity-anchored local search — multi-hop queries. Zero-key: the synthesis that
+    used to make this arm the most expensive one is aborted at `on_context`."""
+
+    synthesises = False
 
     def _retrieve(self, query_bundle: QueryBundle) -> list[NodeWithScore]:
         self._require_graph()
         register_bge_m3_embedding()  # local search embeds the query to find entities
         artifacts = self.artifacts  # _load_artifacts widens service_tier for both arms
 
-        _response, context_data = asyncio.run(
-            local_search(
-                config=artifacts.config,
-                entities=artifacts.entities,
-                communities=artifacts.communities,
-                community_reports=artifacts.community_reports,
-                text_units=artifacts.text_units,
-                relationships=artifacts.relationships,
-                covariates=None,
-                community_level=COMMUNITY_LEVEL,
-                response_type=RESPONSE_TYPE,
-                query=query_bundle.query_str,
+        try:
+            asyncio.run(
+                local_search(
+                    config=artifacts.config,
+                    entities=artifacts.entities,
+                    communities=artifacts.communities,
+                    community_reports=artifacts.community_reports,
+                    text_units=artifacts.text_units,
+                    relationships=artifacts.relationships,
+                    covariates=None,
+                    community_level=COMMUNITY_LEVEL,
+                    response_type=RESPONSE_TYPE,
+                    query=query_bundle.query_str,
+                    callbacks=[_AbortAfterContext()],
+                )
             )
-        )
+        except _ContextBuilt as built:
+            context_data = built.context_records
+        else:
+            # Reaching here means graphrag ran a whole synthesis without ever firing
+            # `on_context` — the contract `_AbortAfterContext` depends on is gone,
+            # presumably after an upgrade. Returning [] instead would report an empty
+            # retrieval as a real result, which is the one failure mode this project
+            # treats as worse than crashing.
+            raise RuntimeError(
+                "graphrag's local search completed without emitting context — "
+                "retrieval/graph.py's on_context contract broke, likely on upgrade"
+            )
         self.path = ["graphrag-local", "entity-search"]
 
         sources = (context_data or {}).get("sources")
