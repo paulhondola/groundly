@@ -43,6 +43,7 @@ _PROVIDER_FIELDS = (
     "requests_per_minute",
     "tokens_per_minute",
     "reasoning_effort",
+    "temperature",
 )
 
 
@@ -63,6 +64,15 @@ class ProviderConfig(BaseModel):
     # honours, OpenAI's o-series takes low/medium/high, and providers are not enumerable
     # here (architecture.md: never hardcode a provider).
     reasoning_effort: str | None = None
+    # Defaults to 0.0, not the provider's default (~1.0). Measured on gpt-oss-120b: the
+    # router returned three different labels for one unchanged question across 10 calls
+    # (4 global / 6 multi-hop), and whole-gold-set router accuracy swung 39.6% -> 58.3%
+    # between two identical runs. Every number this project publishes that passes through
+    # a model — router accuracy, generated cards, the extracted graph itself — is a draw
+    # from a distribution unless this is pinned, which makes a re-run non-reproducible and
+    # an A/B between two prompts unreadable. Set it per call class to opt back into
+    # sampling where variety is the point (deck generation), never for a classifier.
+    temperature: float | None = 0.0
 
 
 class IngestionSettings(BaseModel):
@@ -304,7 +314,8 @@ def render_config_toml(providers: dict, settings: Settings) -> str:
                     "# output_price_per_mtok = 0.0   # optional USD/1M output tokens (litellm's bundled price map costs mapped models automatically)",
                     "# requests_per_minute   = 30    # optional; your provider tier's RPM. Unset = no throttling (right for local runtimes)",
                     "# tokens_per_minute     = 6000  # optional; your provider tier's TPM. Set these on [providers.extraction] before a graph build — it fires hundreds of concurrent calls",
-                    '# reasoning_effort      = "none"  # optional; passed as extra_body — "none" for Ollama, low/medium/high for OpenAI-style o-series reasoning models',
+                    '# reasoning_effort      = "none"  # optional; passed as extra_body — "none" for Ollama, low/medium/high for OpenAI-style o-series reasoning models. Some hosted models ignore it (measured: gpt-oss-120b on DeepInfra still emits reasoning_content)',
+                    "# temperature           = 0.0   # defaults to 0.0, NOT the provider's ~1.0 — an unpinned classifier or extractor makes every measurement a draw from a distribution. Raise it only where variety is the point",
                 ]
         lines.append("")
 
