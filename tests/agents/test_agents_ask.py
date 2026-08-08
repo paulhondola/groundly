@@ -1,5 +1,7 @@
-"""groundly/agents/ask.py: router -> retrieval -> assemble -> chat -> citation
-resolution -> trace row, for every outcome (UC-02)."""
+"""groundly/agents/ask.py: retrieval -> assemble -> chat -> citation resolution ->
+trace row, for every outcome (UC-02), plus the decision-28 boundary — the product
+path selects `vector` and cannot reach a graph arm, while `retrieve_for_arm` still
+serves all three to `groundly eval`."""
 
 import json
 
@@ -16,6 +18,16 @@ from groundly.retrieval.graph import GraphNotBuiltError
 def _configure_chat(home):
     (home / "config.toml").write_text(
         '[providers.chat]\nbase_url = "http://x"\nmodel = "m"\napi_key = "sk"\n'
+    )
+
+
+def _configure_chat_and_router(home):
+    """Both call classes configured. Needed to prove `ask()` skips the router for the
+    right reason: with no `[providers.router]` section `classify()` returns None on its
+    own, so a null label would prove nothing."""
+    (home / "config.toml").write_text(
+        '[providers.chat]\nbase_url = "http://x"\nmodel = "m"\napi_key = "sk"\n'
+        '\n[providers.router]\nbase_url = "http://x"\nmodel = "m"\napi_key = "sk"\n'
     )
 
 
@@ -118,38 +130,36 @@ def test_ask_empty_store_refuses_without_llm_call(subject, monkeypatch, stub_cha
     assert rows[-1]["outcome"] == "refused"
 
 
-def test_ask_router_configured_logs_label(retrievable_subject, monkeypatch, stub_chat):
+def test_ask_never_classifies_and_always_reports_a_null_router_label(
+    retrievable_subject, monkeypatch, stub_chat
+):
+    """Decision 28: `ask()` does not run the router. `router_label` keeps meaning "what
+    the router said" — it is `None` here because nothing asked, not because the router
+    was unconfigured — so a re-admitted router needs no schema change.
+
+    A configured router provider is deliberately present: without it this would pass for
+    the old reason (`classify` short-circuits on no provider) rather than the new one."""
     home = subject_dir(retrievable_subject).parent
-    _configure_chat(home)
-    # classify() itself is unit-tested in test_agents_router.py; here only the
-    # plumbing (label flows through to AskResult + trace) is under test.
-    chat = stub_chat("A deadlock needs mutual exclusion [chunk 1].")
-    monkeypatch.setattr("groundly.agents.ask.classify", lambda query, c: "factoid")
-    monkeypatch.setattr("groundly.agents.ask.complete", chat)
-    result = ask(
-        retrievable_subject, "what causes a deadlock?", embedder=_near_embedder(), rerank=False
-    )
-    assert result.router_label == "factoid"
+    _configure_chat_and_router(home)
 
-    rows = _traces(retrievable_subject)
-    assert rows[-1]["router_label"] == "factoid"
+    def _must_not_classify(*a, **kw):
+        raise AssertionError("ask() must not consult the router — decision 28")
 
-
-def test_ask_router_unconfigured_logs_null_label(retrievable_subject, monkeypatch, stub_chat):
-    home = subject_dir(retrievable_subject).parent
-    _configure_chat(home)
+    monkeypatch.setattr("groundly.agents.router.classify", _must_not_classify)
     chat = stub_chat("A deadlock needs mutual exclusion [chunk 1].")
     monkeypatch.setattr("groundly.agents.ask.complete", chat)
+
     result = ask(
         retrievable_subject, "what causes a deadlock?", embedder=_near_embedder(), rerank=False
     )
     assert result.router_label is None
+    assert len(chat.calls) == 1  # generation only — the router round-trip is gone
 
     rows = _traces(retrievable_subject)
     assert rows[-1]["router_label"] is None
 
 
-# --- router-label -> arm-selection matrix (P5) ---------------------------------
+# --- the product path selects exactly one arm (decision 28) --------------------
 
 
 def _graph_node(chunk_id):
@@ -221,11 +231,10 @@ def _no_vector_retrieval(monkeypatch):
     monkeypatch.setattr("groundly.retrieval.vector.VectorRetriever._retrieve", _must_not_retrieve)
 
 
-def test_ask_factoid_label_uses_vector_arm_only(retrievable_subject, monkeypatch, stub_chat):
+def test_ask_uses_the_vector_arm(retrievable_subject, monkeypatch, stub_chat):
     home = subject_dir(retrievable_subject).parent
     _configure_chat(home)
     chat = stub_chat("Deadlocks need mutual exclusion [chunk 1].")
-    monkeypatch.setattr("groundly.agents.ask.classify", lambda query, c: "factoid")
     monkeypatch.setattr("groundly.agents.ask.complete", chat)
     result = ask(
         retrievable_subject, "what causes a deadlock?", embedder=_near_embedder(), rerank=False
@@ -236,106 +245,73 @@ def test_ask_factoid_label_uses_vector_arm_only(retrievable_subject, monkeypatch
     assert rows[-1]["arm"] == "vector"
 
 
-def test_ask_multi_hop_label_fuses_graph_and_vector(retrievable_subject, monkeypatch, stub_chat):
+def test_ask_cannot_reach_a_graph_arm(retrievable_subject, monkeypatch, stub_chat):
+    """The retirement has to be structural, not a default. Both graph retrievers are
+    replaced by classes that fail on construction, so any surviving route from a user
+    question into graphrag fails this test rather than quietly costing a provider call.
+
+    Constructing is the tripwire, not retrieving: `hybrid-local` builds the retriever
+    before it fuses, so a route that dies later would still have paid for it."""
     home = subject_dir(retrievable_subject).parent
-    _configure_chat(home)
-    chat = stub_chat("Deadlocks are entangled with synchronization [chunk 2].")
-    monkeypatch.setattr("groundly.agents.ask.classify", lambda query, c: "multi-hop")
-    monkeypatch.setattr("groundly.agents.ask.complete", chat)
-    monkeypatch.setattr("groundly.agents.ask.GraphLocalRetriever", _FakeGraphLocalRetriever)
-    _FakeGraphLocalRetriever.instances.clear()
+    _configure_chat_and_router(home)
 
-    result = ask(
-        retrievable_subject, "what causes a deadlock?", embedder=_near_embedder(), rerank=False
-    )
-    assert result.citations[0].chunk_id == 2
-    assert len(_FakeGraphLocalRetriever.instances) == 1  # graph arm actually fired
+    class _Forbidden:
+        def __init__(self, *a, **kw):
+            raise AssertionError("ask() reached a retired graph arm — decision 28")
 
-    rows = _traces(retrievable_subject)
-    assert rows[-1]["arm"] == "hybrid-local"
-
-
-def test_ask_global_label_uses_graph_global_arm_only(retrievable_subject, monkeypatch, stub_chat):
-    home = subject_dir(retrievable_subject).parent
-    _configure_chat(home)
-    chat = stub_chat("The course covers deadlocks broadly [chunk 2].")
-    monkeypatch.setattr("groundly.agents.ask.classify", lambda query, c: "global")
-    monkeypatch.setattr("groundly.agents.ask.complete", chat)
-    monkeypatch.setattr("groundly.agents.ask.GraphGlobalRetriever", _FakeGraphGlobalRetriever)
-    _no_vector_retrieval(monkeypatch)  # global search never touches the vector arm
-    _FakeGraphGlobalRetriever.instances.clear()
-
-    result = ask(retrievable_subject, "give me an overview of deadlocks", embedder=None)
-    assert result.citations[0].chunk_id == 2
-    assert len(_FakeGraphGlobalRetriever.instances) == 1
-
-    rows = _traces(retrievable_subject)
-    assert rows[-1]["arm"] == "graph-global"
-
-
-def test_ask_multi_hop_degrades_to_vector_when_graph_not_built(
-    retrievable_subject, monkeypatch, stub_chat
-):
-    home = subject_dir(retrievable_subject).parent
-    _configure_chat(home)
+    monkeypatch.setattr("groundly.agents.ask.GraphLocalRetriever", _Forbidden)
+    monkeypatch.setattr("groundly.agents.ask.GraphGlobalRetriever", _Forbidden)
     chat = stub_chat("Deadlocks need mutual exclusion [chunk 1].")
-    monkeypatch.setattr("groundly.agents.ask.classify", lambda query, c: "multi-hop")
     monkeypatch.setattr("groundly.agents.ask.complete", chat)
+
+    for query in ("what causes a deadlock?", "give me an overview", "how do X and Y relate?"):
+        result = ask(retrievable_subject, query, embedder=_near_embedder(), rerank=False)
+        assert result.citations[0].chunk_id == 1
+    assert {row["arm"] for row in _traces(retrievable_subject)} == {"vector"}
+
+
+def test_ask_takes_no_arm_parameter(retrievable_subject):
+    """While `arm=` existed, the product could still be pointed at a retired arm. Asserted
+    on the signature rather than by calling with it, so this fails at the moment someone
+    re-adds the parameter rather than only when something passes a graph arm to it."""
+    import inspect
+
+    assert "arm" not in inspect.signature(ask).parameters
+
+
+def test_product_arms_is_a_strict_subset_of_arms():
+    """`ARMS` is what the eval may score; `PRODUCT_ARMS` is what a user question may
+    reach. Strict, because the day they are equal the retirement has been undone."""
+    from groundly.agents.ask import ARMS, PRODUCT_ARMS
+
+    assert set(PRODUCT_ARMS) < set(ARMS)
+    assert set(PRODUCT_ARMS) == {"vector"}
+
+
+def test_retrieve_for_arm_graph_not_built_fallback_logs_info(
+    retrievable_subject, monkeypatch, caplog
+):
+    """The degradation moved with the arms: no product path reaches it any more, but the
+    eval still runs graph arms against subjects that may have no graph, and that must be
+    visible at INFO rather than silently scoring as the baseline."""
+    from groundly.agents.ask import retrieve_for_arm
+    from groundly.core.store import SubjectStore
+
     monkeypatch.setattr("groundly.agents.ask.GraphLocalRetriever", _NotBuiltRetriever)
-
-    result = ask(
-        retrievable_subject, "what causes a deadlock?", embedder=_near_embedder(), rerank=False
-    )
-    assert result.citations[0].chunk_id == 1
-
-    rows = _traces(retrievable_subject)
-    assert rows[-1]["arm"] == "vector"  # reflects what actually ran, not the router label
-    assert rows[-1]["router_label"] == "multi-hop"
-
-
-def test_ask_global_degrades_to_vector_when_graph_not_built(
-    retrievable_subject, monkeypatch, stub_chat
-):
-    home = subject_dir(retrievable_subject).parent
-    _configure_chat(home)
-    chat = stub_chat("Deadlocks need mutual exclusion [chunk 1].")
-    monkeypatch.setattr("groundly.agents.ask.classify", lambda query, c: "global")
-    monkeypatch.setattr("groundly.agents.ask.complete", chat)
-    monkeypatch.setattr("groundly.agents.ask.GraphGlobalRetriever", _NotBuiltRetriever)
-
-    result = ask(
-        retrievable_subject, "what causes a deadlock?", embedder=_near_embedder(), rerank=False
-    )
-    assert result.citations[0].chunk_id == 1
-
-    rows = _traces(retrievable_subject)
-    assert rows[-1]["arm"] == "vector"
-    assert rows[-1]["router_label"] == "global"
-
-
-def test_ask_graph_not_built_fallback_logs_info_and_still_answers(
-    retrievable_subject, monkeypatch, stub_chat, caplog
-):
-    """The single highest-value log line in the debug-logging design: today the
-    router-picked-graph-but-no-graph-built degradation is silent — `ask` must
-    still return a grounded vector answer, and now also say so at INFO."""
-    home = subject_dir(retrievable_subject).parent
-    _configure_chat(home)
-    chat = stub_chat("Deadlocks need mutual exclusion [chunk 1].")
-    monkeypatch.setattr("groundly.agents.ask.classify", lambda query, c: "multi-hop")
-    monkeypatch.setattr("groundly.agents.ask.complete", chat)
-    monkeypatch.setattr("groundly.agents.ask.GraphLocalRetriever", _NotBuiltRetriever)
+    store = SubjectStore(subject_dir(retrievable_subject) / "store.db")
 
     with caplog.at_level("INFO", logger="groundly.agents.ask"):
-        result = ask(
+        nodes, _path, arm = retrieve_for_arm(
             retrievable_subject,
             "what causes a deadlock?",
+            "hybrid-local",
+            store=store,
             embedder=_near_embedder(),
             rerank=False,
         )
 
-    assert result.citations[0].chunk_id == 1
-    assert result.answer  # still returns a vector answer, not a refusal
+    assert arm == "vector"
+    assert nodes
     assert any(
         "degrading to vector-only" in r.message and r.levelname == "INFO" for r in caplog.records
     )
@@ -396,54 +372,25 @@ def test_retrieve_for_arm_reports_degradation_in_arm_actual(retrievable_subject,
     assert arm == "vector"  # caller sees the degradation; the eval treats it as fatal
 
 
-def test_ask_explicit_arm_skips_the_router(retrievable_subject, monkeypatch, stub_chat):
-    home = subject_dir(retrievable_subject).parent
-    _configure_chat(home)
-    chat = stub_chat("Deadlocks need mutual exclusion [chunk 1].")
+def test_retrieve_for_arm_runs_the_graph_global_arm_for_the_eval(retrievable_subject, monkeypatch):
+    """The arms are retired from the product path, not deleted — `groundly eval --arms`
+    is what keeps the negative result reproducible from shipped code, so the eval's entry
+    point must still reach graphrag."""
+    from groundly.agents.ask import retrieve_for_arm
+    from groundly.core.store import SubjectStore
 
-    def _must_not_classify(query, c):
-        raise AssertionError("an explicit arm must not consult the router")
-
-    monkeypatch.setattr("groundly.agents.ask.classify", _must_not_classify)
-    monkeypatch.setattr("groundly.agents.ask.complete", chat)
-
-    result = ask(
-        retrievable_subject,
-        "what causes a deadlock?",
-        embedder=_near_embedder(),
-        rerank=False,
-        arm="vector",
-    )
-
-    assert result.router_label is None
-    assert _traces(retrievable_subject)[-1]["arm"] == "vector"
-
-
-def test_ask_explicit_graph_arm_overrides_a_contradicting_router_label(
-    retrievable_subject, monkeypatch, stub_chat
-):
-    """The router would say factoid; the eval asks for the graph arm anyway. This is the
-    whole point of the override — one question through every arm."""
-    home = subject_dir(retrievable_subject).parent
-    _configure_chat(home)
-    chat = stub_chat("Deadlocks need mutual exclusion [chunk 2].")
-    monkeypatch.setattr("groundly.agents.ask.classify", lambda query, c: "factoid")
-    monkeypatch.setattr("groundly.agents.ask.complete", chat)
     monkeypatch.setattr("groundly.agents.ask.GraphGlobalRetriever", _FakeGraphGlobalRetriever)
     _FakeGraphGlobalRetriever.instances.clear()
-    _no_vector_retrieval(monkeypatch)
+    _no_vector_retrieval(monkeypatch)  # global search never touches the vector arm
+    store = SubjectStore(subject_dir(retrievable_subject) / "store.db")
 
-    result = ask(
-        retrievable_subject,
-        "what causes a deadlock?",
-        embedder=_near_embedder(),
-        rerank=False,
-        arm="graph-global",
+    nodes, _path, arm = retrieve_for_arm(
+        retrievable_subject, "give me an overview", "graph-global", store=store
     )
 
+    assert arm == "graph-global"
     assert len(_FakeGraphGlobalRetriever.instances) == 1
-    assert result.citations[0].chunk_id == 2
-    assert _traces(retrievable_subject)[-1]["arm"] == "graph-global"
+    assert [n.node.metadata["chunk_id"] for n in nodes] == [2]
 
 
 def test_ask_truncates_candidates_to_context_k(retrievable_subject, monkeypatch, stub_chat):
@@ -475,7 +422,6 @@ def test_ask_truncates_candidates_to_context_k(retrievable_subject, monkeypatch,
         lambda *a, **kw: (wide, ["stub"], "vector"),
     )
     chat = stub_chat("Grounded [chunk 0].")
-    monkeypatch.setattr("groundly.agents.ask.classify", lambda query, c: "factoid")
     monkeypatch.setattr("groundly.agents.ask.complete", chat)
 
     ask(retrievable_subject, "anything?", embedder=_near_embedder(), rerank=False)
