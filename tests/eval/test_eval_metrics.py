@@ -1,7 +1,6 @@
 """groundly/eval/metrics.py: pure scoring functions over ranked id lists — no store,
 no model, no key."""
 
-
 import pytest
 from groundly.eval.metrics import (
     Scored,
