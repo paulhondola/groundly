@@ -339,3 +339,148 @@ def test_ask_graph_not_built_fallback_logs_info_and_still_answers(
     assert any(
         "degrading to vector-only" in r.message and r.levelname == "INFO" for r in caplog.records
     )
+
+
+# --- explicit arm override (the eval harness's entry point) --------------------
+
+
+def test_retrieve_for_arm_rejects_an_unknown_arm(retrievable_subject):
+    """A typo in `groundly eval --arms` must fail loudly, not silently score the
+    baseline under another arm's name."""
+    from groundly.agents.ask import retrieve_for_arm
+    from groundly.core.store import SubjectStore
+
+    store = SubjectStore(subject_dir(retrievable_subject) / "store.db")
+    with pytest.raises(ValueError, match="unknown retrieval arm 'graph-locul'"):
+        retrieve_for_arm(retrievable_subject, "q", "graph-locul", store=store)
+
+
+def test_retrieve_for_arm_needs_no_chat_provider(retrievable_subject, monkeypatch):
+    """Zero-key retrieval is what makes the eval runnable offline — no provider is
+    configured in this test and none is required."""
+    from groundly.agents.ask import retrieve_for_arm
+    from groundly.core.store import SubjectStore
+
+    def _explode(*a, **k):
+        raise AssertionError("retrieval must not call an LLM")
+
+    monkeypatch.setattr("groundly.agents.ask.complete", _explode)
+    store = SubjectStore(subject_dir(retrievable_subject) / "store.db")
+    nodes, path, arm = retrieve_for_arm(
+        retrievable_subject,
+        "deadlock",
+        "vector",
+        store=store,
+        embedder=_near_embedder(),
+        rerank=False,
+    )
+    assert arm == "vector"
+    assert [n.node.metadata["chunk_id"] for n in nodes]
+    assert path
+
+
+def test_retrieve_for_arm_reports_degradation_in_arm_actual(retrievable_subject, monkeypatch):
+    from groundly.agents.ask import retrieve_for_arm
+    from groundly.core.store import SubjectStore
+
+    monkeypatch.setattr("groundly.agents.ask.GraphGlobalRetriever", _NotBuiltRetriever)
+    store = SubjectStore(subject_dir(retrievable_subject) / "store.db")
+    _nodes, _path, arm = retrieve_for_arm(
+        retrievable_subject,
+        "deadlock",
+        "graph-global",
+        store=store,
+        embedder=_near_embedder(),
+        rerank=False,
+    )
+    assert arm == "vector"  # caller sees the degradation; the eval treats it as fatal
+
+
+def test_ask_explicit_arm_skips_the_router(retrievable_subject, monkeypatch, stub_chat):
+    home = subject_dir(retrievable_subject).parent
+    _configure_chat(home)
+    chat = stub_chat("Deadlocks need mutual exclusion [chunk 1].")
+
+    def _must_not_classify(query, c):
+        raise AssertionError("an explicit arm must not consult the router")
+
+    monkeypatch.setattr("groundly.agents.ask.classify", _must_not_classify)
+    monkeypatch.setattr("groundly.agents.ask.complete", chat)
+
+    result = ask(
+        retrievable_subject,
+        "what causes a deadlock?",
+        embedder=_near_embedder(),
+        rerank=False,
+        arm="vector",
+    )
+
+    assert result.router_label is None
+    assert _traces(retrievable_subject)[-1]["arm"] == "vector"
+
+
+def test_ask_explicit_graph_arm_overrides_a_contradicting_router_label(
+    retrievable_subject, monkeypatch, stub_chat
+):
+    """The router would say factoid; the eval asks for the graph arm anyway. This is the
+    whole point of the override — one question through every arm."""
+    home = subject_dir(retrievable_subject).parent
+    _configure_chat(home)
+    chat = stub_chat("Deadlocks need mutual exclusion [chunk 2].")
+    monkeypatch.setattr("groundly.agents.ask.classify", lambda query, c: "factoid")
+    monkeypatch.setattr("groundly.agents.ask.complete", chat)
+    monkeypatch.setattr("groundly.agents.ask.GraphGlobalRetriever", _FakeGraphGlobalRetriever)
+    _FakeGraphGlobalRetriever.instances.clear()
+    _no_vector_retrieval(monkeypatch)
+
+    result = ask(
+        retrievable_subject,
+        "what causes a deadlock?",
+        embedder=_near_embedder(),
+        rerank=False,
+        arm="graph-global",
+    )
+
+    assert len(_FakeGraphGlobalRetriever.instances) == 1
+    assert result.citations[0].chunk_id == 2
+    assert _traces(retrievable_subject)[-1]["arm"] == "graph-global"
+
+
+def test_ask_truncates_candidates_to_context_k(retrievable_subject, monkeypatch, stub_chat):
+    """`retrieve_for_arm` returns each arm's full candidate list so the eval can score
+    every k from one sweep; applying `context_k` is `ask()`'s job. Before this, the
+    `global` router label assembled 1,138 chunks into a 16,384-token window.
+
+    The cap must land *before* `chunk_ids`, or `resolve_citations` would accept a citation
+    to a chunk the model was never shown."""
+    from groundly.core.config import load_settings
+
+    home = subject_dir(retrievable_subject).parent
+    _configure_chat(home)
+    context_k = load_settings().retrieval.context_k
+
+    wide = [
+        NodeWithScore(
+            node=TextNode(
+                text=f"text {i}",
+                id_=str(i),
+                metadata={"chunk_id": i, "filename": "f.md", "page": None, "heading_path": ""},
+            ),
+            score=1.0 / (i + 1),
+        )
+        for i in range(context_k + 40)
+    ]
+    monkeypatch.setattr(
+        "groundly.agents.ask.retrieve_for_arm",
+        lambda *a, **kw: (wide, ["stub"], "vector"),
+    )
+    chat = stub_chat("Grounded [chunk 0].")
+    monkeypatch.setattr("groundly.agents.ask.classify", lambda query, c: "factoid")
+    monkeypatch.setattr("groundly.agents.ask.complete", chat)
+
+    ask(retrievable_subject, "anything?", embedder=_near_embedder(), rerank=False)
+
+    rows = _traces(retrievable_subject)
+    assert len(json.loads(rows[-1]["chunk_ids"])) == context_k
+    # a chunk past the cap must not be citable, even though retrieval returned it
+    assert json.loads(rows[-1]["chunk_ids"]) == list(range(context_k))

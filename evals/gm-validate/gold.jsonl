@@ -1,0 +1,17 @@
+# gm-validate gold set — Ingineria Calculatoarelor (computer architecture).
+# A small second subject, authored to exercise the graph arms: gm-validate's graph has
+# 43 community reports at level<=2 (~2 map calls per global query) against apd's 555
+# (~27), so global search fits the 12288-token local floor here and does not there.
+# No exam or quiz files are indexed in this subject, so every row has source_file null
+# and leakage is structurally 0 — leakage is exercised by evals/apd/gold.jsonl instead.
+# Labels verified against the live gm-validate index 2026-08-04. Not professor-checked.
+{"id": "gm-001", "query": "What are the classes of pipeline hazards?", "lang": "en", "class": "factoid", "expected": [{"file": "lecture_1.pdf", "page": 6}], "source_file": null, "notes": "single overview slide"}
+{"id": "gm-002", "query": "What causes a structural hazard in a pipeline?", "lang": "en", "class": "factoid", "expected": [{"file": "lecture_1.pdf", "page": 7}], "source_file": null, "notes": "single slide"}
+{"id": "gm-003", "query": "What is Tomasulo's approach to dynamic scheduling?", "lang": "en", "class": "factoid", "expected": [{"file": "lecture_3.pdf", "page": 14}, {"file": "lecture_3.pdf", "page": 18}], "source_file": null, "notes": "one topic, two consecutive slides"}
+{"id": "gm-004", "query": "What is the RV64V vector extension?", "lang": "en", "class": "factoid", "expected": [{"file": "lecture_5.pdf", "page": 7}], "source_file": null, "notes": "single slide"}
+{"id": "gm-005", "query": "How do data hazards relate to data dependences and name dependences?", "lang": "en", "class": "multi-hop", "expected": [{"file": "lecture_1.pdf", "page": 8}, {"file": "lecture_2.pdf", "page": 9}, {"file": "lecture_2.pdf", "page": 13}], "source_file": null, "notes": "spans lecture 1 hazards and lecture 2 dependence taxonomy"}
+{"id": "gm-006", "query": "How do correlating branch predictors and branch-target buffers each reduce the cost of branches?", "lang": "en", "class": "multi-hop", "expected": [{"file": "lecture_3.pdf", "page": 5}, {"file": "lecture_4.pdf", "page": 13}], "source_file": null, "notes": "two mechanisms, two lectures"}
+{"id": "gm-007", "query": "How does hardware-based speculation build on dynamic scheduling?", "lang": "en", "class": "multi-hop", "expected": [{"file": "lecture_3.pdf", "page": 9}, {"file": "lecture_4.pdf", "page": 6}], "source_file": null, "notes": "requires both the base technique and the extension"}
+{"id": "gm-008", "query": "How do GPUs differ from CPUs in architecture and memory structure?", "lang": "en", "class": "multi-hop", "expected": [{"file": "lecture_6.pdf", "page": 4}, {"file": "lecture_6.pdf", "page": 7}], "source_file": null, "notes": "comparison plus memory hierarchy"}
+{"id": "gm-009", "query": "What forms of parallelism does this course cover, and which architectures exploit each?", "lang": "en", "class": "global", "expected": [{"file": "lecture_2.pdf", "page": 3}, {"file": "lecture_5.pdf", "page": 4}, {"file": "lecture_6.pdf", "page": 3}, {"file": "lecture_7.pdf", "page": 4}], "source_file": null, "notes": "ILP / DLP / GPU / thread-level — spans four lectures"}
+{"id": "gm-010", "query": "Compare centralized shared-memory coherence with distributed shared-memory directory-based coherence.", "lang": "en", "class": "global", "expected": [{"file": "lecture_7.pdf", "page": 14}, {"file": "lecture_8.pdf", "page": 3}, {"file": "lecture_8.pdf", "page": 13}], "source_file": null, "notes": "spans lectures 7 and 8"}

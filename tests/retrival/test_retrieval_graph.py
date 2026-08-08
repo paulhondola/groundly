@@ -3,6 +3,8 @@ implementations. graphrag's query API (`local_search`/`global_search`) is always
 monkeypatched at the module's import site — no test touches a real graphrag
 pipeline or a real cloud model."""
 
+from types import SimpleNamespace
+
 import pandas as pd
 import pytest
 from graphrag_llm.config import ModelConfig
@@ -15,13 +17,19 @@ from groundly.retrieval.graph import GraphGlobalRetriever, GraphLocalRetriever, 
 
 @pytest.fixture(autouse=True)
 def stub_completion_model_config(monkeypatch):
-    """The graph query config always builds a completion model config (local/global
-    search both do their own synthesis LLM call) — stub it so tests never need a
-    real `extraction` provider configured."""
+    """Global search's query config resolves the `extraction` provider twice — once for
+    the completion model, once for `concurrent_requests` — so both are stubbed here and
+    no test needs a real provider configured. Local search resolves neither (it aborts
+    before any completion), which `test_graph_local_retriever_needs_no_provider` pins."""
     monkeypatch.setattr(
         graph_module,
         "completion_model_config",
         lambda: ModelConfig(model_provider="openai", model="stub-model", api_key="test-key"),
+    )
+    monkeypatch.setattr(
+        graph_module,
+        "require_provider",
+        lambda call_class: SimpleNamespace(base_url="http://localhost:1234/v1"),
     )
 
 
@@ -86,10 +94,16 @@ def test_graph_local_retriever_resolves_text_units_to_chunks(monkeypatch, retrie
     )
 
     async def fake_local_search(**kwargs):
+        # Mirrors graphrag's real order (LocalSearch.stream_search): build the context,
+        # fire on_context, and only then synthesise. `_AbortAfterContext` raises out of
+        # the callback, so the synthesis below is unreachable — if it ever runs, the
+        # abort has stopped working and the arm is silently paying for a discarded call.
         # "id" here is graphrag's own text-unit short_id: a positional index into
         # the text_units DataFrame we passed in, not the chunk_id.
         sources = pd.DataFrame({"id": ["0"], "text": ["irrelevant prompt text"]})
-        return "answer", {"sources": sources}
+        for callback in kwargs["callbacks"]:
+            callback.on_context({"sources": sources})
+        pytest.fail("local search synthesised — _AbortAfterContext did not abort")
 
     monkeypatch.setattr(graph_module, "local_search", fake_local_search)
 
@@ -117,12 +131,69 @@ def test_graph_local_retriever_empty_sources_returns_no_nodes(monkeypatch, retri
     )
 
     async def fake_local_search(**kwargs):
-        return "not covered by the course materials", {"sources": pd.DataFrame()}
+        for callback in kwargs["callbacks"]:
+            callback.on_context({"sources": pd.DataFrame()})
+        pytest.fail("local search synthesised — _AbortAfterContext did not abort")
 
     monkeypatch.setattr(graph_module, "local_search", fake_local_search)
 
     retriever = GraphLocalRetriever(subject=retrievable_subject)
     assert retriever.retrieve("anything") == []
+
+
+def test_graph_local_retriever_needs_no_provider(monkeypatch, retrievable_subject):
+    """Local search must run with NO `[providers.extraction]` section at all — not merely
+    without calling one. It aborts before any completion, so requiring a provider would be
+    a config demand nothing spends (.claude/rules/architecture.md: zero-key is first-class).
+    Both provider entry points are made fatal here; only global search may touch them."""
+
+    def _no_provider(*args, **kwargs):
+        raise AssertionError("local search resolved a provider — it must not need one")
+
+    monkeypatch.setattr(graph_module, "completion_model_config", _no_provider)
+    monkeypatch.setattr(graph_module, "require_provider", _no_provider)
+
+    _write_graph_artifacts(
+        retrievable_subject,
+        entities=_empty_frame(["id", "title"]),
+        communities=_empty_frame(["community", "level", "entity_ids"]),
+        community_reports=_empty_frame(["id", "title"]),
+        text_units=pd.DataFrame({"id": ["tu-0"], "document_id": ["1"]}),
+        relationships=_empty_frame(["id"]),
+    )
+
+    async def fake_local_search(**kwargs):
+        for callback in kwargs["callbacks"]:
+            callback.on_context({"sources": pd.DataFrame({"id": ["0"], "text": ["t"]})})
+        pytest.fail("local search synthesised — _AbortAfterContext did not abort")
+
+    monkeypatch.setattr(graph_module, "local_search", fake_local_search)
+
+    nodes = GraphLocalRetriever(subject=retrievable_subject).retrieve("what causes deadlocks?")
+    assert [n.node.metadata["chunk_id"] for n in nodes] == [1]
+
+
+def test_graph_local_retriever_raises_when_context_never_arrives(monkeypatch, retrievable_subject):
+    """If a graphrag upgrade ever stops firing `on_context`, the arm must crash rather
+    than return []: an empty retrieval scores as a real miss in the eval and refuses in
+    `ask()`, so a silent break would publish wrong numbers instead of failing."""
+    _write_graph_artifacts(
+        retrievable_subject,
+        entities=_empty_frame(["id", "title"]),
+        communities=_empty_frame(["community", "level", "entity_ids"]),
+        community_reports=_empty_frame(["id", "title"]),
+        text_units=_empty_frame(["id", "document_id"]),
+        relationships=_empty_frame(["id"]),
+    )
+
+    async def fake_local_search(**kwargs):
+        return "answer", {"sources": pd.DataFrame()}
+
+    monkeypatch.setattr(graph_module, "local_search", fake_local_search)
+
+    retriever = GraphLocalRetriever(subject=retrievable_subject)
+    with pytest.raises(RuntimeError, match="without emitting context"):
+        retriever.retrieve("anything")
 
 
 # --- GraphGlobalRetriever ---------------------------------------------------------------
@@ -198,3 +269,44 @@ def test_graph_global_retriever_empty_reports_returns_no_nodes(monkeypatch, retr
     retriever = GraphGlobalRetriever(subject=retrievable_subject)
     assert retriever.retrieve("anything") == []
     assert retriever.communities == []
+
+
+def test_graph_global_retriever_resolves_colliding_text_unit_ids(monkeypatch, retrievable_subject):
+    """text_unit ids are content hashes, so two different chunks with byte-identical text
+    share one id (apd: 18 of 1193 — "REVIEW" heads two quiz decks). Both are real citation
+    targets. A pandas index lookup returns a Series for those and `int()` raises TypeError,
+    which took global search down entirely; core/graph_html.py hit the same bug first."""
+    entities = pd.DataFrame(
+        {
+            "id": ["e1"],
+            "title": ["Entity One"],
+            "human_readable_id": [0],
+            "type": ["concept"],
+            "description": ["d1"],
+            "degree": [1],
+            "description_embedding": [None],
+            "text_unit_ids": [["tu-dup"]],
+        }
+    )
+    communities = pd.DataFrame({"community": [0], "level": [0], "entity_ids": [["e1"]]})
+    # One id, two genuinely different chunks — identical text on different pages.
+    text_units = pd.DataFrame({"id": ["tu-dup", "tu-dup"], "document_id": ["1", "3"]})
+
+    _write_graph_artifacts(
+        retrievable_subject,
+        entities=entities,
+        communities=communities,
+        community_reports=_empty_frame(["id", "title"]),
+        text_units=text_units,
+        relationships=_empty_frame(["id"]),
+    )
+
+    async def fake_global_search(**kwargs):
+        return "answer", {"reports": pd.DataFrame({"id": ["0"], "title": ["Dup"]})}
+
+    monkeypatch.setattr(graph_module, "global_search", fake_global_search)
+
+    nodes = GraphGlobalRetriever(subject=retrievable_subject).retrieve("summarize")
+
+    # Both colliding chunks cited, not a TypeError and not one silently dropped.
+    assert sorted(n.node.metadata["chunk_id"] for n in nodes) == [1, 3]

@@ -26,12 +26,24 @@ CONTEXT_K = 8  # final chunks assembled into the prompt
 
 def rrf(rankings: list[list[int]], k: int = RRF_K) -> list[tuple[int, float]]:
     """Reciprocal rank fusion over already-ranked (best-first) id lists. Pure
-    function: no I/O, easy to unit-test independent of any store."""
+    function: no I/O, easy to unit-test independent of any store.
+
+    Ties break by *how many rankings contributed*, then by id. An id at rank i in one
+    list scores exactly the same as a different id at rank i in another, and Python's
+    stable `sorted` then hands rank 1 to whichever list was passed first — so in
+    `hybrid-local` a weak graph ordering silently owned position 1 on every query
+    (measured on apd: hybrid put the first relevant chunk at rank 1 on 4/48 questions
+    against vector's 7/48). Agreement across channels is the honest tie-break: an id
+    both retrievers found beats one only a single retriever found. The final `doc_id`
+    key just makes the order deterministic instead of insertion-dependent.
+    """
     scores: dict[int, float] = {}
+    votes: dict[int, int] = {}
     for ranking in rankings:
         for rank, doc_id in enumerate(ranking):
             scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (k + rank + 1)
-    return sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+            votes[doc_id] = votes.get(doc_id, 0) + 1
+    return sorted(scores.items(), key=lambda kv: (kv[1], votes[kv[0]], -kv[0]), reverse=True)
 
 
 class VectorRetriever(BaseRetriever):

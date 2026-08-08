@@ -110,3 +110,23 @@ def test_assemble_overview_escapes_hostile_community_titles():
     messages = assemble_overview("q", communities, [])
     content = messages[-1]["content"]
     assert content.count("</communities>") == 1  # the injected one is neutralized
+
+
+def test_render_chunks_caps_at_context_k():
+    """`graph-global` reached prompt assembly with 1,138 chunks on apd — ~183k tokens into
+    a 16,384-token window. The cap lives in `_render_chunks`, so every prompt builder in
+    this module inherits it rather than only the one path the bug was reported against."""
+    from groundly.core.config import load_settings
+
+    context_k = load_settings().retrieval.context_k
+    nodes = [_node(i, f"chunk text {i}") for i in range(context_k + 25)]
+
+    for messages in (
+        assemble("q?", nodes),
+        assemble_overview("q?", [{"id": "0", "title": "T"}], nodes),
+    ):
+        rendered = messages[1]["content"]
+        assert rendered.count("<chunk id=") == context_k
+        # the cap keeps the *top* of the ranking, not an arbitrary slice
+        assert '<chunk id="0"' in rendered
+        assert f'<chunk id="{context_k + 24}"' not in rendered

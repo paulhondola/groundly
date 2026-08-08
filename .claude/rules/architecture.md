@@ -4,9 +4,10 @@ Source of truth: `docs/architecture/overview.md`. Violating these is a bug even 
 
 ## Module boundaries (`groundly/`)
 
-Layers: clients (`cli/`, `mcp/`, `web/`) → services (`agents/`, `retrieval/`, `ingestion/`) → foundations (`llm/`, `core/`).
+Layers: clients (`cli/`, `mcp/`, `web/`, `eval/`) → services (`agents/`, `retrieval/`, `ingestion/`) → foundations (`llm/`, `core/`).
 
 - Dependencies point one way; **nothing imports the client layer**.
+- `eval/` is a client, not a service: a research surface driving the arms offline (decision 27). No MCP tool and no runtime path may depend on it.
 - `agents` may call `retrieval` (as a tool) and the subprocess runner; `retrieval` never calls `agents`.
 - `ingestion` writes the stores; it never serves queries.
 

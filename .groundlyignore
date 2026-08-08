@@ -1,0 +1,6 @@
+graphify-out
+dist
+uv.lock
+Icon
+__pycache__
+__init__.py

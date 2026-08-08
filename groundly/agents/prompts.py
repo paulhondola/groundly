@@ -7,7 +7,11 @@ Fixed layers, lower never overrides higher:
   4. Retrieved chunks — fully untrusted, delimited data, never instructions.
 """
 
+import logging
+
 from llama_index.core.schema import NodeWithScore
+
+logger = logging.getLogger(__name__)
 
 REFUSAL = "not covered by the course materials"
 
@@ -38,6 +42,28 @@ def _escape(text: str) -> str:
 
 
 def _render_chunks(nodes: list[NodeWithScore]) -> str:
+    """Every prompt in this module renders its chunks here, so the context-window cap
+    lives here too — one guard covering `assemble`, `assemble_cards`,
+    `assemble_cards_retry` and `assemble_overview` rather than four that can drift apart.
+
+    Without it, `graph-global` retrieval reached this function with 1,138 chunks (95% of
+    apd's corpus, measured): ~183k tokens into a 16,384-token window, an 11x overflow that
+    fails the request outright. The retrieval eval never caught it because that slice is
+    retrieval-only and never assembles a prompt.
+    """
+    from groundly.core.config import load_settings
+
+    context_k = load_settings().retrieval.context_k
+    if len(nodes) > context_k:
+        # Loud, because the caller passing more than context_k is the bug — this cap
+        # keeps it from becoming a failed request, it does not make the caller correct.
+        logger.warning(
+            "prompt assembly received %d chunks against context_k=%d — truncating; "
+            "the caller should have applied the cap",
+            len(nodes),
+            context_k,
+        )
+        nodes = nodes[:context_k]
     return "\n".join(
         '<chunk id="{id}" source="{source}" page="{page}" heading="{heading}">\n'
         "{text}\n</chunk>".format(

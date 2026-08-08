@@ -110,6 +110,10 @@ def complete(
     # the same way so the setting means the same thing on every call class).
     if cfg.reasoning_effort:
         extra["extra_body"] = {"reasoning_effort": cfg.reasoning_effort}
+    # Flat, unlike reasoning_effort: temperature is a first-class OpenAI parameter every
+    # compatible endpoint accepts, so litellm maps it rather than rejecting it.
+    if cfg.temperature is not None:
+        extra["temperature"] = cfg.temperature
     try:
         response = litellm.completion(
             model=f"openai/{cfg.model}",
