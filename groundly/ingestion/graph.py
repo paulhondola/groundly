@@ -30,25 +30,26 @@ from graphrag.index.operations.summarize_communities.community_reports_extractor
 )
 from graphrag_cache import CacheConfig
 from graphrag_chunking.chunking_config import ChunkingConfig
-from graphrag_llm.config import ModelConfig
 from graphrag_storage import StorageConfig
-from graphrag_vectors import VectorStoreConfig
 
 from groundly.core.config import load_settings
-from groundly.core.manifest import EMBEDDING_DIM, Graphrag
+from groundly.core.manifest import Graphrag
 from groundly.core.progress import connect_progress, record_trace
 from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
 from groundly.llm.config import ProviderConfig, require_provider
 from groundly.llm.graph_cost import metered_usage, reset_metered_usage
 from groundly.llm.graphrag_adapter import (
-    BGE_M3_EMBEDDING_TYPE,
+    COMPLETION_MODEL_ID,
+    REPORT_COMPLETION_MODEL_ID,
     ExtractionPromptError,
     allow_nonstandard_service_tier,
+    bge_m3_embedding_models,
     completion_model_config,
     concurrent_requests,
     extraction_entity_types,
     extraction_fingerprint,
+    graph_vector_store,
     prompt_budgets,
     register_bge_m3_embedding,
     register_groundly_metrics_store,
@@ -61,9 +62,6 @@ logger = logging.getLogger(__name__)
 # splits a Groundly chunk further — one text unit per document, guaranteed.
 # Internal-only: never exposed in the manifest or CLI (not an interchange knob).
 _GRAPH_CHUNK_SIZE = 4096
-_COMPLETION_MODEL_ID = "default_completion_model"
-_REPORT_COMPLETION_MODEL_ID = "report_completion_model"
-_EMBEDDING_MODEL_ID = "default_embedding_model"
 
 # Above this share of chunks failing entity extraction, the graph is missing too much
 # of the corpus to be presented as the corpus — refuse rather than stamp the manifest.
@@ -408,16 +406,16 @@ def _build_config(
     graph_dir = subj.root_dir / "graph"
     budgets = prompt_budgets(context_window, gleanings)
 
-    completion_models = {_COMPLETION_MODEL_ID: completion_model_config(track_usage=True)}
+    completion_models = {COMPLETION_MODEL_ID: completion_model_config(track_usage=True)}
     community_reports_kwargs: dict[str, int | str] = {
         "max_input_length": budgets.community_max_input_length,
         "max_length": budgets.community_max_length,
     }
     if report_call_class != "extraction":
-        completion_models[_REPORT_COMPLETION_MODEL_ID] = completion_model_config(
+        completion_models[REPORT_COMPLETION_MODEL_ID] = completion_model_config(
             track_usage=True, call_class=report_call_class
         )
-        community_reports_kwargs["completion_model_id"] = _REPORT_COMPLETION_MODEL_ID
+        community_reports_kwargs["completion_model_id"] = REPORT_COMPLETION_MODEL_ID
 
     return GraphRagConfig(
         # graphrag defaults this to 25. Against a local runtime that is what exhausts the
@@ -436,13 +434,7 @@ def _build_config(
         ),
         community_reports=CommunityReportsConfig(**community_reports_kwargs),
         completion_models=completion_models,
-        embedding_models={
-            _EMBEDDING_MODEL_ID: ModelConfig(
-                type=BGE_M3_EMBEDDING_TYPE,
-                model_provider=BGE_M3_EMBEDDING_TYPE,
-                model="bge-m3",
-            )
-        },
+        embedding_models=bge_m3_embedding_models(),
         chunking=ChunkingConfig(size=_GRAPH_CHUNK_SIZE, overlap=0),
         # input is unused (input_documents bypasses graphrag's own file loading
         # entirely) but the config is still validated — root it under graph/ so
@@ -452,9 +444,7 @@ def _build_config(
         update_output_storage=StorageConfig(base_dir=str(graph_dir / "update_output")),
         reporting=ReportingConfig(base_dir=str(graph_dir / "logs")),
         cache=CacheConfig(storage=StorageConfig(base_dir=str(graph_dir / "cache"))),
-        vector_store=VectorStoreConfig(
-            db_uri=str(graph_dir / "lancedb"), vector_size=EMBEDDING_DIM
-        ),
+        vector_store=graph_vector_store(graph_dir),
     )
 
 

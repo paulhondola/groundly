@@ -38,20 +38,20 @@ from graphrag.callbacks.query_callbacks import QueryCallbacks
 from graphrag.config.models.graph_rag_config import GraphRagConfig
 from graphrag.query.indexer_adapters import read_indexer_entities
 from graphrag_llm.config import ModelConfig
-from graphrag_vectors import VectorStoreConfig
 from llama_index.core.callbacks import CallbackManager
 from llama_index.core.retrievers import BaseRetriever
 from llama_index.core.schema import NodeWithScore, QueryBundle, TextNode
 
-from groundly.core.manifest import EMBEDDING_DIM
 from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
 from groundly.llm.config import require_provider
 from groundly.llm.graphrag_adapter import (
-    BGE_M3_EMBEDDING_TYPE,
+    COMPLETION_MODEL_ID,
     allow_nonstandard_service_tier,
+    bge_m3_embedding_models,
     completion_model_config,
     concurrent_requests,
+    graph_vector_store,
     register_bge_m3_embedding,
 )
 
@@ -63,10 +63,11 @@ logger = logging.getLogger(__name__)
 # here is harmless, a smaller value just means less breadth, never empty/broken results.
 COMMUNITY_LEVEL = 2
 RESPONSE_TYPE = "multiple paragraphs"
-# Unlike COMMUNITY_LEVEL above, query and build MUST agree on these — they're the keys
-# graphrag looks up completion_models/embedding_models by; a mismatch fails the lookup.
-_COMPLETION_MODEL_ID = "default_completion_model"
-_EMBEDDING_MODEL_ID = "default_embedding_model"
+# Unlike COMMUNITY_LEVEL above, query and build MUST agree on the model ids and the vector
+# store — they're the keys graphrag looks completion_models/embedding_models up by, and a
+# mismatch fails the lookup. That agreement is structural now: the ids, the embedding
+# entry and the store live in llm/graphrag_adapter.py and both paths import them, rather
+# than each declaring its own copy of the same literals.
 
 
 class GraphNotBuiltError(Exception):
@@ -143,7 +144,7 @@ def _load_artifacts(graph_dir: Path, *, synthesises: bool = True) -> _GraphArtif
         else ModelConfig(model_provider="openai", model="unused", api_key="unused")
     )
     config = GraphRagConfig(
-        completion_models={_COMPLETION_MODEL_ID: completion},
+        completion_models={COMPLETION_MODEL_ID: completion},
         # graphrag defaults this to 25. Only global search's map phase ever spends it,
         # and 25 concurrent ~12k-token calls is what exhausts a local runtime's shared
         # KV cache — the failure `_map_response_single_batch` swallows into
@@ -154,16 +155,8 @@ def _load_artifacts(graph_dir: Path, *, synthesises: bool = True) -> _GraphArtif
         concurrent_requests=(
             concurrent_requests(require_provider("extraction")) if synthesises else 1
         ),
-        embedding_models={
-            _EMBEDDING_MODEL_ID: ModelConfig(
-                type=BGE_M3_EMBEDDING_TYPE,
-                model_provider=BGE_M3_EMBEDDING_TYPE,
-                model="bge-m3",
-            )
-        },
-        vector_store=VectorStoreConfig(
-            db_uri=str(graph_dir / "lancedb"), vector_size=EMBEDDING_DIM
-        ),
+        embedding_models=bge_m3_embedding_models(),
+        vector_store=graph_vector_store(graph_dir),
     )
     return _GraphArtifacts(
         config=config,

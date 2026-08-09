@@ -12,7 +12,8 @@ exported. Keep its accessors out of this module: this is the file that ships
 
 import json
 import sqlite3
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 
 import sqlite_vec
@@ -164,9 +165,20 @@ class SubjectStore:
     def connect(self) -> sqlite3.Connection:
         return connect(self.db_path)
 
-    def list_materials(self) -> list[sqlite3.Row]:
+    @contextmanager
+    def _open(self) -> Iterator[sqlite3.Connection]:
+        """Open-and-always-close, the shape every accessor below needs. Distinct from
+        the `with conn:` blocks nested inside the writers — that is sqlite3's *commit*
+        context (commit on success, rollback on exception) and does not close anything.
+        Both are needed; a writer uses them together."""
         conn = self.connect()
         try:
+            yield conn
+        finally:
+            conn.close()
+
+    def list_materials(self) -> list[sqlite3.Row]:
+        with self._open() as conn:
             return conn.execute(
                 """
                 SELECT m.id, m.filename, m.sha256, m.status, m.pages, m.error,
@@ -175,91 +187,66 @@ class SubjectStore:
                 GROUP BY m.id ORDER BY m.filename
                 """
             ).fetchall()
-        finally:
-            conn.close()
 
     def hash_status(self) -> dict[str, str]:
         """sha256 -> status, for hash-skip (indexed) and retry (extraction_failed)."""
-        conn = self.connect()
-        try:
+        with self._open() as conn:
             return {
                 r["sha256"]: r["status"]
                 for r in conn.execute("SELECT sha256, status FROM materials")
             }
-        finally:
-            conn.close()
 
     def find_materials(self, ident: str) -> list[sqlite3.Row]:
         """Match by exact filename or sha256 prefix (the disambiguator)."""
-        conn = self.connect()
-        try:
+        with self._open() as conn:
             escaped = ident.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             return conn.execute(
                 "SELECT * FROM materials WHERE filename = ? OR sha256 LIKE ? ESCAPE '\\' "
                 "ORDER BY filename",
                 (ident, escaped + "%"),
             ).fetchall()
-        finally:
-            conn.close()
 
     def remove_material(self, material_id: int) -> None:
         """One transaction. FTS syncs via the chunks_ad trigger; sparse_terms via FK
         cascade; vectors (vec0, no FK) deleted explicitly by chunk rowid."""
-        conn = self.connect()
-        try:
-            with conn:
-                chunk_ids = [
-                    r["id"]
-                    for r in conn.execute(
-                        "SELECT id FROM chunks WHERE material_id = ?", (material_id,)
-                    )
-                ]
-                conn.executemany(
-                    "DELETE FROM vectors WHERE rowid = ?", [(cid,) for cid in chunk_ids]
-                )
-                conn.execute("DELETE FROM chunks WHERE material_id = ?", (material_id,))
-                conn.execute("DELETE FROM materials WHERE id = ?", (material_id,))
-                # question_citations cascade with their chunks (FK ON DELETE CASCADE);
-                # a card stripped of every citation must not survive (zero resolvable
-                # citations = error, by rule).
-                conn.execute(
-                    "DELETE FROM questions WHERE id NOT IN "
-                    "(SELECT question_id FROM question_citations)"
-                )
-        finally:
-            conn.close()
+        with self._open() as conn, conn:
+            chunk_ids = [
+                r["id"]
+                for r in conn.execute("SELECT id FROM chunks WHERE material_id = ?", (material_id,))
+            ]
+            conn.executemany("DELETE FROM vectors WHERE rowid = ?", [(cid,) for cid in chunk_ids])
+            conn.execute("DELETE FROM chunks WHERE material_id = ?", (material_id,))
+            conn.execute("DELETE FROM materials WHERE id = ?", (material_id,))
+            # question_citations cascade with their chunks (FK ON DELETE CASCADE);
+            # a card stripped of every citation must not survive (zero resolvable
+            # citations = error, by rule).
+            conn.execute(
+                "DELETE FROM questions WHERE id NOT IN (SELECT question_id FROM question_citations)"
+            )
 
     def add_extraction_failed(self, filename: str, sha256: str, error: str) -> None:
-        conn = self.connect()
-        try:
-            with conn:
-                conn.execute(
-                    "INSERT INTO materials (filename, sha256, status, error) "
-                    "VALUES (?, ?, 'extraction_failed', ?)",
-                    (filename, sha256, error),
-                )
-        finally:
-            conn.close()
+        with self._open() as conn, conn:
+            conn.execute(
+                "INSERT INTO materials (filename, sha256, status, error) "
+                "VALUES (?, ?, 'extraction_failed', ?)",
+                (filename, sha256, error),
+            )
 
     def dense_search(self, embedding: list[float], k: int) -> list[int]:
         """Exact KNN over the dense channel (sqlite-vec brute force). Chunk ids
         nearest-first."""
-        conn = self.connect()
-        try:
+        with self._open() as conn:
             rows = conn.execute(
                 "SELECT rowid FROM vectors WHERE embedding MATCH ? AND k = ? ORDER BY distance",
                 (sqlite_vec.serialize_float32(embedding), k),
             ).fetchall()
             return [r["rowid"] for r in rows]
-        finally:
-            conn.close()
 
     def sparse_search(self, weights: dict[int, float], k: int) -> list[int]:
         """Learned-sparse channel: sum of weight * query_weight per chunk, best-first."""
         if not weights:
             return []
-        conn = self.connect()
-        try:
+        with self._open() as conn:
             query_json = json.dumps({str(token_id): w for token_id, w in weights.items()})
             rows = conn.execute(
                 """
@@ -273,8 +260,6 @@ class SubjectStore:
                 (query_json, k),
             ).fetchall()
             return [r["chunk_id"] for r in rows]
-        finally:
-            conn.close()
 
     def bm25_search(self, query: str, k: int) -> list[int]:
         """FTS5 BM25 channel. Each term is individually double-quoted before joining
@@ -284,23 +269,19 @@ class SubjectStore:
         if not terms:
             return []
         match_expr = " OR ".join('"' + t.replace('"', '""') + '"' for t in terms)
-        conn = self.connect()
-        try:
+        with self._open() as conn:
             rows = conn.execute(
                 "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? "
                 "ORDER BY bm25(chunks_fts) LIMIT ?",
                 (match_expr, k),
             ).fetchall()
             return [r["rowid"] for r in rows]
-        finally:
-            conn.close()
 
     def chunk_details(self, chunk_ids: list[int]) -> list[sqlite3.Row]:
         """Resolve chunk ids to citation targets: document + page + heading path."""
         if not chunk_ids:
             return []
-        conn = self.connect()
-        try:
+        with self._open() as conn:
             placeholders = ",".join("?" for _ in chunk_ids)
             return conn.execute(
                 f"""
@@ -310,14 +291,11 @@ class SubjectStore:
                 """,
                 chunk_ids,
             ).fetchall()
-        finally:
-            conn.close()
 
     def all_chunks(self) -> list[sqlite3.Row]:
         """Every chunk in the subject, resolved to its citation target — feeds the
         graph batch builder (one input document per chunk)."""
-        conn = self.connect()
-        try:
+        with self._open() as conn:
             return conn.execute(
                 """
                 SELECT c.id AS chunk_id, c.page, c.heading_path, c.text, m.filename
@@ -325,14 +303,11 @@ class SubjectStore:
                 ORDER BY c.id
                 """
             ).fetchall()
-        finally:
-            conn.close()
 
     def page_chunks(self, filename: str, page: int) -> list[sqlite3.Row]:
         """Resolve one (filename, page) to its chunks, chunk-id order — the citation
         resource / `get_page` MCP tool's read path."""
-        conn = self.connect()
-        try:
+        with self._open() as conn:
             return conn.execute(
                 """
                 SELECT c.id AS chunk_id, c.page, c.heading_path, c.text, m.filename
@@ -342,8 +317,6 @@ class SubjectStore:
                 """,
                 (filename, page),
             ).fetchall()
-        finally:
-            conn.close()
 
     def add_indexed(
         self,
@@ -356,47 +329,39 @@ class SubjectStore:
         """`vectors` yields one (dense, sparse) pair per chunk, in order. It is consumed
         lazily inside the single per-file transaction, so the caller can stream vectors
         batch-by-batch and never hold the whole document's embeddings at once."""
-        conn = self.connect()
-        try:
-            with conn:
-                cur = conn.execute(
-                    "INSERT INTO materials (filename, sha256, status, pages) VALUES (?, ?, 'indexed', ?)",
-                    (filename, sha256, pages),
-                )
-                material_id = cur.lastrowid
-                for chunk, (vec, weights) in zip(chunks, vectors, strict=True):
-                    c_text = chunk.text
-                    c_page = chunk.page
-                    c_heading_path = chunk.heading_path
-                    c_token_count = chunk.token_count
+        with self._open() as conn, conn:
+            cur = conn.execute(
+                "INSERT INTO materials (filename, sha256, status, pages) VALUES (?, ?, 'indexed', ?)",
+                (filename, sha256, pages),
+            )
+            material_id = cur.lastrowid
+            for chunk, (vec, weights) in zip(chunks, vectors, strict=True):
+                c_text = chunk.text
+                c_page = chunk.page
+                c_heading_path = chunk.heading_path
+                c_token_count = chunk.token_count
 
-                    cid = conn.execute(
-                        "INSERT INTO chunks (material_id, page, heading_path, text, token_count) "
-                        "VALUES (?, ?, ?, ?, ?)",
-                        (material_id, c_page, c_heading_path, c_text, c_token_count),
-                    ).lastrowid
-                    conn.execute(
-                        "INSERT INTO vectors (rowid, embedding) VALUES (?, ?)",
-                        (cid, sqlite_vec.serialize_float32(vec)),
-                    )
-                    conn.executemany(
-                        "INSERT INTO sparse_terms (token_id, chunk_id, weight) VALUES (?, ?, ?)",
-                        [(token_id, cid, weight) for token_id, weight in weights.items()],
-                    )
-                return material_id
-        finally:
-            conn.close()
+                cid = conn.execute(
+                    "INSERT INTO chunks (material_id, page, heading_path, text, token_count) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (material_id, c_page, c_heading_path, c_text, c_token_count),
+                ).lastrowid
+                conn.execute(
+                    "INSERT INTO vectors (rowid, embedding) VALUES (?, ?)",
+                    (cid, sqlite_vec.serialize_float32(vec)),
+                )
+                conn.executemany(
+                    "INSERT INTO sparse_terms (token_id, chunk_id, weight) VALUES (?, ?, ?)",
+                    [(token_id, cid, weight) for token_id, weight in weights.items()],
+                )
+            return material_id
 
     def get_or_create_deck(self, name: str) -> int:
         check_deck_name(name)
-        conn = self.connect()
-        try:
-            with conn:
-                conn.execute("INSERT OR IGNORE INTO decks (name) VALUES (?)", (name,))
-                row = conn.execute("SELECT id FROM decks WHERE name = ?", (name,)).fetchone()
-                return row["id"]
-        finally:
-            conn.close()
+        with self._open() as conn, conn:
+            conn.execute("INSERT OR IGNORE INTO decks (name) VALUES (?)", (name,))
+            row = conn.execute("SELECT id FROM decks WHERE name = ?", (name,)).fetchone()
+            return row["id"]
 
     def add_verified_card(
         self,
@@ -409,26 +374,21 @@ class SubjectStore:
         """One transaction: an unresolvable chunk_id violates the citations FK and
         rolls back the whole insert — the FK is the second enforcement of "every
         card cites resolving chunks" (the verifier is the first)."""
-        conn = self.connect()
-        try:
-            with conn:
-                cur = conn.execute(
-                    "INSERT INTO questions (deck_id, type, body, answer, generation_source) "
-                    "VALUES (?, 'flashcard', ?, ?, ?)",
-                    (deck_id, front, back, generation_source),
-                )
-                question_id = cur.lastrowid
-                conn.executemany(
-                    "INSERT INTO question_citations (question_id, chunk_id) VALUES (?, ?)",
-                    [(question_id, cid) for cid in chunk_ids],
-                )
-                return question_id
-        finally:
-            conn.close()
+        with self._open() as conn, conn:
+            cur = conn.execute(
+                "INSERT INTO questions (deck_id, type, body, answer, generation_source) "
+                "VALUES (?, 'flashcard', ?, ?, ?)",
+                (deck_id, front, back, generation_source),
+            )
+            question_id = cur.lastrowid
+            conn.executemany(
+                "INSERT INTO question_citations (question_id, chunk_id) VALUES (?, ?)",
+                [(question_id, cid) for cid in chunk_ids],
+            )
+            return question_id
 
     def deck_cards(self, deck_name: str) -> list[sqlite3.Row]:
-        conn = self.connect()
-        try:
+        with self._open() as conn:
             return conn.execute(
                 """
                 SELECT q.id AS question_id, q.body, q.answer,
@@ -443,12 +403,9 @@ class SubjectStore:
                 """,
                 (deck_name,),
             ).fetchall()
-        finally:
-            conn.close()
 
     def list_decks(self) -> list[sqlite3.Row]:
-        conn = self.connect()
-        try:
+        with self._open() as conn:
             return conn.execute(
                 """
                 SELECT d.name AS name, COUNT(q.id) AS card_count
@@ -456,5 +413,3 @@ class SubjectStore:
                 GROUP BY d.id ORDER BY d.name
                 """
             ).fetchall()
-        finally:
-            conn.close()
