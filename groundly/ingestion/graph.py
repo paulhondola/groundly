@@ -11,7 +11,7 @@ import asyncio
 import hashlib
 import logging
 import shutil
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib.metadata import version as _package_version
@@ -111,6 +111,88 @@ class GraphBuildResult:
     cost_usd: float | None = None
 
 
+@dataclass(frozen=True)
+class _BuildPlan:
+    """Every input one graph build depends on, resolved exactly once.
+
+    These used to be seven locals threaded by hand into four helpers, under four
+    separate comment blocks all saying the same thing: read each of them **once**,
+    because the probe checks them, the config registers models from them, and the
+    manifest records what they named — and a `config set` landing between two reads
+    produces a build whose probe, model and recorded provenance disagree about what
+    just ran. A frozen object passed by reference is that rule as a type instead of as
+    a warning.
+
+    (`entity_types` is a list because `ExtractGraphConfig` wants one; `frozen` stops the
+    field being rebound, which is the drift that actually happened.)
+    """
+
+    provider: ProviderConfig
+    report_call_class: str
+    # None on the default path, where community reports are served by the extraction
+    # provider and naming it twice would only invite the two to drift.
+    report_provider: ProviderConfig | None
+    context_window: int
+    gleanings: int
+    entity_types: list[str]
+    prompt_path: Path
+    prompt_text: str
+
+    @property
+    def fingerprint(self) -> str:
+        """What the manifest records, derived from the same read the build ran on —
+        the whole reason these three travel together."""
+        return extraction_fingerprint(self.prompt_text, self.entity_types, self.gleanings)
+
+    @property
+    def providers(self) -> list[ProviderConfig]:
+        """Every provider this build will call. `concurrent_requests()` is variadic and
+        pessimistic over these: graphrag has one global concurrency setting, so a local
+        extraction provider binds the whole build even when reports go to a cloud one."""
+        return [cfg for cfg in (self.provider, self.report_provider) if cfg is not None]
+
+    @property
+    def model_label(self) -> str:
+        """One trace row, both names: `tokens`/`cost_usd` are summed across every
+        completion model the build metered, so naming only the extraction model would
+        attribute the report model's spend to the wrong one."""
+        if self.report_provider is None:
+            return self.provider.model
+        return f"{self.provider.model}+{self.report_provider.model}"
+
+
+@contextmanager
+def _plan_build() -> Iterator[_BuildPlan]:
+    """Resolve the plan, holding the extraction prompt open for as long as it lives.
+
+    A context manager because `ExtractGraphConfig.prompt` is a *path* graphrag re-reads
+    at extraction time, so the file has to outlive `build_index` — and because the
+    fingerprint in the plan is computed from that same file's text.
+
+    Providers are resolved before the prompt, and both before the caller enumerates
+    chunks: a misconfigured provider should fail in milliseconds, not after a full
+    corpus read (and never after a graph has been cleared for a rebuild)."""
+    provider = require_provider("extraction")
+    settings = load_settings()
+    report_call_class = settings.graph.report_call_class
+    # Resolved here rather than at the manifest write so a report provider that is named
+    # but unconfigured fails alongside the extraction one.
+    report_provider = (
+        require_provider(report_call_class) if report_call_class != "extraction" else None
+    )
+    with _extraction_prompt() as (prompt_path, prompt_text):
+        yield _BuildPlan(
+            provider=provider,
+            report_call_class=report_call_class,
+            report_provider=report_provider,
+            context_window=settings.graph.context_window,
+            gleanings=settings.graph.gleanings,
+            entity_types=extraction_entity_types(),
+            prompt_path=prompt_path,
+            prompt_text=prompt_text,
+        )
+
+
 class _WorkflowErrorCounter(logging.Handler):
     """Counts per-item LLM failures for one graphrag stage, which reach us no other way.
 
@@ -175,8 +257,7 @@ def _probe_extraction(
     subj: Subject,
     config: GraphRagConfig,
     sample_text: str,
-    context_window: int,
-    report_call_class: str,
+    plan: _BuildPlan,
     on_event: Callable[[str, int, int], None],
 ) -> None:
     """Send one real extraction prompt before committing to the whole corpus.
@@ -233,7 +314,7 @@ def _probe_extraction(
             "That prompt is graphrag's few-shot preamble plus one chunk — the smallest call "
             "the build makes. If the server reports a context or size limit, raise the model's "
             "context window (for LM Studio, the model's load settings) or lower "
-            f"graph.context_window (currently {context_window}). If the prompt looks far too "
+            f"graph.context_window (currently {plan.context_window}). If the prompt looks far too "
             "small for that, check that extraction.model is a plain chat model — agentic or "
             "tool-using endpoints have their own request limits and are the wrong fit here.",
         )
@@ -247,15 +328,15 @@ def _probe_extraction(
         # graph.context_window, so serving a smaller window invalidates all of them at
         # once, and the call that finally fails is a community report ~40 minutes in.
         loaded = loaded_context_length("extraction")
-        if loaded is not None and loaded < context_window:
+        if loaded is not None and loaded < plan.context_window:
             logger.warning(
                 "extraction model is loaded with a %d-token context but graph.context_window "
                 "is %d — every prompt budget in this build is sized for %d. Raise the model's "
                 "load setting to %d, or lower graph.context_window to %d",
                 loaded,
-                context_window,
-                context_window,
-                context_window,
+                plan.context_window,
+                plan.context_window,
+                plan.context_window,
                 loaded,
             )
         # A separate capability: every DeepSeek model answers plain completions fine and
@@ -280,16 +361,16 @@ def _probe_extraction(
         _probe_call(
             conn,
             lambda: complete(
-                report_call_class,
+                plan.report_call_class,
                 [{"role": "user", "content": "Summarise a one-entity community."}],
                 response_format=CommunityReportResponse,
             ),
-            f"the {report_call_class} model rejected graphrag's structured-output request: "
+            f"the {plan.report_call_class} model rejected graphrag's structured-output request: "
             "{exc}. Community reports — the summaries global search and `overview` answer "
             "from — are sent as `response_format: json_schema`, and a model that refuses it "
             "cannot finish a graph build. Note this is a *stricter* capability than JSON "
             'mode: providers that accept `{{"type": "json_object"}}` may still refuse '
-            f"`json_schema` (every DeepSeek model does). Switch {report_call_class}.model to one "
+            f"`json_schema` (every DeepSeek model does). Switch {plan.report_call_class}.model to one "
             "whose endpoint supports JSON-schema structured output, or point "
             "graph.report_call_class at a call class whose provider does.",
         )
@@ -372,48 +453,32 @@ def graph_is_stale(subj: Subject, store: SubjectStore) -> str | None:
     return None
 
 
-def _build_config(
-    subj: Subject,
-    context_window: int,
-    gleanings: int,
-    prompt_path: Path,
-    entity_types: list[str],
-    report_call_class: str,
-    build_providers: Sequence[ProviderConfig],
-) -> GraphRagConfig:
+def _build_config(subj: Subject, plan: _BuildPlan) -> GraphRagConfig:
     """graphrag's config, rooted entirely under <subject>/graph/ — nothing touches
     cwd, nothing leaks outside the subject's own directory. Every prompt budget is
-    scaled to `context_window` (graph.context_window in config.toml); graphrag's own
+    scaled to `plan.context_window` (graph.context_window in config.toml); graphrag's own
     defaults assume ~16k and 400 out on a small local model.
 
-    `prompt_path`/`entity_types`/`report_call_class` come from the caller rather than
-    being read here, so the fingerprint recorded in the manifest is computed from the
-    same resolution that produced this config — they cannot drift apart. That applies to
-    `report_call_class` for the same reason: the probe checks it, this registers a model
-    for it, and the manifest records the model it names, so all three must be one read.
+    Everything it needs comes off the plan rather than being read here, so the
+    fingerprint recorded in the manifest is computed from the same resolution that
+    produced this config — see `_BuildPlan`.
 
     `graph.report_call_class` (core/config.GraphSettings) can point community reports at
     a second provider entirely. When it does, a SECOND completion model is registered
     and `community_reports.completion_model_id` is pointed at it; left at its default
     ("extraction"), exactly one completion model is registered, same as before this
-    setting existed.
-
-    `build_providers` is every provider this build will call, resolved once by the caller
-    for the same read-once reason as `report_call_class` above. It exists so
-    concurrent_requests() can see whether any of them is local: those per-stage budgets
-    are per *request*, while a llama.cpp-family runtime caps `in-flight x prompt` against
-    one shared KV cache, and graphrag's default of 25 in flight is what overran it."""
+    setting existed."""
     graph_dir = subj.root_dir / "graph"
-    budgets = prompt_budgets(context_window, gleanings)
+    budgets = prompt_budgets(plan.context_window, plan.gleanings)
 
     completion_models = {COMPLETION_MODEL_ID: completion_model_config(track_usage=True)}
     community_reports_kwargs: dict[str, int | str] = {
         "max_input_length": budgets.community_max_input_length,
         "max_length": budgets.community_max_length,
     }
-    if report_call_class != "extraction":
+    if plan.report_call_class != "extraction":
         completion_models[REPORT_COMPLETION_MODEL_ID] = completion_model_config(
-            track_usage=True, call_class=report_call_class
+            track_usage=True, call_class=plan.report_call_class
         )
         community_reports_kwargs["completion_model_id"] = REPORT_COMPLETION_MODEL_ID
 
@@ -421,12 +486,12 @@ def _build_config(
         # graphrag defaults this to 25. Against a local runtime that is what exhausts the
         # shared KV cache the prompt budgets above were sized against — see
         # llm/graphrag_adapter.concurrent_requests.
-        concurrent_requests=concurrent_requests(*build_providers),
+        concurrent_requests=concurrent_requests(*plan.providers),
         extract_graph=ExtractGraphConfig(
             max_gleanings=budgets.max_gleanings,
             # A path, not text — graphrag's resolved_prompts() reads it off disk.
-            prompt=str(prompt_path),
-            entity_types=entity_types,
+            prompt=str(plan.prompt_path),
+            entity_types=plan.entity_types,
         ),
         summarize_descriptions=SummarizeDescriptionsConfig(
             max_input_tokens=budgets.summarize_max_input_tokens,
@@ -522,8 +587,7 @@ def _verify_build_output(
     counter: _WorkflowErrorCounter,
     reports_counter: _WorkflowErrorCounter,
     chunk_count: int,
-    context_window: int,
-    report_call_class: str,
+    plan: _BuildPlan,
 ) -> None:
     """Refuse a build that reported success while producing an unusable graph.
     graphrag swallows per-item failures, so nothing above this catches a graph
@@ -550,7 +614,7 @@ def _verify_build_output(
             f"would be missing most of the course, so it was not recorded and stays unusable "
             f"until a build succeeds. Last error: {counter.last_message}. If this is a "
             f"context-size error, raise your extraction model's context window or lower "
-            f"graph.context_window (currently {context_window})"
+            f"graph.context_window (currently {plan.context_window})"
         )
 
     # The artifact retrieval/graph.py actually reads. Row count, not file size: a
@@ -578,7 +642,7 @@ def _verify_build_output(
             f"{reports_counter.last_message or 'unknown'}."
             + _report_failure_hint(reports_counter.last_message)
             + f" Community reports are the one stage that requires JSON mode — if your "
-            f"provider reports response_format as unavailable, switch {report_call_class}.model "
+            f"provider reports response_format as unavailable, switch {plan.report_call_class}.model "
             f"to one that supports structured output, or point graph.report_call_class at a "
             f"call class whose provider does"
         )
@@ -629,119 +693,123 @@ def build_graph(
     stderr and into graph/logs/indexing-engine.log. INFO already carries the
     workflow names and progress counts that `--debug` exists to show."""
     on_event = on_event or (lambda description, completed, total: None)
-    provider_cfg = require_provider("extraction")  # fail fast, before any chunk enumeration
-    settings = load_settings()
-    context_window = settings.graph.context_window
-    # Same read-once rule as the fields below: it feeds both _build_config (how many
-    # extraction calls per chunk) and the fingerprint recorded in the manifest, and those
-    # two disagreeing is exactly the silent divergence graph.gleanings exists to end.
-    gleanings = settings.graph.gleanings
-    # Read ONCE and threaded from here into _build_config, _probe_extraction and
-    # _verify_build_output: the probe checks this call class, the config registers a model
-    # for it, and the manifest records that model's name. Re-reading it per site would let
-    # a concurrent `config set` land between them and produce a build whose probe, model
-    # and recorded provenance disagree — the same invariant _build_config's docstring
-    # already states for prompt_path/entity_types.
-    report_call_class = settings.graph.report_call_class
-    # Resolved here rather than at the manifest write so a report provider that is named
-    # but unconfigured fails alongside the extraction one, before any chunk enumeration.
-    report_provider_cfg = (
-        require_provider(report_call_class) if report_call_class != "extraction" else None
-    )
 
-    rows = store.all_chunks()
-    if not rows:
-        raise GraphBuildError("nothing indexed yet — run `groundly index` before building a graph")
-
-    # The prompt context spans the whole pipeline: ExtractGraphConfig.prompt is a path
-    # graphrag re-reads at extraction time, so the file has to outlive build_index.
+    # `_plan_build` resolves both providers before anything else and holds the extraction
+    # prompt open for the whole pipeline (ExtractGraphConfig.prompt is a path graphrag
+    # re-reads at extraction time, so the file has to outlive build_index).
     with (
-        _extraction_prompt() as (prompt_path, prompt_text),
+        _plan_build() as plan,
         _WorkflowErrorCounter(_EXTRACTION_ERROR_SOURCE) as counter,
         _WorkflowErrorCounter(_COMMUNITY_ERROR_SOURCE) as reports_counter,
     ):
-        entity_types = extraction_entity_types()
-        fingerprint = extraction_fingerprint(prompt_text, entity_types, gleanings)
-
-        # Outside the try below on purpose: the config embeds the extraction provider's
-        # api_key, and a pydantic ValidationError echoes the offending input value — so
-        # neither the wrapped message nor a logged traceback may ever carry this one.
-        try:
-            config = _build_config(
-                subj,
-                context_window,
-                gleanings,
-                prompt_path,
-                entity_types,
-                report_call_class,
-                [cfg for cfg in (provider_cfg, report_provider_cfg) if cfg is not None],
-            )
-        except Exception as exc:
+        rows = store.all_chunks()
+        if not rows:
             raise GraphBuildError(
-                "graphrag config is invalid — check [providers.extraction] in your config.toml "
-                f"against the pinned graphrag {_package_version('graphrag')} "
-                f"({type(exc).__name__}; details withheld, they would include your api_key)"
-            ) from exc
+                "nothing indexed yet — run `groundly index` before building a graph"
+            )
 
-        _probe_extraction(
-            subj, config, rows[0]["text"], context_window, report_call_class, on_event
-        )
+        config = _make_config(subj, plan)
+        _probe_extraction(subj, config, rows[0]["text"], plan, on_event)
 
         # After the probe on purpose: a misconfigured provider should fail without
         # destroying a graph that still works, so nothing is cleared until the provider
         # has answered a real extraction prompt and a JSON-mode call.
         _reset_graph_artifacts(subj)
+        results = _run_index(config, rows, plan, on_event)
 
-        try:
-            register_bge_m3_embedding()
-            register_groundly_metrics_store()
-            reset_metered_usage()
-            allow_nonstandard_service_tier()
-
-            df = pd.DataFrame(
-                {
-                    "id": [str(row["chunk_id"]) for row in rows],
-                    "text": [row["text"] for row in rows],
-                    "title": [f"{row['filename']}#p{row['page']}" for row in rows],
-                    "creation_date": ["" for _ in rows],
-                    "raw_data": [None for _ in rows],
-                }
-            )
-
-            logger.debug("starting graph build: %d chunks, model=%s", len(rows), provider_cfg.model)
-            results = asyncio.run(
-                build_index(
-                    config,
-                    input_documents=df,
-                    callbacks=[_ProgressCallbacks(on_event)],
-                )
-            )
-        except Exception as exc:
-            logger.debug("graph build failed", exc_info=True)
-            raise GraphBuildError(f"graph build failed: {exc}") from exc
-
-    _verify_build_output(
-        subj, results, counter, reports_counter, len(rows), context_window, report_call_class
+    _verify_build_output(subj, results, counter, reports_counter, len(rows), plan)
+    return _record_build(
+        subj,
+        store,
+        plan,
+        chunks=len(rows),
+        failed=counter.count,
+        reports_failed=reports_counter.count,
+        estimated_tokens=estimated_tokens,
+        estimated_cost_usd=estimated_cost_usd,
     )
 
+
+def _make_config(subj: Subject, plan: _BuildPlan) -> GraphRagConfig:
+    """`_build_config` with the one failure mode that must never surface verbatim.
+
+    The config embeds the extraction provider's api_key, and a pydantic ValidationError
+    echoes the offending input value — so neither the wrapped message nor a logged
+    traceback may ever carry this one. Deliberately no `logger.debug(exc_info=True)`
+    here, unlike every other failure path in this module."""
+    try:
+        return _build_config(subj, plan)
+    except Exception as exc:
+        raise GraphBuildError(
+            "graphrag config is invalid — check [providers.extraction] in your config.toml "
+            f"against the pinned graphrag {_package_version('graphrag')} "
+            f"({type(exc).__name__}; details withheld, they would include your api_key)"
+        ) from exc
+
+
+def _run_index(
+    config: GraphRagConfig,
+    rows: list,
+    plan: _BuildPlan,
+    on_event: Callable[[str, int, int], None],
+):
+    """Hand the corpus to graphrag and run the pipeline. One input "document" per stored
+    chunk, with `id = str(chunk_id)` — that is what makes graphrag's `document_id` equal
+    Groundly's chunk_id with no sidecar mapping table."""
+    try:
+        register_bge_m3_embedding()
+        register_groundly_metrics_store()
+        reset_metered_usage()
+        allow_nonstandard_service_tier()
+
+        df = pd.DataFrame(
+            {
+                "id": [str(row["chunk_id"]) for row in rows],
+                "text": [row["text"] for row in rows],
+                "title": [f"{row['filename']}#p{row['page']}" for row in rows],
+                "creation_date": ["" for _ in rows],
+                "raw_data": [None for _ in rows],
+            }
+        )
+
+        logger.debug("starting graph build: %d chunks, model=%s", len(rows), plan.provider.model)
+        return asyncio.run(
+            build_index(config, input_documents=df, callbacks=[_ProgressCallbacks(on_event)])
+        )
+    except Exception as exc:
+        logger.debug("graph build failed", exc_info=True)
+        raise GraphBuildError(f"graph build failed: {exc}") from exc
+
+
+def _record_build(
+    subj: Subject,
+    store: SubjectStore,
+    plan: _BuildPlan,
+    *,
+    chunks: int,
+    failed: int,
+    reports_failed: int,
+    estimated_tokens: int,
+    estimated_cost_usd: float | None,
+) -> GraphBuildResult:
+    """Stamp the manifest and record what the build actually spent. Runs only after
+    `_verify_build_output` has passed: a refused build records neither the corpus hash
+    nor the fingerprint, so the next `groundly index` re-offers the build."""
     manifest = subj.load_manifest()
     manifest.graphrag = Graphrag(
         version=_package_version("graphrag"),
-        extraction_model=provider_cfg.model,
-        # Left None on the default path, where reports are built by extraction_model
-        # and naming it twice would only invite the two to drift.
-        report_model=report_provider_cfg.model if report_provider_cfg else None,
+        extraction_model=plan.provider.model,
+        report_model=plan.report_provider.model if plan.report_provider else None,
         corpus_hash=corpus_hash(store),
-        # Same write as corpus_hash, so a refused build records neither and the next
-        # `groundly index` re-offers the build.
-        extraction_fingerprint=fingerprint,
+        # Same write as corpus_hash, so a refused build records neither.
+        extraction_fingerprint=plan.fingerprint,
     )
     subj.save_manifest(manifest)
 
     # Metered where possible, estimated only as a fallback. graphrag's extraction calls
     # don't pass through llm/, but graphrag_llm aggregates their usage itself and
-    # `track_usage=True` above puts that aggregate somewhere this process can read — so
-    # the trace records what was spent rather than what was guessed.
+    # `track_usage=True` puts that aggregate somewhere this process can read — so the
+    # trace records what was spent rather than what was guessed.
     # (retrieval/graph.py's query-side gap is unchanged.)
     metered = metered_usage()
     conn = connect_progress(subj.progress_db_path)
@@ -752,14 +820,7 @@ def build_graph(
             query="",
             outcome="built",
             arm="graph-build",
-            # `tokens`/`cost_usd` below are summed across every completion model the
-            # build metered, so naming only the extraction model would attribute the
-            # report model's spend to the wrong one. One row, both names.
-            model=(
-                provider_cfg.model
-                if report_provider_cfg is None
-                else f"{provider_cfg.model}+{report_provider_cfg.model}"
-            ),
+            model=plan.model_label,
             tokens=estimated_tokens if metered is None else metered.total_tokens,
             cost_usd=estimated_cost_usd if metered is None else metered.cost_usd,
         )
@@ -767,9 +828,9 @@ def build_graph(
         conn.close()
 
     return GraphBuildResult(
-        chunks=len(rows),
-        failed=counter.count,
-        reports_failed=reports_counter.count,
+        chunks=chunks,
+        failed=failed,
+        reports_failed=reports_failed,
         prompt_tokens=None if metered is None else metered.prompt_tokens,
         completion_tokens=None if metered is None else metered.completion_tokens,
         cost_usd=None if metered is None else metered.cost_usd,
