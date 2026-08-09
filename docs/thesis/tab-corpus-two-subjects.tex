@@ -1,0 +1,74 @@
+% docs/thesis/tab-corpus-two-subjects.tex
+% Measured 2026-08-09 | apd 187 materials / 1193 chunks (corpus_hash cf0c85b4...)
+%                     | passc 15 materials / 341 chunks (corpus_hash b0b54cfa...)
+% Both subjects: chunking docling-hybrid, max_tokens=512, overlap=0; OCR rapidocr-onnxruntime;
+%   embedding BAAI/bge-m3 @ hf_revision 5617a9f61b028005a4858fdac845db406aefb181 (identical pin,
+%   which is what makes the two indexes comparable at all -- the pin is the interchange contract).
+% Source: ~/.groundly/<subject>/manifest.json (counts, chunking, embedding pin);
+%   store.db `materials` + `chunks` (file-type split, page totals, token_count, distinct texts);
+%   evals/<subject>/gold.jsonl (class, lang, source_file);
+%   the `rows` block of the eval result files for gold chunks per question (that is the resolved
+%   chunk-id set the harness actually scores, not the raw (file,page) refs in gold.jsonl --
+%   apd 114 resolved chunk ids from 112 refs, passc 226 from 202);
+%   `leakage_base_rate` from each result file, cross-checked against store.db
+%   (apd 45/1193 = Examen.md 24 + Quiz 1 10 + Quiz 2 3 + REZUMAT.md 8; passc 5/341 = subiecte.md 5).
+% THIS IS NOT A FOURTH CELL of the apd graph experiment. apd's three-build tables
+%   (tab:graph-shape, tab:graph-composition, tab:graph-build-time, tab:graph-build-cost,
+%   tab:graph-extraction-procedure, tab:graph-two-factor, tab:retrieval-quality-by-graph,
+%   tab:retrieval-mcnemar) hold the corpus constant and vary the build. passc varies the corpus,
+%   so it appears only in the `-two-subjects` family of tables and never as a column there.
+% NOTE: the two corpora are NOT matched. apd is 53.8% PDF-derived chunks with the rest code and
+%   markdown; passc is 98.2% PDF slide decks. This table exists so a reader can judge how far the
+%   cross-subject comparison can be pushed, not to claim the two are equivalent.
+\begin{table}[htbp]
+  \centering
+  \caption{Corpus and gold-set characteristics of the two pilot subjects. The two are deliberately
+    unlike: apd is a mixed corpus of lecture PDFs, C/Java/Python sources and lab markdown, passc is
+    almost entirely PDF slide decks. passc's gold set is larger and carries a higher multi-hop
+    share, which favours the graph arm; its question-source leakage base rate is lower, which makes
+    contamination easier to see. Neither corpus is a control for the other --- this table is the
+    basis for judging how far Tables~\ref{tab:retrieval-quality-two-subjects}
+    and~\ref{tab:retrieval-mcnemar-two-subjects} generalise.}
+  \label{tab:corpus-two-subjects}
+  \begin{tabular}{lrr}
+    \toprule
+    Quantity & apd & passc \\
+    \midrule
+    \multicolumn{3}{l}{\emph{Corpus}} \\
+    Materials indexed (0 failed)          &     187 &      15 \\
+    \quad PDF                             &      19 &      13 \\
+    \quad Markdown                        &      31 &       2 \\
+    \quad Source code (\texttt{.c}, \texttt{.java}, \texttt{.py}, \texttt{.h}) & 102 & 0 \\
+    \quad Other (\texttt{.png}, \texttt{.csv}, \texttt{.txt}, \texttt{.yml})   &  35 & 0 \\
+    PDF pages                             &     799 &     409 \\
+    \midrule
+    Chunks                                &    1193 &     341 \\
+    \quad from PDF                        & 53.8\%  & 98.2\%  \\
+    Distinct chunk texts                  &    1175 &     339 \\
+    Median tokens per chunk               &     142 &     108 \\
+    Corpus tokens (sum of \texttt{token\_count}) & 260\,338 & 44\,317 \\
+    \midrule
+    \multicolumn{3}{l}{\emph{Gold set}} \\
+    Questions                             &      48 &      76 \\
+    \quad factoid                         &      17 &      23 \\
+    \quad multi-hop                       &      22 &      44 \\
+    \quad global                          &       9 &       9 \\
+    Multi-hop share                       & 45.8\%  & 57.9\%  \\
+    English / Romanian                    & 39 / 9  & 66 / 10 \\
+    Drawn from an indexed source file     &      32 &      41 \\
+    Hand-written                          &      16 &      35 \\
+    Median gold chunks per question       &       2 &       3 \\
+    \midrule
+    Question-source chunks (leakage base rate) & 45 (3.77\%) & 5 (1.47\%) \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \footnotesize
+  Chunking (\texttt{docling-hybrid}, 512 tokens, 0 overlap) and the embedding pin
+  (\texttt{BAAI/bge-m3} @ \texttt{5617a9f6}) are identical for both subjects. ``Drawn from an
+  indexed source file'' counts gold questions whose \texttt{source\_file} is itself part of the
+  corpus --- four such files on apd, one (\texttt{subiecte.md}) on passc; those files supply the
+  leakage base rate in the last row. Gold chunks per question are the resolved chunk ids the
+  harness scores, not the \texttt{(file, page)} references written in \texttt{gold.jsonl}.
+\end{table}

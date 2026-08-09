@@ -1,0 +1,41 @@
+% docs/thesis/tab-graph-two-factor.tex
+% Measured 2026-08-09 | apd 187 materials / 1193 chunks | corpus_hash cf0c85b4...
+% The 2x2 with one corner missing. Corpus, docling-hybrid chunking (512 tok / 0 overlap),
+%   extraction prompt (groundly/prompts/extract_graph.txt) and graph.entity_types are identical in
+%   all three builds; the prompt+types identity was verified by recomputing extraction_fingerprint.
+%   MODEL effect  = gemma@0 -> gptoss@0 (google/gemma-4-12b-qat -> openai/gpt-oss-120b, gleanings 0)
+%   GLEANING effect = gptoss@0 -> gptoss@1 (openai/gpt-oss-120b, graph.gleanings 0 -> 1)
+% CONFOUND on the model column, stated in the caption: the gemma build also ran at
+%   graph.context_window=12288 against 16384. Under the code of that date max_gleanings was derived
+%   from the window (0 below 16384), which is why gemma has 0 gleanings; it is now the explicit
+%   graph.gleanings field. That the gemma build really did run 0 gleaning rounds is confirmed
+%   independently of config by its extraction cache: 1175 entries, one per distinct chunk text,
+%   identical to gptoss@0, against 2352 for gptoss@1.
+% Source: entities.parquet / relationships.parquet in ~/.groundly/.baselines/<cell>/
+\begin{table}[htbp]
+  \centering
+  \caption{Two-factor decomposition of graph structure, apd corpus. Both factors enlarge the graph,
+    but they do so differently: gleaning is the stronger driver of raw size and of connectivity,
+    while the isolated-entity rate is almost entirely a property of the extraction model and is
+    left unchanged by gleaning. The model column carries one confound (the \texttt{gemma} build
+    also ran at a 12288-token context window rather than 16384); the gleaning column carries none.}
+  \label{tab:graph-two-factor}
+  \begin{tabular}{lrrrrr}
+    \toprule
+    & \multicolumn{3}{c}{Build} & \multicolumn{2}{c}{Effect} \\
+    \cmidrule(lr){2-4} \cmidrule(lr){5-6}
+    Metric & \texttt{gemma@0} & \texttt{gptoss@0} & \texttt{gptoss@1} & Model & Gleaning \\
+    \midrule
+    Entities per chunk       & 2.251 & 3.105 & 5.184 & $+38.0\%$ & $+67.0\%$ \\
+    Relationships per entity & 1.765 & 1.788 & 2.108 & $+1.3\%$  & $+17.9\%$ \\
+    Isolated share           & 4.84\% & 18.68\% & 18.61\% & $+13.84$ pp & $-0.07$ pp \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \footnotesize
+  Model effect is \texttt{gemma@0}~$\rightarrow$~\texttt{gptoss@0} (gleanings held at 0); gleaning
+  effect is \texttt{gptoss@0}~$\rightarrow$~\texttt{gptoss@1} (model held at
+  \texttt{openai/gpt-oss-120b}). The fourth cell of the design, \texttt{gemma@1}, was not built.
+  Relative changes for the first two rows, percentage points for the share.
+\end{table}

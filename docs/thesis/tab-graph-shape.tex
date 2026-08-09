@@ -1,0 +1,32 @@
+% docs/thesis/tab-graph-shape.tex
+% Measured 2026-08-09 | apd 187 materials / 1193 chunks | corpus_hash cf0c85b4...
+% Models: google/gemma-4-12b-qat (local) | openai/gpt-oss-120b (DeepInfra)
+% Config: graph.gleanings 0/0/1, graph.context_window 12288/16384/16384, graph.entity_types (8 types),
+%   graphrag 3.1.0. context_window also sets community_max_input_length (6144 at 12288 vs 8000 at
+%   16384), so the gemma column's community/report figures carry that second difference too.
+% Source: entities.parquet, relationships.parquet, communities.parquet, community_reports.parquet
+%   in ~/.groundly/.baselines/<cell>/ -- row counts, and communities.level for the level ceiling.
+% "Reports at level<=2" uses the same ceiling the query path uses
+%   (groundly/retrieval/graph.py COMMUNITY_LEVEL = 2, a ceiling not an exact match).
+\begin{table}[htbp]
+  \centering
+  \caption{Resulting graph shape per build, apd corpus. Changing the extraction model alone
+    (\texttt{gemma@0} $\rightarrow$ \texttt{gptoss@0}) grows the graph by 38\%; adding one gleaning
+    round on the same model (\texttt{gptoss@0} $\rightarrow$ \texttt{gptoss@1}) grows it by a
+    further 67\%.}
+  \label{tab:graph-shape}
+  \begin{tabular}{lrrr}
+    \toprule
+    Quantity & \texttt{gemma@0} & \texttt{gptoss@0} & \texttt{gptoss@1} \\
+    \midrule
+    Entities                  & 2685 & 3704 & 6184 \\
+    Relationships             & 4740 & 6624 & 13036 \\
+    Communities               &  609 &  783 & 1301 \\
+    Community reports         &  609 &  783 & 1301 \\
+    Reports at level $\le$ 2  &  555 &  677 &  941 \\
+    Deepest community level   &    3 &    4 &    4 \\
+    \midrule
+    Entities per chunk        & 2.251 & 3.105 & 5.184 \\
+    \bottomrule
+  \end{tabular}
+\end{table}

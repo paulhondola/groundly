@@ -349,7 +349,9 @@ def current_extraction_fingerprint() -> str:
     """The fingerprint a build started right now would record. Raises
     ExtractionPromptError if a configured custom prompt cannot be used."""
     with resolve_extraction_prompt() as (_path, text):
-        return extraction_fingerprint(text, extraction_entity_types())
+        return extraction_fingerprint(
+            text, extraction_entity_types(), load_settings().graph.gleanings
+        )
 
 
 def graph_is_stale(subj: Subject, store: SubjectStore) -> str | None:
@@ -368,13 +370,14 @@ def graph_is_stale(subj: Subject, store: SubjectStore) -> str | None:
     if manifest.graphrag.corpus_hash != corpus_hash(store):
         return "the corpus changed since the last build"
     if manifest.graphrag.extraction_fingerprint != current_extraction_fingerprint():
-        return "the extraction prompt or entity types changed since the last build"
+        return "the extraction prompt, entity types or gleaning rounds changed since the last build"
     return None
 
 
 def _build_config(
     subj: Subject,
     context_window: int,
+    gleanings: int,
     prompt_path: Path,
     entity_types: list[str],
     report_call_class: str,
@@ -403,7 +406,7 @@ def _build_config(
     are per *request*, while a llama.cpp-family runtime caps `in-flight x prompt` against
     one shared KV cache, and graphrag's default of 25 in flight is what overran it."""
     graph_dir = subj.root_dir / "graph"
-    budgets = prompt_budgets(context_window)
+    budgets = prompt_budgets(context_window, gleanings)
 
     completion_models = {_COMPLETION_MODEL_ID: completion_model_config(track_usage=True)}
     community_reports_kwargs: dict[str, int | str] = {
@@ -639,6 +642,10 @@ def build_graph(
     provider_cfg = require_provider("extraction")  # fail fast, before any chunk enumeration
     settings = load_settings()
     context_window = settings.graph.context_window
+    # Same read-once rule as the fields below: it feeds both _build_config (how many
+    # extraction calls per chunk) and the fingerprint recorded in the manifest, and those
+    # two disagreeing is exactly the silent divergence graph.gleanings exists to end.
+    gleanings = settings.graph.gleanings
     # Read ONCE and threaded from here into _build_config, _probe_extraction and
     # _verify_build_output: the probe checks this call class, the config registers a model
     # for it, and the manifest records that model's name. Re-reading it per site would let
@@ -664,7 +671,7 @@ def build_graph(
         _WorkflowErrorCounter(_COMMUNITY_ERROR_SOURCE) as reports_counter,
     ):
         entity_types = extraction_entity_types()
-        fingerprint = extraction_fingerprint(prompt_text, entity_types)
+        fingerprint = extraction_fingerprint(prompt_text, entity_types, gleanings)
 
         # Outside the try below on purpose: the config embeds the extraction provider's
         # api_key, and a pydantic ValidationError echoes the offending input value — so
@@ -673,6 +680,7 @@ def build_graph(
             config = _build_config(
                 subj,
                 context_window,
+                gleanings,
                 prompt_path,
                 entity_types,
                 report_call_class,

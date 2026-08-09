@@ -1,0 +1,40 @@
+% docs/thesis/tab-retrieval-leakage.tex
+% Measured 2026-08-09 | apd 187 materials / 1193 chunks | gold set evals/apd/gold.jsonl, 48 questions
+% Source: `at_k` block of results-gemma-glean0.json / results-gptoss-glean0.json /
+%   results-gptoss-glean1.json (ts 2026-08-09 08:45:09Z / 08:57:48Z / 09:11:42Z), field `leakage`,
+%   divided by the runs' recorded leakage_base_rate = 0.0377200335289 (identical in all three;
+%   equivalent to 45 of the 1193 chunks).
+% WHY ENRICHMENT, NOT RAW RATE: the files that questions were written from are themselves indexed,
+%   so a raw leakage rate rewards an arm for returning more of the corpus. Reported as
+%   leakage / leakage_base_rate, i.e. how many times the corpus base rate the returned set carries.
+% Matched cutoffs only (median_retrieved_n == k in every cell); errors = 0 in all three runs.
+% vector is graph-independent and its leakage was bit-identical across all three runs.
+\begin{table}[htbp]
+  \centering
+  \caption{Question-source leakage as enrichment over the corpus base rate, apd gold set
+    ($n=48$, 0 errors). A value of 1.0 would mean the returned set contains question-source chunks
+    at exactly the rate they occur in the corpus. Enrichment falls towards the base rate as $k$
+    grows for every arm, and the \texttt{vector} baseline is the most enriched arm at $k=1$ by a
+    wide margin.}
+  \label{tab:retrieval-leakage}
+  \begin{tabular}{rrrrr}
+    \toprule
+    & \texttt{vector} & \multicolumn{3}{c}{\texttt{hybrid-local} by graph} \\
+    \cmidrule(lr){3-5}
+    $k$ & (control) & \texttt{gemma@0} & \texttt{gptoss@0} & \texttt{gptoss@1} \\
+    \midrule
+     1 & 14.91 & 7.73 & 7.18 & 7.18 \\
+     5 &  5.30 & 3.65 & 4.42 & 3.98 \\
+     8 &  3.59 & 3.04 & 3.45 & 3.59 \\
+    10 &  3.20 & 2.98 & 3.04 & 2.98 \\
+    20 &  2.54 & 2.32 & 2.26 & 2.49 \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \footnotesize
+  Enrichment factor $=$ measured leakage rate $/$ corpus base rate. The base rate recorded in all
+  three result files is $0.0377$ (45 of 1193 chunks). Raw leakage rates are not quoted: because
+  question-source files are part of the indexed corpus, a raw rate flatters whichever arm returns
+  the larger share of the corpus.
+\end{table}

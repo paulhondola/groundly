@@ -1,0 +1,73 @@
+% docs/thesis/tab-graph-build-two-subjects.tex
+% Measured 2026-08-09 | apd 187 materials / 1193 chunks (corpus_hash cf0c85b4...)
+%                     | passc 15 materials / 341 chunks (corpus_hash b0b54cfa...)
+% Model, BOTH subjects: openai/gpt-oss-120b via DeepInfra ([providers.extraction],
+%   input $0.037/Mtok, output $0.17/Mtok, reasoning_effort="none")
+% Config, BOTH subjects (this is the shipped configuration; it is what makes the two comparable):
+%   graph.context_window=16384, graph.gleanings=0, graph.entity_types (8 types),
+%   graph.report_call_class="extraction" (community reports billed to the same provider, so the
+%   USD row covers reports too), concurrent_requests=25 (graphrag default, cloud provider),
+%   graphrag 3.1.0, docling-hybrid chunking 512/0.
+%   Identity of prompt+types+gleanings is confirmed independently of config: both manifests record
+%   extraction_fingerprint 825dbb84cb109ed666ffdeb2bc0250a911a74e7637003d2774a303b18da646e5.
+% Source: progress.db traces, kind='index', arm='graph-build', read LIVE via sqlite3 --
+%   apd trace id 13 (ts 2026-08-08 23:26:13, tokens 6028134, cost_usd 0.487995446935725),
+%   passc trace id 3 (ts 2026-08-09 10:49:44, tokens 1901824, cost_usd 0.15236695133023256).
+%   graphrag's own metrics file is only flushed at interpreter exit, so the traces table is
+%   authoritative. The prompt/completion split (the traces store only the total) comes from each
+%   build's CLI summary line; both splits sum exactly to the traced total.
+%   Wall clock: graph/stats.json `total_runtime` (pipeline) and the CLI's own "built in Ns"
+%   (end to end). Failure counts from the same CLI summary.
+% TWO WALL-CLOCK ROWS, DELIBERATELY. The build log reports apd 2951.5 s and passc 926.0 s; the
+%   stats.json pipeline runtimes are 2618.4 s and 890.9 s. The difference is the pre-pipeline
+%   extraction-model probe (333.1 s on apd, 35.1 s on passc), which is real spent time but is not
+%   proportional to corpus size. Both spans are reported rather than one being silently chosen;
+%   the pipeline row is the one comparable with Table~\ref{tab:graph-build-time}, which is
+%   stats.json-based throughout.
+% COST CROSS-CHECK: recomputing cost from the config's per-Mtok prices and the logged split gives
+%   $0.4897 (apd) and $0.1525 (passc) against the traced $0.4880 / $0.1524 -- a 0.35% / 0.09%
+%   difference. The traced figure is the sum of per-call costs recorded through llm/ and is the
+%   one reported; the recomputation is a sanity check, not a correction.
+% NOT a fourth cell of the apd three-build experiment: passc is a different corpus. See
+%   Table~\ref{tab:graph-build-cost} for the controlled apd comparison across models and gleanings.
+\begin{table}[htbp]
+  \centering
+  \caption{Graph build time and cost for the two pilot subjects at the shipped configuration
+    (\texttt{openai/gpt-oss-120b}, \texttt{graph.gleanings}~$=0$,
+    \texttt{graph.context\_window}~$=16384$). Cost scales almost linearly with corpus size: passc
+    is 28.6\% of apd's chunk count and costs 31.2\% as much, so cost per chunk differs by only
+    9\%. Neither build had a failed chunk or a failed community report.}
+  \label{tab:graph-build-two-subjects}
+  \begin{tabular}{lrr}
+    \toprule
+    Quantity & apd & passc \\
+    \midrule
+    Chunks                                   &      1193 &       341 \\
+    \midrule
+    Pipeline wall clock (s)                  &      2618 &       891 \\
+    Pipeline wall clock (h)                  &     0.727 &     0.247 \\
+    End-to-end wall clock (s)\textsuperscript{a} & 2952 &       926 \\
+    Seconds per chunk (pipeline)             &     2.195 &     2.613 \\
+    \midrule
+    Prompt tokens                            & 4\,023\,153 & 1\,284\,220 \\
+    Completion tokens                        & 2\,004\,981 & \phantom{0}617\,604 \\
+    Total tokens                             & 6\,028\,134 & 1\,901\,824 \\
+    Tokens per chunk                         &      5053 &      5577 \\
+    \midrule
+    Cost (USD)                               &    0.4880 &    0.1524 \\
+    Cost per chunk (USD)                     &  0.000409 &  0.000447 \\
+    \midrule
+    Chunks failed                            &         0 &         0 \\
+    Community reports failed                 &         0 &         0 \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \footnotesize
+  \textsuperscript{a} End-to-end includes the pre-pipeline extraction-model probe (333.1~s on apd,
+  35.1~s on passc), which does not scale with corpus size; the pipeline row is the figure
+  comparable with Table~\ref{tab:graph-build-time}. Token totals and USD are read live from the
+  \texttt{progress.db} traces table (\texttt{kind='index'}); graphrag's own metrics file is flushed
+  only at interpreter exit and is not used. Both subjects were built under the same extraction
+  fingerprint (\texttt{825dbb84}), i.e.\ the same prompt, entity types and gleaning count.
+\end{table}

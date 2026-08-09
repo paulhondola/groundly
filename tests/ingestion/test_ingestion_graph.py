@@ -205,7 +205,24 @@ def test_graph_is_stale_when_entity_types_change(subj, store, home):
 
     set_key("graph.entity_types", "concept,algorithm")
     assert graph_is_stale(subj, store) == (
-        "the extraction prompt or entity types changed since the last build"
+        "the extraction prompt, entity types or gleaning rounds changed since the last build"
+    )
+
+
+def test_graph_is_stale_when_gleanings_change(subj, store, home):
+    """The case that motivated splitting `graph.gleanings` out of `graph.context_window`.
+    Two apd builds differed only in this — 2,685 entities against 6,184, and 4.1% against
+    15.9% isolated — while every recorded field said the model was the only difference.
+    A build that runs a second extraction call per chunk is a different build, and the
+    fingerprint has to say so."""
+    _add_material(store, "a.pdf", "a" * 64)
+    (subj.root_dir / "graph").mkdir()
+    _record_build(subj, store)
+    assert graph_is_stale(subj, store) is None
+
+    set_key("graph.gleanings", "1")
+    assert graph_is_stale(subj, store) == (
+        "the extraction prompt, entity types or gleaning rounds changed since the last build"
     )
 
 
@@ -218,7 +235,7 @@ def test_graph_is_stale_when_the_extraction_prompt_changes(subj, store, home, tm
     custom.write_text("Types: [{entity_types}]\nText: {input_text}\nOutput:")
     set_key("graph.extraction_prompt", str(custom))
     assert graph_is_stale(subj, store) == (
-        "the extraction prompt or entity types changed since the last build"
+        "the extraction prompt, entity types or gleaning rounds changed since the last build"
     )
 
 

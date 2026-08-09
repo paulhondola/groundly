@@ -4,12 +4,14 @@ Expands [`groundly-spec.md`](../groundly-spec.md) §5. This layer is the thesis'
 
 ## The four arms (evaluation frame)
 
-| Arm | Path | Exists to answer |
-|---|---|---|
-| 1. Vector baseline | dense + sparse + BM25 → RRF → rerank | Strong baseline; NotebookLM-class behavior |
-| 2. Pure GraphRAG | MS `graphrag` local/global search | Does graph structure help multi-hop/global queries? |
-| 3. Static hybrid | router → backend(s) → fusion → rerank | Does cheap routing capture most of the gain? **Production arm.** |
-| 4. Adaptive agentic | retrieve → self-grade → escalate/rewrite (≤2 iterations) | Does self-evaluation beat static routing, at what cost? **Eval only.** |
+| Arm | Path | Exists to answer | Status |
+|---|---|---|---|
+| 1. Vector baseline | dense + sparse + BM25 → RRF → rerank | Strong baseline; NotebookLM-class behavior | **Production arm** (`PRODUCT_ARMS`) |
+| 2. Pure GraphRAG | MS `graphrag` local/global search | Does graph structure help multi-hop/global queries? | Eval only (decision 28) |
+| 3. Static hybrid | router → backend(s) → fusion → rerank | Does cheap routing capture most of the gain? | Eval only (decision 28) |
+| 4. Adaptive agentic | retrieve → self-grade → escalate/rewrite (≤2 iterations) | Does self-evaluation beat static routing, at what cost? | Stub; eval only |
+
+**Arm 3 was the production arm until decision 28; arm 1 is now.** Every arm stays runnable: `ARMS` is what `groundly eval` may score, `agents.ask.PRODUCT_ARMS` is what a user question may reach, and the two being different is the whole content of the decision. Nothing was deleted — the *comparison between the arms is the thesis contribution*, so an arm that loses still has to be re-runnable from shipped code, and each one's cost in quality, money and time is a published result rather than a reason to remove it. Measured tables live in [`docs/thesis/`](../thesis/); the headline is that vector leads hit and recall at every cutoff the product uses, at zero build cost and zero per-query cost, while `hybrid-local` closes most of the MRR gap and overtakes at rank 1 once the graph is built by a capable model.
 
 The common LlamaIndex `Retriever` interface is what makes the comparison fair — same query in, same context format out, per-arm logging (arm, path, chunk ids, tokens, latency, cost) into the local `traces` table in `progress.db`.
 
@@ -40,13 +42,14 @@ flowchart LR
     traces[(Private traces\narm, path, chunks, tokens, cost, latency)]
 
     query --> search
-    query --> ask --> route
+    query --> ask
     search --> vector
-    route -->|factoid| vector
-    route -->|multi-hop| hybrid
-    route -->|global| gph
-    query --> gph
-    query --> adaptive
+    ask --> vector
+    route -.->|eval only| vector
+    route -.->|eval only| hybrid
+    route -.->|eval only| gph
+    query -.->|eval only| gph
+    query -.->|eval only| adaptive
     adaptive -->|vector first| vector
     adaptive -->|escalate or rewrite| gph
     vector --> contract
@@ -82,11 +85,15 @@ MS `graphrag` as a **per-subject batch indexer**: entity/relation extraction →
 
 - **Extraction cost lands on the student** — a bad graph silently invalidates the comparison. Decision 24 replaced the flat "mid-tier cloud model" rule with a measured floor: roughly 12B, reasoning *verified* off, at `graph.context_window` 12288 ([detail](../guides/graphrag-provider.md)); cloud remains the default recommendation. `groundly index` shows the estimated cost before building; graph build is skippable — the vector baseline works with zero API key.
 - Mitigation is the sharing feature: the graph is the most expensive *and* most portable artifact (no embedding coupling) — one student builds, the course imports.
-- **Global search is the cost hazard**: map-reduce over community summaries can mean dozens of LLM calls per query. It fires only via the router (arm 3) or explicitly (`overview` tool) — never as a default path.
+- **Global search is the cost hazard**: map-reduce over community summaries means ~33 LLM calls per query on apd, not one. Since decision 28 it fires from exactly two places — the `overview` tool (UC-12, explicit) and `groundly eval --arms graph-global`. No user question reaches it implicitly, because there is no longer a router that could send one.
 
-### Query router (arm 3's brain — and the cost gate)
+### Query router (measured, not deployed)
 
-One cheap LLM call (router call class) labels the query: `factoid` → vector; `multi-hop` → graph local (+ vector); `global` → graph global. Ambiguous → both non-global backends. Router decisions are logged; router accuracy is itself a measured quantity. The router's second job is economic: nothing reaches token-hungry global search unclassified.
+One cheap LLM call (router call class) labels the query `factoid` / `multi-hop` / `global`. It was arm 3's brain and the economic gate: nothing was supposed to reach token-hungry global search unclassified.
+
+**It is no longer on the ask path** (decision 28). Once `PRODUCT_ARMS` holds one arm, a classifier selecting among one arm is a provider round-trip that cannot change the answer — so the removal follows from the arm retirement and does not depend on how accurate the router was. `agents/router.py` stays as a *measured quantity*: `groundly eval` calls `classify()` directly, and router accuracy remains a reported number in the thesis rather than a live dependency.
+
+The measurement that made this comfortable rather than merely tidy is below — the router sent **30 of 48 questions to `graph-global`**, the arm returning 1,138 chunks at ~33 untraced provider calls each, so the gate was routing the majority of traffic *into* the hazard it existed to prevent.
 
 ### Fusion + citation rule
 
@@ -104,7 +111,9 @@ MS `graphrag` runs its own chunking/extraction — the two backends do not share
 
 The harness is `groundly/eval/`, driven by `groundly eval SUBJECT --gold PATH --arms ...` (decision 27). It is a **client-layer** package: it imports the service layer and nothing imports it.
 
-**Forcing an arm.** `ask()` normally derives the arm from the router label, which cannot express "this question through every arm". `retrieve_for_arm(subject, query, arm, ...)` in `agents/ask.py` runs exactly one arm, and `ask(arm=...)` skips the router entirely. An unknown arm raises — a typo in `--arms` must never silently score the baseline under another name. `traces` already separates `router_label` from `arm`, so nothing in the schema changed.
+**Selecting an arm.** `retrieve_for_arm(subject, query, arm, ...)` in `agents/ask.py` runs exactly one arm and is the eval's only entry point. An unknown arm raises — a typo in `--arms` must never silently score the baseline under another name. `traces` separates `router_label` from `arm`, so nothing in the schema changed.
+
+There is deliberately **no `ask(arm=...)`** (decision 28). It existed so the eval could put one question through every arm, but the eval never used it — it calls `retrieve_for_arm` directly, because that returns candidates without paying for generation. What the parameter actually bought was a live route from a user question into a retired arm, which is what would have made the retirement nominal. Removing it is what makes `PRODUCT_ARMS` true rather than aspirational.
 
 **Gold set** per pilot subject from past exams, stratified by query class (factoid / multi-hop / global synthesis), RO and EN, **cross-lingual queries as a separate slice**. Professor spot-checks. Lives at `evals/<subject>/gold.jsonl`, version-controlled; results are gitignored. apd's is 48 questions (17 factoid / 22 multi-hop / 9 global; 39 EN / 9 RO), drawn from `Examen.md`, the two quiz decks, and hand-written RO items.
 
@@ -149,6 +158,8 @@ The harness is `groundly/eval/`, driven by `groundly eval SUBJECT --gold PATH --
 **Contamination is concentrated at the top of the ranking**, which raw leakage hides: at k=1 the vector arm's retrieved chunk is question-source material at **14.9x** the corpus base rate, falling to 2.5x by k=20. The single chunk a student is most likely to read is the one most likely to be an exam question rather than the material answering it — a finding for the methods section, and the argument for the contamination-control re-index.
 
 **Router accuracy (apd, 48 questions, `gemma-4-12b-qat`, 2026-08-08): 47.9%** — against 45.8% for a constant classifier that always answers "multi-hop". The router beats guessing by **one question**. The confusion is not noise but a single systematic bias:
+
+> **Provenance caveat, load-bearing:** this figure is a *local 12B* measurement. A re-measurement on the cloud provider (`gpt-oss-120b`) was taken and **retracted** — `[providers.router]` sets neither `temperature` nor `reasoning_effort`, and `llm/chat.py` only sends those when configured, so the run classified at provider-default reasoning and temperature and varied by 19 points between repeats. Router accuracy on the current configuration is therefore **unmeasured**, and this number must be cited with its model attached. It is not what decision 28 rests on: with one arm in `PRODUCT_ARMS`, a classifier has nothing to select regardless of how accurate it is.
 
 | gold \ routed | factoid | multi-hop | global |
 |---|---|---|---|

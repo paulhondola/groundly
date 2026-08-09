@@ -1,0 +1,60 @@
+% docs/thesis/tab-retrieval-quality-by-graph.tex
+% Measured 2026-08-09 | apd 187 materials / 1193 chunks | gold set evals/apd/gold.jsonl,
+%   48 questions (39 en / 9 ro) | retrieval.rerank=true | arms: vector, hybrid-local
+% Graphs under test: gemma@0 (google/gemma-4-12b-qat, graph.gleanings=0, context_window=12288),
+%   gptoss@0 (openai/gpt-oss-120b, gleanings=0, context_window=16384),
+%   gptoss@1 (openai/gpt-oss-120b, gleanings=1, context_window=16384)
+% Embedding pin identical across all runs: BAAI/bge-m3 @ hf_revision 5617a9f61b028005a4858fdac845db406aefb181
+% Source: results-gemma-glean0.json (ts 2026-08-09T08:45:09Z), results-gptoss-glean0.json
+%   (08:57:48Z), results-gptoss-glean1.json (09:11:42Z) -- the `at_k` block ONLY.
+% SET-SIZE MATCHING: every row is a matched cutoff. median_retrieved_n equals k in all 60 cells.
+%   The by_arm / by_arm_class blocks in those files are at natural set sizes and are NOT used.
+% errors = 0 in all three runs, so no row excludes an errored question; n = 48 everywhere.
+% NO LATENCY COLUMN: latency_comparable=false in all three files (two arms shared each sweep).
+%   A time axis would need three single-arm reruns; none were made and none is estimated.
+% CONTROL: the `vector` arm is graph-independent and came out bit-identical in all three runs
+%   (hit rate, recall, MRR and leakage all match to full precision), which is what validates the
+%   graph swap as the only thing that changed between the runs.
+% Requires only booktabs.
+\begin{table}[htbp]
+  \centering
+  \caption{Retrieval quality by underlying graph at matched cutoffs, apd gold set ($n=48$,
+    0 errors). \texttt{vector} is graph-independent and was bit-identical across all three runs,
+    so it appears once as the control. Rebuilding the graph moves \texttt{hybrid-local}
+    measurably, but no graph lets it beat the plain vector baseline on hit rate or recall at any
+    cutoff $\ge 5$.}
+  \label{tab:retrieval-quality-by-graph}
+  \begin{tabular}{lrrrrr}
+    \toprule
+    & & \texttt{vector} & \multicolumn{3}{c}{\texttt{hybrid-local} by graph} \\
+    \cmidrule(lr){4-6}
+    Metric & $k$ & (control) & \texttt{gemma@0} & \texttt{gptoss@0} & \texttt{gptoss@1} \\
+    \midrule
+    Hit rate &  1 & 0.146 & 0.083 & 0.208 & 0.208 \\
+    Hit rate &  5 & 0.604 & 0.542 & 0.479 & 0.563 \\
+    Hit rate &  8 & 0.708 & 0.604 & 0.646 & 0.667 \\
+    Hit rate & 10 & 0.708 & 0.688 & 0.708 & 0.708 \\
+    Hit rate & 20 & 0.896 & 0.813 & 0.833 & 0.771 \\
+    \midrule
+    Recall &  1 & 0.090 & 0.042 & 0.104 & 0.128 \\
+    Recall &  5 & 0.406 & 0.314 & 0.245 & 0.356 \\
+    Recall &  8 & 0.493 & 0.375 & 0.352 & 0.453 \\
+    Recall & 10 & 0.516 & 0.479 & 0.429 & 0.470 \\
+    Recall & 20 & 0.644 & 0.609 & 0.608 & 0.571 \\
+    \midrule
+    MRR &  1 & 0.146 & 0.083 & 0.208 & 0.208 \\
+    MRR &  5 & 0.325 & 0.253 & 0.296 & 0.322 \\
+    MRR &  8 & 0.340 & 0.262 & 0.321 & 0.335 \\
+    MRR & 10 & 0.340 & 0.271 & 0.328 & 0.340 \\
+    MRR & 20 & 0.354 & 0.281 & 0.337 & 0.345 \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \footnotesize
+  Matched cutoffs throughout: the median retrieved set size equals $k$ in every cell, so hit rate
+  and recall are comparable across arms. Both arms shown are ranked, so MRR is meaningful for
+  both; see Table~\ref{tab:graph-global-constant} for the arm that is withheld one. Latency is
+  omitted deliberately --- each sweep ran two arms together, so all three result files carry
+  \texttt{latency\_comparable}~=~\texttt{false}.
+\end{table}

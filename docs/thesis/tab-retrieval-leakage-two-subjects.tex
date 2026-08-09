@@ -1,0 +1,59 @@
+% docs/thesis/tab-retrieval-leakage-two-subjects.tex
+% Measured 2026-08-09 | apd 187 materials / 1193 chunks, gold evals/apd/gold.jsonl (48 questions)
+%                     | passc 15 materials / 341 chunks, gold evals/passc/gold.jsonl (76 questions)
+% Source: the `at_k` block, field `leakage`, of
+%   apd   results-gptoss-glean0.json (ts 2026-08-09T08:57:48Z)
+%   passc evals/passc/results-20260809T111747+0000.json (ts 2026-08-09T11:17:47Z)
+%   divided by each run's recorded leakage_base_rate:
+%   apd   0.037720033528918694 = 45 of 1193 chunks (Examen.md 24, Quiz 1 - ThreadsSynchro.pdf 10,
+%         REZUMAT.md 8, Quiz 2 - OpenMP.pdf 3), cross-checked against store.db
+%   passc 0.014662756598240470 =  5 of  341 chunks (subiecte.md), cross-checked against store.db
+% Config: both subjects on their own openai/gpt-oss-120b, graph.gleanings=0,
+%   graph.context_window=16384 graph; rerank=true; arms vector + hybrid-local; provider-free.
+% WHY ENRICHMENT, NOT THE RAW RATE: question-source files are themselves indexed, so a raw leakage
+%   rate rewards an arm for returning more of the corpus, and the two subjects' base rates differ
+%   by 2.6x so raw rates are not comparable across subjects at all. Reported as
+%   leakage / leakage_base_rate.
+% Matched cutoffs only (median_retrieved_n == k in every cell); errors = 0 in both runs.
+% Raw rank-1 leakage rates behind the k=1 column, for the "roughly half" claim in the caption:
+%   apd vector 0.5625, apd hybrid-local 0.2708; passc vector 0.4605, passc hybrid-local 0.2895.
+% NOT a fourth cell of the apd three-build experiment: Table~\ref{tab:retrieval-leakage} varies the
+%   graph on one corpus; this table varies the corpus. The apd columns here are that table's
+%   vector and gptoss@0 columns.
+\begin{table}[htbp]
+  \centering
+  \caption{Question-source leakage as enrichment over the corpus base rate, both pilot subjects
+    (apd $n=48$, passc $n=76$, 0 errors). A value of 1.0 would mean the returned set contains
+    question-source chunks at exactly the rate they occur in the corpus. Contamination is
+    concentrated at rank 1 on both subjects and is far more extreme on passc, whose base rate is
+    2.6 times lower: \texttt{vector}'s first hit is question-source material 56.3\% of the time on
+    apd and 46.1\% on passc, so on both corpora roughly half of all rank-1 chunks are the question
+    rather than the material answering it. \texttt{hybrid-local} is consistently the less
+    contaminated arm at $k=1$ on both subjects.}
+  \label{tab:retrieval-leakage-two-subjects}
+  \begin{tabular}{rrrrr}
+    \toprule
+    & \multicolumn{2}{c}{apd (base 3.77\%)} & \multicolumn{2}{c}{passc (base 1.47\%)} \\
+    \cmidrule(lr){2-3} \cmidrule(lr){4-5}
+    $k$ & \texttt{vector} & \texttt{hybrid-local} & \texttt{vector} & \texttt{hybrid-local} \\
+    \midrule
+     1 & 14.91 &  7.18 & 31.41 & 19.74 \\
+     8 &  3.59 &  3.45 &  7.29 &  7.29 \\
+    20 &  2.54 &  2.26 &  5.88 &  4.98 \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \footnotesize
+  Enrichment factor $=$ measured leakage rate $/$ corpus base rate. The base rates recorded in the
+  result files are $0.0377$ on apd (45 of 1193 chunks, across four indexed exam and quiz files) and
+  $0.0147$ on passc (5 of 341 chunks, all from \texttt{subiecte.md}). Raw rates are not quoted:
+  because question-source files are part of the indexed corpus, a raw rate flatters whichever arm
+  returns the larger share of the corpus, and the two subjects' base rates differ enough that raw
+  rates would not be comparable across them either. Gold \texttt{expected} labels may never name a
+  question-source file --- \texttt{eval/gold.py} rejects that at load --- so this contamination
+  never inflates a hit directly; it does mean the absolute hit rates in
+  Table~\ref{tab:retrieval-quality-two-subjects} are optimistic on both subjects, and it is the
+  argument for a contamination-controlled re-index. It does not affect the arm comparison: both
+  arms face the same corpus.
+\end{table}

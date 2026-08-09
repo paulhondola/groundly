@@ -1,0 +1,64 @@
+% docs/thesis/tab-retrieval-mcnemar-two-subjects.tex
+% Measured 2026-08-09 | apd 187 materials / 1193 chunks, gold evals/apd/gold.jsonl (48 questions)
+%                     | passc 15 materials / 341 chunks, gold evals/passc/gold.jsonl (76 questions)
+% Test: exact two-sided McNemar (binomial on the discordant pairs, eval/metrics.py mcnemar) on the
+%   paired per-question hit indicator, hybrid-local against the vector baseline, computed by the
+%   harness and read from the `significance` block of
+%   apd   results-gptoss-glean0.json (ts 2026-08-09T08:57:48Z)
+%   passc evals/passc/results-20260809T111747+0000.json (ts 2026-08-09T11:17:47Z)
+% Arms/config: vector + hybrid-local, rerank=true, provider-free; each subject on its own
+%   openai/gpt-oss-120b graph.gleanings=0 graph.context_window=16384 graph
+%   (extraction_fingerprint 825dbb84... on both manifests).
+% Matched cutoffs only -- the harness computes significance at each `at_k` cutoff, never at the
+%   arms' natural set sizes (that comparison inherits exactly the set-size confound and reads as a
+%   tie). errors = 0 in both runs, so no pair is dropped.
+% RESOLVING POWER, derived exactly from the test the harness runs, not estimated: with d discordant
+%   pairs all favouring one arm, p = 2/2^d, so p < 0.05 requires d >= 6 (p = 0.03125; d = 5 gives
+%   0.0625). That threshold is independent of n, so the smallest hit-rate gap either gold set can
+%   certify is 6/76 = 7.9 pp on passc and 6/48 = 12.5 pp on apd -- and only if every discordant
+%   question points the same way. Verified against eval/metrics.py's own binomial.
+% NOTE ON A PRIOR PHRASING: the 2026-08-09 prose write-up says "n = 76 needs roughly a 6-question
+%   split ...; n = 48 needs about 9". The first figure agrees with the exact test; the second does
+%   not reproduce from it (the 6-pair threshold does not depend on n). The exact-test statement
+%   above is what is published here.
+% MULTIPLICITY: 10 tests. None reaches p = 0.18, so no correction is needed to reach the
+%   conclusion, which is that neither gold set can resolve a difference at any cutoff.
+% NOT a fourth cell of the apd three-build experiment: Table~\ref{tab:retrieval-mcnemar} varies the
+%   graph on one corpus (15 tests); this table varies the corpus at one build procedure. The apd
+%   panel here is that table's gptoss@0 block.
+\begin{table}[htbp]
+  \centering
+  \caption{Paired significance of \texttt{hybrid-local} against the \texttt{vector} baseline on
+    both pilot subjects, exact two-sided McNemar on per-question hits at matched cutoffs (apd
+    $n=48$, passc $n=76$, 0 errors in both runs). Counts are discordant pairs. None of the ten
+    tests falls below $p=0.18$; at $k=8$, the cutoff the product actually assembles
+    (\texttt{retrieval.context\_k}), passc's entire disagreement is one question against one. The
+    defensible claim is therefore that the baseline leads consistently in direction
+    (Table~\ref{tab:retrieval-quality-two-subjects}) and that neither gold set can certify the size
+    of the gap.}
+  \label{tab:retrieval-mcnemar-two-subjects}
+  \begin{tabular}{rrrrrrr}
+    \toprule
+    & \multicolumn{3}{c}{apd ($n=48$)} & \multicolumn{3}{c}{passc ($n=76$)} \\
+    \cmidrule(lr){2-4} \cmidrule(lr){5-7}
+    $k$ & hybrid only & vector only & $p$ & hybrid only & vector only & $p$ \\
+    \midrule
+     1 & 8 &  5 & 0.581 & 10 & 12 & 0.832 \\
+     5 & 4 & 10 & 0.180 &  5 &  5 & 1.000 \\
+     8 & 3 &  6 & 0.508 &  1 &  1 & 1.000 \\
+    10 & 4 &  4 & 1.000 &  0 &  2 & 0.500 \\
+    20 & 0 &  3 & 0.250 &  1 &  0 & 1.000 \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \footnotesize
+  ``hybrid only'' counts questions \texttt{hybrid-local} hit and \texttt{vector} missed; ``vector
+  only'' the reverse. Concordant pairs carry no information for McNemar and do not enter the test.
+  What these gold sets can resolve: with $d$ discordant pairs all favouring one arm the exact test
+  gives $p = 2/2^{d}$, so $p<0.05$ needs $d \ge 6$ ($d=5$ gives $p=0.0625$). That threshold does
+  not depend on $n$, so the smallest hit-rate gap certifiable is $6/76 = 7.9$~pp on passc and
+  $6/48 = 12.5$~pp on apd, and only if every discordant question points the same way. No cutoff on
+  either subject comes close. No multiplicity correction is applied and none is required: at ten
+  tests with $\alpha=0.05$ about 0.5 spurious cells would be expected, and none appears.
+\end{table}

@@ -1,0 +1,72 @@
+% docs/thesis/tab-graph-structure-two-subjects.tex
+% Measured 2026-08-09 | apd 187 materials / 1193 chunks (corpus_hash cf0c85b4...)
+%                     | passc 15 materials / 341 chunks (corpus_hash b0b54cfa...)
+% Model, BOTH subjects: openai/gpt-oss-120b (DeepInfra)
+% Config, BOTH subjects: graph.context_window=16384, graph.gleanings=0, graph.entity_types
+%   (8 types), extraction prompt groundly/prompts/extract_graph.txt, graphrag 3.1.0,
+%   docling-hybrid chunking 512/0. Both manifests record the same extraction_fingerprint
+%   825dbb84cb109ed666ffdeb2bc0250a911a74e7637003d2774a303b18da646e5, so procedure is held
+%   constant and the corpus is the only thing that differs.
+% Source: entities.parquet, relationships.parquet, communities.parquet, community_reports.parquet,
+%   text_units.parquet under ~/.groundly/apd/graph/ and ~/.groundly/passc/graph/.
+%   The apd graph directory is the shipped gptoss@0 build -- its stats.json is byte-identical
+%   (md5 2b9ce4fe895fbb7fafa29ed4d8ba6613) to the archived baseline used in
+%   Table~\ref{tab:graph-shape}, so the apd column here equals that table's gptoss@0 column.
+% Definitions match the apd tables exactly: isolated = degree == 0; CONCEPT share is case-folded
+%   on entities.type; "reports at level<=2" uses the query path's ceiling
+%   (retrieval/graph.py COMMUNITY_LEVEL = 2, a ceiling not an equality);
+%   "chunks yielding no entities" counts text_units rows with no entity referencing their id
+%   (apd: 18 of 1193 ids collide on byte-identical text, passc: 2 of 341).
+% Extraction cache entry counts (cache/extract_graph/): apd 1175, passc 339 -- one per distinct
+%   chunk text on both, which independently confirms gleanings=0 on both builds.
+% NOT a fourth cell of the apd three-build experiment. Table~\ref{tab:graph-shape} and
+%   Table~\ref{tab:graph-composition} hold the corpus constant and vary the build; this table
+%   holds the build procedure constant and varies the corpus.
+\begin{table}[htbp]
+  \centering
+  \caption{Resulting graph structure for the two pilot subjects under an identical extraction
+    procedure (\texttt{openai/gpt-oss-120b}, \texttt{graph.gleanings}~$=0$, same prompt and entity
+    types --- both builds record extraction fingerprint \texttt{825dbb84}). The corpora produce
+    opposite shapes: passc yields 69\% more entities per chunk yet connects them far less, with
+    two thirds of apd's relationships per entity, a mean degree of 2.25 against 3.39, and a
+    quarter of its entities isolated. This is the signature of conceptual slide prose, which names
+    many ideas per slide and asserts few relations between them, against apd's code and algorithm
+    listings where a chunk names a tightly coupled cluster. Local search traverses relationships,
+    so the corpus whose question mix most favours the graph arm is also the one whose graph
+    structure least supports it.}
+  \label{tab:graph-structure-two-subjects}
+  \begin{tabular}{lrr}
+    \toprule
+    Quantity & apd & passc \\
+    \midrule
+    Chunks                                &   1193 &    341 \\
+    \midrule
+    Entities                              &   3704 &   1790 \\
+    Relationships                         &   6624 &   2055 \\
+    Communities                           &    783 &    320 \\
+    Community reports                     &    783 &    320 \\
+    Reports at level $\le$ 2              &    677 &    315 \\
+    Deepest community level               &      4 &      3 \\
+    \midrule
+    Entities per chunk                    &  3.105 &  5.249 \\
+    Relationships per entity              &  1.788 &  1.148 \\
+    Mean degree                           &  3.389 &  2.254 \\
+    Median degree                         &      2 &      2 \\
+    \midrule
+    Isolated entities (degree 0)          &    692 &    433 \\
+    Isolated share                        & 18.68\% & 24.19\% \\
+    Entities with frequency $=1$          & 72.33\% & 82.18\% \\
+    \texttt{CONCEPT}-typed share          & 47.52\% & 54.41\% \\
+    Chunks yielding no entities           & 18 of 1193 & 2 of 341 \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \footnotesize
+  Both graphs were built with the same model, prompt, entity types, gleaning count, context window
+  and chunker, so the differences here are properties of the corpora. The apd column is the shipped
+  \texttt{gptoss@0} build and is numerically identical to that column of
+  Tables~\ref{tab:graph-shape} and~\ref{tab:graph-composition}; it is repeated rather than
+  cross-referenced so this table can be read on its own. ``Reports at level $\le$ 2'' applies the
+  ceiling the query path uses (\texttt{retrieval/graph.py}, \texttt{COMMUNITY\_LEVEL}~$=2$).
+\end{table}

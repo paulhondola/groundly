@@ -1,0 +1,38 @@
+% docs/thesis/tab-graph-build-cost.tex
+% Measured 2026-08-09 | apd 187 materials / 1193 chunks | corpus_hash cf0c85b4...
+% Models: google/gemma-4-12b-qat (LM Studio, local, unpriced) | openai/gpt-oss-120b (DeepInfra,
+%   input $0.037/Mtok, output $0.17/Mtok as configured in [providers.extraction])
+% Config that moves these numbers: graph.gleanings (0/0/1), graph.context_window (12288/16384/16384),
+%   concurrent_requests (1/25/25), graph.entity_types (8 types), graph.report_call_class="extraction"
+%   (community reports billed to the same provider, so the USD column covers reports too)
+% Source: progress.db traces, kind='index', arm='graph-build', read LIVE via sqlite3 (trace ids 7, 13, 10).
+%   graphrag's own metrics are only flushed at interpreter exit, so the traces table is authoritative;
+%   the per-build engine logs agree exactly on all three totals (4111445 / 6028134 / 11732100),
+%   which is where the prompt/completion split comes from -- the traces store only the total.
+% NOTE: gemma@0 is deliberately unpriced. It ran against a local runtime; there is no provider
+%   invoice and no defensible $/Mtok to impute. An estimate is NOT given rather than invented.
+\begin{table}[htbp]
+  \centering
+  \caption{Graph build token volume and cost, apd corpus (1193 chunks), three builds. Token totals
+    are read from the traces table; the prompt/completion split is cross-validated against each
+    build's engine log. The local \texttt{gemma} build has no provider cost and none is imputed.}
+  \label{tab:graph-build-cost}
+  \small
+  \begin{tabular}{llrrrrr}
+    \toprule
+    Build & Extraction model & Gleanings & Prompt tok & Completion tok & Total tok & Cost (USD) \\
+    \midrule
+    \texttt{gemma@0}  & \texttt{google/gemma-4-12b-qat} & 0 & 3\,145\,810 & \phantom{0}965\,635 & \phantom{0}4\,111\,445 & --\textsuperscript{a} \\
+    \texttt{gptoss@0} & \texttt{openai/gpt-oss-120b}    & 0 & 4\,023\,153 & 2\,004\,981 & \phantom{0}6\,028\,134 & 0.4880 \\
+    \texttt{gptoss@1} & \texttt{openai/gpt-oss-120b}    & 1 & 8\,049\,496 & 3\,682\,604 & 11\,732\,100 & 0.9202 \\
+    \midrule
+    \multicolumn{6}{l}{Gleaning effect (\texttt{gptoss@0} $\rightarrow$ \texttt{gptoss@1}), same model, same corpus} & $\times$1.89 \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \footnotesize
+  \textsuperscript{a} Local runtime (LM Studio); no provider charge exists and no rate is imputed.
+  Its cost is 15.02 h of wall clock on the student's own machine, reported in
+  Table~\ref{tab:graph-build-time}.
+\end{table}

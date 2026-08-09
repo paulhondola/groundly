@@ -1,0 +1,41 @@
+% docs/thesis/tab-graph-extraction-procedure.tex
+% Measured 2026-08-09 | apd 187 materials / 1193 chunks | corpus_hash cf0c85b4...
+% Models: google/gemma-4-12b-qat (local) | openai/gpt-oss-120b (DeepInfra)
+% Config: graph.gleanings 0/0/1, graph.context_window 12288/16384/16384, graph.entity_types (8 types),
+%   extraction prompt groundly/prompts/extract_graph.txt (identical in all three -- confirmed by
+%   recomputing extraction_fingerprint over prompt+types: gemma and gptoss@1 both recorded
+%   ef96bcbf... which is sha256(prompt+types) under the pre-gleanings formula, and gptoss@0 recorded
+%   825dbb84... = sha256(prompt+types+"gleanings=0"). Same prompt, same types, all three.)
+% Source: file count and contents of ~/.groundly/.baselines/<cell>/cache/extract_graph/
+%   Raw records counted as occurrences of ("entity" and ("relationship" in
+%   result.response.choices[0].message.content of each cached entry.
+% Denominator note: the cache is keyed by prompt hash, and 18 of the 1193 apd chunks are
+%   byte-identical to another chunk (1175 distinct chunk texts). "per chunk" below uses 1193;
+%   per distinct chunk text the call counts are exactly 1.000 / 1.000 / 2.002.
+\begin{table}[htbp]
+  \centering
+  \caption{Extraction procedure per build, apd corpus. One gleaning round doubles the call count
+    exactly and roughly doubles the raw record yield, but the fraction of raw entity records that
+    survive deduplication into the final graph is close to constant across all three builds.}
+  \label{tab:graph-extraction-procedure}
+  \begin{tabular}{lrrr}
+    \toprule
+    Quantity & \texttt{gemma@0} & \texttt{gptoss@0} & \texttt{gptoss@1} \\
+    \midrule
+    Extraction calls                       &  1175 &  1175 &  2352 \\
+    Calls per chunk                        & 0.985 & 0.985 & 1.972 \\
+    Raw entity records                     &  7430 &  9750 & 17803 \\
+    Raw entity records per chunk           &  6.23 &  8.17 & 14.92 \\
+    Raw entity records per call            &  6.32 &  8.30 &  7.57 \\
+    Raw relationship records               &  6130 & 10751 & 21204 \\
+    Raw relationships per raw entity       & 0.825 & 1.103 & 1.191 \\
+    \midrule
+    Raw entity records $\rightarrow$ final entities & 36.1\% & 38.0\% & 34.7\% \\
+    Deduplication factor                   & 2.77$\times$ & 2.63$\times$ & 2.88$\times$ \\
+    \midrule
+    \texttt{summarize\_descriptions} calls &  1620 &  2038 &  3651 \\
+    \texttt{community\_reporting} calls    &   609 &   783 &  1301 \\
+    Total provider requests (all stages)   &  3422 &  4014 &  7338 \\
+    \bottomrule
+  \end{tabular}
+\end{table}

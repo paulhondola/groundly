@@ -182,15 +182,28 @@ def test_prompt_budgets_never_exceed_graphrag_defaults(window):
     assert b.community_max_length <= 2000
 
 
-def test_prompt_budgets_enable_gleanings_only_on_a_large_window():
-    """The gleaning round replays prompt + chunk + the model's whole first answer,
-    roughly doubling peak context for little gain on a <=512-token chunk."""
+def test_gleanings_default_to_off_at_every_window():
+    """The window must not *enable* gleaning on its own. It used to: `1 if
+    context_window >= 16384 else 0` meant raising the window for capacity reasons
+    silently doubled extraction calls and changed the shape of the graph, with nothing
+    recording that the two builds differed in anything but the model."""
     from groundly.llm.graphrag_adapter import prompt_budgets
 
-    assert prompt_budgets(4096).max_gleanings == 0
-    assert prompt_budgets(8192).max_gleanings == 0
-    assert prompt_budgets(16384).max_gleanings == 1
-    assert prompt_budgets(131072).max_gleanings == 1
+    for window in (4096, 8192, 12288, 16384, 131072):
+        assert prompt_budgets(window).max_gleanings == 0
+
+
+def test_the_window_clamps_gleanings_but_never_grants_them():
+    """A gleaning round replays prompt + chunk + the model's whole first answer, so it
+    roughly doubles peak context and cannot fit below 16384 beside the stage budgets.
+    The window is therefore a ceiling on the student's choice, never the choice itself."""
+    from groundly.llm.graphrag_adapter import prompt_budgets
+
+    assert prompt_budgets(8192, 2).max_gleanings == 0  # asked for 2, window forbids it
+    assert prompt_budgets(12288, 1).max_gleanings == 0
+    assert prompt_budgets(16384, 0).max_gleanings == 0  # window allows, student declined
+    assert prompt_budgets(16384, 1).max_gleanings == 1
+    assert prompt_budgets(131072, 2).max_gleanings == 2
 
 
 # --- provider response compatibility ----------------------------------------------------
@@ -507,3 +520,16 @@ def test_fingerprint_changes_with_prompt_and_with_types():
     assert base != extraction_fingerprint("prompt", ["concept"])
     # order counts: graphrag interpolates the list as given, so a reorder is a change
     assert base != extraction_fingerprint("prompt", ["algorithm", "concept"])
+
+
+def test_fingerprint_changes_with_gleanings():
+    """A gleaning round is a second extraction call per chunk, so two builds differing
+    only in it are genuinely different builds — apd produced 2,685 entities at 0 and
+    6,184 at 1. Folding it into the fingerprint is what makes `graph_is_stale` say so
+    and offer a rebuild, without adding a manifest field."""
+    from groundly.llm.graphrag_adapter import extraction_fingerprint
+
+    types = ["concept", "algorithm"]
+    assert extraction_fingerprint("p", types, 0) != extraction_fingerprint("p", types, 1)
+    assert extraction_fingerprint("p", types, 1) != extraction_fingerprint("p", types, 2)
+    assert extraction_fingerprint("p", types, 0) == extraction_fingerprint("p", types)
