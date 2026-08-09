@@ -1,0 +1,76 @@
+% docs/thesis/tab-retrieval-quality-two-subjects.tex
+% Measured 2026-08-09 | apd 187 materials / 1193 chunks, gold evals/apd/gold.jsonl (48 questions)
+%                     | passc 15 materials / 341 chunks, gold evals/passc/gold.jsonl (76 questions)
+% Arms: vector, hybrid-local. retrieval.rerank=true, retrieval.context_k=8. Both runs provider-free
+%   (local search aborts at on_context -- retrieval/graph.py _AbortAfterContext).
+% Graphs under test, one per subject, SAME procedure on both: openai/gpt-oss-120b,
+%   graph.gleanings=0, graph.context_window=16384, entity_types (8 types),
+%   extraction_fingerprint 825dbb84... on both manifests.
+% Embedding pin identical on both subjects: BAAI/bge-m3 @ hf_revision
+%   5617a9f61b028005a4858fdac845db406aefb181.
+% Source: the `at_k` block ONLY of
+%   apd   results-gptoss-glean0.json  (ts 2026-08-09T08:57:48Z, n=48, errors=0, partial=false)
+%   passc evals/passc/results-20260809T111747+0000.json (ts 2026-08-09T11:17:47Z, n=76, errors=0,
+%         partial=false)
+% SET-SIZE MATCHING: every row is a matched cutoff -- median_retrieved_n == k in all 40 cells.
+%   The by_arm / by_arm_class / by_arm_lang blocks are at NATURAL set sizes (hybrid-local returns a
+%   median of 42 chunks on apd and 31 on passc against vector's 20 on both) and read backwards;
+%   they are not used here and must not be quoted.
+% errors = 0 in both runs, so no question is excluded and n is the full gold set in every cell.
+% NO LATENCY COLUMN: latency_comparable=false in both files (two arms shared each sweep; a resident
+%   model taxes the other arm, measured 5.4x). A time axis would need four single-arm reruns; none
+%   were made and none is estimated.
+% BOTH ARMS ARE RANKED, so MRR is reported for both. The withheld arm is graph-global
+%   (agents.ask.UNRANKED_ARMS) -- see Table~\ref{tab:graph-global-two-subjects}.
+% NOT a fourth cell of the apd three-build experiment: Table~\ref{tab:retrieval-quality-by-graph}
+%   varies the graph on one corpus; this table varies the corpus at one build procedure. The apd
+%   columns here are that table's gptoss@0 and vector columns.
+\begin{table}[htbp]
+  \centering
+  \caption{Retrieval quality at matched cutoffs on both pilot subjects, each on its own
+    \texttt{gpt-oss-120b} \texttt{gleanings}~$=0$ graph (apd $n=48$, passc $n=76$, 0 errors in both
+    runs). Only one direction survives the corpus change: \texttt{vector} leads on MRR at every
+    cutoff $k \ge 5$ on both subjects. Everything else is corpus-dependent --- on passc the arms
+    tie exactly on hit rate at $k=5$ and $k=8$ while \texttt{vector} keeps the recall lead, and the
+    rank-1 result reverses outright, with \texttt{hybrid-local} ahead on apd (0.208 against 0.146)
+    and behind on passc (0.434 against 0.461). Neither rank-1 reading generalises.}
+  \label{tab:retrieval-quality-two-subjects}
+  \begin{tabular}{lrrrrr}
+    \toprule
+    & & \multicolumn{2}{c}{apd ($n=48$)} & \multicolumn{2}{c}{passc ($n=76$)} \\
+    \cmidrule(lr){3-4} \cmidrule(lr){5-6}
+    Metric & $k$ & \texttt{hybrid-local} & \texttt{vector} & \texttt{hybrid-local} & \texttt{vector} \\
+    \midrule
+    Hit rate &  1 & 0.208 & 0.146 & 0.434 & 0.461 \\
+    Hit rate &  5 & 0.479 & 0.604 & 0.855 & 0.855 \\
+    Hit rate &  8 & 0.646 & 0.708 & 0.947 & 0.947 \\
+    Hit rate & 10 & 0.708 & 0.708 & 0.947 & 0.974 \\
+    Hit rate & 20 & 0.833 & 0.896 & 0.987 & 0.974 \\
+    \midrule
+    Recall &  1 & 0.104 & 0.090 & 0.202 & 0.252 \\
+    Recall &  5 & 0.245 & 0.406 & 0.533 & 0.592 \\
+    Recall &  8 & 0.352 & 0.493 & 0.622 & 0.658 \\
+    Recall & 10 & 0.429 & 0.516 & 0.654 & 0.731 \\
+    Recall & 20 & 0.608 & 0.644 & 0.839 & 0.803 \\
+    \midrule
+    MRR &  1 & 0.208 & 0.146 & 0.434 & 0.461 \\
+    MRR &  5 & 0.296 & 0.325 & 0.591 & 0.621 \\
+    MRR &  8 & 0.321 & 0.340 & 0.604 & 0.635 \\
+    MRR & 10 & 0.328 & 0.340 & 0.604 & 0.638 \\
+    MRR & 20 & 0.337 & 0.354 & 0.607 & 0.638 \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \footnotesize
+  Matched cutoffs throughout: the median retrieved set size equals $k$ in all 40 cells, so hit rate
+  and recall are comparable across arms and across subjects. The arms' natural set sizes differ
+  sharply (\texttt{hybrid-local} returns a median of 42 chunks on apd and 31 on passc against
+  \texttt{vector}'s 20) and the unmatched rows in the result files are not used. Both arms are
+  ranked, so MRR is reported for both; the arm whose MRR is withheld is \texttt{graph-global}
+  (Table~\ref{tab:graph-global-two-subjects}). Latency is omitted deliberately: each sweep ran two
+  arms together, so both result files carry \texttt{latency\_comparable}~=~\texttt{false}. passc
+  scores far higher than apd on every metric --- it is a smaller and more homogeneous corpus, and
+  the absolute levels on both subjects are optimistic for the contamination reason quantified in
+  Table~\ref{tab:retrieval-leakage-two-subjects}.
+\end{table}

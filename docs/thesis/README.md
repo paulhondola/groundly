@@ -10,6 +10,24 @@ preamble and must load `booktabs` (plus `siunitx` if a table uses `S` columns).
 \input{docs/thesis/tab-graph-build-cost}
 ```
 
+## Two families, and why they must not merge
+
+The tables fall into two groups that answer different kinds of question:
+
+- **Controlled experiment, apd only** — `tab-graph-build-time`, `tab-graph-build-cost`,
+  `tab-graph-shape`, `tab-graph-composition`, `tab-graph-extraction-procedure`,
+  `tab-graph-two-factor`, `tab-graph-global-constant`, `tab-retrieval-quality-by-graph`,
+  `tab-retrieval-mcnemar`, `tab-retrieval-leakage`. One corpus, three graph builds,
+  everything else held constant. Their columns are **build conditions**.
+- **Cross-subject comparison** — everything suffixed `-two-subjects`. Two corpora at one
+  fixed build procedure. Their columns are **subjects**.
+
+A second subject is not a fourth build condition. Adding a `passc` column to a table in the
+first group would read as one and would destroy what makes that group controlled; a new
+build of apd added to the second group would read as a third subject. Keep them apart.
+Where a cross-subject table repeats an apd figure (it is the shipped `gptoss@0` build in
+every case), it says so in its footnote and the two agree exactly.
+
 ## The comment header is the provenance
 
 Every file opens with a comment block naming the measurement date, the subject and its
