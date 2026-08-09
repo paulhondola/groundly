@@ -14,7 +14,7 @@ harness that calls none of them.
 """
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from llama_index.core.retrievers import BaseRetriever
@@ -119,6 +119,32 @@ of decision 28 — retiring an arm from the product is not the same as deleting 
 
 UNRANKED_ARMS = frozenset(name for name, arm in ARM_TABLE.items() if not arm.ranked)
 """Arms whose returned order carries no relevance signal; MRR is withheld for these."""
+
+
+def validate_arms(names: Sequence[str]) -> None:
+    """Refuse a batch of arm names before any work starts, naming which mistake it was.
+
+    Shared by `groundly eval`'s argument parsing and `eval.runner.run`, because a check
+    in only one of them is a check that does not happen: the CLI screens first, so a
+    runner-only check is unreachable from the product surface, and a CLI-only check
+    leaves the library entry point unguarded.
+
+    Two messages, not one. "unknown arm" sends someone hunting a typo they did not make
+    when the real answer is that arm 4 has no implementation yet — it is in `ARM_TABLE`
+    and in docs/architecture/retrieval.md, just not dispatchable.
+    """
+    unknown = [n for n in names if n not in ARM_TABLE]
+    if unknown:
+        raise ValueError(
+            f"unknown retrieval arm(s): {', '.join(unknown)} — expected from: {', '.join(ARMS)}"
+        )
+    unimplemented = [n for n in names if ARM_TABLE[n].build is None]
+    if unimplemented:
+        raise ValueError(
+            f"retrieval arm(s) {', '.join(unimplemented)} are declared but not implemented "
+            f"— they exist in the architecture doc and as an interface stub only. "
+            f"Scoreable arms: {', '.join(ARMS)}"
+        )
 
 
 def retrieve_for_arm(

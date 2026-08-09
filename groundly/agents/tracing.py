@@ -69,7 +69,15 @@ class TracedAnswer:
     ) -> bool:
         if exc is not None:
             self._outcome = "error"
-            self._error = str(exc)
+            # `str()` only for `Exception`, reproducing the `except Exception` this
+            # replaced. `__exit__` also sees `BaseException`, so without the guard a
+            # KeyboardInterrupt mid-`ask` writes `error = ""` (that is what
+            # `str(KeyboardInterrupt())` is) where the old code left NULL — turning
+            # "the student interrupted it" into a zero-length error message in the
+            # traces table the thesis reads. `outcome` is "error" either way, exactly
+            # as before, because that is its initial value.
+            if isinstance(exc, Exception):
+                self._error = str(exc)
         try:
             record_trace(
                 self._conn,
@@ -111,8 +119,17 @@ class TracedAnswer:
         return REFUSAL
 
     def answered(self, answer: str, citations: list[Citation]) -> None:
-        """Both together, because an answer stored without its citations is the state
-        the grounding rule exists to forbid."""
+        """Record both together, so a caller cannot trace an answer and forget its
+        citations.
+
+        This does **not** enforce that `citations` is non-empty, and an earlier version
+        of this docstring implied it did. `resolve_citations` raises `NoCitationsError`
+        when the model cited nothing resolvable, which is the guard that matters — but
+        its return comprehension drops ids whose chunk vanished between retrieval and
+        the detail lookup, so it can still hand back `[]`. That path records
+        `outcome="answered"` with no citations, which the grounding rule forbids. It
+        predates this class and is not something a refactor should change silently.
+        """
         self._outcome = "answered"
         self._answer = answer
         self._citations = citations

@@ -75,6 +75,19 @@ def test_an_unimplemented_arm_is_refused_as_such_not_as_unknown(retrievable_subj
         retrieve_for_arm(retrievable_subject, "q", "adaptive", store=store)
 
 
+def test_validate_arms_distinguishes_the_two_mistakes():
+    """`retrieve_for_arm`'s message was unreachable from the only surface that takes
+    `--arms`: the CLI screened the list against `ARMS` first and said "unknown arm".
+    `validate_arms` is the shared screen, so both surfaces say the same thing."""
+    from groundly.retrieval.arms import validate_arms
+
+    validate_arms(["vector", "hybrid-local"])  # implemented arms pass
+    with pytest.raises(ValueError, match="declared but not implemented"):
+        validate_arms(["vector", "adaptive"])
+    with pytest.raises(ValueError, match="unknown retrieval arm"):
+        validate_arms(["vector", "graph-locul"])
+
+
 def test_unknown_arm_is_still_refused_as_unknown(retrievable_subject):
     from groundly.core.paths import subject_dir
     from groundly.core.store import SubjectStore

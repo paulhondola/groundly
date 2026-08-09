@@ -16,7 +16,7 @@ from pathlib import Path
 
 from groundly.eval import gold as gold_mod
 from groundly.eval.metrics import Scored, by_slice, mcnemar, sweep, unranked_arms
-from groundly.retrieval.arms import ARMS, UNRANKED_ARMS, retrieve_for_arm
+from groundly.retrieval.arms import UNRANKED_ARMS, retrieve_for_arm, validate_arms
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +62,7 @@ def run(
     # `retrieve_for_arm`, and the per-question handler below would file that as an
     # "error" — producing a results file that looks like a provider outage instead of
     # refusing to run. Fail here, before any model loads.
-    unknown = [a for a in arms if a not in ARMS]
-    if unknown:
-        raise ValueError(
-            f"unknown retrieval arm(s): {', '.join(unknown)} — expected from: {', '.join(ARMS)}"
-        )
+    validate_arms(arms)
 
     questions = gold_mod.load(gold_path)
     expected, source, warnings, base_rate = gold_mod.resolve(questions, store)

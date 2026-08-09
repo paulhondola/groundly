@@ -8,7 +8,7 @@ Expands [`groundly-spec.md`](../groundly-spec.md) §5. This layer is the thesis'
 |---|---|---|---|---|
 | 1. Vector baseline | `VectorRetriever` | dense + sparse + BM25 → RRF → rerank | Strong baseline; NotebookLM-class behavior | **Production arm** (`PRODUCT_ARMS`) |
 | 2. Pure GraphRAG | `GraphLocalRetriever`, `GraphGlobalRetriever` | MS `graphrag` local/global search | Does graph structure help multi-hop/global queries? | Eval only (decision 28) |
-| 3. Static hybrid | `HybridLocalRetriever` | graph local search → RRF with the baseline | Does cheap routing capture most of the gain? | Eval only (decision 28) |
+| 3. Static hybrid | `HybridLocalRetriever` | graph local search → RRF with the baseline | Does fusing the graph into the baseline beat the baseline alone? (originally: does cheap routing capture most of the gain? — the router came out at decision 28) | Eval only (decision 28) |
 | 4. Adaptive agentic | `AdaptiveRetriever` (stub) | retrieve → self-grade → escalate/rewrite (≤2 iterations) | Does self-evaluation beat static routing, at what cost? | Declared, not implemented |
 
 **The arms are data, not control flow.** `retrieval/arms.py`'s `ARM_TABLE` is the single inventory — one `Arm` entry per arm, carrying whether it is implemented, ranked, product-selectable and graph-dependent. `ARMS`, `PRODUCT_ARMS` and `UNRANKED_ARMS` are *derived* from it rather than maintained beside it, which is what stops the table and the dispatch from disagreeing. Arm 4 is in the table with no builder: `--arms adaptive` is refused up front as "declared but not implemented" rather than as an unknown arm, and never reaches the eval's per-question error tolerance.

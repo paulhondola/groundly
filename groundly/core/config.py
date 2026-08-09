@@ -50,7 +50,12 @@ _PROVIDER_FIELDS = (
 class ProviderConfig(BaseModel):
     base_url: str
     model: str
-    api_key: str = ""
+    # `repr=False` so the key cannot reach a log line, a traceback frame or a `%r` by
+    # accident — pydantic's generated repr printed it verbatim. It became worth closing
+    # when `ingestion/graph._BuildPlan` started carrying two of these through seven
+    # frames that previously held only scalars; the value is still readable in code, and
+    # `mask_key` below is what display paths use.
+    api_key: str = Field(default="", repr=False)
     input_price_per_mtok: float | None = None
     output_price_per_mtok: float | None = None
     # Provider/tier rate limits. Unset means no throttling — correct for a local
