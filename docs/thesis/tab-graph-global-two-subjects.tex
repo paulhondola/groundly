@@ -23,7 +23,7 @@
 %   context, which is what dynamic_community_selection=False does (map-reduce over all reports at
 %   the level). A live confirmation needs a provider-backed single-arm run on each subject.
 % UNRANKED ARM: GraphGlobalRetriever returns sorted(resolved), i.e. ascending SQLite rowid, and
-%   graph-global is in agents.ask.UNRANKED_ARMS. Its MRR would measure ingestion order, so it is
+%   graph-global is in retrieval.arms.UNRANKED_ARMS. Its MRR would measure ingestion order, so it is
 %   withheld rather than reported, and the arm is excluded from matched cutoffs and from
 %   significance testing entirely.
 % SEPARATE FILE, NOT A MERGE. tab-graph-global-constant.tex is the three-build apd series

@@ -40,7 +40,7 @@ from graphrag.query.indexer_adapters import read_indexer_entities
 from graphrag_llm.config import ModelConfig
 from llama_index.core.callbacks import CallbackManager
 from llama_index.core.retrievers import BaseRetriever
-from llama_index.core.schema import NodeWithScore, QueryBundle, TextNode
+from llama_index.core.schema import NodeWithScore, QueryBundle
 
 from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
@@ -54,6 +54,7 @@ from groundly.llm.graphrag_adapter import (
     graph_vector_store,
     register_bge_m3_embedding,
 )
+from groundly.retrieval.nodes import node_from_row
 
 logger = logging.getLogger(__name__)
 
@@ -181,17 +182,7 @@ def _nodes_from_chunk_ids(store: SubjectStore, chunk_ids: list[int]) -> list[Nod
         if row is None:  # entity/text-unit pointed at a chunk since removed — skip
             logger.debug("chunk %s vanished between fusion and detail lookup", chunk_id)
             continue
-        node = TextNode(
-            text=row["text"],
-            id_=str(chunk_id),
-            metadata={
-                "chunk_id": chunk_id,
-                "filename": row["filename"],
-                "page": row["page"],
-                "heading_path": row["heading_path"],
-            },
-        )
-        nodes.append(NodeWithScore(node=node, score=1.0 / (rank + 1)))
+        nodes.append(node_from_row(row, 1.0 / (rank + 1)))
     return nodes
 
 

@@ -40,9 +40,9 @@ def eval_(
     ] = None,
 ) -> None:
     """Score retrieval arms against a gold set. The vector arm needs no provider."""
-    from groundly.agents.ask import ARMS
     from groundly.eval.gold import GoldSetError
     from groundly.eval.runner import DEFAULT_AT_K, ArmDegradedError, run, write_results
+    from groundly.retrieval.arms import ARMS
 
     if at_k is None:
         ks = DEFAULT_AT_K

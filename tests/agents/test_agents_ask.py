@@ -195,7 +195,7 @@ class _FakeGraphLocalRetriever:
 
 
 class _FakeGraphGlobalRetriever:
-    """Stubs `GraphGlobalRetriever` at ask.py's import site."""
+    """Stubs `GraphGlobalRetriever` at arms.py's import site."""
 
     instances: list["_FakeGraphGlobalRetriever"] = []
 
@@ -212,10 +212,17 @@ class _FakeGraphGlobalRetriever:
 
 
 class _NotBuiltRetriever:
-    """Stubs either graph retriever to simulate a subject with no graph built yet."""
+    """Stubs either graph retriever to simulate a subject with no graph built yet.
+
+    `instances` exists because the *real* retriever also raises `GraphNotBuiltError` on
+    a graph-less fixture: without recording construction, a degradation test passes
+    identically whether the patch took effect or not."""
+
+    instances: list["_NotBuiltRetriever"] = []
 
     def __init__(self, subject):
         self.subject = subject
+        _NotBuiltRetriever.instances.append(self)
 
     def retrieve(self, query):
         raise GraphNotBuiltError()
@@ -259,8 +266,8 @@ def test_ask_cannot_reach_a_graph_arm(retrievable_subject, monkeypatch, stub_cha
         def __init__(self, *a, **kw):
             raise AssertionError("ask() reached a retired graph arm — decision 28")
 
-    monkeypatch.setattr("groundly.agents.ask.GraphLocalRetriever", _Forbidden)
-    monkeypatch.setattr("groundly.agents.ask.GraphGlobalRetriever", _Forbidden)
+    monkeypatch.setattr("groundly.retrieval.graph.GraphLocalRetriever", _Forbidden)
+    monkeypatch.setattr("groundly.retrieval.arms.GraphGlobalRetriever", _Forbidden)
     chat = stub_chat("Deadlocks need mutual exclusion [chunk 1].")
     monkeypatch.setattr("groundly.agents.ask.complete", chat)
 
@@ -282,7 +289,7 @@ def test_ask_takes_no_arm_parameter(retrievable_subject):
 def test_product_arms_is_a_strict_subset_of_arms():
     """`ARMS` is what the eval may score; `PRODUCT_ARMS` is what a user question may
     reach. Strict, because the day they are equal the retirement has been undone."""
-    from groundly.agents.ask import ARMS, PRODUCT_ARMS
+    from groundly.retrieval.arms import ARMS, PRODUCT_ARMS
 
     assert set(PRODUCT_ARMS) < set(ARMS)
     assert set(PRODUCT_ARMS) == {"vector"}
@@ -294,13 +301,14 @@ def test_retrieve_for_arm_graph_not_built_fallback_logs_info(
     """The degradation moved with the arms: no product path reaches it any more, but the
     eval still runs graph arms against subjects that may have no graph, and that must be
     visible at INFO rather than silently scoring as the baseline."""
-    from groundly.agents.ask import retrieve_for_arm
+    from groundly.retrieval.arms import retrieve_for_arm
     from groundly.core.store import SubjectStore
 
-    monkeypatch.setattr("groundly.agents.ask.GraphLocalRetriever", _NotBuiltRetriever)
+    monkeypatch.setattr("groundly.retrieval.graph.GraphLocalRetriever", _NotBuiltRetriever)
+    _NotBuiltRetriever.instances.clear()
     store = SubjectStore(subject_dir(retrievable_subject) / "store.db")
 
-    with caplog.at_level("INFO", logger="groundly.agents.ask"):
+    with caplog.at_level("INFO", logger="groundly.retrieval.arms"):
         nodes, _path, arm = retrieve_for_arm(
             retrievable_subject,
             "what causes a deadlock?",
@@ -312,6 +320,7 @@ def test_retrieve_for_arm_graph_not_built_fallback_logs_info(
 
     assert arm == "vector"
     assert nodes
+    assert _NotBuiltRetriever.instances, "the stubbed graph arm was never reached"
     assert any(
         "degrading to vector-only" in r.message and r.levelname == "INFO" for r in caplog.records
     )
@@ -323,7 +332,7 @@ def test_retrieve_for_arm_graph_not_built_fallback_logs_info(
 def test_retrieve_for_arm_rejects_an_unknown_arm(retrievable_subject):
     """A typo in `groundly eval --arms` must fail loudly, not silently score the
     baseline under another arm's name."""
-    from groundly.agents.ask import retrieve_for_arm
+    from groundly.retrieval.arms import retrieve_for_arm
     from groundly.core.store import SubjectStore
 
     store = SubjectStore(subject_dir(retrievable_subject) / "store.db")
@@ -334,7 +343,7 @@ def test_retrieve_for_arm_rejects_an_unknown_arm(retrievable_subject):
 def test_retrieve_for_arm_needs_no_chat_provider(retrievable_subject, monkeypatch):
     """Zero-key retrieval is what makes the eval runnable offline — no provider is
     configured in this test and none is required."""
-    from groundly.agents.ask import retrieve_for_arm
+    from groundly.retrieval.arms import retrieve_for_arm
     from groundly.core.store import SubjectStore
 
     def _explode(*a, **k):
@@ -356,10 +365,11 @@ def test_retrieve_for_arm_needs_no_chat_provider(retrievable_subject, monkeypatc
 
 
 def test_retrieve_for_arm_reports_degradation_in_arm_actual(retrievable_subject, monkeypatch):
-    from groundly.agents.ask import retrieve_for_arm
+    from groundly.retrieval.arms import retrieve_for_arm
     from groundly.core.store import SubjectStore
 
-    monkeypatch.setattr("groundly.agents.ask.GraphGlobalRetriever", _NotBuiltRetriever)
+    monkeypatch.setattr("groundly.retrieval.arms.GraphGlobalRetriever", _NotBuiltRetriever)
+    _NotBuiltRetriever.instances.clear()
     store = SubjectStore(subject_dir(retrievable_subject) / "store.db")
     _nodes, _path, arm = retrieve_for_arm(
         retrievable_subject,
@@ -370,16 +380,17 @@ def test_retrieve_for_arm_reports_degradation_in_arm_actual(retrievable_subject,
         rerank=False,
     )
     assert arm == "vector"  # caller sees the degradation; the eval treats it as fatal
+    assert _NotBuiltRetriever.instances, "the stubbed graph arm was never reached"
 
 
 def test_retrieve_for_arm_runs_the_graph_global_arm_for_the_eval(retrievable_subject, monkeypatch):
     """The arms are retired from the product path, not deleted — `groundly eval --arms`
     is what keeps the negative result reproducible from shipped code, so the eval's entry
     point must still reach graphrag."""
-    from groundly.agents.ask import retrieve_for_arm
+    from groundly.retrieval.arms import retrieve_for_arm
     from groundly.core.store import SubjectStore
 
-    monkeypatch.setattr("groundly.agents.ask.GraphGlobalRetriever", _FakeGraphGlobalRetriever)
+    monkeypatch.setattr("groundly.retrieval.arms.GraphGlobalRetriever", _FakeGraphGlobalRetriever)
     _FakeGraphGlobalRetriever.instances.clear()
     _no_vector_retrieval(monkeypatch)  # global search never touches the vector arm
     store = SubjectStore(subject_dir(retrievable_subject) / "store.db")

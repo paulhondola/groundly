@@ -1,9 +1,10 @@
 """Arm 1 (vector baseline): dense + learned-sparse + BM25, fused by reciprocal rank
-fusion, reranked by a cross-encoder (default ON). The `BaseRetriever` interface is
+fusion, reranked by a cross-encoder (default ON) — and arm 3 (static hybrid), which
+fuses arm 2's local search into that same baseline. The `BaseRetriever` interface is
 the "four arms, one interface" gate — every arm returns `NodeWithScore` with the same
-metadata shape (docs/architecture/retrieval.md).
+metadata shape (retrieval/nodes.py, docs/architecture/retrieval.md).
 
-`search()` is the zero-key shared function CLI `search` (and later the MCP tool)
+`search()` is the zero-key shared function CLI `search` (and the MCP `search` tool)
 call directly; it never requires a provider and always logs a `kind='search'` trace.
 """
 
@@ -12,9 +13,10 @@ import time
 
 from llama_index.core.callbacks import CallbackManager
 from llama_index.core.retrievers import BaseRetriever
-from llama_index.core.schema import NodeWithScore, QueryBundle, TextNode
+from llama_index.core.schema import NodeWithScore, QueryBundle
 
 from groundly.core.store import SubjectStore
+from groundly.retrieval.nodes import chunk_ids, node_from_row
 
 logger = logging.getLogger(__name__)
 
@@ -136,21 +138,65 @@ class VectorRetriever(BaseRetriever):
             if row is None:  # removed between fusion and detail lookup — skip, don't crash
                 logger.debug("chunk %s vanished between fusion and detail lookup", chunk_id)
                 continue
-            node = TextNode(
-                text=row["text"],
-                id_=str(chunk_id),
-                metadata={
-                    "chunk_id": chunk_id,
-                    "filename": row["filename"],
-                    "page": row["page"],
-                    "heading_path": row["heading_path"],
-                },
-            )
-            nodes.append(NodeWithScore(node=node, score=float(score)))
+            nodes.append(node_from_row(row, score))
         logger.debug(
             "path=%s top=%s", path, [(n.node.metadata["chunk_id"], n.score) for n in nodes]
         )
         return nodes
+
+
+class HybridLocalRetriever(BaseRetriever):
+    """Arm 3 (static hybrid): graphrag local search RRF-fused with the vector baseline.
+
+    Groundly's production arm until decision 28, and a published thesis result — the
+    fusion dilutes the baseline's ranking on this corpus (MRR 0.28 against 0.35) while
+    adding a 15-hour graph build. Retired from `PRODUCT_ARMS`, kept scoreable, because
+    the comparison between the arms *is* the contribution.
+
+    This lived as an `elif` branch inside `agents/ask.py` until it became a class. That
+    put the one arm the docs describe as sharing the `BaseRetriever` interface in the
+    agents layer, outside the interface it was supposed to demonstrate.
+
+    **Degradation is not handled here.** `GraphNotBuiltError` propagates: whether a
+    missing graph should fall back to the baseline is a dispatch question, because the
+    answer changes what `arm_actual` reports and the eval refuses a run whose graph arm
+    silently became the baseline (`retrieval/arms.py`, `eval/runner.ArmDegradedError`).
+    """
+
+    def __init__(
+        self,
+        store: SubjectStore,
+        subject: str,
+        embedder=None,
+        reranker=None,
+        rerank: bool | None = None,
+        context_k: int | None = None,
+    ) -> None:
+        super().__init__(callback_manager=CallbackManager([]))
+        self.subject = subject
+        self.store = store
+        self._vector = VectorRetriever(
+            store, embedder=embedder, reranker=reranker, rerank=rerank, context_k=context_k
+        )
+        self.path: list[str] = []
+
+    def _retrieve(self, query_bundle: QueryBundle) -> list[NodeWithScore]:
+        # Lazy, and load-bearing: this module is the zero-key `search` path that the MCP
+        # server and `groundly search` import, while retrieval/graph.py pulls pandas and
+        # the whole graphrag stack at *its* module load. A top-level import here would put
+        # that cost on every host handshake, for an arm the product never selects
+        # (.claude/rules/architecture.md: never load models/heavy deps at MCP spawn).
+        from groundly.retrieval.graph import GraphLocalRetriever
+
+        query = query_bundle.query_str
+        graph = GraphLocalRetriever(self.subject)
+        graph_nodes = graph.retrieve(query)
+        vector_nodes = self._vector.retrieve(query)
+
+        by_id = {n.node.metadata["chunk_id"]: n for n in graph_nodes + vector_nodes}
+        fused = rrf([chunk_ids(graph_nodes), chunk_ids(vector_nodes)])
+        self.path = graph.path + self._vector.path
+        return [by_id[cid] for cid, _ in fused if cid in by_id]
 
 
 def search(
@@ -184,7 +230,7 @@ def search(
             query=query,
             arm="vector",
             path=retriever.path,
-            chunk_ids=[n.node.metadata["chunk_id"] for n in nodes],
+            chunk_ids=chunk_ids(nodes),
             outcome="results",
             latency_ms=latency_ms,
         )

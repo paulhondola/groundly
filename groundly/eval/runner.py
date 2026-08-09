@@ -14,9 +14,9 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from groundly.agents.ask import ARMS, UNRANKED_ARMS, retrieve_for_arm
 from groundly.eval import gold as gold_mod
 from groundly.eval.metrics import Scored, by_slice, mcnemar, sweep, unranked_arms
+from groundly.retrieval.arms import ARMS, UNRANKED_ARMS, retrieve_for_arm
 
 logger = logging.getLogger(__name__)
 

@@ -35,7 +35,7 @@ Measure any of these when asked, or when a run has just produced fresh data:
 
 **1. Set-size matching is not optional.** Arms return different numbers of chunks (`graph-global` measured 1,138–1,168 of apd's 1,193). Hit rate and recall are only comparable at a matched cutoff (`--at-k`). Any per-arm quality table must state its `k`, and must never quote the natural-set-size rows — those read backwards.
 
-**2. Rank metrics are withheld from unranked arms.** `graph-global` emits `sorted(chunk_ids)`, i.e. ascending SQLite rowid. Its MRR measures ingestion order. Print `--`, never a number, for arms in `agents.ask.UNRANKED_ARMS`.
+**2. Rank metrics are withheld from unranked arms.** `graph-global` emits `sorted(chunk_ids)`, i.e. ascending SQLite rowid. Its MRR measures ingestion order. Print `--`, never a number, for arms in `retrieval.arms.UNRANKED_ARMS`.
 
 **3. Latency is only comparable within a single-arm run.** A second arm in the same sweep taxes the first (measured 5.4× when a local model was resident). Every eval results file carries `latency_comparable`; if it is `false`, you may not put those latencies in a time table. Re-run single-arm if a time axis is needed.
 

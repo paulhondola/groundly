@@ -31,7 +31,7 @@ def reciprocal_rank(retrieved: list[int], expected: set[int]) -> float:
     rank inside it still matters to what the model actually reads first.
 
     Only meaningful when `retrieved` is ordered by relevance. Callers must skip it for
-    arms in `agents.ask.UNRANKED_ARMS`; `Scored.score` does.
+    arms in `retrieval.arms.UNRANKED_ARMS`; `Scored.score` does.
     """
     for i, cid in enumerate(retrieved, start=1):
         if cid in expected:
@@ -118,7 +118,7 @@ class Scored:
         ranked: bool = True,
     ) -> "Scored":
         """`ranked=False` for an arm whose returned order carries no relevance signal
-        (`agents.ask.UNRANKED_ARMS`). Rank-sensitive metrics are then left `None` rather
+        (`retrieval.arms.UNRANKED_ARMS`). Rank-sensitive metrics are then left `None` rather
         than computed over an arbitrary order and published as if they meant something.
         The caller passes this in so metrics stays import-free of the service layer."""
         return cls(
@@ -214,7 +214,7 @@ def by_slice(scored: list[Scored], *keys: str) -> list[Aggregate]:
 
 def is_ranked(s: "Scored") -> bool:
     """Whether this row's `retrieved` order carries a relevance signal. `reciprocal_rank`
-    is None exactly for arms in `agents.ask.UNRANKED_ARMS` (errored rows carry `error`)."""
+    is None exactly for arms in `retrieval.arms.UNRANKED_ARMS` (errored rows carry `error`)."""
     return s.reciprocal_rank is not None or s.error is not None
 
 
