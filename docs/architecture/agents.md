@@ -67,7 +67,9 @@ bypassed from the CLI.
 
 `vector retrieval (dense + sparse + BM25 → RRF → rerank) → trust-layered prompt assembly → generation (chat call class) → citation resolution → cited answer or "not covered" → trace row.`
 
-**No router, and one arm** (decision 28). The pipeline used to open with a `classify()` call selecting between `vector`, `hybrid-local` and `graph-global`; measured on apd the graph arms lost at every matched cutoff and the router beat a constant classifier by one question, so `ask()` now calls the vector arm unconditionally — one fewer provider round-trip per question. The arms and the router both survive in `groundly eval`, which is what keeps that negative result reproducible from shipped code. The graph itself is untouched and still serves `drill_down`/`overview` (UC-12).
+**No router, and one arm** (decision 28). The pipeline used to open with a `classify()` call selecting between `vector`, `hybrid-local` and `graph-global`. `ask()` now calls the vector arm unconditionally — one fewer provider round-trip per question — because on apd the vector arm leads hit and recall at every matched cutoff the product uses, and with one arm in `PRODUCT_ARMS` a classifier has nothing to select.
+
+**Shipping one arm is not the same as having one arm.** All three stay runnable through `retrieve_for_arm` and `groundly eval`, and what each costs in quality, money and time is a published comparison (`docs/thesis/`) rather than a deleted branch — the product takes the winner, the thesis takes the measurement. The graph itself is untouched and still serves `drill_down`/`overview` (UC-12).
 
 Exposed identically as the MCP `ask` tool and the `groundly ask` CLI verb — **the product tool and the evaluation instrument are one function**. Grounding is enforced inside this boundary: a response with zero resolvable citations is an error; insufficient context returns the refusal, never model knowledge.
 
