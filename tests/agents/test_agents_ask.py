@@ -179,8 +179,10 @@ def _graph_node(chunk_id):
 
 
 class _FakeGraphLocalRetriever:
-    """Stubs `GraphLocalRetriever` at ask.py's import site — always returns chunk 2,
-    never runs real graphrag."""
+    """Stubs `GraphLocalRetriever` at its defining module — always returns chunk 2,
+    never runs real graphrag. Patched on `retrieval/graph.py` rather than on a
+    re-import, because `HybridLocalRetriever` imports it inside `_retrieve` (to keep the
+    zero-key search path clear of graphrag) and so resolves it at call time."""
 
     instances: list["_FakeGraphLocalRetriever"] = []
 
