@@ -21,13 +21,12 @@ product path is not the same as deleting them, and the eval harness is what keep
 negative result reproducible from shipped code."""
 
 import logging
-import time
 from dataclasses import dataclass
 
 from groundly.agents.citations import Citation, NoCitationsError, resolve_citations  # noqa: F401  re-exported: mcp/server.py + cli/ask.py import NoCitationsError from here
 from groundly.agents.prompts import REFUSAL, assemble
+from groundly.agents.tracing import TracedAnswer
 from groundly.core.config import load_settings
-from groundly.core.progress import connect_progress, record_trace
 from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
 from groundly.llm.chat import complete
@@ -64,26 +63,12 @@ def ask(
 
     subj = Subject(subject)
     store = SubjectStore(subj.store_db_path)
-    progress_conn = connect_progress(subj.progress_db_path)
 
-    # Always None from `ask`: the column still means "what the router said", and the
-    # router no longer runs here. Kept on the result and the trace so a re-admitted
-    # router needs no schema change (see the module docstring).
-    router_label: str | None = None
-    arm: str | None = None  # what actually ran — `retrieve_for_arm` reports degradation
-    path: list[str] = []
-    chunk_ids: list[int] = []
-    outcome = "error"
-    answer: str | None = None
-    citations: list[Citation] = []
-    model: str | None = None
-    tokens: int | None = None
-    cost_usd: float | None = None
-    error: str | None = None
-    start = time.monotonic()
-
-    try:
-        nodes, path, arm = retrieve_for_arm(
+    # `router_label` is left at None throughout: the column still means "what the router
+    # said", and the router no longer runs here. Kept on the result and the trace so a
+    # re-admitted router needs no schema change (see the module docstring).
+    with TracedAnswer(subj, kind="ask", query=query) as trace:
+        nodes, trace.path, trace.arm = retrieve_for_arm(
             subject,
             query,
             "vector",
@@ -100,47 +85,17 @@ def ask(
         # Truncating here rather than after `chunk_ids` keeps citation resolution honest:
         # a chunk the model never saw must not be resolvable.
         nodes = nodes[: load_settings().retrieval.context_k]
-        chunk_ids = chunk_ids_of(nodes)
+        trace.chunk_ids = chunk_ids_of(nodes)
 
         if not nodes:
-            outcome = "refused"
-            answer = REFUSAL
-            return AskResult(answer=REFUSAL, citations=[], router_label=router_label)
+            return AskResult(answer=trace.refuse(), citations=[], router_label=None)
 
-        messages = assemble(query, nodes)
-        result = complete("chat", messages)
-        model, tokens, cost_usd = result.model, result.tokens, result.cost_usd
+        result = complete("chat", assemble(query, nodes))
+        trace.record_usage(result)
 
         if REFUSAL in result.text:
-            outcome = "refused"
-            answer = REFUSAL
-            return AskResult(answer=REFUSAL, citations=[], router_label=router_label)
+            return AskResult(answer=trace.refuse(), citations=[], router_label=None)
 
-        citations = resolve_citations(result.text, chunk_ids, store)
-        outcome = "answered"
-        answer = result.text
-        return AskResult(answer=answer, citations=citations, router_label=router_label)
-    except Exception as exc:
-        outcome = "error"
-        error = str(exc)
-        raise
-    finally:
-        latency_ms = int((time.monotonic() - start) * 1000)
-        record_trace(
-            progress_conn,
-            kind="ask",
-            query=query,
-            router_label=router_label,
-            arm=arm,
-            path=path or None,
-            chunk_ids=chunk_ids or None,
-            outcome=outcome,
-            answer=answer,
-            citations=[c.__dict__ for c in citations] if citations else None,
-            model=model,
-            tokens=tokens,
-            cost_usd=cost_usd,
-            latency_ms=latency_ms,
-            error=error,
-        )
-        progress_conn.close()
+        citations = resolve_citations(result.text, trace.chunk_ids, store)
+        trace.answered(result.text, citations)
+        return AskResult(answer=result.text, citations=citations, router_label=None)
