@@ -1,0 +1,37 @@
+% docs/thesis/tab-graph-composition.tex
+% Measured 2026-08-09 | apd 187 materials / 1193 chunks | corpus_hash cf0c85b4...
+% Models: google/gemma-4-12b-qat (local) | openai/gpt-oss-120b (DeepInfra)
+% Config: graph.gleanings 0/0/1, graph.context_window 12288/16384/16384, graph.entity_types
+%   "concept,algorithm,data_structure,theorem,technique,tool,metric,person"
+% Source: entities.parquet (degree, frequency, type) and text_units.parquet (entity_ids) in
+%   ~/.groundly/.baselines/<cell>/. Isolated = degree == 0. CONCEPT share is case-folded on `type`.
+% "Chunks with no entities" counted over all 1193 text_unit rows. 18 of those rows share an id
+%   with another row (byte-identical chunk text); their entity_ids were verified consistent across
+%   every colliding pair (0/18 inconsistent in all three builds), so the count is not a collision
+%   artifact. Over the 1175 distinct chunk texts the figures are 17 / 16 / 14.
+% Headline: the isolated-entity rate is a property of the extraction MODEL, not of gleaning.
+\begin{table}[htbp]
+  \centering
+  \caption{Graph quality composition per build, apd corpus. The isolated-entity share nearly
+    quadruples when the extraction model changes and is then left essentially untouched by a
+    gleaning round, while mean degree barely moves in either direction. Both \texttt{gpt-oss}
+    builds concentrate more of the graph in the generic \texttt{CONCEPT} type.}
+  \label{tab:graph-composition}
+  \begin{tabular}{lrrr}
+    \toprule
+    Quantity & \texttt{gemma@0} & \texttt{gptoss@0} & \texttt{gptoss@1} \\
+    \midrule
+    Entities                              &  2685 &  3704 &  6184 \\
+    Isolated entities (degree 0)          &   130 &   692 &  1151 \\
+    Isolated share                        & 4.84\% & 18.68\% & 18.61\% \\
+    \midrule
+    Mean degree                           & 3.372 & 3.389 & 3.973 \\
+    Median degree                         &     2 &     2 &     2 \\
+    Relationships per entity              & 1.765 & 1.788 & 2.108 \\
+    \midrule
+    Entities with frequency $=1$          & 68.1\% & 72.3\% & 72.5\% \\
+    \texttt{CONCEPT}-typed share          & 38.7\% & 47.5\% & 51.9\% \\
+    Chunks yielding no entities (of 1193) &    18 &    18 &    16 \\
+    \bottomrule
+  \end{tabular}
+\end{table}

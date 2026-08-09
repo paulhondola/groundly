@@ -108,6 +108,36 @@ class GraphSettings(BaseModel):
     # room its stage budgets are carved from.
     context_window: int = Field(default=4096, ge=2048)
 
+    # How many *gleaning* rounds entity extraction runs: extra passes that re-send the
+    # prompt, the chunk and the model's own answer, asking what it missed.
+    #
+    # Its own knob because it used to be derived from `context_window >= 16384`, and that
+    # conflated a capacity setting with a cost-and-quality one: raising the window to fit
+    # bigger prompts silently doubled the bill, and nothing recorded that the two builds
+    # had run different procedures.
+    #
+    # Isolated from the model by a controlled pair on apd (same corpus, prompt, entity
+    # types and model; only this field moved): extraction calls 1,175 -> 2,352 (exactly
+    # 2.00 per chunk), entities 3,704 -> 6,184 (1.67x), cost $0.49 -> $0.92 (1.89x). So it
+    # buys 67% more entities for 89% more money, and the retrieval eval says they do not
+    # pay for themselves — hit@20 fell 0.833 -> 0.771 and that tail loss is the only
+    # result in a 15-cell matrix that reached p < 0.05.
+    #
+    # What gleaning does NOT explain is the graph's isolated-entity rate: 18.68% at 0
+    # against 18.61% at 1. That is a property of the extraction model (gemma-4-12b-qat
+    # 4.84%, gpt-oss-120b 18.68%), and an earlier draft of this comment blamed it on
+    # graphrag's CONTINUE_PROMPT asserting "MANY entities and relationships were missed".
+    # The controlled pair refuted that; the prompt's false premise is real but is not what
+    # produces dangling nodes.
+    #
+    # Default 0, which is what every build before this change actually ran unless its
+    # window happened to cross 16384. Note 1 is the least coherent setting available:
+    # graphrag's LOOP_PROMPT ("any more? Y/N") is only sent when another round could
+    # follow, so at exactly 1 the model is never allowed to say "no more" and the extra
+    # pass is unconditional. Capped at 2 because each round re-sends the whole
+    # conversation; beyond that the prompt outgrows any window this project targets.
+    gleanings: int = Field(default=0, ge=0, le=2)
+
     # Path to a custom entity-extraction prompt; unset uses the bundled course-tuned
     # one (groundly/prompts/extract_graph.txt). Two real uses, not speculation: a
     # student outside CS needs different framing, and the thesis's evaluation compares
@@ -344,6 +374,7 @@ def render_config_toml(providers: dict, settings: Settings) -> str:
         "",
         "[graph]",
         f"context_window = {_toml_value(settings.graph.context_window)}   # usable context of your extraction model; graphrag's per-stage prompt budgets are scaled to fit it",
+        f"gleanings = {_toml_value(settings.graph.gleanings)}   # extra entity-extraction passes per chunk (0-2); each one doubles extraction cost and mostly adds unconnected entities",
         f"entity_types = {_toml_value(settings.graph.entity_types)}   # comma-separated types entity extraction looks for; the defaults target course material",
         f'report_call_class = {_toml_value(settings.graph.report_call_class)}   # which call class serves community reports; "extraction" keeps them on the extraction provider',
     ]

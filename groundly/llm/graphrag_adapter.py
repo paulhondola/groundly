@@ -118,11 +118,23 @@ def extraction_entity_types() -> list[str]:
     return [t.strip() for t in load_settings().graph.entity_types.split(",") if t.strip()]
 
 
-def extraction_fingerprint(prompt_text: str, entity_types: list[str]) -> str:
-    """sha256 over exactly what the build sends: the prompt text and the entity-type
-    list as graphrag joins it. Not sorted — reordering the types genuinely changes the
-    prompt the model sees, so it counts as a change."""
-    return hashlib.sha256(f"{prompt_text}\n{','.join(entity_types)}".encode()).hexdigest()
+def extraction_fingerprint(prompt_text: str, entity_types: list[str], gleanings: int = 0) -> str:
+    """sha256 over exactly what the build sends: the prompt text, the entity-type list as
+    graphrag joins it, and the number of gleaning rounds. Not sorted — reordering the
+    types genuinely changes the prompt the model sees, so it counts as a change.
+
+    `gleanings` belongs here because it changes what is *sent*, not merely how the result
+    is post-processed: a gleaning round is a second extraction call per chunk carrying
+    graphrag's CONTINUE_PROMPT. Two apd builds differing in **this field alone** produced
+    3,704 and 6,184 entities at 1,175 and 2,352 extraction calls, and nothing recorded
+    anywhere said they were different builds. Folding it into the fingerprint makes
+    `graph_is_stale` say so and offer a rebuild — the whole point, at no manifest cost.
+
+    Default 0 so a caller that predates the parameter fingerprints identically to before;
+    every in-tree caller passes it explicitly."""
+    return hashlib.sha256(
+        f"{prompt_text}\n{','.join(entity_types)}\ngleanings={gleanings}".encode()
+    ).hexdigest()
 
 
 # Set once by allow_nonstandard_service_tier(); see there for why this is a flag rather
@@ -312,7 +324,7 @@ class PromptBudgets:
     community_max_length: int
 
 
-def prompt_budgets(context_window: int) -> PromptBudgets:
+def prompt_budgets(context_window: int, gleanings: int = 0) -> PromptBudgets:
     """Scale graphrag's stage budgets to the model actually configured.
 
     graphrag's defaults assume a large-context cloud model: community reports alone
@@ -331,10 +343,18 @@ def prompt_budgets(context_window: int) -> PromptBudgets:
     is what keeps the divisor at 1 locally so these numbers mean what they say.
     """
     return PromptBudgets(
-        # The gleaning round re-sends prompt + chunk + the model's whole first answer.
-        # On a chunk capped at CHUNK_MAX_TOKENS (512) one pass has already seen
-        # everything, so it buys little and roughly doubles peak context.
-        max_gleanings=1 if context_window >= 16384 else 0,
+        # `gleanings` is the student's choice (`graph.gleanings`); the window only ever
+        # *clamps* it. A gleaning round re-sends prompt + chunk + the model's whole first
+        # answer, so it roughly doubles peak context — below 16384 that does not fit
+        # beside the stage budgets carved out above, and asking for it anyway would fail
+        # every call rather than extract more.
+        #
+        # This used to BE the choice (`1 if context_window >= 16384 else 0`), which made a
+        # capacity setting silently control cost: raising apd's window from 12288 to 16384
+        # doubled its extraction calls and its bill, with nothing in the manifest recording
+        # that the *procedure* had changed at all. See core/config.GraphSettings.gleanings
+        # for the controlled numbers — and note the isolated-entity rate it does NOT move.
+        max_gleanings=gleanings if context_window >= 16384 else 0,
         summarize_max_input_tokens=min(4000, context_window // 2),
         summarize_max_length=min(500, context_window // 4),
         community_max_input_length=min(8000, context_window // 2),

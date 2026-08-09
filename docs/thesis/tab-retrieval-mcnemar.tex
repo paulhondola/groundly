@@ -1,0 +1,54 @@
+% docs/thesis/tab-retrieval-mcnemar.tex
+% Measured 2026-08-09 | apd 187 materials / 1193 chunks | gold set evals/apd/gold.jsonl, 48 questions
+% Test: exact McNemar (binomial, two-sided) on the paired per-question hit indicator,
+%   hybrid-local vs vector, computed by the eval harness and read from the `significance` block of
+%   results-gemma-glean0.json / results-gptoss-glean0.json / results-gptoss-glean1.json
+%   (ts 2026-08-09 08:45:09Z / 08:57:48Z / 09:11:42Z).
+% Pairing is per question within one run, so the vector baseline is the same 48 outcomes in all
+%   three panels (it is graph-independent and came out bit-identical across the three runs).
+% Matched cutoffs only; errors=0 in all three runs so no pair is dropped.
+% Discordant pairs only enter the test: concordant pairs carry no information for McNemar.
+% MULTIPLICITY: 15 tests at alpha=0.05 expects ~0.75 false positives under the null. Exactly one
+%   cell falls below 0.05 and it favours the BASELINE, not the graph arm. No correction is applied
+%   and none is needed to reach the conclusion, which is that nothing here is evidence for the
+%   graph arm.
+\begin{table}[htbp]
+  \centering
+  \caption{Paired significance of \texttt{hybrid-local} against the \texttt{vector} baseline,
+    exact McNemar on per-question hits, apd gold set ($n=48$, 0 errors). Counts are discordant
+    pairs. One of the fifteen cells reaches $p<0.05$ and it favours the baseline; with fifteen
+    tests at $\alpha=0.05$ roughly one such cell is expected under the null, so this table
+    supports no claim of a graph-arm advantage at any cutoff on any of the three graphs.}
+  \label{tab:retrieval-mcnemar}
+  \begin{tabular}{lrrrr}
+    \toprule
+    Graph & $k$ & \texttt{hybrid-local} only & \texttt{vector} only & $p$ \\
+    \midrule
+    \texttt{gemma@0}  &  1 & 2 & 5 & 0.453 \\
+    \texttt{gemma@0}  &  5 & 5 & 8 & 0.581 \\
+    \texttt{gemma@0}  &  8 & 3 & 8 & 0.227 \\
+    \texttt{gemma@0}  & 10 & 3 & 4 & 1.000 \\
+    \texttt{gemma@0}  & 20 & 0 & 4 & 0.125 \\
+    \midrule
+    \texttt{gptoss@0} &  1 & 8 & 5 & 0.581 \\
+    \texttt{gptoss@0} &  5 & 4 & 10 & 0.180 \\
+    \texttt{gptoss@0} &  8 & 3 & 6 & 0.508 \\
+    \texttt{gptoss@0} & 10 & 4 & 4 & 1.000 \\
+    \texttt{gptoss@0} & 20 & 0 & 3 & 0.250 \\
+    \midrule
+    \texttt{gptoss@1} &  1 & 7 & 4 & 0.549 \\
+    \texttt{gptoss@1} &  5 & 5 & 7 & 0.774 \\
+    \texttt{gptoss@1} &  8 & 2 & 4 & 0.688 \\
+    \texttt{gptoss@1} & 10 & 2 & 2 & 1.000 \\
+    \texttt{gptoss@1} & 20 & 0 & 6 & \textbf{0.031} \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \footnotesize
+  Two-sided exact binomial test on the discordant pairs. ``\texttt{hybrid-local} only'' counts
+  questions the graph arm hit and the baseline missed; ``\texttt{vector} only'' the reverse.
+  The single bolded cell is the only one below $\alpha=0.05$, and its direction favours
+  \texttt{vector}. No multiplicity correction is applied; at fifteen tests, $\approx0.75$ such
+  cells are expected under the null.
+\end{table}

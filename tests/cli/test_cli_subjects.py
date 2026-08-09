@@ -808,7 +808,7 @@ def test_index_names_a_framing_change_rather_than_blaming_the_corpus(monkeypatch
     result = runner.invoke(app, ["index", "PDSS", str(f), "--yes"])
 
     assert result.exit_code == 0, result.output
-    assert "extraction prompt or entity types changed" in result.output
+    assert "extraction prompt, entity types or gleaning rounds changed" in result.output
     assert "corpus changed" not in result.output
     assert calls == ["PDSS", "PDSS"]  # rebuilt under the new framing
 

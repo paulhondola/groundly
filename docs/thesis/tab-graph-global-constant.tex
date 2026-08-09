@@ -1,0 +1,59 @@
+% docs/thesis/tab-graph-global-constant.tex
+% Derived 2026-08-09 | apd 187 materials / 1193 chunks | corpus_hash cf0c85b4...
+% Graphs: gemma@0 (google/gemma-4-12b-qat, graph.gleanings=0, graph.context_window=12288),
+%   gptoss@0 (openai/gpt-oss-120b, gleanings=0, 16384), gptoss@1 (openai/gpt-oss-120b, gleanings=1, 16384)
+% Source: communities.parquet / community_reports.parquet / entities.parquet / text_units.parquet in
+%   ~/.groundly/.baselines/<cell>/, replaying the production citation join of
+%   groundly/retrieval/graph.py GraphGlobalRetriever offline.
+% JOIN KEY: the `community` column, NOT community_reports.id (which is a content hash).
+%   graphrag's read_indexer_entities sets entity.community_ids to str(int(community)), so joining
+%   on the report id yields an empty set. Ceiling is COMMUNITY_LEVEL = 2, a ceiling not an equality
+%   (df[df.level <= 2]). Chunk ids resolve via text_units.document_id, which ingestion/graph.py sets
+%   to str(chunk_id); 18 of the 1193 text-unit ids collide on byte-identical text, so the lookup is
+%   a list per id, exactly as the production code does it.
+% NOT DIRECTLY MEASURED -- marked est. This is a deterministic replay of the join, not a projection,
+%   but no live graph-global eval run exists to check it against: the arm calls graphrag's
+%   global_search and therefore needs a provider, which is why the three eval sweeps ran
+%   vector + hybrid-local only. A live figure would need a provider-backed single-arm eval run.
+%   The replay assumes global search admits every report at level<=2 into context, which is what
+%   dynamic_community_selection=False does (map-reduce over all reports at the level).
+% UNRANKED ARM: GraphGlobalRetriever returns sorted(resolved), i.e. ascending SQLite rowid, and
+%   graph-global is in agents.ask.UNRANKED_ARMS. Its MRR would measure ingestion order, so it is
+%   withheld rather than reported.
+\begin{table}[htbp]
+  \centering
+  \caption{The \texttt{graph-global} arm as a corpus constant, apd (1193 chunks). Because global
+    search admits every community report under the level ceiling, the arm's citation set does not
+    depend on the query --- it is a fixed fraction of the corpus per graph. The better the graph,
+    the larger that fraction, so this arm degrades as a retrieval arm exactly as the graph
+    improves.}
+  \label{tab:graph-global-constant}
+  \begin{tabular}{lrrr}
+    \toprule
+    Quantity & \texttt{gemma@0} & \texttt{gptoss@0} & \texttt{gptoss@1} \\
+    \midrule
+    Community reports at level $\le 2$        &  555 &  677 &  941 \\
+    Entities under those communities\textsuperscript{est} & 2389 & 2861 & 4879 \\
+    Distinct text units reached\textsuperscript{est}      & 1121 & 1132 & 1152 \\
+    \midrule
+    Chunks returned (of 1193)\textsuperscript{est}        & 1138 & 1148 & 1168 \\
+    Share of corpus\textsuperscript{est}                  & 95.4\% & 96.2\% & 97.9\% \\
+    \midrule
+    MRR & -- & -- & -- \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \footnotesize
+  \textsuperscript{est} Derived offline by replaying the production citation join
+  (\texttt{retrieval/graph.py}, \texttt{GraphGlobalRetriever}) against each build's parquet output,
+  not observed in a live eval run. The replay is deterministic given the parquet; it assumes global
+  search admits every report at level $\le 2$ into context, which is the behaviour of
+  \texttt{dynamic\_community\_selection=False}. Confirming it against the live arm requires a
+  provider-backed single-arm eval run, which was not performed --- the three sweeps behind
+  Table~\ref{tab:retrieval-quality-by-graph} were provider-free and ran
+  \texttt{vector} and \texttt{hybrid-local} only.
+  MRR is withheld, not missing: the arm emits \texttt{sorted(chunk\_ids)}, i.e. ascending
+  ingestion order, and is listed in \texttt{agents.ask.UNRANKED\_ARMS}, so a rank metric computed
+  over it would measure ingestion order rather than relevance.
+\end{table}
