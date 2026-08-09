@@ -37,7 +37,7 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: a **host agent*
 
 **Preconditions:** graph built (skippable at index time; these tools report "graph not built — run `groundly index --graph`" otherwise).
 
-- `overview(subject, topic)` — community-summary synthesis ("main themes", exam-scope overviews). Fires graphrag global search — router-gated / explicit only (cost).
+- `overview(subject, topic)` — community-summary synthesis ("main themes", exam-scope overviews). Fires graphrag global search — **explicit only**: since decision 28 there is no router that could reach it implicitly, and this tool is the sole product path into global search (~33 provider calls per query on apd, so the host must mean it).
 - `drill_down(subject, entity)` — entity-anchored local search for multi-hop questions.
 - Citation rule holds: summaries provide breadth; **citations always resolve to verbatim chunks** (a summary has no page).
 

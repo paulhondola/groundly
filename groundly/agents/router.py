@@ -1,8 +1,16 @@
-"""Query router — arm 3's brain and the cost gate (docs/architecture/retrieval.md).
-One cheap `router` call-class completion labels the query; unconfigured or
-unreachable both degrade to no label, never blocking `ask`. At P3 the label is
-logged only — every non-vector label still degrades to the vector arm (P5 wires
-graph routing)."""
+"""Query router — one cheap `router` call-class completion labelling a query
+factoid / multi-hop / global (docs/architecture/retrieval.md).
+
+**No runtime caller.** `ask()` stopped classifying at decision 28: with the graph arms
+retired from the product path there is one selectable arm, and a classifier that
+selects among one arm is a provider round-trip that cannot change the answer. This
+module is retained as a *measured quantity* — `groundly eval` calls `classify()`
+directly to report router accuracy, which is the number that justified retiring it
+(apd, `gemma-4-12b-qat`: 47.9% against 45.8% for always answering "multi-hop", with
+30 of 48 questions routed to `graph-global`).
+
+Unconfigured or unreachable both degrade to no label rather than raising — kept, because
+the eval must be able to run this on a machine with no router provider configured."""
 
 import logging
 

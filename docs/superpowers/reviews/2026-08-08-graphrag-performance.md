@@ -1,5 +1,28 @@
 # GraphRAG performance review — apd (2026-08-08)
 
+> **Correction header (added 2026-08-08, decision 28). Read this before citing anything below.**
+>
+> 1. **Six of the nine findings have landed**, so this document describes code that no longer
+>    exists: #1 (`_AbortAfterContext`), #3 (`concurrent_requests`), #4 (`_render_chunks` cap)
+>    and #5 (`ask()` truncation) are fixed; #7 and #8 remain but are now sub-second and not
+>    worth fixing. **#2 (`graph-global`'s 1,138-chunk constant) and #6 (`max_cluster_size`
+>    unset) still stand.**
+> 2. **Every comparison against "`vector@32`" is retracted.** `RERANK_POOL` caps the vector
+>    arm's pool at 20 before `context_k` is read, so `vector@32` cannot exist — the §2 "net
+>    −3" and the §5 table's baseline row are both scored against a configuration that is not
+>    reachable. The superseding figures are in `docs/architecture/retrieval.md`
+>    ("First fair arm comparison") and decision 27.
+> 3. **The "net −3" headline is not significant.** It is 5 discordant pairs, exact McNemar
+>    p = 0.375; at n = 48 this gold set cannot resolve a difference below ~9 questions.
+> 4. **Every latency and cost figure here is a local `gemma-4-12b-qat` measurement.** On the
+>    configured cloud provider the 15.02 h build is ≈ $0.15–0.70 and under an hour, and the
+>    5.4× cross-arm contention tax disappears entirely because nothing is resident. The
+>    conclusion "expensive and unhelpful" should be read as **"cheap and unhelpful"** — which
+>    is the stronger negative result, not a weaker one.
+>
+> What survives unchanged is the structural analysis: the graph is sound, the *arm* is not,
+> and §3's account of why `graph-global` returns a corpus constant is provider-independent.
+
 Opus 5 performance-specialist agent, measured on Paul's machine against the 48-question
 apd gold set. Every number is measured unless marked *(estimated)*; ones requiring a
 provider are marked *(provider)*. Spot-checked independently — see "Verification" below.

@@ -1,15 +1,24 @@
 """The ask pipeline — the one shared function exposed identically as `groundly ask`
-and the MCP `ask` tool (docs/architecture/agents.md): router -> arm-aware retrieval ->
-trust-layered prompt -> generation -> citation resolution -> cited answer or refusal.
-Zero resolvable citations is an error, never a degraded answer
+and the MCP `ask` tool (docs/architecture/agents.md): retrieval -> trust-layered
+prompt -> generation -> citation resolution -> cited answer or refusal. Zero
+resolvable citations is an error, never a degraded answer
 (.claude/rules/grounding-and-privacy.md); every outcome (including errors and the
 no-key case never reaching this far) is traced.
 
-Router label picks the retrieval arm: factoid/None -> vector only; multi-hop ->
-graph local search fused with vector via RRF; global -> graph global search alone.
-If the subject has no graph built, both graph arms degrade to vector-only rather
-than failing `ask()` outright (`arm` in the trace reflects what actually ran, not
-what the router asked for)."""
+**The product path is the vector arm, and only the vector arm** (decision 28). The
+router used to pick between three arms here; measured on apd it routed 30 of 48
+questions to `graph-global` — an arm that returns the same 1,138 chunks (95% of the
+corpus) for every question — while `vector` beat `hybrid-local` at every matched
+cutoff on every metric. With one selectable arm a classifier has nothing to select,
+so the `classify()` call is gone and with it one provider round-trip per `ask`.
+
+`router_label` stays on `AskResult` and in the trace schema, always `None` from here.
+It keeps meaning "what the router said" rather than being repurposed — `agents/router.py`
+is still measured by `groundly eval`, just never on the way to an answer.
+
+The three arms all still exist in `retrieve_for_arm` below: retiring them from the
+product path is not the same as deleting them, and the eval harness is what keeps the
+negative result reproducible from shipped code."""
 
 import logging
 import time
@@ -19,7 +28,6 @@ from llama_index.core.schema import NodeWithScore
 
 from groundly.agents.citations import Citation, NoCitationsError, resolve_citations  # noqa: F401  re-exported: mcp/server.py + cli/ask.py import NoCitationsError from here
 from groundly.agents.prompts import REFUSAL, assemble
-from groundly.agents.router import classify
 from groundly.core.config import load_settings
 from groundly.core.progress import connect_progress, record_trace
 from groundly.core.store import SubjectStore
@@ -33,6 +41,12 @@ logger = logging.getLogger(__name__)
 
 ARMS = ("vector", "hybrid-local", "graph-global")
 
+# Arms the *product* may select. `ARMS` is what the eval can score; this is what a user
+# question can reach. Stated as data rather than left implicit in `ask()`'s body so
+# "which arms are shipped" is a fact a test can assert, and so re-admitting an arm is a
+# visible one-line change rather than a re-plumbing of the dispatch (decision 28).
+PRODUCT_ARMS = ("vector",)
+
 # Arms whose returned order carries NO relevance signal. `graph-global` resolves its
 # citations through a set and emits `sorted(chunk_ids)` (retrieval/graph.py) — ascending
 # SQLite rowid, i.e. the order chunks happened to be indexed in. Rank-sensitive metrics
@@ -41,11 +55,6 @@ ARMS = ("vector", "hybrid-local", "graph-global")
 # (hit rate, recall) stay valid. This is a property of the arm, not of the eval, and it
 # disappears once global search ranks its output.
 UNRANKED_ARMS = frozenset({"graph-global"})
-
-# Router vocabulary -> arm. The router speaks query classes, the retrieval layer
-# speaks arms; keeping the two vocabularies separate is what lets the eval force an
-# arm without inventing a fake router label (docs/architecture/retrieval.md).
-_LABEL_TO_ARM = {"multi-hop": "hybrid-local", "global": "graph-global"}
 
 
 @dataclass
@@ -141,21 +150,25 @@ def ask(
     rerank: bool = True,
     embedder=None,
     reranker=None,
-    arm: str | None = None,
 ) -> AskResult:
-    """`arm=None` is the product path: classify, then dispatch on the label. Passing an
-    explicit arm skips the router entirely — the eval harness needs the same question
-    through every arm, which a router label cannot express (router accuracy is measured
-    separately by calling `classify()` directly)."""
+    """Answer `query` from `subject`'s materials through the vector arm, the only arm
+    the product selects (`PRODUCT_ARMS`).
+
+    **There is deliberately no `arm=` parameter.** While one existed, a caller could
+    still route a user question into a retired graph arm, which would make the
+    retirement nominal rather than real — and nothing in production ever passed it,
+    because the eval calls `retrieve_for_arm` directly (decision 28)."""
     require_provider("chat")  # fail before any model load; nothing started, nothing to trace
 
     subj = Subject(subject)
     store = SubjectStore(subj.store_db_path)
     progress_conn = connect_progress(subj.progress_db_path)
 
+    # Always None from `ask`: the column still means "what the router said", and the
+    # router no longer runs here. Kept on the result and the trace so a re-admitted
+    # router needs no schema change (see the module docstring).
     router_label: str | None = None
-    requested_arm = arm  # what the caller asked for; `arm` below is what actually ran
-    arm = None
+    arm: str | None = None  # what actually ran — `retrieve_for_arm` reports degradation
     path: list[str] = []
     chunk_ids: list[int] = []
     outcome = "error"
@@ -168,14 +181,10 @@ def ask(
     start = time.monotonic()
 
     try:
-        if requested_arm is None:
-            router_label = classify(query, complete)
-            requested_arm = _LABEL_TO_ARM.get(router_label, "vector")
-
         nodes, path, arm = retrieve_for_arm(
             subject,
             query,
-            requested_arm,
+            "vector",
             store=store,
             rerank=rerank,
             embedder=embedder,

@@ -58,9 +58,9 @@ def ask(
             loc = f" p.{c.page}" if c.page else ""
             heading = f" — {escape(c.heading_path)}" if c.heading_path else ""
             console.print(f"  {i}. {escape(c.filename)}{loc}{heading}")
-    console.print(
-        f"[dim]router={result.router_label or '—'} citations={len(result.citations)}[/dim]"
-    )
+    # No `router=` here: `ask()` no longer classifies, so the field would print `—`
+    # forever (decision 28). `groundly eval` is where router behaviour is reported now.
+    console.print(f"[dim]citations={len(result.citations)}[/dim]")
 
 
 @app.command()
