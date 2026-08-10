@@ -6,6 +6,8 @@ host spawn -> handshake is fast and bge-m3/torch load lazily on first `search`/`
 (.claude/rules/architecture.md).
 """
 
+import functools
+
 from fastmcp import FastMCP
 from fastmcp.exceptions import ResourceError, ToolError
 from pydantic import BaseModel
@@ -39,6 +41,68 @@ def _subject_or_error(subject: str, error_cls: type[Exception]):
     if not subj.exists():
         raise error_cls(f"unknown subject {subject!r} — call list_subjects for valid names")
     return subj
+
+
+def _answer_payload(subject: str, result) -> dict:
+    """The wire shape of a grounded answer: the text plus every citation resolved to a
+    `groundly://` URI the host can open. Shared by `ask`, `drill_down` and `overview` —
+    written out once each, they drifted into three copies of the same six lines."""
+    return {
+        "answer": result.answer,
+        "citations": [
+            {
+                "chunk_id": c.chunk_id,
+                "filename": c.filename,
+                "page": c.page,
+                "heading_path": c.heading_path,
+                "uri": _citation_uri(subject, c.filename, c.page),
+            }
+            for c in result.citations
+        ],
+    }
+
+
+def _maps_service_errors(tool: str):
+    """Turn the service layer's named exceptions into `ToolError`s the host can show.
+
+    Every answer tool had a byte-identical five-clause ladder; the only per-tool part is
+    which tool name the no-provider message opens with, so that is the one parameter.
+
+    **The exception classes are imported inside the wrapper, not at module scope**, and
+    that is load-bearing: `GraphNotBuiltError` pulls pandas and graphrag, and
+    `ModelDownloadError` pulls the embedding stack. Importing either at module top would
+    move that cost onto every host spawn, when the rule is that a handshake stays fast
+    and models load on first use (.claude/rules/architecture.md). Decoration itself runs
+    at import; the body only runs once a tool is actually called, by which point the
+    service being wrapped has pulled these in anyway.
+    """
+
+    def decorate(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            from groundly.agents.citations import NoCitationsError
+            from groundly.llm.chat import ChatUnreachableError
+            from groundly.llm.config import ProviderNotConfiguredError
+            from groundly.llm.embeddings import ModelDownloadError
+            from groundly.retrieval.graph import GraphNotBuiltError
+
+            try:
+                return fn(*args, **kwargs)
+            except ProviderNotConfiguredError as exc:
+                raise ToolError(
+                    f"{tool} needs a configured chat provider; search works without one — {exc}"
+                ) from exc
+            except (
+                GraphNotBuiltError,
+                NoCitationsError,
+                ModelDownloadError,
+                ChatUnreachableError,
+            ) as exc:
+                raise ToolError(str(exc)) from exc
+
+        return wrapper
+
+    return decorate
 
 
 @mcp.tool
@@ -104,45 +168,20 @@ def search(subject: str, query: str, k: int | None = None) -> list[dict]:
 
 
 @mcp.tool
+@_maps_service_errors("ask")
 def ask(subject: str, query: str) -> dict:
     """Enforced grounded answer: retrieves relevant chunks from `subject`'s materials,
     generates an answer that must cite them, and refuses ("not covered by the course
     materials") rather than fall back to model knowledge when nothing supports an
     answer. Needs a configured chat provider — `search` does not."""
-    from groundly.agents.ask import NoCitationsError
     from groundly.agents.ask import ask as ask_fn
-    from groundly.llm.chat import ChatUnreachableError
-    from groundly.llm.config import ProviderNotConfiguredError
-    from groundly.llm.embeddings import ModelDownloadError
 
     _subject_or_error(subject, ToolError)
-    try:
-        result = ask_fn(subject, query)
-    except ProviderNotConfiguredError as exc:
-        raise ToolError(
-            f"ask needs a configured chat provider; search works without one — {exc}"
-        ) from exc
-    except NoCitationsError as exc:
-        raise ToolError(str(exc)) from exc
-    except (ModelDownloadError, ChatUnreachableError) as exc:
-        raise ToolError(str(exc)) from exc
-
-    return {
-        "answer": result.answer,
-        "citations": [
-            {
-                "chunk_id": c.chunk_id,
-                "filename": c.filename,
-                "page": c.page,
-                "heading_path": c.heading_path,
-                "uri": _citation_uri(subject, c.filename, c.page),
-            }
-            for c in result.citations
-        ],
-    }
+    return _answer_payload(subject, ask_fn(subject, query))
 
 
 @mcp.tool
+@_maps_service_errors("drill_down")
 def drill_down(subject: str, entity: str) -> dict:
     """Entity-anchored deep dive: multi-hop graph search anchored on one specific
     `entity`, producing a cited answer drawn from `subject`'s knowledge graph rather
@@ -151,43 +190,14 @@ def drill_down(subject: str, entity: str) -> dict:
     Requires the subject's graph to be built — check `graph_built` via `list_subjects`
     first, and run `groundly index --graph` if it's false. Needs a configured chat
     provider, same as `ask`."""
-    from groundly.agents.citations import NoCitationsError
     from groundly.agents.study_modes import drill_down as drill_down_fn
-    from groundly.llm.chat import ChatUnreachableError
-    from groundly.llm.config import ProviderNotConfiguredError
-    from groundly.llm.embeddings import ModelDownloadError
-    from groundly.retrieval.graph import GraphNotBuiltError
 
     _subject_or_error(subject, ToolError)
-    try:
-        result = drill_down_fn(subject, entity)
-    except GraphNotBuiltError as exc:
-        raise ToolError(str(exc)) from exc
-    except ProviderNotConfiguredError as exc:
-        raise ToolError(
-            f"drill_down needs a configured chat provider; search works without one — {exc}"
-        ) from exc
-    except NoCitationsError as exc:
-        raise ToolError(str(exc)) from exc
-    except (ModelDownloadError, ChatUnreachableError) as exc:
-        raise ToolError(str(exc)) from exc
-
-    return {
-        "answer": result.answer,
-        "citations": [
-            {
-                "chunk_id": c.chunk_id,
-                "filename": c.filename,
-                "page": c.page,
-                "heading_path": c.heading_path,
-                "uri": _citation_uri(subject, c.filename, c.page),
-            }
-            for c in result.citations
-        ],
-    }
+    return _answer_payload(subject, drill_down_fn(subject, entity))
 
 
 @mcp.tool
+@_maps_service_errors("overview")
 def overview(subject: str, topic: str) -> dict:
     """Course-wide synthesis: community-summary global search over `subject`'s
     knowledge graph, producing a cited answer about `topic` plus the graph communities
@@ -196,41 +206,13 @@ def overview(subject: str, topic: str) -> dict:
     on one entity. Requires the subject's graph to be built — check `graph_built` via
     `list_subjects` first, and run `groundly index --graph` if it's false. Needs a
     configured chat provider, same as `ask`."""
-    from groundly.agents.citations import NoCitationsError
     from groundly.agents.study_modes import overview as overview_fn
-    from groundly.llm.chat import ChatUnreachableError
-    from groundly.llm.config import ProviderNotConfiguredError
-    from groundly.llm.embeddings import ModelDownloadError
-    from groundly.retrieval.graph import GraphNotBuiltError
 
     _subject_or_error(subject, ToolError)
-    try:
-        result = overview_fn(subject, topic)
-    except GraphNotBuiltError as exc:
-        raise ToolError(str(exc)) from exc
-    except ProviderNotConfiguredError as exc:
-        raise ToolError(
-            f"overview needs a configured chat provider; search works without one — {exc}"
-        ) from exc
-    except NoCitationsError as exc:
-        raise ToolError(str(exc)) from exc
-    except (ModelDownloadError, ChatUnreachableError) as exc:
-        raise ToolError(str(exc)) from exc
-
-    return {
-        "answer": result.answer,
-        "citations": [
-            {
-                "chunk_id": c.chunk_id,
-                "filename": c.filename,
-                "page": c.page,
-                "heading_path": c.heading_path,
-                "uri": _citation_uri(subject, c.filename, c.page),
-            }
-            for c in result.citations
-        ],
-        "communities": result.communities,
-    }
+    result = overview_fn(subject, topic)
+    # UC-12: "an overview answer names its constituent communities" — the one field
+    # that makes this tool's payload wider than the shared answer shape.
+    return _answer_payload(subject, result) | {"communities": result.communities}
 
 
 @mcp.tool

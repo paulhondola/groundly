@@ -4,14 +4,16 @@ Expands [`groundly-spec.md`](../groundly-spec.md) §5. This layer is the thesis'
 
 ## The four arms (evaluation frame)
 
-| Arm | Path | Exists to answer | Status |
-|---|---|---|---|
-| 1. Vector baseline | dense + sparse + BM25 → RRF → rerank | Strong baseline; NotebookLM-class behavior | **Production arm** (`PRODUCT_ARMS`) |
-| 2. Pure GraphRAG | MS `graphrag` local/global search | Does graph structure help multi-hop/global queries? | Eval only (decision 28) |
-| 3. Static hybrid | router → backend(s) → fusion → rerank | Does cheap routing capture most of the gain? | Eval only (decision 28) |
-| 4. Adaptive agentic | retrieve → self-grade → escalate/rewrite (≤2 iterations) | Does self-evaluation beat static routing, at what cost? | Stub; eval only |
+| Arm | Class | Path | Exists to answer | Status |
+|---|---|---|---|---|
+| 1. Vector baseline | `VectorRetriever` | dense + sparse + BM25 → RRF → rerank | Strong baseline; NotebookLM-class behavior | **Production arm** (`PRODUCT_ARMS`) |
+| 2. Pure GraphRAG | `GraphLocalRetriever`, `GraphGlobalRetriever` | MS `graphrag` local/global search | Does graph structure help multi-hop/global queries? | Eval only (decision 28) |
+| 3. Static hybrid | `HybridLocalRetriever` | graph local search → RRF with the baseline | Does fusing the graph into the baseline beat the baseline alone? (originally: does cheap routing capture most of the gain? — the router came out at decision 28) | Eval only (decision 28) |
+| 4. Adaptive agentic | `AdaptiveRetriever` (stub) | retrieve → self-grade → escalate/rewrite (≤2 iterations) | Does self-evaluation beat static routing, at what cost? | Declared, not implemented |
 
-**Arm 3 was the production arm until decision 28; arm 1 is now.** Every arm stays runnable: `ARMS` is what `groundly eval` may score, `agents.ask.PRODUCT_ARMS` is what a user question may reach, and the two being different is the whole content of the decision. Nothing was deleted — the *comparison between the arms is the thesis contribution*, so an arm that loses still has to be re-runnable from shipped code, and each one's cost in quality, money and time is a published result rather than a reason to remove it. Measured tables live in [`docs/thesis/`](../thesis/); the headline is that vector leads hit and recall at every cutoff the product uses, at zero build cost and zero per-query cost, while `hybrid-local` closes most of the MRR gap and overtakes at rank 1 once the graph is built by a capable model.
+**The arms are data, not control flow.** `retrieval/arms.py`'s `ARM_TABLE` is the single inventory — one `Arm` entry per arm, carrying whether it is implemented, ranked, product-selectable and graph-dependent. `ARMS`, `PRODUCT_ARMS` and `UNRANKED_ARMS` are *derived* from it rather than maintained beside it, which is what stops the table and the dispatch from disagreeing. Arm 4 is in the table with no builder: `--arms adaptive` is refused up front as "declared but not implemented" rather than as an unknown arm, and never reaches the eval's per-question error tolerance.
+
+**Arm 3 was the production arm until decision 28; arm 1 is now.** Every arm stays runnable: `ARMS` is what `groundly eval` may score, `PRODUCT_ARMS` is what a user question may reach, and the two being different is the whole content of the decision. Nothing was deleted — the *comparison between the arms is the thesis contribution*, so an arm that loses still has to be re-runnable from shipped code, and each one's cost in quality, money and time is a published result rather than a reason to remove it. Measured tables live in [`docs/thesis/`](../thesis/); the headline is that vector leads hit and recall at every cutoff the product uses, at zero build cost and zero per-query cost, while `hybrid-local` closes most of the MRR gap and overtakes at rank 1 once the graph is built by a capable model.
 
 The common LlamaIndex `Retriever` interface is what makes the comparison fair — same query in, same context format out, per-arm logging (arm, path, chunk ids, tokens, latency, cost) into the local `traces` table in `progress.db`.
 
@@ -29,8 +31,8 @@ flowchart LR
     contract[Shared LlamaIndex Retriever contract\nranked context with chunk metadata]
     vector[Arm 1: vector baseline\ndense + sparse + BM25 + RRF + rerank]
     gph[Arm 2: pure GraphRAG\nlocal or global search]
-    route[Arm 3: cheap query router]
-    hybrid[Static hybrid\nvector and/or graph]
+    route[Query router\nmeasured, not deployed]
+    hybrid[Arm 3: static hybrid\nHybridLocalRetriever]
     fuse[Fusion then rerank]
     adaptive[Arm 4: adaptive loop\nself-grade, escalate or rewrite\nmaximum 2 iterations]
     context[Ranked context\nverbatim chunks and graph summaries]
@@ -111,7 +113,7 @@ MS `graphrag` runs its own chunking/extraction — the two backends do not share
 
 The harness is `groundly/eval/`, driven by `groundly eval SUBJECT --gold PATH --arms ...` (decision 27). It is a **client-layer** package: it imports the service layer and nothing imports it.
 
-**Selecting an arm.** `retrieve_for_arm(subject, query, arm, ...)` in `agents/ask.py` runs exactly one arm and is the eval's only entry point. An unknown arm raises — a typo in `--arms` must never silently score the baseline under another name. `traces` separates `router_label` from `arm`, so nothing in the schema changed.
+**Selecting an arm.** `retrieve_for_arm(subject, query, arm, ...)` in `retrieval/arms.py` runs exactly one arm and is the eval's only entry point. It lives in `retrieval/` precisely because the eval is retrieval-only: while the dispatch sat next to `ask()`, importing it pulled `llm/chat`, `agents/prompts` and `agents/citations` into a harness that calls none of them (asserted by `tests/test_layering.py`). An unknown arm raises — a typo in `--arms` must never silently score the baseline under another name. `traces` separates `router_label` from `arm`, so nothing in the schema changed.
 
 There is deliberately **no `ask(arm=...)`** (decision 28). It existed so the eval could put one question through every arm, but the eval never used it — it calls `retrieve_for_arm` directly, because that returns candidates without paying for generation. What the parameter actually bought was a live route from a user question into a retired arm, which is what would have made the retirement nominal. Removing it is what makes `PRODUCT_ARMS` true rather than aspirational.
 
@@ -123,7 +125,7 @@ There is deliberately **no `ask(arm=...)`** (decision 28). It existed so the eva
 **Metrics per arm × class × language.** Retrieval hit rate, recall, MRR, leakage, retrieved-set size, latency (slice 1, offline). RAGAS groundedness/faithfulness, citation accuracy, router accuracy and cost from the traces table (slice 2, needs a provider).
 
 - **Set size is not optional.** Arms do not return comparable numbers of chunks: the vector arm returns `context_k` (8), while `graph-global` measured **1,138 of apd's 1,193 chunks — 95% of the corpus — for every question**. Its recall of 1.00 and hit rate of 100% are artifacts of returning nearly everything. `retrieved_n` is what exposes that, and hit-rate/recall comparisons across arms are invalid without it beside them; the CLI warns when arms differ by more than 4x. This is the global-citation-join open risk above, measured.
-- **Rank metrics are withheld from arms that have no rank.** `graph-global` ends its citation join with `sorted(chunk_ids)` — ascending SQLite rowid, i.e. the order chunks happened to be indexed in. An MRR over that measures corpus layout, not retrieval, and it is deterministic from the parquet files without a single LLM call. Arms in `agents.ask.UNRANKED_ARMS` therefore report `mrr = None` (rendered `—`) rather than a number that invites interpretation. An earlier draft of this document cited graph-global's MRR of 0.02 as evidence that its recall was hollow; the recall *is* hollow, but `retrieved_n` shows it and MRR never did. Order-insensitive metrics (hit rate, recall, leakage) stay valid for these arms.
+- **Rank metrics are withheld from arms that have no rank.** `graph-global` ends its citation join with `sorted(chunk_ids)` — ascending SQLite rowid, i.e. the order chunks happened to be indexed in. An MRR over that measures corpus layout, not retrieval, and it is deterministic from the parquet files without a single LLM call. Arms marked `ranked=False` in `ARM_TABLE` therefore report `mrr = None` (rendered `—`) rather than a number that invites interpretation. An earlier draft of this document cited graph-global's MRR of 0.02 as evidence that its recall was hollow; the recall *is* hollow, but `retrieved_n` shows it and MRR never did. Order-insensitive metrics (hit rate, recall, leakage) stay valid for these arms.
 - **Errors are excluded, not counted as misses.** A provider outage or context overflow is recorded per question and reported; folding it into hit rate would read as an arm retrieving badly.
 - **The headline comparison is set-size-matched (`--at-k`).** `retrieve_for_arm` returns each arm's *full* candidate list and the consumer applies `context_k`, so one sweep scores every cutoff — `metrics.sweep` re-cuts the stored rows offline. Default cutoffs are **1, 5, 8, 10, 20**; 20 is the vector arm's honest ceiling, because `RERANK_POOL` caps the pool the cross-encoder ever sees and a longer list would mix reranked with un-reranked positions. **There is no such thing as `vector@32`.** Comparing an 8-chunk arm against a 33-chunk one and reading the difference as quality is the mistake this table exists to prevent.
 - **Leakage is read against the corpus base rate, never raw.** Question-source material is **45 of apd's 1,193 chunks (3.77%)**, so an arm returning 95% of the corpus scores ≈ the base rate by construction and *looks cleanest* while telling you nothing. The results document carries `leakage_base_rate` and the CLI reports `leakage / base_rate`: 1.0x is no signal, and the vector arm's 13.5% is a **3.6x enrichment** — real contamination. Same set-size confound `retrieved_n` guards for hit rate and recall.

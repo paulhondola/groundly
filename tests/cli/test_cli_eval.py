@@ -79,7 +79,23 @@ def test_eval_unknown_arm_named_before_any_work(retrievable_subject, tmp_path):
         ["eval", retrievable_subject, "--gold", str(_gold_file(tmp_path)), "--arms", "graph-locul"],
     )
     assert result.exit_code == 1
-    assert "unknown arm(s): graph-locul" in result.output
+    # Wording comes from `retrieval.arms.validate_arms`, shared with `eval.runner.run`
+    # so the CLI and the library cannot describe the same mistake differently.
+    assert "unknown retrieval arm(s): graph-locul" in result.output
+
+
+def test_eval_unimplemented_arm_is_not_reported_as_a_typo(retrievable_subject, tmp_path):
+    """Arm 4 is in `ARM_TABLE` with no builder. The CLI used to screen against `ARMS`
+    and call it "unknown", which sends someone hunting a typo they did not make —
+    `retrieve_for_arm`'s distinguishing message was unreachable from the one surface
+    that accepts `--arms`."""
+    result = runner.invoke(
+        app,
+        ["eval", retrievable_subject, "--gold", str(_gold_file(tmp_path)), "--arms", "adaptive"],
+    )
+    assert result.exit_code == 1
+    assert "declared but not implemented" in result.output
+    assert "unknown" not in result.output
 
 
 def test_eval_bad_gold_set_fails_with_a_named_cause(retrievable_subject, tmp_path):

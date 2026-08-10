@@ -26,12 +26,23 @@ from graphrag_llm.embedding.embedding_factory import register_embedding
 from graphrag_llm.metrics.memory_metrics_store import MemoryMetricsStore
 from graphrag_llm.metrics.metrics_store_factory import register_metrics_store
 from graphrag_llm.retry.exceptions_to_skip import _default_exceptions_to_skip
+from graphrag_vectors import VectorStoreConfig
 
+from groundly.core.manifest import EMBEDDING_DIM
 from groundly.llm.chat import _LOCAL_PLACEHOLDER_KEY
 from groundly.llm.config import ProviderConfig, load_settings, require_provider
 
 BGE_M3_EMBEDDING_TYPE = "bge_m3"
 GROUNDLY_METRICS_STORE_TYPE = "groundly"
+
+# The keys graphrag looks completion_models/embedding_models up by. **Build and query
+# MUST agree on these**, and until they lived here they did not have to: both
+# ingestion/graph.py and retrieval/graph.py declared their own copies, so a rename in
+# one silently broke the lookup in the other. Now the agreement is structural — there is
+# one definition and both import it.
+COMPLETION_MODEL_ID = "default_completion_model"
+REPORT_COMPLETION_MODEL_ID = "report_completion_model"
+EMBEDDING_MODEL_ID = "default_embedding_model"
 
 _BUNDLED_PROMPT = ("groundly", "prompts/extract_graph.txt")
 
@@ -185,6 +196,26 @@ def completion_model_config(
         else MetricsConfig(),
         **extra,
     )
+
+
+def bge_m3_embedding_models() -> dict[str, ModelConfig]:
+    """The `embedding_models` entry both graph paths register. One definition, because
+    the *key* is what graphrag resolves the embedder by and the build and the query have
+    to name the same one (see EMBEDDING_MODEL_ID)."""
+    return {
+        EMBEDDING_MODEL_ID: ModelConfig(
+            type=BGE_M3_EMBEDDING_TYPE,
+            model_provider=BGE_M3_EMBEDDING_TYPE,
+            model="bge-m3",
+        )
+    }
+
+
+def graph_vector_store(graph_dir: Path) -> VectorStoreConfig:
+    """Where a subject's graph keeps its LanceDB entity-description vectors. The build
+    writes it and the query reads it, so the path and the dimension are one definition
+    rather than two that happen to match."""
+    return VectorStoreConfig(db_uri=str(graph_dir / "lancedb"), vector_size=EMBEDDING_DIM)
 
 
 class ReadableMetricsStore(MemoryMetricsStore):

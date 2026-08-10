@@ -3,6 +3,7 @@ get_page + citation resource) — thin wrappers over the same functions the CLI 
 (docs/superpowers/specs/2026-07-18-mcp-skeleton-design.md). Uses FastMCP's in-memory
 Client: no subprocess servers, no network."""
 
+import subprocess
 import sys
 
 import pytest
@@ -67,6 +68,28 @@ def test_importing_server_never_pulls_in_heavy_ml_deps():
     assert "sentence_transformers" not in sys.modules
     assert "torch" not in sys.modules
     assert "FlagEmbedding" not in sys.modules
+
+
+def test_importing_server_never_pulls_in_graphrag():
+    """The graph stack is the other half of spawn cost, and the easy one to reintroduce
+    by accident: `_maps_service_errors` needs `GraphNotBuiltError`, which lives in
+    retrieval/graph.py behind graphrag and pandas. Hoisting that import to module scope
+    to tidy the decorator would look harmless and would put the whole graph stack on
+    every host handshake.
+
+    A subprocess rather than sys.modules surgery: popping `graphrag` mid-session while
+    its submodules stay loaded leaves a half-initialized package, and
+    `allow_nonstandard_service_tier`'s idempotence flag would then claim a patch that a
+    re-imported `graphrag_llm` no longer carries.
+    """
+    probe = (
+        "import sys, groundly.mcp.server;"
+        "print(','.join(m for m in ('graphrag', 'pandas', 'torch') if m in sys.modules))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+    assert result.stdout.strip() == "", f"heavy deps imported at MCP spawn: {result.stdout.strip()}"
 
 
 # --- list_subjects ----------------------------------------------------------------

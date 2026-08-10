@@ -40,9 +40,9 @@ def eval_(
     ] = None,
 ) -> None:
     """Score retrieval arms against a gold set. The vector arm needs no provider."""
-    from groundly.agents.ask import ARMS
     from groundly.eval.gold import GoldSetError
     from groundly.eval.runner import DEFAULT_AT_K, ArmDegradedError, run, write_results
+    from groundly.retrieval.arms import validate_arms
 
     if at_k is None:
         ks = DEFAULT_AT_K
@@ -59,9 +59,12 @@ def eval_(
 
     gold_path = gold if gold is not None else Path.cwd() / "evals" / subject / "gold.jsonl"
     arm_list = [a.strip() for a in arms.split(",") if a.strip()]
-    unknown = [a for a in arm_list if a not in ARMS]
-    if unknown:
-        _fail(f"unknown arm(s): {', '.join(unknown)} — expected from: {', '.join(ARMS)}")
+    # Shared with `eval.runner.run` so the two cannot drift: this screens first, so a
+    # message that lived only in the runner would never reach a user.
+    try:
+        validate_arms(arm_list)
+    except ValueError as exc:
+        _fail(str(exc))
 
     # Models load lazily on first retrieve; warn before the wait rather than after it.
     console.print(f"Scoring {len(arm_list)} arm(s) on [bold]{subject}[/bold] from {gold_path}")

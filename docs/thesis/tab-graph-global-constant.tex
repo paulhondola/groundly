@@ -18,7 +18,7 @@
 %   The replay assumes global search admits every report at level<=2 into context, which is what
 %   dynamic_community_selection=False does (map-reduce over all reports at the level).
 % UNRANKED ARM: GraphGlobalRetriever returns sorted(resolved), i.e. ascending SQLite rowid, and
-%   graph-global is in agents.ask.UNRANKED_ARMS. Its MRR would measure ingestion order, so it is
+%   graph-global is in retrieval.arms.UNRANKED_ARMS. Its MRR would measure ingestion order, so it is
 %   withheld rather than reported.
 \begin{table}[htbp]
   \centering
@@ -54,6 +54,6 @@
   Table~\ref{tab:retrieval-quality-by-graph} were provider-free and ran
   \texttt{vector} and \texttt{hybrid-local} only.
   MRR is withheld, not missing: the arm emits \texttt{sorted(chunk\_ids)}, i.e. ascending
-  ingestion order, and is listed in \texttt{agents.ask.UNRANKED\_ARMS}, so a rank metric computed
+  ingestion order, and is listed in \texttt{retrieval.arms.UNRANKED\_ARMS}, so a rank metric computed
   over it would measure ingestion order rather than relevance.
 \end{table}

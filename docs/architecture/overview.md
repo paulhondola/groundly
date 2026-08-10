@@ -93,7 +93,7 @@ Multiple processes may open the same `store.db` (an `index` run while a host-spa
 | Class | Path | Notes |
 |---|---|---|
 | `search` (MCP) | `mcp → retrieval` | no LLM call; free; the host composes |
-| `ask` (MCP ≡ CLI) | `agents.ask → retrieval → llm` | enforced pipeline; the evaluation instrument |
+| `ask` (MCP ≡ CLI) | `agents.ask → retrieval.arms → retrieval → llm` | enforced pipeline; the evaluation instrument |
 | Generation (decks/quizzes) | background task behind a job id | never block a handler on an agent loop |
 | Ingestion | CLI, in-process, per-file transactions | resumable; hash-skip on re-run |
 
