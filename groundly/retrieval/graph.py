@@ -206,12 +206,11 @@ class _GraphRetrieverBase(BaseRetriever):
         return self._subj.root_dir / "graph"
 
     def _require_graph(self) -> None:
-        # Directory presence is not proof of a usable graph. A build that failed the
-        # extraction gate — or was interrupted mid-run — leaves partial parquet behind
-        # on purpose, so graphrag's LLM cache survives for the retry. `corpus_hash` is
-        # written only by a build that passed every check, so it is the honest record
-        # of "there is a graph here", and the same field graph_is_stale reads.
-        if not self.graph_dir.exists() or self._subj.load_manifest().graphrag.corpus_hash is None:
+        # `Subject.graph_is_built` carries why a directory alone is not proof of a graph.
+        # Shared with the `ask` and eval preflights, which refuse a graph arm *before*
+        # anything starts — this stays as the last gate, since nothing guarantees a
+        # caller preflighted.
+        if not self._subj.graph_is_built():
             raise GraphNotBuiltError()
 
     # Whether this arm ever reaches a completion model — see `_load_artifacts`.

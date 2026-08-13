@@ -1,13 +1,13 @@
 """Query router — one cheap `router` call-class completion labelling a query
 factoid / multi-hop / global (docs/architecture/retrieval.md).
 
-**No runtime caller.** `ask()` stopped classifying at decision 28: with the graph arms
-retired from the product path there is one selectable arm, and a classifier that
-selects among one arm is a provider round-trip that cannot change the answer. This
-module is retained as a *measured quantity* — `groundly eval` calls `classify()`
-directly to report router accuracy, which is the number that justified retiring it
-(apd, `gemma-4-12b-qat`: 47.9% against 45.8% for always answering "multi-hop", with
-30 of 48 questions routed to `graph-global`).
+**No runtime caller.** `ask()` stopped classifying at decision 28 and did not resume at
+29, which made every arm selectable again: arm selection there is explicit (`arm=`,
+`--arm`), so a classifier would spend a provider round-trip guessing at something the
+caller already stated. This module is retained as a *measured quantity* — `groundly
+eval` calls `classify()` directly to report router accuracy, which is the number that
+justified taking it off the path (apd, `gemma-4-12b-qat`: 47.9% against 45.8% for always
+answering "multi-hop", with 30 of 48 questions routed to `graph-global`).
 
 Unconfigured or unreachable both degrade to no label rather than raising — kept, because
 the eval must be able to run this on a machine with no router provider configured."""

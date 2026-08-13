@@ -128,8 +128,7 @@ def list_subjects() -> list[dict]:
                 # Manifest, not directory: a refused or interrupted build leaves
                 # partial parquet on disk that must never be reported as a graph
                 # (same gate as retrieval/graph.py's _require_graph).
-                "graph_built": (subj.root_dir / "graph").exists()
-                and subj.load_manifest().graphrag.corpus_hash is not None,
+                "graph_built": subj.graph_is_built(),
             }
         )
     return result

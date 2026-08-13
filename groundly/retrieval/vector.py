@@ -148,19 +148,21 @@ class VectorRetriever(BaseRetriever):
 class HybridLocalRetriever(BaseRetriever):
     """Arm 3 (static hybrid): graphrag local search RRF-fused with the vector baseline.
 
-    Groundly's production arm until decision 28, and a published thesis result — the
+    Groundly's default arm until decision 28, and a published thesis result — the
     fusion dilutes the baseline's ranking on this corpus (MRR 0.28 against 0.35) while
-    adding a 15-hour graph build. Retired from `PRODUCT_ARMS`, kept scoreable, because
-    the comparison between the arms *is* the contribution.
+    adding a graph build. It stayed selectable: `vector` is only the *default*, and
+    `--arm hybrid-local` still runs this, because the comparison between the arms *is*
+    the contribution.
 
     This lived as an `elif` branch inside `agents/ask.py` until it became a class. That
     put the one arm the docs describe as sharing the `BaseRetriever` interface in the
     agents layer, outside the interface it was supposed to demonstrate.
 
-    **Degradation is not handled here.** `GraphNotBuiltError` propagates: whether a
-    missing graph should fall back to the baseline is a dispatch question, because the
-    answer changes what `arm_actual` reports and the eval refuses a run whose graph arm
-    silently became the baseline (`retrieval/arms.py`, `eval/runner.ArmDegradedError`).
+    **Degradation is not handled here, and no longer anywhere** (decision 29).
+    `GraphNotBuiltError` propagates all the way out: this arm reports its own failure
+    rather than answering as the baseline under its own name. `ask` and `eval.runner`
+    preflight `Subject.graph_is_built()` so the refusal usually lands before this arm is
+    even constructed.
     """
 
     def __init__(
@@ -184,8 +186,10 @@ class HybridLocalRetriever(BaseRetriever):
         # Lazy, and load-bearing: this module is the zero-key `search` path that the MCP
         # server and `groundly search` import, while retrieval/graph.py pulls pandas and
         # the whole graphrag stack at *its* module load. A top-level import here would put
-        # that cost on every host handshake, for an arm the product never selects
-        # (.claude/rules/architecture.md: never load models/heavy deps at MCP spawn).
+        # that cost on every host handshake, to serve an arm no MCP tool can select —
+        # `--arm hybrid-local` is CLI-only (decision 29), and the CLI pays the import
+        # when it is asked for (.claude/rules/architecture.md: never load models/heavy
+        # deps at MCP spawn).
         from groundly.retrieval.graph import GraphLocalRetriever
 
         query = query_bundle.query_str

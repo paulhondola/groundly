@@ -41,8 +41,9 @@ def eval_(
 ) -> None:
     """Score retrieval arms against a gold set. The vector arm needs no provider."""
     from groundly.eval.gold import GoldSetError
-    from groundly.eval.runner import DEFAULT_AT_K, ArmDegradedError, run, write_results
+    from groundly.eval.runner import DEFAULT_AT_K, run, write_results
     from groundly.retrieval.arms import validate_arms
+    from groundly.retrieval.graph import GraphNotBuiltError
 
     if at_k is None:
         ks = DEFAULT_AT_K
@@ -115,7 +116,7 @@ def eval_(
                 on_question=_progress,
                 at_k=ks,
             )
-        except (GoldSetError, ArmDegradedError) as exc:
+        except (GoldSetError, GraphNotBuiltError) as exc:
             _fail(str(exc))
 
     for warning in results["warnings"]:

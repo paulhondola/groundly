@@ -65,13 +65,15 @@ bypassed from the CLI.
 
 ### 1. Ask pipeline — interactive
 
-`vector retrieval (dense + sparse + BM25 → RRF → rerank) → trust-layered prompt assembly → generation (chat call class) → citation resolution → cited answer or "not covered" → trace row.`
+`retrieval through the selected arm (default: dense + sparse + BM25 → RRF → rerank) → trust-layered prompt assembly → generation (chat call class) → citation resolution → cited answer or "not covered" → trace row.`
 
-**No router, and one arm** (decision 28). The pipeline used to open with a `classify()` call selecting between `vector`, `hybrid-local` and `graph-global`. `ask()` now calls the vector arm unconditionally — one fewer provider round-trip per question — because on apd the vector arm leads hit and recall at every matched cutoff the product uses, and with one arm in `PRODUCT_ARMS` a classifier has nothing to select.
+**No router, and an explicit arm** (decisions 28 and 29). The pipeline used to open with a `classify()` call selecting between `vector`, `hybrid-local` and `graph-global`. The arm is now a parameter — `ask(subject, query, arm=...)`, `groundly ask --arm`, defaulting to `vector` because on apd it leads hit and recall at every matched cutoff the product uses. The classifier stays gone on its own measured merits (47.9% against 45.8% for a constant): a caller who names the arm has nothing left for it to guess.
 
-**Shipping one arm is not the same as having one arm.** All three stay runnable through `retrieval/arms.py`'s `retrieve_for_arm` and `groundly eval`, and what each costs in quality, money and time is a published comparison (`docs/thesis/`) rather than a deleted branch — the product takes the winner, the thesis takes the measurement. The graph itself is untouched and still serves `drill_down`/`overview` (UC-12).
+**The default is a measurement, not a restriction.** Every implemented ranked arm is reachable from `ask`, which is what lets the arm comparison extend past retrieval into citation accuracy, faithfulness and cost per answer — all of which come from full `ask()` runs reading the traces table. `graph-global` is the one exception, and mechanically so: it returns no relevance order, so the `context_k` truncation would ground every answer in the same arbitrary chunks. It stays scoreable through `groundly eval`. The graph itself is untouched and still serves `drill_down`/`overview` (UC-12).
 
-Exposed identically as the MCP `ask` tool and the `groundly ask` CLI verb — **the product tool and the evaluation instrument are one function**. Grounding is enforced inside this boundary: a response with zero resolvable citations is an error; insufficient context returns the refusal, never model knowledge.
+**A graph arm on a subject with no graph raises**, before the trace opens and before any model loads — never a quiet fall back to the baseline, which would file one arm's numbers under another's name.
+
+Exposed as the MCP `ask` tool and the `groundly ask` CLI verb — **the product tool and the evaluation instrument are one function**, and identical for every query the MCP tool can express. The one asymmetry is deliberate: only the CLI takes `--arm` (decision 29), because a host model picking a graph arm on a whim spends the student's tokens without being asked. Grounding is enforced inside this boundary: a response with zero resolvable citations is an error; insufficient context returns the refusal, never model knowledge.
 
 Honest scope note: host agents may prefer raw `search` (free, composable) and compose their own answers — that path is best-effort grounding by construction, and the eval *measures* the gap (grounding-fidelity experiment) rather than pretending it away.
 

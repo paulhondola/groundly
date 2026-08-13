@@ -1,6 +1,29 @@
 # All arms selectable: removing the product/dev split
 
-**Status:** design, approved 2026-08-10 (Paul). Branch `all-arms`, off `main` at 6a44955.
+**Status:** implemented 2026-08-11 as decision 29. Approved 2026-08-10 (Paul); branch
+`all-arms`, off `main` at 6a44955.
+
+> **Three corrections applied during implementation.** They are marked inline below
+> rather than edited away, because each one was a claim this design got wrong and the
+> reason it was wrong is worth keeping.
+>
+> 1. **`graph-global` is not askable.** §Decisions 2 and §4 assumed all three arms would
+>    reach `ask`. The arm emits `sorted(chunk_ids)` — ascending rowid, no relevance
+>    order — and `ask` truncates to `context_k`, so every answer would be grounded in
+>    whichever 8 chunks sort first, identically for every question, and *cited*. The
+>    gate is `Arm.ranked`, via `validate_arms(..., ranked_only=True)`.
+> 2. **Two call sites, not four.** §2's list included `cli/subjects.py:168` and `:339`,
+>    which are manifest-only checks with no directory term — the same narrower question
+>    as `ingestion/graph.py:445`, which this design correctly excluded. Replacing 168
+>    would have made `graph_is_stale`'s "the graph directory is missing" branch
+>    unreachable. Both were left alone.
+> 3. **The preflight runs after `require_provider`, not before.** §3 specified before,
+>    but `require_provider` is a config read, not a provider call, so every reason given
+>    ("nothing to trace", "nothing paid for") holds either way. Cheapest remedy first: a
+>    config edit before a 0.73h / $0.49 graph build.
+>
+> Also: `requires_graph(names)` was cut (one caller, one line inline), and the test table
+> below missed three affected tests — see the implementation for the full list.
 
 ## Context
 

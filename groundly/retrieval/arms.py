@@ -2,10 +2,17 @@
 one of them (docs/architecture/retrieval.md, "the four arms").
 
 The comparison between the arms *is* the thesis contribution, so the arms are data here
-rather than control flow. Three parallel string collections used to encode it —
-`ARMS`, `PRODUCT_ARMS`, `UNRANKED_ARMS`, each hand-maintained in `agents/ask.py`
-alongside an if/elif dispatch — which meant re-admitting or retiring an arm touched four
-places that could disagree, in the one project whose whole subject is arms disagreeing.
+rather than control flow. Parallel string collections used to encode it — each
+hand-maintained in `agents/ask.py` alongside an if/elif dispatch — which meant
+re-admitting or retiring an arm touched four places that could disagree, in the one
+project whose whole subject is arms disagreeing.
+
+**Every implemented arm is selectable, and no arm silently becomes another one.** There
+is no longer a product/research split in this table: `ask()` takes `arm=`, `groundly
+eval --arms` takes the same names, and a graph arm on a subject with no graph raises
+rather than degrading to the baseline. The one restriction left is mechanical rather
+than editorial — `ask` truncates to `context_k`, so it refuses arms whose order carries
+no relevance signal (`ranked=False`); see `validate_arms`.
 
 **This lives in `retrieval/`, not `agents/`.** `groundly eval` is retrieval-only: it
 scores candidates without paying for generation. While the dispatch lived next to
@@ -13,7 +20,6 @@ scores candidates without paying for generation. While the dispatch lived next t
 harness that calls none of them.
 """
 
-import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -21,13 +27,10 @@ from llama_index.core.retrievers import BaseRetriever
 from llama_index.core.schema import NodeWithScore
 
 from groundly.core.store import SubjectStore
-from groundly.retrieval.graph import GraphGlobalRetriever, GraphNotBuiltError
+from groundly.retrieval.graph import GraphGlobalRetriever
 from groundly.retrieval.vector import RERANK_POOL, HybridLocalRetriever, VectorRetriever
 
-logger = logging.getLogger(__name__)
-
-# The one arm a missing graph degrades to, and the eval's baseline. Named once because
-# it is also a table key.
+# The eval's baseline and `ask`'s default. Named once because it is also a table key.
 VECTOR = "vector"
 
 
@@ -55,11 +58,20 @@ class Arm:
     name: str
     build: Callable[[ArmContext], BaseRetriever] | None
     # False for arms whose returned order carries no relevance signal — rank metrics
-    # (MRR) must not be computed over them. See `graph-global` below.
+    # (MRR) must not be computed over them, and `ask` must not truncate them to
+    # `context_k`. See `graph-global` below.
+    #
+    # **The safe direction is opt-out, and it used to be opt-in.** Under decision 28 a
+    # new arm was unreachable from a user question until someone set `product=True`;
+    # now a new arm is askable unless someone sets `ranked=False`. That is right for
+    # `ranked` — most retrievers do rank, and claiming otherwise by default would
+    # withhold MRR from arms that earned it — but it means adding an arm carelessly
+    # makes it askable. `test_every_ranked_arm_is_askable_and_the_unranked_one_is_not`
+    # pins the askable set for exactly this reason.
     ranked: bool = True
-    # Whether a *user question* may reach this arm, as opposed to `groundly eval`.
-    product: bool = False
-    # Whether a missing graph degrades this arm to the baseline instead of failing.
+    # Whether this arm needs a built graph. The *preflight* predicate: callers refuse
+    # up front rather than paying for a run that cannot work. It is no longer a
+    # fallback trigger — nothing degrades to the baseline any more.
     needs_graph: bool = False
 
 
@@ -93,7 +105,7 @@ def _build_graph_global(ctx: ArmContext) -> BaseRetriever:
 
 # In the order docs/architecture/retrieval.md numbers them.
 ARM_TABLE: dict[str, Arm] = {
-    VECTOR: Arm(name=VECTOR, build=_build_vector, product=True),
+    VECTOR: Arm(name=VECTOR, build=_build_vector),
     "hybrid-local": Arm(name="hybrid-local", build=_build_hybrid_local, needs_graph=True),
     # `ranked=False`: global search resolves its citations through a set and emits
     # `sorted(chunk_ids)` — ascending SQLite rowid, i.e. the order chunks happened to be
@@ -111,27 +123,31 @@ ARM_TABLE: dict[str, Arm] = {
 
 # Derived views — one source, so re-admitting an arm is one line in the table above.
 ARMS = tuple(name for name, arm in ARM_TABLE.items() if arm.build is not None)
-"""What `groundly eval` may score: every implemented arm."""
-
-PRODUCT_ARMS = tuple(name for name, arm in ARM_TABLE.items() if arm.product)
-"""What a user question may reach. `ARMS` and this being different is the whole content
-of decision 28 — retiring an arm from the product is not the same as deleting it."""
+"""Every implemented arm — what `groundly eval` may score, and (minus the unranked ones)
+what `ask` may be pointed at."""
 
 UNRANKED_ARMS = frozenset(name for name, arm in ARM_TABLE.items() if not arm.ranked)
 """Arms whose returned order carries no relevance signal; MRR is withheld for these."""
 
 
-def validate_arms(names: Sequence[str]) -> None:
+def validate_arms(names: Sequence[str], *, ranked_only: bool = False) -> None:
     """Refuse a batch of arm names before any work starts, naming which mistake it was.
 
-    Shared by `groundly eval`'s argument parsing and `eval.runner.run`, because a check
-    in only one of them is a check that does not happen: the CLI screens first, so a
-    runner-only check is unreachable from the product surface, and a CLI-only check
+    Shared by every surface that takes arm names — `groundly eval`'s argument parsing
+    and `eval.runner.run`, `groundly ask`'s and `agents.ask.ask` — because a check in
+    only one of a pair is a check that does not happen: the CLI screens first, so a
+    library-only check is unreachable from the product surface, and a CLI-only check
     leaves the library entry point unguarded.
 
-    Two messages, not one. "unknown arm" sends someone hunting a typo they did not make
-    when the real answer is that arm 4 has no implementation yet — it is in `ARM_TABLE`
-    and in docs/architecture/retrieval.md, just not dispatchable.
+    Three messages, not one. "unknown arm" sends someone hunting a typo they did not
+    make when the real answer is that arm 4 has no implementation yet — it is in
+    `ARM_TABLE` and in docs/architecture/retrieval.md, just not dispatchable.
+
+    `ranked_only` is what `ask` passes. It is a mechanical restriction, not a revived
+    product/research split: `ask` truncates to `context_k`, and truncating a list that
+    carries no relevance order returns whichever chunks sort first rather than the best
+    ones. The eval never passes it — scoring an unranked arm on order-insensitive
+    metrics is exactly what `UNRANKED_ARMS` exists to make safe.
     """
     unknown = [n for n in names if n not in ARM_TABLE]
     if unknown:
@@ -145,6 +161,15 @@ def validate_arms(names: Sequence[str]) -> None:
             f"— they exist in the architecture doc and as an interface stub only. "
             f"Scoreable arms: {', '.join(ARMS)}"
         )
+    unranked = [n for n in names if n in UNRANKED_ARMS] if ranked_only else []
+    if unranked:
+        raise ValueError(
+            f"retrieval arm(s) {', '.join(unranked)} return no relevance order, so an "
+            f"answer cannot be grounded in their top results — truncating to context_k "
+            f"would take whichever chunks sort first, the same ones for every question. "
+            f"Score them with `groundly eval --arms {','.join(unranked)}` instead. "
+            f"Askable arms: {', '.join(n for n in ARMS if n not in UNRANKED_ARMS)}"
+        )
 
 
 def retrieve_for_arm(
@@ -156,12 +181,16 @@ def retrieve_for_arm(
     rerank: bool = True,
     embedder=None,
     reranker=None,
-) -> tuple[list[NodeWithScore], list[str], str]:
-    """Run exactly one retrieval arm. Returns (nodes, path, arm_actual); `arm_actual`
-    differs from `arm` only when a graph arm degraded to vector because no graph is
-    built — that degradation is what the trace's `arm` column records, and what makes
-    `eval/runner.ArmDegradedError` able to refuse a run that would report baseline
-    numbers under a graph arm's name.
+) -> tuple[list[NodeWithScore], list[str]]:
+    """Run exactly one retrieval arm. Returns (nodes, path) — the arm that ran is always
+    the arm that was asked for.
+
+    **A graph arm on a subject with no graph raises `GraphNotBuiltError`.** It used to
+    degrade to vector and report which arm actually ran, and both callers wanted that
+    gone: the eval treated the degradation as fatal anyway, and someone who typed
+    `--arm hybrid-local` does not want the baseline's numbers under that name. Callers
+    preflight with `ARM_TABLE[arm].needs_graph` and `Subject.graph_is_built()` so the
+    refusal lands before anything is started or paid for; this is the backstop.
 
     **Returns each arm's full candidate list, not its top `context_k`.** Applying the cap
     is the consumer's job (`ask()` does it). That split is what lets the eval score every
@@ -194,18 +223,4 @@ def retrieve_for_arm(
         subject=subject, store=store, rerank=rerank, embedder=embedder, reranker=reranker
     )
     retriever = spec.build(ctx)
-    try:
-        nodes = retriever.retrieve(query)
-    except GraphNotBuiltError:
-        # Only for arms that declared the dependency. Anything else raising this is a
-        # bug in that arm, not a missing build, and must not be absorbed as a fallback.
-        if not spec.needs_graph:
-            raise
-        logger.info(
-            "arm %s needs a graph and none is built for %s — degrading to vector-only",
-            arm,
-            subject,
-        )
-        fallback = _build_vector(ctx)
-        return fallback.retrieve(query), fallback.path, VECTOR
-    return nodes, retriever.path, arm
+    return retriever.retrieve(query), retriever.path

@@ -39,8 +39,8 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: the **student**
 
 **Main flow (`ask` — the enforced path)**
 
-1. Router classifies the query (factoid / multi-hop / global) — also the cost gate for graph paths.
-2. Retrieval arm(s) fire (three-channel vector baseline; graph if routed and built); RRF fusion; cross-encoder rerank (default ON).
+1. The arm is taken from the caller — `vector` unless `--arm` says otherwise (decision 29). No router classifies here (decision 28); a graph arm on a subject with no graph **raises**, before anything is started or traced, rather than being skipped or degraded.
+2. The selected arm fires (three-channel vector baseline, or `hybrid-local`'s graph-fused variant); RRF fusion; cross-encoder rerank (default ON).
 3. Prompt assembled in trust layers; retrieved content is delimited data.
 4. Generation → **citation resolution**: every claim carries chunk ids resolving to document + page + heading path. Zero resolvable citations = error.
 5. Response: cited answer, or **"not covered by the course materials"** — never model knowledge.
@@ -52,7 +52,7 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: the **student**
 
 - Every `ask` answer contains ≥1 citation resolving to the correct page; the no-coverage case returns the refusal, not a hallucination.
 - A Romanian question over English-only slides retrieves relevant chunks (dense channel; cross-lingual slice in the eval).
-- `groundly ask` and the MCP `ask` tool produce identical results for the same query (same function).
+- `groundly ask` and the MCP `ask` tool produce identical results for the same query (same function). The CLI additionally accepts `--arm`, which MCP deliberately withholds (decision 29) — the two agree on every query the MCP tool can express.
 - With no API key configured, `ask` fails with a clear message while `search` works fully.
 
 ---

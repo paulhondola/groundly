@@ -1,10 +1,10 @@
 """The arm table (groundly/retrieval/arms.py) — the single inventory of which retrieval
 arms exist and what each one is.
 
-`ARMS`, `PRODUCT_ARMS` and `UNRANKED_ARMS` used to be three hand-maintained string
-collections next to an if/elif dispatch. These tests exist because the failure mode of
-that arrangement was silent: a table and a dispatch disagreeing produces an eval that
-scores the wrong arm under the right name.
+`ARMS` and `UNRANKED_ARMS` used to be hand-maintained string collections next to an
+if/elif dispatch. These tests exist because the failure mode of that arrangement was
+silent: a table and a dispatch disagreeing produces an eval that scores the wrong arm
+under the right name.
 """
 
 import pytest
@@ -13,7 +13,6 @@ from llama_index.core.retrievers import BaseRetriever
 from groundly.retrieval.arms import (
     ARM_TABLE,
     ARMS,
-    PRODUCT_ARMS,
     UNRANKED_ARMS,
     ArmContext,
     retrieve_for_arm,
@@ -24,7 +23,6 @@ def test_the_table_is_the_only_source_of_the_derived_views():
     """Each view is exactly what the table says, so adding an arm cannot leave one of
     them behind."""
     assert ARMS == tuple(n for n, a in ARM_TABLE.items() if a.build is not None)
-    assert PRODUCT_ARMS == tuple(n for n, a in ARM_TABLE.items() if a.product)
     assert UNRANKED_ARMS == frozenset(n for n, a in ARM_TABLE.items() if not a.ranked)
 
 
@@ -34,11 +32,11 @@ def test_every_entry_is_keyed_by_its_own_name():
     assert all(key == arm.name for key, arm in ARM_TABLE.items())
 
 
-def test_product_arms_is_a_strict_subset_of_arms():
-    """`ARMS` is what the eval may score; `PRODUCT_ARMS` is what a user question may
-    reach. Strict, because the day they are equal the decision-28 retirement is undone."""
-    assert set(PRODUCT_ARMS) < set(ARMS)
-    assert set(PRODUCT_ARMS) == {"vector"}
+def test_no_arm_carries_a_product_flag():
+    """The product/research split is gone: which arms a user question may reach is no
+    longer editorial policy stored on the table. The only restriction left is mechanical
+    (`ranked`), and it is derived, not declared per-arm."""
+    assert not hasattr(ARM_TABLE["vector"], "product")
 
 
 def test_graph_global_is_the_only_unranked_arm():
@@ -86,6 +84,29 @@ def test_validate_arms_distinguishes_the_two_mistakes():
         validate_arms(["vector", "adaptive"])
     with pytest.raises(ValueError, match="unknown retrieval arm"):
         validate_arms(["vector", "graph-locul"])
+
+
+def test_ranked_only_is_asked_for_never_assumed():
+    """`ask` passes it because it truncates to context_k; the eval must not inherit it,
+    or the arm the whole negative result is about would stop being scoreable."""
+    from groundly.retrieval.arms import validate_arms
+
+    validate_arms(["graph-global"])  # the eval's call — every implemented arm is fair game
+    with pytest.raises(ValueError, match="no relevance order"):
+        validate_arms(["graph-global"], ranked_only=True)
+    validate_arms(["vector", "hybrid-local"], ranked_only=True)
+
+
+def test_every_ranked_arm_is_askable_and_the_unranked_one_is_not():
+    """Pins the askable set, because askability is now **opt-out**.
+
+    Under decision 28 an arm could not reach a user question until someone set
+    `product=True`; since 29 it is askable unless someone sets `ranked=False`. The safe
+    direction reversed, so this is the tripwire: a new arm added without a deliberate
+    decision about its ordering fails here rather than silently becoming askable."""
+    askable = {n for n in ARMS if n not in UNRANKED_ARMS}
+    assert askable == {"vector", "hybrid-local"}
+    assert UNRANKED_ARMS == {"graph-global"}
 
 
 def test_unknown_arm_is_still_refused_as_unknown(retrievable_subject):
