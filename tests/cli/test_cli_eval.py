@@ -138,7 +138,10 @@ def test_eval_graph_arm_without_a_graph_fails_rather_than_reporting_baseline_num
         ],
     )
     assert result.exit_code == 1
-    assert "degraded to 'vector'" in result.output
+    # Preflighted, so the cause names the missing graph rather than a degradation that
+    # already happened — and it lands before question 1 instead of during it.
+    assert "graph not built" in result.output
+    assert "graph-global cannot be scored without it" in result.output
 
 
 def test_eval_uninitialized_subject_fails(monkeypatch, tmp_path):

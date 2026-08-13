@@ -74,22 +74,98 @@ def test_search_no_rerank_plumbs_through(retrievable_subject, monkeypatch):
     assert captured["rerank"] is False
 
 
-def test_ask_no_rerank_plumbs_through(retrievable_subject, monkeypatch):
-    captured = {}
-
-    def fake_ask(subject, query, *, rerank=True, embedder=None, reranker=None):
-        captured["rerank"] = rerank
+def _capturing_ask(captured):
+    def fake_ask(subject, query, *, arm="vector", rerank=True, embedder=None, reranker=None):
+        captured.update(arm=arm, rerank=rerank)
         from groundly.agents.ask import AskResult
 
         return AskResult(
             answer="not covered by the course materials", citations=[], router_label=None
         )
 
-    monkeypatch.setattr("groundly.agents.ask.ask", fake_ask)
+    return fake_ask
+
+
+def test_ask_no_rerank_plumbs_through(retrievable_subject, monkeypatch):
+    captured = {}
+    monkeypatch.setattr("groundly.agents.ask.ask", _capturing_ask(captured))
     _configure_chat(retrievable_subject)
     result = runner.invoke(app, ["ask", retrievable_subject, "q", "--no-rerank"])
     assert result.exit_code == 0, result.output
     assert captured["rerank"] is False
+
+
+def test_the_cli_default_arm_matches_the_table():
+    """`cli/ask.py` spells the default as a literal rather than importing
+    `arms.VECTOR`, because a signature default is evaluated at import time and the arm
+    table costs ~6.4s of graphrag and pandas that every `groundly --help` would pay.
+    That trade buys a drift risk, so it gets the one assertion that closes it."""
+    from groundly.cli.ask import _DEFAULT_ARM
+    from groundly.retrieval.arms import ARM_TABLE, UNRANKED_ARMS, VECTOR
+
+    assert _DEFAULT_ARM == VECTOR
+    assert _DEFAULT_ARM in ARM_TABLE and _DEFAULT_ARM not in UNRANKED_ARMS
+
+
+def test_the_arm_help_text_names_every_askable_arm():
+    """The `--arm` help lists the askable arms as prose, which is the other half of the
+    same shortcut. Admitting a fourth arm must not leave the help text describing three."""
+    from groundly.retrieval.arms import ARMS, UNRANKED_ARMS
+
+    help_text = runner.invoke(app, ["ask", "--help"]).output
+    for arm in (n for n in ARMS if n not in UNRANKED_ARMS):
+        assert arm in help_text, f"--arm help does not mention the askable arm {arm!r}"
+
+
+def test_ask_arm_plumbs_through_and_defaults_to_vector(retrievable_subject, monkeypatch):
+    """`--arm`, singular, beside `groundly eval --arms`, plural — different surfaces,
+    unambiguous names."""
+    captured = {}
+    monkeypatch.setattr("groundly.agents.ask.ask", _capturing_ask(captured))
+    _configure_chat(retrievable_subject)
+
+    assert runner.invoke(app, ["ask", retrievable_subject, "q"]).exit_code == 0
+    assert captured["arm"] == "vector"
+
+    result = runner.invoke(app, ["ask", retrievable_subject, "q", "--arm", "hybrid-local"])
+    assert result.exit_code == 0, result.output
+    assert captured["arm"] == "hybrid-local"
+
+
+def test_ask_names_which_arm_mistake_it_was(retrievable_subject, monkeypatch):
+    """Three refusals, three causes. The unranked one is the easiest to mistake for a
+    typo, so it has to say why `graph-global` is scoreable but not askable."""
+
+    def _unreachable(*a, **kw):
+        raise AssertionError("the CLI must screen the arm before calling ask()")
+
+    monkeypatch.setattr("groundly.agents.ask.ask", _unreachable)
+    _configure_chat(retrievable_subject)
+
+    for arm, expected in (
+        ("vektor", "unknown retrieval arm"),
+        ("adaptive", "declared but not implemented"),
+        ("graph-global", "no relevance order"),
+    ):
+        result = runner.invoke(app, ["ask", retrievable_subject, "q", "--arm", arm])
+        assert result.exit_code != 0, arm
+        assert expected in result.output, f"{arm}: {result.output}"
+
+
+def test_ask_graph_arm_without_a_graph_prints_a_cause_not_a_traceback(
+    retrievable_subject, monkeypatch
+):
+    """`GraphNotBuiltError` joins the except tuple, so the student is told what to build
+    rather than shown a stack trace (conventions: name the cause specifically)."""
+    _configure_chat(retrievable_subject)
+    result = runner.invoke(app, ["ask", retrievable_subject, "q", "--arm", "hybrid-local"])
+
+    assert result.exit_code != 0
+    assert "graph not built" in result.output
+    # Names the arm: the default one works on this subject, so "no graph" alone does not
+    # explain why this invocation is the one that failed.
+    assert "'hybrid-local' arm needs one" in result.output
+    assert "Traceback" not in result.output
 
 
 def test_ask_model_download_error_fails_cleanly(retrievable_subject, monkeypatch):

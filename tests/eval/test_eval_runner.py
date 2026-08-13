@@ -5,7 +5,8 @@ import json
 import pytest
 from llama_index.core.schema import NodeWithScore, TextNode
 
-from groundly.eval.runner import ArmDegradedError, run, write_results
+from groundly.eval.runner import run, write_results
+from groundly.retrieval.graph import GraphNotBuiltError
 
 _GOLD = [
     {
@@ -50,11 +51,15 @@ def gold_file(tmp_path):
     return path
 
 
-def _stub_retrieve(monkeypatch, by_arm, degrade_to=None):
+def _stub_retrieve(monkeypatch, by_arm):
     def _retrieve(subject, query, arm, **kwargs):
-        return _nodes(*by_arm[arm]), ["stub"], degrade_to or arm
+        return _nodes(*by_arm[arm]), ["stub"]
 
     monkeypatch.setattr("groundly.eval.runner.retrieve_for_arm", _retrieve)
+    # A test that fakes retrieval has no real subject on disk, so the graph preflight
+    # would refuse every graph arm before scoring anything. Satisfying it here rather
+    # than per test keeps the gate itself testable in exactly one place, below.
+    monkeypatch.setattr("groundly.core.subject.Subject.graph_is_built", lambda self: True)
 
 
 def test_run_scores_every_question_against_every_arm(gold_file, monkeypatch):
@@ -93,11 +98,26 @@ def test_run_measures_leakage_against_every_question_source(gold_file, monkeypat
     assert rows["q2"]["leakage"] == 1.0  # hand-written, but still retrieving exam text
 
 
-def test_run_refuses_when_a_graph_arm_degraded_to_vector(gold_file, monkeypatch):
-    """Reporting baseline numbers under a graph arm's name is worse than no numbers."""
-    _stub_retrieve(monkeypatch, {"graph-global": [1]}, degrade_to="vector")
-    with pytest.raises(ArmDegradedError, match="degraded to 'vector'"):
-        run("TEST", gold_file, StubStore(), arms=["graph-global"])
+def test_eval_preflights_the_graph_requirement(gold_file, monkeypatch):
+    """A missing graph is a configuration fact, not a per-question failure: it holds for
+    every remaining question, so the run refuses *before* question 1 rather than filing
+    48 identical errors. Retrieval is deliberately not stubbed — reaching it at all would
+    mean the preflight ran too late."""
+
+    def _unreachable(*a, **kw):
+        raise AssertionError("the preflight must refuse before any retrieval")
+
+    monkeypatch.setattr("groundly.eval.runner.retrieve_for_arm", _unreachable)
+    with pytest.raises(GraphNotBuiltError, match="graph-global cannot be scored"):
+        run("TEST", gold_file, StubStore(), arms=["vector", "graph-global"])
+
+
+def test_eval_needs_no_graph_for_the_zero_key_arm(gold_file, monkeypatch):
+    """The preflight keys off `needs_graph`, not off "any arm at all" — the vector arm
+    stays runnable on a subject that was never graphed, which is the zero-key path."""
+    _stub_retrieve(monkeypatch, {"vector": [1]})
+    monkeypatch.setattr("groundly.core.subject.Subject.graph_is_built", lambda self: False)
+    assert run("TEST", gold_file, StubStore(), arms=["vector"])["questions"] == 2
 
 
 def test_run_reports_progress_per_question_arm(gold_file, monkeypatch):
@@ -145,7 +165,7 @@ def test_run_records_a_failed_question_and_carries_on(gold_file, monkeypatch):
         calls.append(query)
         if len(calls) == 1:
             raise RuntimeError("exceeds the available context size (8192 tokens)")
-        return _nodes(1), ["stub"], arm
+        return _nodes(1), ["stub"]
 
     monkeypatch.setattr("groundly.eval.runner.retrieve_for_arm", _retrieve)
     results = run("TEST", gold_file, StubStore(), arms=["vector"])
@@ -164,7 +184,7 @@ def test_errored_questions_are_excluded_from_quality_metrics(gold_file, monkeypa
     def _retrieve(subject, query, arm, **kwargs):
         if "deadlock" in query or "race" in query:
             raise RuntimeError("provider unreachable")
-        return _nodes(2), ["stub"], arm
+        return _nodes(2), ["stub"]
 
     monkeypatch.setattr("groundly.eval.runner.retrieve_for_arm", _retrieve)
     results = run("TEST", gold_file, StubStore(), arms=["vector"])
@@ -196,7 +216,7 @@ def test_interrupt_keeps_what_ran_and_marks_it_partial(gold_file, monkeypatch):
     def _retrieve(subject, query, arm, **kwargs):
         if "barieră" in query:
             raise KeyboardInterrupt
-        return _nodes(1), ["stub"], arm
+        return _nodes(1), ["stub"]
 
     monkeypatch.setattr("groundly.eval.runner.retrieve_for_arm", _retrieve)
     results = run("TEST", gold_file, StubStore(), arms=["vector"])

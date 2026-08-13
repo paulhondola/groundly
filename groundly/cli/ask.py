@@ -9,6 +9,14 @@ from rich.markup import escape
 
 from groundly.cli.app import _fail, _store_checked, _subject_checked, app, console
 
+# A literal, not `retrieval.arms.VECTOR`: a signature default is evaluated at import
+# time, and importing the arm table costs ~6.4s of graphrag and pandas that every
+# `groundly --help` would pay for. `cli/eval.py`'s `_DEFAULT_ARMS` is a literal for the
+# same reason. `test_the_cli_default_arm_matches_the_table` pins this against ARM_TABLE
+# so the shortcut cannot drift, and `test_the_arm_help_text_names_every_askable_arm`
+# does the same for the prose list in the `--arm` help below.
+_DEFAULT_ARM = "vector"
+
 
 @app.command()
 def ask(
@@ -16,6 +24,15 @@ def ask(
     query: Annotated[
         str, typer.Argument(help="Question to answer, grounded in the subject's materials.")
     ],
+    arm: Annotated[
+        str,
+        typer.Option(
+            "--arm",
+            help="Retrieval arm: 'vector' (default, zero-key) or 'hybrid-local', which "
+            "needs a built graph and is also provider-free per query. Singular, unlike "
+            "`groundly eval --arms`.",
+        ),
+    ] = _DEFAULT_ARM,
     no_rerank: Annotated[
         bool, typer.Option("--no-rerank", help="Skip the cross-encoder rerank step.")
     ] = False,
@@ -33,21 +50,32 @@ def ask(
     from groundly.llm.chat import ChatUnreachableError
     from groundly.llm.config import ProviderNotConfiguredError
     from groundly.llm.embeddings import ModelDownloadError
+    from groundly.retrieval.arms import validate_arms
+    from groundly.retrieval.graph import GraphNotBuiltError
 
     try:
         setup_logging(debug)
     except ValueError as exc:
         _fail(str(exc))
 
+    # Screened here as well as inside `ask()`: same reason `groundly eval` screens before
+    # `eval.runner.run`. It also keeps ValueError out of the except tuple below, where it
+    # would dress an unrelated bug up as a clean CLI failure.
+    try:
+        validate_arms([arm], ranked_only=True)
+    except ValueError as exc:
+        _fail(str(exc))
+
     subj = _subject_checked(subject)
     _store_checked(subj)
     try:
-        result = ask_fn(subject, query, rerank=not no_rerank)
+        result = ask_fn(subject, query, arm=arm, rerank=not no_rerank)
     except (
         ProviderNotConfiguredError,
         NoCitationsError,
         ModelDownloadError,
         ChatUnreachableError,
+        GraphNotBuiltError,
     ) as exc:
         _fail(str(exc))
 
@@ -59,7 +87,8 @@ def ask(
             heading = f" — {escape(c.heading_path)}" if c.heading_path else ""
             console.print(f"  {i}. {escape(c.filename)}{loc}{heading}")
     # No `router=` here: `ask()` no longer classifies, so the field would print `—`
-    # forever (decision 28). `groundly eval` is where router behaviour is reported now.
+    # forever (decision 28, unchanged by 29 — `--arm` states the arm outright).
+    # `groundly eval` is where router behaviour is reported now.
     console.print(f"[dim]citations={len(result.citations)}[/dim]")
 
 

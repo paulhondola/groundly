@@ -14,9 +14,11 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from groundly.core.subject import Subject
 from groundly.eval import gold as gold_mod
 from groundly.eval.metrics import Scored, by_slice, mcnemar, sweep, unranked_arms
-from groundly.retrieval.arms import UNRANKED_ARMS, retrieve_for_arm, validate_arms
+from groundly.retrieval.arms import ARM_TABLE, UNRANKED_ARMS, retrieve_for_arm, validate_arms
+from groundly.retrieval.graph import GraphNotBuiltError
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +30,6 @@ DEFAULT_AT_K = (1, 5, 8, 10, 20)
 # Every arm is tested against this one. It is the zero-key, zero-build arm, so "does the
 # graph earn its cost" is the only question the comparison is really asking.
 BASELINE_ARM = "vector"
-
-
-class ArmDegradedError(RuntimeError):
-    """A graph arm ran as vector because no graph is built. Fatal for an eval: the run
-    would report graph numbers that are really baseline numbers, which is worse than no
-    numbers at all."""
 
 
 # Exceptions that mean *this code is broken*, never "the provider had a bad minute".
@@ -64,6 +60,19 @@ def run(
     # refusing to run. Fail here, before any model loads.
     validate_arms(arms)
 
+    # Same shape, same reason, for the graph the graph arms need. A missing graph is a
+    # configuration fact: it holds for every remaining question, so there is nothing to
+    # salvage by starting. Preflighting also keeps it out of reach of the per-question
+    # handler below, which would otherwise file 48 identical failures and write a
+    # results file full of zeroes.
+    if any(ARM_TABLE[a].needs_graph for a in arms) and not Subject(subject).graph_is_built():
+        # The exception already prefixes "graph not built for this subject —", so this
+        # says only which arms need one and how to get it.
+        raise GraphNotBuiltError(
+            f"{', '.join(a for a in arms if ARM_TABLE[a].needs_graph)} cannot be scored "
+            f"without it. Build it first: groundly index {subject} <paths> --graph"
+        )
+
     questions = gold_mod.load(gold_path)
     expected, source, warnings, base_rate = gold_mod.resolve(questions, store)
 
@@ -77,7 +86,7 @@ def run(
                 on_question(question, arm)
             start = time.monotonic()
             try:
-                nodes, _path, arm_actual = retrieve_for_arm(
+                nodes, _path = retrieve_for_arm(
                     subject,
                     question.query,
                     arm,
@@ -106,13 +115,6 @@ def run(
                 scored.append(Scored.failed(question=question, arm=arm, error=str(exc)))
                 continue
             latency_ms = int((time.monotonic() - start) * 1000)
-            if arm_actual != arm:
-                # Unlike a per-question error this is a configuration fact — it will hold
-                # for every remaining question, so there is nothing to salvage by going on.
-                raise ArmDegradedError(
-                    f"arm {arm!r} degraded to {arm_actual!r} — no graph is built for "
-                    f"'{subject}'. Build it first: groundly index {subject} <paths> --graph"
-                )
             scored.append(
                 Scored.score(
                     question=question,
