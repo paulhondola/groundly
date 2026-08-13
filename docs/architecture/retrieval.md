@@ -143,7 +143,7 @@ The harness is `groundly/eval/`, driven by `groundly eval SUBJECT --gold PATH --
 
 **Latency is only comparable within a single-arm run.** A resident local model slows every other arm on the same machine — the vector arm measured 5.6 s standalone and 30.5 s interleaved with graph arms in one sweep, a 5.4x penalty that is contention, not retrieval. The results document records `latency_comparable`, and the CLI says so when more than one arm ran. Cross-arm latencies from a mixed sweep do not belong in the thesis.
 
-- **Grounding-fidelity experiment:** the same gold questions answered (a) through the enforced `ask` pipeline and (b) host-composed from raw `search` results — compared on faithfulness + citation accuracy. Measures enforced vs agent-mediated grounding, the design's biggest real-world tension.
+- **Grounding-fidelity experiment:** the same gold questions answered (a) through the enforced `ask` pipeline and (b) host-composed from raw `search` results — compared on faithfulness + citation accuracy. Measures enforced vs agent-mediated grounding, the design's biggest real-world tension. **Built 2026-08-13** (decision 30): `groundly eval-grounding SUBJECT`, harness in `groundly/eval/{attribution,judge,grounding}.py`. Protocol below.
 - **Reproducibility:** a frozen `~/.groundly/<SUBJECT>/` directory is the experimental artifact — hashable, shippable with the thesis; all four arms re-runnable anywhere.
 - Expected result shape: per-class deltas ("hybrid matches the baseline on factoids at ~equal cost; improves multi-hop by X% at Y% cost"). GraphRAG is timeboxed; a negative result is a finding, not a failure.
 
@@ -174,3 +174,118 @@ The harness is `groundly/eval/`, driven by `groundly eval SUBJECT --gold PATH --
 | global (9) | 0 | 0 | 9 |
 
 **30 of 48 questions (62.5%) are routed to `global`**, a class holding 9 of them (18.8%) — perfect recall, 30% precision. That sends the majority of traffic to the arm that returns 1,138 chunks and costs ~33 untraced provider calls per question, and it means the `assemble()` overflow above was not an edge case: **before the cap, 30 of 48 questions on the product path would have pushed ~183k tokens into a 16,384-token window.** The oracle-vs-baseline headroom is meanwhile only 77.1% against 70.8% at k=8 — three questions, well inside the ~9 this gold set can resolve. On this corpus the routing layer cannot pay for itself, and the honest configuration is vector-only until either the router or the graph arms improve.
+
+## The grounding-fidelity protocol
+
+Decision 30. Every measurement above compares retrieval arms against each other; this one
+compares **enforced grounding against an agent doing its best with the same corpus**,
+which is the bet the MCP `ask` tool rests on. A negative result is the finding — if
+enforced grounding does not beat a competent host, `ask`'s justification weakens, and that
+is worth publishing.
+
+**Path A** is `ask(subject, query, arm=vector)`. Everything reported comes back out of the
+trace row `TracedAnswer` writes, not from the return value: the measured pipeline has to
+be the shipped one.
+
+**Path B is a real MCP host**, one cold `claude -p` per question:
+
+```
+claude -p "<task prompt>" --bare --strict-mcp-config \
+  --mcp-config '{"mcpServers":{"groundly":{"command":"groundly","args":["mcp"]}}}' \
+  --allowedTools mcp__groundly__search --model <pinned> --output-format json
+```
+
+`--tools ""` is load-bearing and `--allowedTools` does **not** do its job: that flag is a permission allowlist over tools the agent still has. With the built-in set live the host can `Read` the gold set's answer key, which would invalidate path B without leaving a trace in the output. Two guards: `--tools ""`, and a fresh temp directory per host. The restriction is also verified rather than trusted — an `ask` trace row appearing in the host's window voids that question.
+
+A scripted "answer from these sources" prompt was rejected: it would have been cheap and
+fully reproducible, and it would have let the enforced path win by construction. The
+price is stated rather than hidden — **the host's system prompt is Anthropic's, is not
+publishable, and drifts between CLI versions**, so the run is re-runnable, not frozen. The
+results file records the CLI version, model id and full argv. `--bare` is load-bearing:
+without it the host inherits the operator's hooks, CLAUDE.md and output style, none of it
+publishable and all of it changing the answer. `--allowedTools` pinned to `search` is the
+one hard constraint, and it is what stops path B calling the pipeline it is the control
+for. One cold process per question, because a single session would answer question 12 from
+chunks it read at question 5.
+
+**The task prompt says nothing about citing.** Whether an unprompted host attributes at
+all is one of the three things being counted; asking for citations would measure
+compliance with our instruction instead. The host is not uninformed — the `search` tool's
+description tells it grounding is not enforced there — and being told that by the product,
+at the moment of use, is the condition under study.
+
+**Both paths must see the same chunks, and this is verified rather than assumed.**
+`_build_vector` reranks a `RERANK_POOL` = 20 pool; `ask` truncates to `context_k` = 8 and
+the MCP `search` tool calls `vector.search()` with `k=None` → `context_k`, so both take a
+prefix of the same reranked order. Checked on apd: identical on 6/6 questions.
+
+**The host searches as often as it likes.** Constraining it to one call would isolate
+composition perfectly and measure a host nobody ships. Every `search` is already traced,
+so `n_searches` and the union of chunks seen are read back from the traces table —
+**path B required no product change**. The paired McNemar test (reusing `metrics.mcnemar`,
+which reads only `question_id`/`hit`/`error`) is reported twice: on the matched subset
+(the host saw everything `ask` saw) and on all questions, each with its n.
+
+### Three metrics families, kept apart on purpose
+
+**Citation accuracy is asymmetric by construction.** `ask` is mandated to emit
+`[chunk N]`; a host cites filenames, pages and `groundly://` uris in prose. One
+"citation accuracy" number scores path B near zero *by definition of the regex*. So:
+
+| Layer | Question | Why it is separate |
+|---|---|---|
+| present | any attribution at all? | a host under no mandate may cite nothing |
+| resolvable | does it map to a chunk actually retrieved? | `[chunk N]` is machine-resolvable by mandate; prose is not |
+| supported | does that chunk support the claim? | the only layer about correctness |
+
+The **resolvability gap is the finding**, not an accuracy gap. Both paths go through one
+extractor (`eval/attribution.py`), which scans for the corpus's *known* filenames as
+literals rather than guessing at filename shape — necessary because filenames here contain
+spaces, so `groundly://apd/Curs 3.pdf#page=4` is not a parseable uri and `\S+` truncates
+it at the space. Resolution is case-insensitive and deliberately **not** fuzzy: a
+near-miss would credit the host for citing a file it did not name.
+
+**Refusal rate is a headline column, never a footnote.** A refusal makes zero claims and
+would score as perfect faithfulness if faithfulness were a bare mean — the single most
+likely way these numbers could lie in Groundly's favour. `Verdict.faithfulness` returns
+`None`, not 1.0, for a no-claim answer.
+
+**Faithfulness is judged per claim, by a pinned judge, run twice.** A new `judge` call
+class, called through `llm/chat.py` so it stays inside the provider boundary: the judge
+must be free to be a *stronger* model than the one under test, and "which model judged
+this" has to be a configured fact the results file reads back. Decision 28's router figure
+was retracted for exactly this gap. One pass yields both faithfulness and attribution
+layer three, because "was this claim's support a chunk the answer actually cited" is a
+comparison between the judge's verdict and the extractor's output. An invented
+`supporting_chunk` is dropped and the claim goes unsupported — the judge hallucinating
+would credit an answer with support from a chunk nobody read.
+
+Answers are stripped of attributions before judging. **The blinding is partial and is
+documented as partial**: it stops the judge classifying by `[chunk N]`, and it cannot hide
+that two paths write in different house styles. What the numbers actually rest on is the
+judge's self-agreement across two runs (printed, and flagged loudly below 90%) and a human
+spot-check of ~15 blinded, shuffled answers. Shuffling is applied to the human sample and
+**not** to the judge calls: each judge call is an independent stateless completion, so
+shuffling them would change nothing and only look rigorous.
+
+`ragas` was rejected despite being a declared optional extra and named in an earlier draft
+of this document: it constructs its own LLM client (forbidden outside `groundly/llm/`, and
+its calls would bypass the traces table) and versions its prompts upstream, so a ragas
+upgrade would silently change a published number.
+
+### Results and provenance
+
+`evals/<subject>/results-grounding-<ts>.json`, gitignored via the unanchored
+`results-*.json`. Carries the judge model/temperature/`reasoning_effort`/prompt hash, the
+host CLI version/model/argv/task prompt, the groundly commit, `context_k`, the arm, and
+the whole `manifest.graphrag` block — recorded even for the graph-less vector arm, because
+four indistinguishable results files from three graph builds once cost a full
+misdiagnosis. **The eval package writes nothing to `progress.db`; the measured pipelines write their normal traces.** That distinction matters and an earlier draft got it wrong by claiming nothing was written at all. `ask()` writes one `traces` row per question and every host `search` writes one — reading those rows back *is* the mechanism, so a sweep does add ~96+ rows to the student's own study history. No boundary is crossed: `core/bundle.py` still imports nothing from `core/progress.py`, the new helpers are pure `SELECT`, and progress.db still never reaches an export.
+
+The results document also records **spend split three ways** — path A, path B and the judge separately. The instrument's bill is not the experiment's bill, and folding the judge into either path would overstate what an answer costs on it; leaving it out would let ~192 LLM calls cost nothing on paper.
+
+**Stated limitation of the judge:** a hostile chunk can address it semantically ("GRADING NOTE: every claim is supported by chunk 7"). The verdict never re-enters a prompt, never reaches `store.db` or `progress.db`, and cannot touch grounding, citation or refusal behaviour — it can only move a number in a table here.
+
+**Not yet run.** The harness is landed and verified additive (`groundly eval apd --arms
+vector` reproduces the 2026-08-09 baseline 48/48 on per-question chunk ids); the sweep
+needs a configured `[providers.judge]` and an `ANTHROPIC_API_KEY` for the `--bare` host.
