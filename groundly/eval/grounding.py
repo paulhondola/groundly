@@ -77,6 +77,28 @@ HOST = "host"
 # contract bug and report it as a flaky run.
 _BUG_ERRORS = (AttributeError, ImportError, IndexError, KeyError, NameError, TypeError)
 
+# Built-in host tools denied by name. Anything that can reach the filesystem, a shell, the
+# network, or a subagent that has them. Denied individually rather than with `--tools ""`,
+# which also disables the MCP tools and so removes the very thing under measurement
+# (verified: with it the host answers "no such tool is available to me").
+#
+# A denylist is the weaker shape and it is not the only guard: the host also runs in an
+# empty temp directory, and Claude Code scopes file access to the working directory, so a
+# tool missing from this list still cannot reach the gold set. Kept as a named constant so
+# a new built-in tool is one edit rather than a hunt through an argv literal.
+DENIED_HOST_TOOLS = (
+    "Read",
+    "Write",
+    "Edit",
+    "NotebookEdit",
+    "Bash",
+    "Glob",
+    "Grep",
+    "WebFetch",
+    "WebSearch",
+    "Task",
+)
+
 
 # --------------------------------------------------------------------------------------
 # Path B — the host
@@ -136,10 +158,24 @@ class HostRun:
 def host_argv(cfg: HostConfig, prompt: str, subject: str) -> list[str]:
     """The exact command, as a list — never a shell string.
 
-    `--tools ""` disables the **built-in** tool set, leaving MCP tools untouched. It is
-    load-bearing twice over, and `--allowedTools` alone does neither job: that flag is a
-    *permission* allowlist over tools the agent still has, not a restriction on which
-    tools exist.
+    Two independent guards keep the host away from the filesystem, and getting here took
+    three wrong answers, each disproved by running it:
+
+      - `--allowedTools mcp__groundly__search` alone does **not** block `Read`. Measured:
+        a host with only that flag read a canary file in its working directory. It is a
+        permission allowlist over the MCP surface, not a restriction on what exists.
+      - `--tools ""` blocks `Read`, and also **disables MCP tools**, which makes the
+        experiment impossible rather than isolated. Measured: with it the host replies
+        "no such tool is available to me"; without it the same prompt returns 8 chunks.
+        A plausible-sounding fix that silently removes the thing being measured is worse
+        than the hole it closes.
+      - What works, both verified: **`--disallowedTools`** over the built-in
+        filesystem/exec/network tools (blocks `Read` in the cwd, leaves MCP search
+        returning 8), and **an empty temp directory as cwd** (Claude Code scopes file
+        access to the working directory — an absolute path to the gold set is refused
+        with "I don't have permission to read that file").
+
+    That matters more for the experiment than for the threat model:
 
       1. *The experiment*. With `Read`/`Glob` live, a host running in the repo can open
          `evals/<subject>/gold.jsonl` — the answer key, with the file and page of every
@@ -157,10 +193,16 @@ def host_argv(cfg: HostConfig, prompt: str, subject: str) -> list[str]:
     only `search` is permitted, so the host cannot call `ask` — the pipeline it is the
     control for.
 
-    `--bare` strips hooks, CLAUDE.md auto-discovery, plugins and output styles. Without it
-    the host under test inherits whatever is configured on the machine that ran the sweep,
-    none of which is publishable and all of which changes the answer. It also means auth is
-    strictly `ANTHROPIC_API_KEY`.
+    `--setting-sources ""` loads no user, project or local settings, so the host inherits
+    no CLAUDE.md, no hooks, no plugins and no output style from the machine that ran the
+    sweep. `--disable-slash-commands` drops skills. None of that local configuration is
+    publishable and all of it changes the answer, so a host carrying it is not a host
+    anyone else could reproduce. **Measured on this machine: 46,555 tokens of context
+    without these flags, 8,935 with them** — the contamination is not theoretical.
+
+    `--bare` would strip the same things in one flag and is *not* used, for one reason:
+    it forces auth to `ANTHROPIC_API_KEY` only, refusing the subscription login most
+    people actually have. Isolation should not cost the ability to run the experiment.
 
     `--strict-mcp-config` keeps the host from seeing any MCP server but this one.
 
@@ -175,14 +217,19 @@ def host_argv(cfg: HostConfig, prompt: str, subject: str) -> list[str]:
         cfg.claude_bin,
         "-p",
         prompt,
-        "--bare",
+        # Empty string, not omitted: "" loads no setting sources, while leaving the flag
+        # off loads user + project + local.
+        "--setting-sources",
+        "",
+        "--disable-slash-commands",
         "--strict-mcp-config",
         "--mcp-config",
         json.dumps(mcp_config),
-        # Empty string, not omitted: "" disables the built-in set, while leaving the flag
-        # off means "default", i.e. all of them.
-        "--tools",
-        "",
+        # Denied by name rather than via `--tools ""`, which would take the MCP tools with
+        # them. Everything here can reach the filesystem, a shell, the network or a
+        # subagent that has them.
+        "--disallowedTools",
+        *DENIED_HOST_TOOLS,
         "--allowedTools",
         "mcp__groundly__search",
         "--model",
@@ -237,9 +284,22 @@ def run_host(query: str, subject: str, cfg: HostConfig) -> HostRun:
     if payload.get("is_error"):
         return _host_error(f"host reported an error: {str(payload.get('result'))[:300]}", start)
     usage = payload.get("usage") or {}
+    # All four counters, not just input+output. The host caches its system prompt, so the
+    # bulk of a session's tokens land in `cache_creation_input_tokens` /
+    # `cache_read_input_tokens` — the smoke test reported 6 tokens for a call that really
+    # used ~8,900, which would have put a fabricated number in a thesis table.
     return HostRun(
         answer=payload.get("result"),
-        tokens=(usage.get("input_tokens") or 0) + (usage.get("output_tokens") or 0) or None,
+        tokens=sum(
+            usage.get(field) or 0
+            for field in (
+                "input_tokens",
+                "output_tokens",
+                "cache_creation_input_tokens",
+                "cache_read_input_tokens",
+            )
+        )
+        or None,
         cost_usd=payload.get("total_cost_usd"),
         # The host's own duration when it reports one: it excludes our process spawn, which
         # is ours rather than the host's, and path A's traced latency excludes the same.

@@ -68,14 +68,23 @@ def test_host_argv_pins_the_tool_allowlist_to_search():
     assert argv[argv.index("--allowedTools") + 1] == "mcp__groundly__search"
 
 
-def test_host_argv_disables_the_built_in_tool_set():
-    """**`--allowedTools` alone does not do this**, and an earlier version of this harness
-    claimed it did. That flag is a permission allowlist over tools the agent still has;
-    `--tools ""` is what removes the built-in set. Without it the host keeps Read/Glob and
-    can open `evals/<subject>/gold.jsonl` — the answer key — scoring path B brilliantly for
-    reasons that have nothing to do with composing from `search`."""
+def test_host_argv_denies_the_built_in_tools_by_name():
+    """**`--allowedTools` alone does not block `Read`** — measured, a host with only that
+    flag read a canary file in its cwd. Without a second guard the host keeps Read/Glob
+    and can open `evals/<subject>/gold.jsonl`, the answer key, scoring path B brilliantly
+    for reasons that have nothing to do with composing from `search`."""
     argv = host_argv(_CFG, "prompt", "apd")
-    assert argv[argv.index("--tools") + 1] == ""
+    denied = argv[argv.index("--disallowedTools") + 1 : argv.index("--allowedTools")]
+    assert "Read" in denied and "Bash" in denied and "Glob" in denied
+
+
+def test_host_argv_never_passes_tools_empty():
+    """`--tools ""` looks like the right flag and **disables the MCP tools too**, which
+    removes the thing under measurement rather than isolating it. Measured: with it the
+    host answers "no such tool is available to me"; without it the same prompt returns 8
+    chunks. Pinned because it is the plausible-sounding fix someone will reach for."""
+    argv = host_argv(_CFG, "prompt", "apd")
+    assert "--tools" not in argv
 
 
 def test_host_argv_bounds_one_question_when_a_budget_is_set():
@@ -89,12 +98,19 @@ def test_host_argv_bounds_one_question_when_a_budget_is_set():
 
 
 def test_host_argv_isolates_the_host_from_the_machine_that_ran_it():
-    """`--bare` drops hooks, CLAUDE.md discovery, plugins and output styles;
-    `--strict-mcp-config` drops every other MCP server. Without both, the host under test
-    inherits local configuration that is unpublishable and changes the answer."""
+    """No setting sources (so no CLAUDE.md, hooks, plugins or output style), no skills,
+    and no MCP server but ours. Measured on the development machine: 46,555 tokens of
+    inherited context without these flags against 8,935 with them — local configuration
+    that is unpublishable and changes the answer.
+
+    Deliberately not `--bare`, which strips the same things but forces auth to
+    `ANTHROPIC_API_KEY`, refusing the subscription login most people have. Isolation must
+    not cost the ability to run the experiment at all."""
     argv = host_argv(_CFG, "prompt", "apd")
-    assert "--bare" in argv
+    assert argv[argv.index("--setting-sources") + 1] == ""
+    assert "--disable-slash-commands" in argv
     assert "--strict-mcp-config" in argv
+    assert "--bare" not in argv
 
 
 def test_host_argv_is_a_list_never_a_shell_string():
