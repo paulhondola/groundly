@@ -270,10 +270,44 @@ spot-check of ~15 blinded, shuffled answers. Shuffling is applied to the human s
 **not** to the judge calls: each judge call is an independent stateless completion, so
 shuffling them would change nothing and only look rigorous.
 
-`ragas` was rejected despite being a declared optional extra and named in an earlier draft
-of this document: it constructs its own LLM client (forbidden outside `groundly/llm/`, and
-its calls would bypass the traces table) and versions its prompts upstream, so a ragas
-upgrade would silently change a published number.
+**`ragas` was rejected, and the first reason given for it was wrong.** An earlier draft
+said ragas "constructs its own LLM client (forbidden outside `groundly/llm/`)". Tested,
+that does not hold: `BaseRagasLLM` is an abstract class *designed* for subclassing — ragas
+ships a worked example for a backend with no LangChain involved — so a ~50-line wrapper
+delegating to `llm/chat.py` keeps both the provider boundary and the cost accounting. A
+second hypothesis, that ragas would force a `huggingface-hub` major bump under the
+exactly-pinned bge-m3 stack, is also false: resolving ragas *together with* Groundly's pins
+succeeds and leaves `huggingface-hub` at 0.36.2, `pandas` at 2.3.3 and `pyarrow` at 22.0.0.
+The pins constrain ragas, not the reverse.
+
+The reasons that survive testing are narrower and one of them is decisive:
+
+- **ragas cannot produce `supporting_chunk`.** Its Faithfulness returns a score and a
+  prose reason — it never says *which* context chunk supports each claim. That field is
+  what powers attribution layer three (`cited_support`): of the claims the judge found
+  support for, how many rest on a chunk the answer actually cited. That is the number
+  separating "the answer is true" from "the answer told you where to check", and a
+  freely-composing host is likeliest to lose on it. Getting it from ragas would need a
+  bespoke second pass, at which point the dependency has bought nothing.
+- **Refusal semantics are load-bearing here.** `Verdict.faithfulness` returns `None`,
+  never 1.0, for a zero-claim answer, because the enforced path refuses by design.
+  Adopting ragas' convention means re-deriving and re-testing that property anyway.
+- **Prompt versioning.** ragas owns `FaithfulnessPrompt` and versions it upstream, so a
+  ragas upgrade silently changes a published number — decision 28's retraction in a
+  different costume.
+- **Weight, measured**: 25 new packages on top of 263, including the whole
+  `langchain` + `langgraph` tree, and a *downgrade* of `rich` 15.0.0 → 14.3.4 that the CLI
+  renders through. `.claude/rules/architecture.md` names LangGraph as rejected.
+
+Both compute the same metric by the same method — ragas divides supported claims by total
+claims, which is `Verdict.faithfulness` line for line. This is not build-vs-buy of
+different things; it is an independent reimplementation of the same one. **The strongest
+argument for ragas is credibility**, not correctness: a named metric is one an examiner
+recognises, where a bespoke judge invites "how do you know it measures what you claim?".
+That is answered here by the published prompt, two-run self-agreement and the human
+spot-check — and the open option, if the defence wants more, is to install the declared
+`eval` extra and report agreement between the two on a subsample rather than to replace
+the instrument.
 
 ### Results and provenance
 
