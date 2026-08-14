@@ -247,6 +247,26 @@ spaces, so `groundly://apd/Curs 3.pdf#page=4` is not a parseable uri and `\S+` t
 it at the space. Resolution is case-insensitive and deliberately **not** fuzzy: a
 near-miss would credit the host for citing a file it did not name.
 
+**Not answering is an outcome, not an error — and the first partial run proved why it
+matters.** Each path has a characteristic way of failing to produce a grounded answer, and
+the harness originally filed both as harness errors and dropped them from every column:
+
+- **`ungrounded`** — the host answered without calling `search` at all. Measured on 12 host
+  sessions of apd: **9 of them**. It answered OpenMP and Amdahl's-law questions straight
+  out of the model, never opening the course materials. Dropping those rows deleted
+  agent-mediated grounding's worst failure from the averages meant to measure it.
+- **`no_citations`** — `ask` produced text whose citations resolved to nothing, so the
+  pipeline refused it (`NoCitationsError`). The product worked as designed and the student
+  still got no answer. Measured: **7 of 13** `ask` rows on gpt-oss-120b. Dropping those
+  flattered the enforced path by exactly the same mechanism, in the opposite direction.
+
+Both now count. `hit` is `False` for each, so they are losses in the paired test, and each
+gets its own rate beside faithfulness. **Faithfulness is conditional on having produced a
+gradeable answer**, so it is never readable without `refusal_rate`, `ungrounded_rate` and
+`no_citation_rate` next to it — a host that answers 25% of the time very faithfully has
+not beaten a path that answers every time slightly less so. `outcome` is a single field;
+an earlier version carried a separate `refused` boolean beside it and the two disagreed.
+
 **Refusal rate is a headline column, never a footnote.** A refusal makes zero claims and
 would score as perfect faithfulness if faithfulness were a bare mean — the single most
 likely way these numbers could lie in Groundly's favour. `Verdict.faithfulness` returns

@@ -57,6 +57,7 @@ from pathlib import Path
 # have made the measured pipeline a different pipeline from the shipped one, which is the
 # one thing this experiment cannot afford.
 from groundly.agents.ask import ask
+from groundly.agents.citations import NoCitationsError
 from groundly.agents.prompts import REFUSAL
 from groundly.core.config import load_provider, load_settings
 from groundly.core.progress import connect_progress, max_trace_id, read_traces
@@ -71,6 +72,24 @@ logger = logging.getLogger(__name__)
 
 ASK = "ask"
 HOST = "host"
+
+# What happened to one question on one path. **These are outcomes, not errors**, and the
+# distinction is what the first partial run got wrong: 9 host rows and 7 ask rows were
+# filed as harness errors and excluded from every mean, which silently deleted each path's
+# *worst* behaviour — biasing the comparison toward the host in one direction and toward
+# `ask` in the other.
+ANSWERED = "answered"
+REFUSED = "refused"
+# The host answered without retrieving anything. Not a failure of the harness: it is the
+# central thing agent-mediated grounding can do that enforced grounding cannot, and on the
+# first partial run it was 9 of 12 host sessions.
+UNGROUNDED = "ungrounded"
+# `ask` produced text but no citation that resolved to a retrieved chunk, so the pipeline
+# refused to return it (`NoCitationsError`). The product worked as designed and the user
+# still got no answer, so it counts as a failure to produce a grounded answer rather than
+# as a provider outage.
+NO_CITATIONS = "no_citations"
+ERROR = "error"
 
 # Exceptions that mean *this code is broken* rather than "the provider had a bad minute",
 # copied in intent from `eval/runner.py`: per-question error tolerance must never absorb a
@@ -336,10 +355,12 @@ class GroundingScored:
     klass: str
     lang: str
     path: str
+    # One of ANSWERED/REFUSED/UNGROUNDED/NO_CITATIONS/ERROR. Only ERROR is excluded from
+    # the quality columns; the rest are results.
+    outcome: str
     seen_chunks: list[int]
     n_searches: int
     answer: str | None
-    refused: bool
     attributions_n: int
     attributions_resolvable: int
     attributions: list[dict]
@@ -363,6 +384,13 @@ class GroundingScored:
     judge_cost_usd: float | None = None
 
     @property
+    def refused(self) -> bool:
+        """Derived, not stored. It was a separate boolean field beside `outcome` until the
+        two disagreed: `aggregate` read one and `judge_row` set the other, so the host's
+        prose refusals counted in one column and not the next. One fact, one field."""
+        return self.outcome == REFUSED
+
+    @property
     def attribution_present(self) -> bool:
         return self.attributions_n > 0
 
@@ -381,9 +409,21 @@ class GroundingAggregate:
     # Mean over answers that made at least one claim. A refusal makes none, and scoring it
     # as perfect faithfulness would let the enforced path win this experiment by declining
     # to answer — which is why `refusal_rate` sits beside this and never under it.
+    #
+    # **It is conditional on the path having produced a gradeable answer at all**, so it
+    # must never be read without `ungrounded_rate` and `no_citation_rate` beside it. The
+    # host's faithfulness over the answers where it actually retrieved says nothing about
+    # the answers where it didn't bother, and those were the majority on the first run.
     faithfulness: float | None
+    # The composite, and the one the paired test runs on: every outcome that is not a
+    # fully-supported answer counts against the path here, including ungrounded answers and
+    # citation failures. This is where "it answered without looking" is paid for.
     fully_supported_rate: float | None
     refusal_rate: float
+    # Host-side failure mode: answered with an empty retrieved set.
+    ungrounded_rate: float
+    # Ask-side failure mode: text produced, no citation resolved, pipeline refused it.
+    no_citation_rate: float
     attribution_present_rate: float
     attribution_resolvable_rate: float | None
     cited_support_rate: float | None
@@ -408,17 +448,27 @@ def _median(values: list):
     return sorted(values)[len(values) // 2] if values else None
 
 
+def _rate(rows: list[GroundingScored], outcome: str) -> float:
+    return (sum(1 for r in rows if r.outcome == outcome) / len(rows)) if rows else 0.0
+
+
 def aggregate(rows: list[GroundingScored], **slice_: str) -> GroundingAggregate:
-    ok = [r for r in rows if r.error is None]
+    # `ok` is every row that produced a *result*, which now includes ungrounded answers and
+    # citation failures. Only genuine harness/provider failures are excluded — the previous
+    # version excluded those two outcomes as well and so deleted each path's worst
+    # behaviour from every column.
+    ok = [r for r in rows if r.outcome != ERROR]
     answered = [r for r in ok if r.claims_total]
     with_attrib = [r for r in ok if r.attributions_n]
     return GroundingAggregate(
         n=len(ok),
-        errors=sum(1 for r in rows if r.error is not None),
-        refusals=sum(1 for r in ok if r.refused),
+        errors=sum(1 for r in rows if r.outcome == ERROR),
+        refusals=sum(1 for r in ok if r.outcome == REFUSED),
         faithfulness=_mean([r.faithfulness for r in answered if r.faithfulness is not None]),
         fully_supported_rate=_mean([float(r.hit) for r in ok if r.hit is not None]),
-        refusal_rate=(sum(1 for r in ok if r.refused) / len(ok)) if ok else 0.0,
+        refusal_rate=_rate(ok, REFUSED),
+        ungrounded_rate=_rate(ok, UNGROUNDED),
+        no_citation_rate=_rate(ok, NO_CITATIONS),
         attribution_present_rate=(len(with_attrib) / len(ok)) if ok else 0.0,
         attribution_resolvable_rate=_mean(
             [r.attributions_resolvable / r.attributions_n for r in with_attrib]
@@ -466,6 +516,7 @@ def _collect_ask(subject: str, question, cfg: AskConfig, conn) -> GroundingScore
     shipped one, and the trace is what the shipped one records."""
     before = max_trace_id(conn)
     failure: str | None = None
+    outcome = ANSWERED
     try:
         ask(
             subject,
@@ -477,10 +528,17 @@ def _collect_ask(subject: str, question, cfg: AskConfig, conn) -> GroundingScore
         )
     except _BUG_ERRORS:
         raise
+    except NoCitationsError as exc:
+        # **Not a harness error, and an earlier version filed it as one.** The pipeline
+        # worked exactly as designed — it refused to hand back an answer whose citations
+        # resolved to nothing — and the student still got no answer out of it. Counting
+        # that as a provider outage excluded it from every column, which on the first
+        # partial run silently deleted 7 of 13 `ask` rows: the enforced path's own worst
+        # cases, removed from the average that was supposed to judge it.
+        outcome = NO_CITATIONS
+        failure = None
+        logger.info("%s: ask produced no resolvable citation (%s)", question.id, exc)
     except Exception as exc:
-        # `NoCitationsError` lands here, and it is the right place for it: an answer whose
-        # every citation was hallucinated is a failed answer, recorded and excluded from
-        # the means exactly as `eval/runner.py` treats a provider outage.
         failure = f"{type(exc).__name__}: {exc}"
 
     # Narrowed by query, not just by the id bracket: progress.db is shared with any other
@@ -492,24 +550,33 @@ def _collect_ask(subject: str, question, cfg: AskConfig, conn) -> GroundingScore
         # subject with no graph) leave no row by design — nothing ran, nothing was paid for.
         return _empty_row(question, ASK, failure or "ask left no trace row")
     trace = rows[-1]
+    if failure is not None:
+        outcome = ERROR
+    elif trace["outcome"] == "refused" or trace["answer"] == REFUSAL:
+        outcome = REFUSED
     return GroundingScored(
         question_id=question.id,
         klass=question.klass,
         lang=question.lang,
         path=ASK,
+        outcome=outcome,
         seen_chunks=json.loads(trace["chunk_ids"] or "[]"),
         n_searches=1,
         answer=trace["answer"],
-        refused=trace["outcome"] == "refused" or trace["answer"] == REFUSAL,
         attributions_n=0,
         attributions_resolvable=0,
         attributions=[],
         claims_total=None,
         claims_supported=None,
         cited_support=None,
-        hit=None,
+        hit=False if outcome == NO_CITATIONS else None,
         hit_second_run=None,
-        error=failure or trace["error"],
+        # `error` is populated only when `outcome` is ERROR, so the two can never disagree
+        # about whether this row is a harness failure. `ask` records the NoCitationsError
+        # text in its own trace row, and carrying that through would leave a non-error row
+        # holding an error message — which is how the first run came to read as 16 broken
+        # questions rather than 16 informative ones. The cause is logged instead.
+        error=failure if outcome == ERROR else None,
         model=trace["model"],
         tokens=trace["tokens"],
         cost_usd=trace["cost_usd"],
@@ -543,25 +610,30 @@ def _collect_host(subject: str, question, cfg: HostConfig, conn) -> GroundingSco
     for row in searches:
         seen.update(json.loads(row["chunk_ids"] or "[]"))
 
+    # **An answer produced without retrieving anything is the finding, not an error.**
+    # Measured on the first partial run: 9 of 12 host sessions never called `search` at
+    # all — they answered OpenMP and Amdahl's-law questions straight out of the model.
+    # An earlier version bailed here with "no source text for the chunks this answer saw"
+    # and dropped the row, which removed agent-mediated grounding's worst failure from
+    # every column that was supposed to measure it. `hit=False` because no claim can rest
+    # on a chunk nobody read; it therefore counts as a loss in the paired test.
+    ungrounded = run.error is None and run.answer is not None and not seen
     return GroundingScored(
         question_id=question.id,
         klass=question.klass,
         lang=question.lang,
         path=HOST,
+        outcome=ERROR if run.error else (UNGROUNDED if ungrounded else ANSWERED),
         seen_chunks=sorted(seen),
         n_searches=len(searches),
         answer=run.answer,
-        # A host has no mandated refusal sentence, so this can only ever be False here.
-        # Whether it declined in its own words is the judge's empty verdict, counted as
-        # `claims_total == 0` rather than guessed at with a string match.
-        refused=False,
         attributions_n=0,
         attributions_resolvable=0,
         attributions=[],
         claims_total=None,
         claims_supported=None,
         cited_support=None,
-        hit=None,
+        hit=False if ungrounded else None,
         hit_second_run=None,
         error=run.error,
         model=cfg.model,
@@ -577,10 +649,10 @@ def _empty_row(question, path: str, error: str) -> GroundingScored:
         klass=question.klass,
         lang=question.lang,
         path=path,
+        outcome=ERROR,
         seen_chunks=[],
         n_searches=0,
         answer=None,
-        refused=False,
         attributions_n=0,
         attributions_resolvable=0,
         attributions=[],
@@ -625,11 +697,19 @@ def judge_row(
     spotting `[chunk N]`. That blinding is **partial** and the results document says so —
     it cannot hide that two paths write in different house styles.
     """
-    if row.error is not None or row.answer is None or row.refused:
+    # UNGROUNDED rows are already decided and cost nothing to score: with an empty
+    # retrieved set no claim can be supported, so `hit` is already False and a judge call
+    # would only pay a provider to confirm arithmetic. NO_CITATIONS rows have no answer
+    # text to grade — `ask` raises before `TracedAnswer.answered()`, so the trace never
+    # stored what the model said. Both are counted by `aggregate`, not dropped.
+    if row.outcome in (ERROR, UNGROUNDED, NO_CITATIONS) or row.answer is None or row.refused:
         return
     sources = {cid: texts[cid] for cid in row.seen_chunks if cid in texts}
     if not sources:
-        row.error = "no source text for the chunks this answer saw"
+        # Reachable only if the chunks were retrieved but their text has since vanished
+        # from the store — a real inconsistency, unlike the empty-retrieval case above.
+        row.outcome = ERROR
+        row.error = "chunks were retrieved but their text is missing from the store"
         return
 
     blind = strip(row.answer, extract(row.answer, index))
@@ -641,6 +721,7 @@ def judge_row(
         except _BUG_ERRORS:
             raise
         except Exception as exc:
+            row.outcome = ERROR
             row.error = f"judge failed: {type(exc).__name__}: {exc}"
             return
         finally:
@@ -664,8 +745,13 @@ def judge_row(
     # claims — a refusal, an apology, or a request for clarification". Without this, the
     # host's refusal rate is 0% *by construction* while the enforced path's is real, and
     # the one column that stops faithfulness being won by declining reads as a walkover.
-    if not row.refused and first.total == 0:
-        row.refused = True
+    # A host has no mandated refusal sentence, so path B's refusals are only visible here:
+    # the judge's own rules define an empty verdict as "the answer makes no factual claims
+    # — a refusal, an apology, or a request for clarification". Without this the host's
+    # refusal rate is 0% by construction while the enforced path's is real, and the column
+    # that stops faithfulness being won by declining reads as a walkover.
+    if first.total == 0:
+        row.outcome = REFUSED
 
 
 def _git_sha() -> str | None:

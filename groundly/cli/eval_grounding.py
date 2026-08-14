@@ -207,6 +207,11 @@ def _report(results: dict) -> None:
     # together.
     table.add_column("Faithful", justify="right")
     table.add_column("Refused", justify="right")
+    # The two failure modes that used to be filed as harness errors and dropped. They are
+    # each path's characteristic way of not answering, and faithfulness is not readable
+    # without them: it is conditional on having produced a gradeable answer at all.
+    table.add_column("Ungrounded", justify="right")
+    table.add_column("No cite", justify="right")
     table.add_column("Full support", justify="right")
     table.add_column("Cites", justify="right")
     table.add_column("Resolvable", justify="right")
@@ -219,6 +224,8 @@ def _report(results: dict) -> None:
             str(row["errors"]) if row["errors"] else "—",
             _pct(row["faithfulness"]),
             _pct(row["refusal_rate"]),
+            _pct(row["ungrounded_rate"]),
+            _pct(row["no_citation_rate"]),
             _pct(row["fully_supported_rate"]),
             _pct(row["attribution_present_rate"]),
             _pct(row["attribution_resolvable_rate"]),
@@ -226,6 +233,13 @@ def _report(results: dict) -> None:
             "—" if row["median_latency_ms"] is None else str(row["median_latency_ms"]),
         )
     console.print(table)
+    console.print(
+        "[dim]Faithful is conditional on producing a gradeable answer — read it with "
+        "Refused, Ungrounded and No cite beside it. Ungrounded = the host answered "
+        "without retrieving anything; No cite = `ask` produced text whose citations "
+        "resolved to nothing, so the pipeline refused it. Both count as losses in Full "
+        "support.[/dim]"
+    )
 
     agreement = results["judge_agreement"]
     if agreement is not None and agreement < 0.9:

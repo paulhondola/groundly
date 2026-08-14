@@ -37,10 +37,10 @@ def _row(path, **over):
         klass="factoid",
         lang="en",
         path=path,
+        outcome="answered",
         seen_chunks=[1, 2],
         n_searches=1,
         answer="an answer",
-        refused=False,
         attributions_n=0,
         attributions_resolvable=0,
         attributions=[],
@@ -195,7 +195,7 @@ def test_a_missing_host_binary_raises_instead_of_failing_48_times(monkeypatch):
 def test_a_refusal_does_not_score_as_perfect_faithfulness():
     """**The most likely way these numbers could lie in Groundly's favour.** The enforced
     path refuses by design; if a refusal counted as 1.0 it would win by declining."""
-    agg = aggregate([_row(ASK, refused=True, claims_total=0, claims_supported=0)])
+    agg = aggregate([_row(ASK, outcome="refused", claims_total=0, claims_supported=0)])
     assert agg.faithfulness is None
     assert agg.refusal_rate == 1.0
     assert agg.refusals == 1
@@ -203,7 +203,7 @@ def test_a_refusal_does_not_score_as_perfect_faithfulness():
 
 def test_refusal_rate_sits_beside_faithfulness_not_under_it():
     rows = [
-        _row(ASK, refused=True, claims_total=0, claims_supported=0),
+        _row(ASK, outcome="refused", claims_total=0, claims_supported=0),
         _row(ASK, claims_total=4, claims_supported=2, hit=False),
     ]
     agg = aggregate(rows)
@@ -214,7 +214,7 @@ def test_refusal_rate_sits_beside_faithfulness_not_under_it():
 def test_errored_rows_are_excluded_from_quality_but_counted():
     agg = aggregate(
         [
-            _row(HOST, error="host timed out"),
+            _row(HOST, outcome="error", error="host timed out"),
             _row(HOST, claims_total=2, claims_supported=2, hit=True),
         ]
     )
@@ -531,4 +531,91 @@ def test_a_host_that_declines_in_prose_counts_as_a_refusal(retrievable_subject, 
     )
     store = SubjectStore(Subject(retrievable_subject).store_db_path)
     doc = run(retrievable_subject, gold, store, host=_CFG, ask_config=_NO_RERANK, judge_runs=1)
-    assert next(r for r in doc["rows"] if r["path"] == HOST)["refused"] is True
+    assert next(r for r in doc["rows"] if r["path"] == HOST)["outcome"] == "refused"
+
+
+def test_a_host_that_never_searched_is_counted_not_dropped(
+    retrievable_subject, gold, monkeypatch
+):
+    """**The bug the first partial run exposed.** 9 of 12 host sessions answered without
+    calling `search` at all, and the harness filed every one as "no source text for the
+    chunks this answer saw" — a harness error, excluded from every column. That deleted
+    agent-mediated grounding's worst failure from the averages meant to measure it.
+
+    An answer built on nothing retrieved is `ungrounded`: no claim can rest on a chunk
+    nobody read, so it is a loss in the paired test and gets its own rate beside
+    faithfulness."""
+    from groundly.core.store import SubjectStore
+    from groundly.core.subject import Subject
+
+    _stub_everything(
+        monkeypatch,
+        retrievable_subject,
+        host_answer="Deadlocks require a circular wait, four conditions in total.",
+        judge_reply="[]",
+    )
+    store = SubjectStore(Subject(retrievable_subject).store_db_path)
+    doc = run(retrievable_subject, gold, store, host=_CFG, ask_config=_NO_RERANK, judge_runs=1)
+
+    host_row = next(r for r in doc["rows"] if r["path"] == HOST)
+    assert host_row["n_searches"] == 0
+    assert host_row["seen_chunks"] == []
+    assert host_row["outcome"] == "ungrounded"
+    assert host_row["error"] is None, "an ungrounded answer is a result, not a harness error"
+    assert host_row["hit"] is False, "it must count as a loss in the paired test"
+
+    host_agg = next(a for a in doc["by_path"] if a["slice"]["path"] == HOST)
+    assert host_agg["errors"] == 0
+    assert host_agg["n"] == 1
+    assert host_agg["ungrounded_rate"] == 1.0
+
+
+def test_ask_without_a_resolvable_citation_is_counted_not_dropped(
+    retrievable_subject, gold, monkeypatch
+):
+    """The mirror-image bug, biasing the other way. `NoCitationsError` is the enforced
+    pipeline working exactly as designed — refusing an answer whose citations resolve to
+    nothing — and the student still gets no answer. Filing it as a provider outage dropped
+    7 of 13 `ask` rows on the first run: the enforced path's own worst cases, removed from
+    the average judging it."""
+    from groundly.core.store import SubjectStore
+    from groundly.core.subject import Subject
+    from groundly.llm.chat import ChatResult
+
+    _stub_everything(monkeypatch, retrievable_subject, host_answer="x", judge_reply="[]")
+    # An answer citing a chunk that was never retrieved: resolve_citations drops it and
+    # raises, exactly as it does in production.
+    monkeypatch.setattr(
+        "groundly.agents.ask.complete",
+        lambda *a, **k: ChatResult(
+            text="Deadlocks need mutual exclusion [chunk 9999].", tokens=5, cost_usd=0.001,
+            model="stub-chat",
+        ),
+    )
+    store = SubjectStore(Subject(retrievable_subject).store_db_path)
+    doc = run(retrievable_subject, gold, store, host=_CFG, ask_config=_NO_RERANK, judge_runs=1)
+
+    ask_row = next(r for r in doc["rows"] if r["path"] == ASK)
+    assert ask_row["outcome"] == "no_citations"
+    assert ask_row["error"] is None, "the pipeline refusing an ungrounded answer is a result"
+
+    ask_agg = next(a for a in doc["by_path"] if a["slice"]["path"] == ASK)
+    assert ask_agg["errors"] == 0
+    assert ask_agg["no_citation_rate"] == 1.0
+
+
+def test_genuine_failures_are_still_errors(retrievable_subject, gold, monkeypatch):
+    """The counterpart guard: widening what counts as a result must not swallow a real
+    provider outage, which would read as a path answering badly rather than not at all."""
+    from groundly.core.store import SubjectStore
+    from groundly.core.subject import Subject
+
+    _stub_everything(monkeypatch, retrievable_subject, host_answer="x", judge_reply="[]")
+    monkeypatch.setattr(subprocess, "run", _fake_run({"result": "x"}, returncode=1))
+    store = SubjectStore(Subject(retrievable_subject).store_db_path)
+    doc = run(retrievable_subject, gold, store, host=_CFG, ask_config=_NO_RERANK, judge_runs=1)
+
+    host_row = next(r for r in doc["rows"] if r["path"] == HOST)
+    assert host_row["outcome"] == "error"
+    assert host_row["error"]
+    assert next(a for a in doc["by_path"] if a["slice"]["path"] == HOST)["errors"] == 1
