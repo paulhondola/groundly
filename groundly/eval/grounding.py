@@ -558,6 +558,11 @@ class AskConfig:
     rerank: bool = True
     embedder: object | None = None
     reranker: object | None = None
+    # Overrides `[providers.chat]`'s model for the enforced path only. The sensitivity run
+    # the apd/passc results demanded: path A ran gpt-oss-120b against a claude-sonnet-5
+    # host, so the one result that went against enforced grounding could not be told apart
+    # from a model-strength difference.
+    model: str | None = None
 
 
 def _collect_ask(subject: str, question, cfg: AskConfig, conn) -> GroundingScored:
@@ -575,6 +580,7 @@ def _collect_ask(subject: str, question, cfg: AskConfig, conn) -> GroundingScore
             rerank=cfg.rerank,
             embedder=cfg.embedder,
             reranker=cfg.reranker,
+            model=cfg.model,
         )
     except _BUG_ERRORS:
         raise

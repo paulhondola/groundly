@@ -61,6 +61,7 @@ def ask(
     rerank: bool = True,
     embedder=None,
     reranker=None,
+    model: str | None = None,
 ) -> AskResult:
     """Answer `query` from `subject`'s materials through `arm`, defaulting to the arm
     that won the measured comparison at every cutoff the product uses.
@@ -115,7 +116,12 @@ def ask(
         if not nodes:
             return AskResult(answer=trace.refuse(), citations=[], router_label=None)
 
-        result = complete("chat", assemble(query, nodes))
+        # `model` overrides `[providers.chat]`'s model for this call only. Present for the
+        # grounding-fidelity sensitivity run: the enforced path and the host run different
+        # models, so "enforced grounding lost" and "the host's model is stronger" are the
+        # same measurement until the enforced path can be re-run on a comparable model.
+        # The model that actually ran is recorded in the trace by `record_usage`.
+        result = complete("chat", assemble(query, nodes), model=model)
         trace.record_usage(result)
 
         if REFUSAL in result.text:

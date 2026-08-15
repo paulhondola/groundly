@@ -58,6 +58,23 @@ def eval_grounding(
             help="Max USD per host session (enforced by the host). 0 disables the cap.",
         ),
     ] = 1.0,
+    chat_model: Annotated[
+        Optional[str],
+        typer.Option(
+            "--chat-model",
+            help="Override [providers.chat]'s model for the enforced path. The sensitivity "
+            "run: path A and the host use different models, so a host win cannot be told "
+            "from a model-strength difference until A is re-run on a comparable one.",
+        ),
+    ] = None,
+    no_host: Annotated[
+        bool,
+        typer.Option(
+            "--no-host",
+            help="Run the enforced path only, no host sessions. Makes the sensitivity run "
+            "cost cents instead of re-buying every host session.",
+        ),
+    ] = False,
     directed: Annotated[
         bool,
         typer.Option(
@@ -108,16 +125,27 @@ def eval_grounding(
     # everything downstream, so they are collapsed here rather than in two places.
     budget = budget if budget else None
     conditions = (NEUTRAL_CONDITION, DIRECTED_CONDITION) if directed else (NEUTRAL_CONDITION,)
+    if no_host:
+        # Path A alone. The comparison block comes out empty, which is honest: there is
+        # nothing to compare against in this run, and the numbers are read against a
+        # previous full sweep rather than within this file.
+        conditions = ()
 
     # Long operations name their cost before spending it (.claude/rules/conventions.md).
     # This one is unusually easy to under-estimate: it is not 48 calls, it is 48 enforced
     # answers plus 48 whole agent sessions plus 2 judge passes over both paths' answers.
     console.print(f"Grounding-fidelity comparison on [bold]{subject}[/bold] from {gold_path}")
-    console.print(
-        f"  [bold]{total}[/bold] questions x 2 paths\n"
-        f"  path A: {total} enforced `ask` calls on the [bold]{arm}[/bold] arm\n"
+    on_model = f" using [bold]{chat_model}[/bold]" if chat_model else ""
+    host_line = (
         f"  path B: {total * len(conditions)} cold [bold]{host_model}[/bold] host sessions "
         f"({len(conditions)} condition(s)), each free to search as often as it likes\n"
+        if conditions
+        else "  path B: [bold]skipped[/bold] (--no-host)\n"
+    )
+    console.print(
+        f"  [bold]{total}[/bold] questions x {1 + len(conditions)} path(s)\n"
+        f"  path A: {total} enforced `ask` calls on the [bold]{arm}[/bold] arm{on_model}\n"
+        f"{host_line}"
         f"  judge:  up to {total * (1 + len(conditions)) * judge_runs} calls "
         f"({judge_runs} run(s) over every path's answers)"
     )
@@ -175,7 +203,7 @@ def eval_grounding(
                     timeout_seconds=timeout,
                     max_budget_usd=budget,
                 ),
-                ask_config=AskConfig(arm=arm, rerank=rerank),
+                ask_config=AskConfig(arm=arm, rerank=rerank, model=chat_model),
                 conditions=conditions,
                 judge_runs=judge_runs,
                 on_question=_progress,

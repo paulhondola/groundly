@@ -73,8 +73,21 @@ def loaded_context_length(call_class: str) -> int | None:
 
 
 def complete(
-    call_class: str, messages: list[dict], *, response_format: object | None = None
+    call_class: str,
+    messages: list[dict],
+    *,
+    response_format: object | None = None,
+    model: str | None = None,
 ) -> ChatResult:
+    """`model` overrides the call class's configured model for this call only, against the
+    same `base_url` and key. It exists for one measurement: the grounding-fidelity
+    experiment compares an enforced `ask` against a host running a different model, and
+    without a way to re-run the enforced path on a *comparable* model the result cannot be
+    told apart from "the host's model is stronger".
+
+    It does not weaken the provider boundary — the client is still constructed here, from
+    the same configured section, and the model that actually ran is recorded in the trace
+    rather than assumed."""
     import litellm
     import openai
 
@@ -116,7 +129,7 @@ def complete(
         extra["temperature"] = cfg.temperature
     try:
         response = litellm.completion(
-            model=f"openai/{cfg.model}",
+            model=f"openai/{model or cfg.model}",
             messages=messages,
             api_base=cfg.base_url,
             api_key=cfg.api_key or _LOCAL_PLACEHOLDER_KEY,

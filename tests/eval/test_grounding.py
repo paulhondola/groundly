@@ -708,3 +708,66 @@ def test_the_neutral_condition_is_the_default(retrievable_subject, gold, monkeyp
     doc = run(retrievable_subject, gold, store, host=_CFG, ask_config=_NO_RERANK, judge_runs=1)
     assert {r["path"] for r in doc["rows"]} == {ASK, HOST}
     assert set(doc["comparisons"]) == {HOST}
+
+
+def test_the_chat_model_override_reaches_the_client_and_is_recorded(
+    retrievable_subject, gold, monkeypatch, stub_chat
+):
+    """The sensitivity run the apd/passc results made necessary. Path A ran gpt-oss-120b
+    against a claude-sonnet-5 host, so the one result that went *against* enforced
+    grounding — a directed host beating it — cannot be told apart from a model-strength
+    difference until path A is re-run on a comparable model.
+
+    An override that were silently dropped would produce a sensitivity run that looked
+    like it controlled for the confound while changing nothing, which is worse than not
+    running it."""
+    from groundly.core.store import SubjectStore
+    from groundly.core.subject import Subject
+
+    chat = stub_chat("Deadlock needs circular wait [chunk 1].")
+    monkeypatch.setattr("groundly.agents.ask.complete", chat)
+    monkeypatch.setattr("groundly.agents.ask.require_provider", lambda _c: None)
+    monkeypatch.setattr("groundly.eval.judge.complete", stub_chat("[]"))
+
+    store = SubjectStore(Subject(retrievable_subject).store_db_path)
+    doc = run(
+        retrievable_subject,
+        gold,
+        store,
+        host=_CFG,
+        ask_config=AskConfig(rerank=False, model="Qwen/Qwen3-235B-A22B-Instruct-2507"),
+        conditions=(),
+        judge_runs=1,
+    )
+
+    assert chat.kwargs[0]["model"] == "Qwen/Qwen3-235B-A22B-Instruct-2507"
+    # Recorded from the trace, not from the flag: what actually ran is what gets published.
+    assert next(r for r in doc["rows"] if r["path"] == ASK)["model"] == (
+        "Qwen/Qwen3-235B-A22B-Instruct-2507"
+    )
+
+
+def test_no_host_conditions_runs_the_enforced_path_alone(retrievable_subject, gold, monkeypatch):
+    """What makes the sensitivity run affordable: re-buying 248 host sessions to re-measure
+    path A would cost more than the finding is worth."""
+    from groundly.core.store import SubjectStore
+    from groundly.core.subject import Subject
+
+    real = subprocess.run
+
+    def _must_not_spawn(argv, **k):
+        # `_document` legitimately shells out for `git rev-parse` and `claude --version`;
+        # only a host invocation carries `-p`.
+        if "-p" in argv:
+            raise AssertionError("a host session was started despite conditions=()")
+        return real(argv, **k)
+
+    _stub_everything(monkeypatch, retrievable_subject, host_answer="x", judge_reply="[]")
+    monkeypatch.setattr(subprocess, "run", _must_not_spawn)
+    store = SubjectStore(Subject(retrievable_subject).store_db_path)
+    doc = run(
+        retrievable_subject, gold, store, host=_CFG, ask_config=_NO_RERANK,
+        conditions=(), judge_runs=1,
+    )
+    assert {r["path"] for r in doc["rows"]} == {ASK}
+    assert doc["comparisons"] == {}
