@@ -23,6 +23,7 @@ from groundly.eval.grounding import (
     run_host,
     write_results,
 )
+from groundly.eval.grounding import DIRECTED_CONDITION, HOST_DIRECTED, NEUTRAL_CONDITION
 
 _CFG = HostConfig(model="pinned-model", claude_bin="claude", groundly_bin="groundly")
 
@@ -330,7 +331,7 @@ def test_run_produces_a_row_per_path_and_records_provenance(
     assert {r["path"] for r in doc["rows"]} == {ASK, HOST}
     assert doc["provenance"]["host"]["model"] == "pinned-model"
     assert doc["provenance"]["judge"]["runs"] == 2
-    assert doc["provenance"]["host"]["task_prompt_sha256"]
+    assert doc["provenance"]["host"]["conditions"][HOST]["task_prompt_sha256"]
     assert doc["provenance"]["judge"]["prompt_sha256"]
     # The graph block is recorded even when the arm needs no graph, so the file is always
     # self-describing — four indistinguishable results files once cost a full misdiagnosis.
@@ -619,3 +620,91 @@ def test_genuine_failures_are_still_errors(retrievable_subject, gold, monkeypatc
     assert host_row["outcome"] == "error"
     assert host_row["error"]
     assert next(a for a in doc["by_path"] if a["slice"]["path"] == HOST)["errors"] == 1
+
+
+def test_the_directed_condition_tells_the_host_to_search(retrievable_subject, gold, monkeypatch):
+    """The second path-B condition exists to answer the objection the neutral prompt
+    invites: *you never told it to search*. Running both separates "will not retrieve"
+    from "retrieves and then drifts" — two different product problems that the neutral
+    prompt alone reports as one number."""
+    from groundly.core.store import SubjectStore
+    from groundly.core.subject import Subject
+
+    prompts = []
+    real = subprocess.run
+
+    def _capture(argv, **kwargs):
+        # `_document` also shells out for `git rev-parse` and `claude --version`; only the
+        # host invocations carry `-p`.
+        if "-p" not in argv:
+            return real(argv, **kwargs)
+        prompts.append(argv[argv.index("-p") + 1])
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"result": "an answer"}), "")
+
+    _stub_everything(monkeypatch, retrievable_subject, host_answer="x", judge_reply="[]")
+    monkeypatch.setattr(subprocess, "run", _capture)
+    store = SubjectStore(Subject(retrievable_subject).store_db_path)
+    doc = run(
+        retrievable_subject,
+        gold,
+        store,
+        host=_CFG,
+        ask_config=_NO_RERANK,
+        conditions=(NEUTRAL_CONDITION, DIRECTED_CONDITION),
+        judge_runs=1,
+    )
+
+    assert {r["path"] for r in doc["rows"]} == {ASK, HOST, HOST_DIRECTED}
+    assert len(prompts) == 2, "one host session per condition"
+    neutral, directed = prompts
+    assert "search" not in neutral.lower(), "the neutral condition must not mention the tool"
+    assert "`search` tool" in directed
+    # Neither condition mentions citing: attribution stays unprompted in both, so the
+    # attribution layers remain comparable across them.
+    assert "cite" not in neutral.lower() and "cite" not in directed.lower()
+
+
+def test_each_condition_gets_its_own_comparison_and_provenance(
+    retrievable_subject, gold, monkeypatch
+):
+    """Every comparison is `ask` against one condition, so matched-subset and significance
+    are per condition. Both prompts are recorded verbatim and by hash — the two differ by
+    a single clause, and a condition is only interpretable next to its exact wording."""
+    from groundly.core.store import SubjectStore
+    from groundly.core.subject import Subject
+
+    _stub_everything(
+        monkeypatch, retrievable_subject, host_answer="an answer", judge_reply="[]", searched=[1]
+    )
+    store = SubjectStore(Subject(retrievable_subject).store_db_path)
+    doc = run(
+        retrievable_subject,
+        gold,
+        store,
+        host=_CFG,
+        ask_config=_NO_RERANK,
+        conditions=(NEUTRAL_CONDITION, DIRECTED_CONDITION),
+        judge_runs=1,
+    )
+
+    assert set(doc["comparisons"]) == {HOST, HOST_DIRECTED}
+    for comp in doc["comparisons"].values():
+        assert {"matched_n", "matched_question_ids", "significance_matched", "significance_all"} <= set(comp)
+
+    recorded = doc["provenance"]["host"]["conditions"]
+    assert set(recorded) == {HOST, HOST_DIRECTED}
+    assert recorded[HOST]["task_prompt"] != recorded[HOST_DIRECTED]["task_prompt"]
+    assert recorded[HOST]["task_prompt_sha256"] != recorded[HOST_DIRECTED]["task_prompt_sha256"]
+    assert set(doc["spend_usd"]) == {ASK, HOST, HOST_DIRECTED, "judge"}
+
+
+def test_the_neutral_condition_is_the_default(retrievable_subject, gold, monkeypatch):
+    """The directed condition doubles path B, so it is opt-in."""
+    from groundly.core.store import SubjectStore
+    from groundly.core.subject import Subject
+
+    _stub_everything(monkeypatch, retrievable_subject, host_answer="x", judge_reply="[]")
+    store = SubjectStore(Subject(retrievable_subject).store_db_path)
+    doc = run(retrievable_subject, gold, store, host=_CFG, ask_config=_NO_RERANK, judge_runs=1)
+    assert {r["path"] for r in doc["rows"]} == {ASK, HOST}
+    assert set(doc["comparisons"]) == {HOST}

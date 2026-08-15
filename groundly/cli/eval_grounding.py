@@ -58,12 +58,27 @@ def eval_grounding(
             help="Max USD per host session (enforced by the host). 0 disables the cap.",
         ),
     ] = 1.0,
+    directed: Annotated[
+        bool,
+        typer.Option(
+            "--directed/--no-directed",
+            help="Also run a host condition whose prompt tells it to use `search`. "
+            "Separates 'will not retrieve' from 'retrieves and then drifts'. Doubles path B.",
+        ),
+    ] = False,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the cost confirmation.")] = False,
 ) -> None:
     """Compare enforced `ask` grounding against a real MCP host composing from `search`."""
     from groundly.core.config import load_provider
     from groundly.eval.gold import GoldSetError
-    from groundly.eval.grounding import AskConfig, HostConfig, run, write_results
+    from groundly.eval.grounding import (
+        DIRECTED_CONDITION,
+        NEUTRAL_CONDITION,
+        AskConfig,
+        HostConfig,
+        run,
+        write_results,
+    )
     from groundly.retrieval.arms import validate_arms
 
     subj = _subject_checked(subject)
@@ -92,6 +107,7 @@ def eval_grounding(
     # `--host-budget 0` is how the cap is turned off; None and 0.0 mean the same thing to
     # everything downstream, so they are collapsed here rather than in two places.
     budget = budget if budget else None
+    conditions = (NEUTRAL_CONDITION, DIRECTED_CONDITION) if directed else (NEUTRAL_CONDITION,)
 
     # Long operations name their cost before spending it (.claude/rules/conventions.md).
     # This one is unusually easy to under-estimate: it is not 48 calls, it is 48 enforced
@@ -100,10 +116,10 @@ def eval_grounding(
     console.print(
         f"  [bold]{total}[/bold] questions x 2 paths\n"
         f"  path A: {total} enforced `ask` calls on the [bold]{arm}[/bold] arm\n"
-        f"  path B: {total} cold [bold]{host_model}[/bold] host sessions, each free to "
-        f"search as often as it likes\n"
-        f"  judge:  up to {total * 2 * judge_runs} calls "
-        f"({judge_runs} run(s) over both paths' answers)"
+        f"  path B: {total * len(conditions)} cold [bold]{host_model}[/bold] host sessions "
+        f"({len(conditions)} condition(s)), each free to search as often as it likes\n"
+        f"  judge:  up to {total * (1 + len(conditions)) * judge_runs} calls "
+        f"({judge_runs} run(s) over every path's answers)"
     )
     # A ceiling, not a forecast. Path B is the one leg that can be bounded exactly, since
     # `--max-budget-usd` is enforced by the host itself; A and the judge are metered after
@@ -112,8 +128,8 @@ def eval_grounding(
     # and cost $0.92.
     if budget is not None:
         console.print(
-            f"  [bold]path B is capped at ${budget:.2f} per question[/bold] "
-            f"— at most ${budget * total:,.2f} for the sweep."
+            f"  [bold]path B is capped at ${budget:.2f} per session[/bold] "
+            f"— at most ${budget * total * len(conditions):,.2f} for the sweep."
         )
     else:
         console.print(
@@ -160,6 +176,7 @@ def eval_grounding(
                     max_budget_usd=budget,
                 ),
                 ask_config=AskConfig(arm=arm, rerank=rerank),
+                conditions=conditions,
                 judge_runs=judge_runs,
                 on_question=_progress,
             )
@@ -253,18 +270,21 @@ def _report(results: dict) -> None:
     elif agreement is not None:
         console.print(f"[dim]Judge self-agreement: {agreement:.0%}[/dim]")
 
-    matched = results["significance_matched"]
-    console.print(
-        f"\n[bold]Matched subset[/bold]: {results['matched_n']} of {results['questions']} "
-        "questions where the host saw everything `ask` saw."
-    )
-    console.print(
-        f"  McNemar on full support: ask-only {matched['ask_only']}, "
-        f"host-only {matched['host_only']}, p = {matched['p']:.3f} "
-        f"({matched['n_pairs']} pairs)"
-    )
-    if matched["n_pairs"] < 20:
+    thin = False
+    for label, comp in results["comparisons"].items():
+        matched = comp["significance_matched"]
         console.print(
-            "[yellow]Note:[/yellow] this gold set cannot resolve a difference much under "
+            f"\n[bold]ask vs {label}[/bold] — matched subset: {comp['matched_n']} of "
+            f"{results['questions']} questions where the host saw everything `ask` saw."
+        )
+        console.print(
+            f"  McNemar on full support: ask-only {matched['ask_only']}, "
+            f"host-only {matched['host_only']}, p = {matched['p']:.3f} "
+            f"({matched['n_pairs']} pairs)"
+        )
+        thin = thin or matched["n_pairs"] < 20
+    if thin:
+        console.print(
+            "\n[yellow]Note:[/yellow] this gold set cannot resolve a difference much under "
             "10 questions. Report a consistent direction descriptively, not as a result."
         )

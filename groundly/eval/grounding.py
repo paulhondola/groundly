@@ -71,7 +71,12 @@ from groundly.retrieval.arms import VECTOR, validate_arms
 logger = logging.getLogger(__name__)
 
 ASK = "ask"
+# Two path-B conditions. `host` is the neutral prompt — it measures whether an agent left
+# to itself grounds its answers at all. `host-directed` adds an instruction to search,
+# separating "won't retrieve" from "retrieves and then drifts"; without it those two very
+# different product failures are one number.
 HOST = "host"
+HOST_DIRECTED = "host-directed"
 
 # What happened to one question on one path. **These are outcomes, not errors**, and the
 # distinction is what the first partial run got wrong: 9 host rows and 7 ask rows were
@@ -144,6 +149,49 @@ product, at the moment of use, is exactly the condition being studied.
 "Reply with your answer and nothing else" is a formatting instruction, not a grounding
 one: without it the reply is a chatty progress report and the judge grades prose about
 searching rather than an answer."""
+
+HOST_DIRECTED_TASK_PROMPT = """You have access to the `groundly` MCP server, which indexes \
+the course materials for the subject "{subject}".
+
+Use the `search` tool to find relevant course material, then answer this question from \
+what you retrieve:
+
+{query}
+
+Reply with your answer and nothing else."""
+"""The second path-B condition, and it exists to answer the obvious objection.
+
+The neutral prompt above measures whether an unprompted host retrieves at all — and on
+the first partial apd run, 9 of 12 sessions did not, answering from model knowledge
+without opening the materials. That is the more interesting finding, and it is also the
+one an examiner will immediately push on: *you never told it to search.*
+
+Running both conditions separates two failures that the neutral prompt alone conflates:
+
+  neutral   -> does an agent, left to itself, ground its answers?
+  directed  -> when it does retrieve, does it compose faithfully from what it got?
+
+A host that scores badly on the first and well on the second is a different product
+problem from one that scores badly on both, and only the directed condition can tell
+`won't retrieve` apart from `retrieves and then drifts`. It costs one extra host session
+per question, which is why it is a flag rather than always-on.
+
+Deliberately **still silent about citing**: attribution remains unprompted in both
+conditions, so the attribution layers stay comparable across them."""
+
+
+@dataclass(frozen=True)
+class HostCondition:
+    """One path-B condition: what to call it, and the task prompt that defines it. Both
+    land in the results document, the prompt verbatim and by hash, because a condition is
+    only interpretable next to the exact words that produced it."""
+
+    label: str
+    prompt: str
+
+
+NEUTRAL_CONDITION = HostCondition(label=HOST, prompt=HOST_TASK_PROMPT)
+DIRECTED_CONDITION = HostCondition(label=HOST_DIRECTED, prompt=HOST_DIRECTED_TASK_PROMPT)
 
 
 @dataclass(frozen=True)
@@ -261,14 +309,16 @@ def host_argv(cfg: HostConfig, prompt: str, subject: str) -> list[str]:
     return argv
 
 
-def run_host(query: str, subject: str, cfg: HostConfig) -> HostRun:
+def run_host(
+    query: str, subject: str, cfg: HostConfig, prompt_template: str = HOST_TASK_PROMPT
+) -> HostRun:
     """One question through one cold host process.
 
     Cold per question on purpose: a single session answering all 48 could answer question
     12 from chunks it read at question 5, and that contamination is invisible in the
     output and impossible to subtract afterwards.
     """
-    prompt = HOST_TASK_PROMPT.format(subject=subject, query=query)
+    prompt = prompt_template.format(subject=subject, query=query)
     start = time.monotonic()
     # An empty temp directory unless the caller insists otherwise. The host is a real
     # agent; running it in the sweep's own cwd puts it in the repo, one directory from
@@ -584,12 +634,14 @@ def _collect_ask(subject: str, question, cfg: AskConfig, conn) -> GroundingScore
     )
 
 
-def _collect_host(subject: str, question, cfg: HostConfig, conn) -> GroundingScored:
+def _collect_host(
+    subject: str, question, cfg: HostConfig, conn, condition: HostCondition
+) -> GroundingScored:
     """Path B. The chunks the host saw are read back from the `search` trace rows its MCP
     calls wrote — no product change was needed for this, because `retrieval/vector.py`
     has always traced every `search`."""
     before = max_trace_id(conn)
-    run = run_host(question.query, subject, cfg)
+    run = run_host(question.query, subject, cfg, condition.prompt)
     searches = read_traces(conn, since_id=before, kind="search")
 
     # The isolation claim, verified in-repo rather than trusted. `--tools ""` and
@@ -601,7 +653,7 @@ def _collect_host(subject: str, question, cfg: HostConfig, conn) -> GroundingSco
     if leaked:
         return _empty_row(
             question,
-            HOST,
+            condition.label,
             f"host reached the `ask` pipeline ({len(leaked)} trace row(s)) — path B is "
             "supposed to be restricted to `search`; this question's comparison is void",
         )
@@ -622,7 +674,7 @@ def _collect_host(subject: str, question, cfg: HostConfig, conn) -> GroundingSco
         question_id=question.id,
         klass=question.klass,
         lang=question.lang,
-        path=HOST,
+        path=condition.label,
         outcome=ERROR if run.error else (UNGROUNDED if ungrounded else ANSWERED),
         seen_chunks=sorted(seen),
         n_searches=len(searches),
@@ -831,13 +883,17 @@ def run(
     *,
     host: HostConfig,
     ask_config: AskConfig | None = None,
+    conditions: tuple[HostCondition, ...] = (NEUTRAL_CONDITION,),
     judge_runs: int = 2,
     human_sample: int = 15,
     seed: int = 1,
     on_question=None,
 ) -> dict:
-    """Both paths over the gold set, judged, scored and assembled into the results
-    document. `on_question(question, path)` is a progress callback."""
+    """Every path over the gold set, judged, scored and assembled into the results
+    document. `on_question(question, path)` is a progress callback.
+
+    `conditions` is the path-B arm list — one host session per condition per question, so
+    adding `DIRECTED_CONDITION` doubles path B's cost and is opt-in for that reason."""
     ask_config = ask_config or AskConfig()
     # Before the first question and before any model loads, the same shape
     # `eval/runner.run` uses: a typo'd arm must not be filed as a per-question error and
@@ -854,13 +910,20 @@ def run(
     rows: list[GroundingScored] = []
     interrupted = False
     try:
+        # One leg per path: the enforced pipeline, then each host condition. Built as a
+        # list rather than branched on so a third condition is a table entry.
+        legs: list[tuple[str, HostCondition | None]] = [(ASK, None)]
+        legs += [(c.label, c) for c in conditions]
         for question in questions:
-            for path, collect in ((ASK, _collect_ask), (HOST, _collect_host)):
+            for path, condition in legs:
                 if on_question is not None:
                     on_question(question, path)
                 try:
-                    config = ask_config if path == ASK else host
-                    rows.append(collect(subject, question, config, conn))
+                    rows.append(
+                        _collect_ask(subject, question, ask_config, conn)
+                        if condition is None
+                        else _collect_host(subject, question, host, conn, condition)
+                    )
                 except KeyboardInterrupt:
                     # A 48-question sweep is 96 model sessions. Keeping what ran matters,
                     # and a half-run that is indistinguishable from a full one is the one
@@ -892,6 +955,7 @@ def run(
         gold_path=gold_path,
         arm=ask_config.arm,
         host=host,
+        conditions=conditions,
         rows=rows,
         index=index,
         questions=questions,
@@ -908,6 +972,7 @@ def _document(
     gold_path,
     arm,
     host,
+    conditions,
     rows,
     index,
     questions,
@@ -917,24 +982,12 @@ def _document(
     interrupted,
 ) -> dict:
     ask_rows = [r for r in rows if r.path == ASK]
-    host_rows = [r for r in rows if r.path == HOST]
-
-    # The matched subset: questions where the host saw everything `ask` saw. Outside it the
-    # two paths read different material, so a difference between them is partly retrieval
-    # rather than composition — the same set-size confound the arm comparison's `--at-k`
-    # table exists to remove, arriving in a different shape.
-    host_seen = {r.question_id: set(r.seen_chunks) for r in host_rows}
-    matched = {
-        r.question_id
-        for r in ask_rows
-        if r.seen_chunks and set(r.seen_chunks) <= host_seen.get(r.question_id, set())
-    }
 
     # Only rows with a real verdict enter the paired test. `hit is None` means the answer
     # made no claims (a refusal), and scoring that as either a win or a loss would be a
     # verdict the judge never gave. `mcnemar` pairs on question id, so dropping a row from
     # one side drops the pair.
-    def _paired(subset: set[str] | None) -> dict:
+    def _paired(host_rows: list, subset: set[str] | None) -> dict:
         a = [
             r for r in ask_rows if r.hit is not None and (subset is None or r.question_id in subset)
         ]
@@ -949,6 +1002,30 @@ def _document(
             "ask_only": ask_only,
             "host_only": host_only,
             "p": p,
+        }
+
+    # Every comparison is `ask` against one host condition, so the whole block is per
+    # condition. With the directed condition enabled this is also what makes the *third*
+    # comparison readable — neutral against directed — which is the one that separates
+    # "won't retrieve" from "retrieves and then drifts".
+    comparisons = {}
+    for condition in conditions:
+        host_rows = [r for r in rows if r.path == condition.label]
+        # The matched subset: questions where the host saw everything `ask` saw. Outside it
+        # the two paths read different material, so a difference between them is partly
+        # retrieval rather than composition — the same set-size confound the arm
+        # comparison's `--at-k` table exists to remove, in a different shape.
+        host_seen = {r.question_id: set(r.seen_chunks) for r in host_rows}
+        matched = {
+            r.question_id
+            for r in ask_rows
+            if r.seen_chunks and set(r.seen_chunks) <= host_seen.get(r.question_id, set())
+        }
+        comparisons[condition.label] = {
+            "matched_n": len(matched),
+            "matched_question_ids": sorted(matched),
+            "significance_matched": _paired(host_rows, matched),
+            "significance_all": _paired(host_rows, None),
         }
 
     agreement = [r for r in rows if r.hit is not None and r.hit_second_run is not None]
@@ -977,8 +1054,16 @@ def _document(
                 "model": host.model,
                 "cli_version": _host_version(host),
                 "argv": host_argv(host, "<prompt>", subject),
-                "task_prompt": HOST_TASK_PROMPT,
-                "task_prompt_sha256": hashlib.sha256(HOST_TASK_PROMPT.encode()).hexdigest(),
+                # Every condition's prompt verbatim and by hash. A condition is only
+                # interpretable next to the exact words that produced it, and the whole
+                # point of the second one is that its wording differs by a single clause.
+                "conditions": {
+                    c.label: {
+                        "task_prompt": c.prompt,
+                        "task_prompt_sha256": hashlib.sha256(c.prompt.encode()).hexdigest(),
+                    }
+                    for c in conditions
+                },
             },
         },
         # How stable the judge was on identical input. Reported beside the headline, never
@@ -994,12 +1079,12 @@ def _document(
         # overstate what an answer costs on that path — but leaving it unrecorded would
         # let ~192 LLM calls cost nothing on paper, which the trace-cost invariant in
         # .claude/rules/architecture.md exists to prevent.
-        "spend_usd": {path: _total(rows, path) for path in (ASK, HOST)}
+        "spend_usd": {path: _total(rows, path) for path in [ASK] + [c.label for c in conditions]}
         | {"judge": sum(r.judge_cost_usd for r in rows if r.judge_cost_usd is not None) or None},
-        "matched_n": len(matched),
-        "matched_question_ids": sorted(matched),
-        "significance_matched": _paired(matched),
-        "significance_all": _paired(None),
+        # Keyed by host condition: every comparison is `ask` against one of them, and with
+        # both conditions run the pair of entries is what separates a host that will not
+        # retrieve from one that retrieves and then drifts.
+        "comparisons": comparisons,
         "by_path": [asdict(a) for a in by_slice(rows, "path")],
         "by_path_class": [asdict(a) for a in by_slice(rows, "path", "klass")],
         "by_path_lang": [asdict(a) for a in by_slice(rows, "path", "lang")],
