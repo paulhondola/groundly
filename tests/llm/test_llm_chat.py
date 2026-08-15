@@ -193,3 +193,48 @@ def test_temperature_can_be_opted_out_per_call_class(monkeypatch, home):
     capture = _stub_completion(monkeypatch, capture={})
     complete("chat", [{"role": "user", "content": "hi"}])
     assert capture["temperature"] == 0.8
+
+
+def test_model_override_replaces_the_configured_model(monkeypatch, home):
+    """The grounding-fidelity sensitivity run: the enforced path has to be re-runnable on
+    the host's model class, or "enforced grounding lost" cannot be told apart from "the
+    host's model is stronger"."""
+    capture = {}
+    _stub_completion(monkeypatch, _response(), capture=capture)
+    complete("chat", [{"role": "user", "content": "hi"}], model="Qwen/Qwen3-235B")
+    assert capture["model"] == "openai/Qwen/Qwen3-235B"
+    # Same section's endpoint and key: only the model moves.
+    assert capture["api_base"] == "http://localhost:1234/v1"
+    assert capture["api_key"] == "sk-local"
+
+
+def test_an_overridden_model_does_not_inherit_reasoning_effort(monkeypatch, home):
+    """**Measured, and it fails silently.** `reasoning_effort` is model-specific by its own
+    definition, and `[providers.chat]` carries `"none"` for gpt-oss-120b. Sending that to
+    `Qwen/Qwen3-235B-A22B-Instruct-2507` on DeepInfra returns HTTP 200 with a body of
+    "\\n" — an empty answer, not an error. The sensitivity run built on it would have
+    scored every enforced answer as a citation failure and concluded that enforcement
+    collapses on Qwen, when the parameter had muted the model."""
+    (home / "config.toml").write_text(
+        '[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "gpt-oss-120b"\n'
+        'api_key = "sk-local"\nreasoning_effort = "none"\ntemperature = 0.0\n'
+    )
+    capture = {}
+    _stub_completion(monkeypatch, _response(), capture=capture)
+    complete("chat", [{"role": "user", "content": "hi"}], model="Qwen/Qwen3-235B")
+    assert "extra_body" not in capture
+    # temperature is NOT dropped: it means the same thing on every model, and dropping it
+    # would unpin sampling — the one thing decision 28 retracted a number over.
+    assert capture["temperature"] == 0.0
+
+
+def test_the_configured_model_still_gets_its_reasoning_effort(monkeypatch, home):
+    """The guard above must not disable the setting for ordinary calls."""
+    (home / "config.toml").write_text(
+        '[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "gpt-oss-120b"\n'
+        'api_key = "sk-local"\nreasoning_effort = "none"\n'
+    )
+    capture = {}
+    _stub_completion(monkeypatch, _response(), capture=capture)
+    complete("chat", [{"role": "user", "content": "hi"}])
+    assert capture["extra_body"] == {"reasoning_effort": "none"}
