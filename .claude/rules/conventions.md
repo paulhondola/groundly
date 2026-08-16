@@ -14,7 +14,8 @@
 
 ## Product surfaces
 
-- MCP tools are the product surface: tool descriptions are UX — write them for the host model. Citations double as MCP resources (`groundly://<subject>/<file>#page=N`).
+- MCP tools are the product surface: tool descriptions are UX — write them for the host model. **A retrieval tool's description leads with when to call it, not with how it works**, and says why this course's own material beats what the model already knows; the server's `instructions` carry that norm once for the whole surface. Measured (decision 30/31): under descriptions that opened on retrieval mechanics and named no occasion to call `search`, an undirected host retrieved on 17% of questions and **0 of 17 factoids** — the same host told to search retrieved every time. Citations double as MCP resources (`groundly://<subject>/<file>#page=N`).
+- Tool descriptions are measured, not just written: `eval-grounding`'s `host-product` condition runs the real surface, and every results file records the descriptions verbatim under one hash — a reworded tool is a changed experiment.
 - CLI verbs are batch lifecycle only (index/import/export/config/ask); anything conversational belongs to the host agent. No TUI.
 - Long operations print cost estimates before spending the student's tokens and report per-file/per-item progress.
 - User-facing failure messages name the cause specifically ("no readable text — OCR found nothing to extract"), never generic errors.

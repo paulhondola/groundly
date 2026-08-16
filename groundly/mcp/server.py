@@ -12,7 +12,30 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ResourceError, ToolError
 from pydantic import BaseModel
 
-mcp = FastMCP("groundly")
+SERVER_INSTRUCTIONS = """Groundly serves local, indexed course knowledge bases. Each \
+`subject` is one university course: its slides, notes and past exams.
+
+When the student asks about a subject listed by `list_subjects`, retrieve before you \
+answer. Do not answer from your own knowledge of the topic — a course's definitions, \
+notation and emphasis are what the student is graded on, and general knowledge is not a \
+substitute for them. `ask` returns an enforced, cited answer; `search` returns raw chunks \
+for you to compose from. Cite what you use: every chunk carries a `groundly://` uri that \
+resolves to a document and page."""
+"""The MCP `initialize` instructions — the one place a retrieval norm can be stated once
+for the whole server rather than repeated per tool.
+
+**Measured, not assumed.** The grounding-fidelity experiment (decision 30) ran a real
+`claude -p` host over both gold sets under two prompts. Told nothing about retrieval, it
+called `search` on 8 of 48 apd questions and **0 of 17 factoids**, answering the rest out
+of model knowledge without opening the materials; told "use the `search` tool", it
+retrieved on 48 of 48. The capability was never missing — the *trigger* was, and nothing
+in the tool surface supplied it.
+
+The factoid number is what this text aims at. A model that already knows Amdahl's law has
+no reason to open a slide deck unless something tells it why *this course's* treatment is
+the thing being examined."""
+
+mcp = FastMCP("groundly", instructions=SERVER_INSTRUCTIONS)
 
 
 class CardIn(BaseModel):
@@ -136,11 +159,14 @@ def list_subjects() -> list[dict]:
 
 @mcp.tool
 def search(subject: str, query: str, k: int | None = None) -> list[dict]:
-    """Raw ranked retrieval: the top-k chunks for `query` from `subject`'s materials
-    (hybrid dense + sparse + BM25, reranked). Omit `k` to use the configured default
-    (`retrieval.context_k`); pass it only to override. No LLM call, no provider needed —
-    you compose the answer yourself from the returned chunks; grounding is not enforced
-    here (use `ask` when you need an enforced, cited answer)."""
+    """Search this course's own materials — the slides, notes and past exams the student
+    is examined on. Use it for ANY question about `subject`, including ones you already
+    know the general answer to: a course's definitions, notation, emphasis and worked
+    examples are what the student is graded on, and they differ from the textbook
+    treatment. Returns ranked verbatim chunks, each with filename, page and a
+    `groundly://` uri you can cite or open with `get_page`. Omit `k` to use the configured
+    default (`retrieval.context_k`); pass it only to override. No LLM call, no provider
+    needed — you compose the answer from what comes back, so cite the chunks you used."""
     from groundly.llm.embeddings import ModelDownloadError
     from groundly.retrieval.vector import search as search_fn
 

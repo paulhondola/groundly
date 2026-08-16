@@ -92,6 +92,41 @@ def test_importing_server_never_pulls_in_graphrag():
     assert result.stdout.strip() == "", f"heavy deps imported at MCP spawn: {result.stdout.strip()}"
 
 
+# --- tool surface as UX -------------------------------------------------------------
+# `.claude/rules/conventions.md`: tool descriptions are UX, written for the host model.
+# Nothing asserted that until decision 30 measured what the old wording cost — a host told
+# nothing about retrieval called `search` on 8 of 48 apd questions and 0 of 17 factoids.
+# These two pin the trigger that fixes it, the same way test_grounding.py pins the eval's
+# condition prompts: an edit may reword them, but not quietly delete them.
+
+
+async def test_handshake_tells_the_host_to_retrieve_before_answering():
+    async with Client(mcp) as client:
+        instructions = client.initialize_result.instructions
+    assert instructions, "the server advertises no instructions — the one server-wide trigger"
+    lowered = instructions.lower()
+    assert "retrieve before you answer" in lowered
+    assert "not a substitute" in lowered, (
+        "the instructions must say model knowledge does not substitute for the course's "
+        "own treatment — that is what the 0-of-17 factoid failure needed to hear"
+    )
+
+
+async def test_search_description_leads_with_when_to_use_not_retrieval_mechanics():
+    async with Client(mcp) as client:
+        search_tool = next(t for t in await client.list_tools() if t.name == "search")
+    description = search_tool.description.lower()
+    assert "use it for any question" in description, "no trigger clause — the old wording's defect"
+    assert "already" in description and "know" in description, (
+        "the description must cover questions the model already knows the answer to; "
+        "those were the ones it never retrieved for"
+    )
+    assert "use `ask` when you need" not in description, (
+        "the old redirect sent a host that is allowlisted to `search` alone toward a tool "
+        "it cannot call, leaving it with model knowledge as the only option"
+    )
+
+
 # --- list_subjects ----------------------------------------------------------------
 
 

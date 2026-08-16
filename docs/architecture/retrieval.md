@@ -190,10 +190,21 @@ be the shipped one.
 **Path B is a real MCP host**, one cold `claude -p` per question:
 
 ```
-claude -p "<task prompt>" --bare --strict-mcp-config \
+claude -p "<task prompt>" --setting-sources "" --disable-slash-commands \
+  --strict-mcp-config \
   --mcp-config '{"mcpServers":{"groundly":{"command":"groundly","args":["mcp"]}}}' \
-  --allowedTools mcp__groundly__search --model <pinned> --output-format json
+  --disallowedTools Read Write Edit NotebookEdit Bash Glob Grep WebFetch WebSearch Task \
+  --allowedTools <the condition's tools> --model <pinned> --output-format json
 ```
+
+**Three conditions, and the allowlist belongs to the condition** (decision 31). `host` and
+`host-directed` get `mcp__groundly__search` alone, because path B is the control for
+enforced `ask` and letting it call `ask` makes the comparison circular. `host-product` gets
+the whole `mcp__groundly__*` surface under the **neutral** prompt — the configuration a
+student actually runs, since installing Groundly does not hide five of its six tools, and
+the only condition whose retrieval rate is a fact about the product. Selected with
+`--conditions host,host-directed,host-product`; each is a whole extra host session per
+question.
 
 **Isolating the host took three attempts and two of them were wrong in ways that looked right.** `--allowedTools` does not block `Read` (measured: a host with only that flag read a canary in its cwd). `--tools ""` does block `Read` — and disables the MCP tools with it, so the host reports no search tool at all and the experiment measures nothing. What works, both verified: `--disallowedTools` over the built-in filesystem/exec/network tools, **and** a fresh empty temp directory per host, since Claude Code scopes file access to the working directory. The stake is experimental before it is security: with `Read` live in the repo, path B could open the gold set's answer key and score brilliantly for spurious reasons, invisibly. The restriction is also verified rather than trusted — an `ask` trace row appearing in the host's window voids that question.
 
@@ -203,18 +214,31 @@ A scripted "answer from these sources" prompt was rejected: it would have been c
 fully reproducible, and it would have let the enforced path win by construction. The
 price is stated rather than hidden — **the host's system prompt is Anthropic's, is not
 publishable, and drifts between CLI versions**, so the run is re-runnable, not frozen. The
-results file records the CLI version, model id and full argv. `--bare` is load-bearing:
-without it the host inherits the operator's hooks, CLAUDE.md and output style, none of it
-publishable and all of it changing the answer. `--allowedTools` pinned to `search` is the
-one hard constraint, and it is what stops path B calling the pipeline it is the control
-for. One cold process per question, because a single session would answer question 12 from
-chunks it read at question 5.
+results file records the CLI version, model id and the full argv **of each condition**
+(one argv recorded from the default allowlist would claim `search`-only for a
+`host-product` run). `--setting-sources ""` is load-bearing: without it the host inherits
+the operator's hooks, CLAUDE.md and output style, none of it publishable and all of it
+changing the answer. `--allowedTools` pinned to `search` is the one hard constraint on the
+two *control* conditions, and it is what stops them calling the pipeline they are the
+control for; `host-product` lifts it on purpose and the `ask`-leak guard is gated on the
+condition's own allowlist rather than on being path B. One cold process per question,
+because a single session would answer question 12 from chunks it read at question 5.
 
-**The task prompt says nothing about citing.** Whether an unprompted host attributes at
-all is one of the three things being counted; asking for citations would measure
-compliance with our instruction instead. The host is not uninformed — the `search` tool's
-description tells it grounding is not enforced there — and being told that by the product,
-at the moment of use, is the condition under study.
+**The task prompt says nothing about retrieving or citing.** Whether an unprompted host
+retrieves at all, and whether it attributes what it says, are two of the three things being
+counted; asking for either would measure compliance with our instruction instead. The host
+is not uninformed — the tool surface tells it what `search` is and when to reach for it —
+and being told that by the product, at the moment of use, is the condition under study.
+
+**Which makes the surface an experimental variable, and decision 31 changed it.** The
+descriptions the 2026-08-16 numbers were taken against named no occasion to call `search`
+and redirected to `ask`; they now lead with the trigger and end with "cite the chunks you
+used". Two consequences, stated rather than buried: **attribution is no longer unprompted**
+in the host conditions, so that half of the result must be re-taken before it is quoted
+again, and the pre-31 retrieval rates are not comparable to anything measured after it.
+`_mcp_provenance()` records the instructions and every tool description verbatim under one
+sha256 in each results file, which is what tells the two eras apart — read with
+`inspect.getdoc`, byte-identical to what the host receives over the wire.
 
 **Both paths must see the same chunks, and this is verified rather than assumed.**
 `_build_vector` reranks a `RERANK_POOL` = 20 pool; `ask` truncates to `context_k` = 8 and
@@ -346,6 +370,10 @@ The results document also records **spend split three ways** — path A, path B 
 
 Enforced `ask` (`vector` arm) against a `claude-sonnet-5` MCP host in two conditions.
 `supported` = faithfulness >= 0.8 (`judge.SUPPORT_THRESHOLD`).
+
+**Taken under the pre-decision-31 tool descriptions**, which is part of what the host
+conditions measured — see above. `host-product` did not exist yet, so nothing here is a
+measurement of the surface a student runs.
 
 | | apd ask | apd host | apd directed | passc ask | passc host | passc directed |
 |---|---|---|---|---|---|---|

@@ -23,7 +23,14 @@ from groundly.eval.grounding import (
     run_host,
     write_results,
 )
-from groundly.eval.grounding import DIRECTED_CONDITION, HOST_DIRECTED, NEUTRAL_CONDITION
+from groundly.eval.grounding import (
+    DIRECTED_CONDITION,
+    HOST_DIRECTED,
+    HOST_PRODUCT,
+    NEUTRAL_CONDITION,
+    PRODUCT_CONDITION,
+    resolve_conditions,
+)
 
 _CFG = HostConfig(model="pinned-model", claude_bin="claude", groundly_bin="groundly")
 
@@ -338,6 +345,35 @@ def test_run_produces_a_row_per_path_and_records_provenance(
     assert "graph" in doc["provenance"]
 
 
+def test_the_results_file_records_the_tool_surface_the_host_was_shown(
+    retrievable_subject, gold, monkeypatch
+):
+    """`HOST_TASK_PROMPT`'s docstring argues the neutral condition is fair *because* the
+    `search` tool tells the host what it is getting — which makes the description an
+    experimental variable. It was never recorded, so editing one word of it moved a
+    published retrieval rate with nothing able to say which wording produced which number."""
+    from groundly.core.store import SubjectStore
+    from groundly.core.subject import Subject
+    from groundly.mcp import server
+
+    _stub_everything(
+        monkeypatch, retrievable_subject, host_answer="x", judge_reply="[]", searched=[1]
+    )
+    store = SubjectStore(Subject(retrievable_subject).store_db_path)
+    doc = run(retrievable_subject, gold, store, host=_CFG, ask_config=_NO_RERANK, judge_runs=1)
+
+    mcp_block = doc["provenance"]["mcp"]
+    assert mcp_block["instructions"] == server.SERVER_INSTRUCTIONS
+    assert mcp_block["tools"]["search"].startswith("Search this course's own materials")
+    assert mcp_block["sha256"]
+
+    # Per condition, not once: `host-product` allowlists a different tool set, so a single
+    # recorded argv would claim `search`-only for a run that was not.
+    condition = doc["provenance"]["host"]["conditions"][HOST]
+    assert condition["allowed_tools"] == ["mcp__groundly__search"]
+    assert "mcp__groundly__ask" not in condition["argv"]
+
+
 def test_both_paths_are_scored_by_the_same_attribution_extractor(
     retrievable_subject, gold, monkeypatch
 ):
@@ -470,6 +506,84 @@ def test_a_host_that_reached_ask_voids_that_question(retrievable_subject, gold, 
     host_row = next(r for r in doc["rows"] if r["path"] == HOST)
     assert "reached the `ask` pipeline" in host_row["error"]
     assert host_row["answer"] is None
+
+
+# --- the product condition ----------------------------------------------------------
+# `host`/`host-directed` are allowlisted to `search` alone because path B is the control
+# for enforced `ask`. That is right for the thesis and describes a configuration no student
+# ever runs, so `host-product` opens the whole surface — and the two guards above have to
+# invert for it, or the shipped configuration reads as 100% harness failure.
+
+
+def test_product_condition_allowlists_the_whole_mcp_surface_including_ask():
+    control = host_argv(_CFG, "p", "TEST", NEUTRAL_CONDITION.allowed_tools)
+    product = host_argv(_CFG, "p", "TEST", PRODUCT_CONDITION.allowed_tools)
+
+    assert "mcp__groundly__ask" not in control, "the control must never reach `ask`"
+    assert "mcp__groundly__ask" in product
+    assert "mcp__groundly__search" in product
+    # The filesystem guard is not the allowlist's job and must hold under both.
+    for argv in (control, product):
+        assert "Read" in argv and "Bash" in argv
+        assert "--tools" not in argv
+
+
+def test_a_product_host_that_answered_through_ask_is_grounded_not_void(
+    retrievable_subject, gold, monkeypatch
+):
+    """The same `ask` trace row that voids the control condition is, here, the product
+    working. It must not trip the leak guard, and the chunks `ask` retrieved must count as
+    chunks the host saw — counting only `search` rows would file the best possible outcome
+    as `ungrounded`, the exact inversion of what that column means."""
+    from groundly.core.progress import connect_progress, record_trace
+    from groundly.core.store import SubjectStore
+    from groundly.core.subject import Subject
+
+    _stub_everything(monkeypatch, retrievable_subject, host_answer="An answer.", judge_reply="[]")
+    real_run = subprocess.run
+
+    def _run_via_ask(argv, **kwargs):
+        """A host that used `ask` and never touched `search` — no search row is written."""
+        conn = connect_progress(Subject(retrievable_subject).progress_db_path)
+        try:
+            record_trace(
+                conn,
+                kind="ask",
+                query="what causes deadlock?",
+                arm="vector",
+                chunk_ids=[1, 2],
+                outcome="answered",
+                answer="a grounded answer",
+            )
+        finally:
+            conn.close()
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", _run_via_ask)
+    store = SubjectStore(Subject(retrievable_subject).store_db_path)
+    doc = run(
+        retrievable_subject,
+        gold,
+        store,
+        host=_CFG,
+        ask_config=_NO_RERANK,
+        conditions=(PRODUCT_CONDITION,),
+        judge_runs=1,
+    )
+
+    row = next(r for r in doc["rows"] if r["path"] == HOST_PRODUCT)
+    assert row["error"] is None, "the leak guard fired on a condition that allowlists `ask`"
+    assert row["outcome"] != "ungrounded"
+    assert row["seen_chunks"] == [1, 2], "`ask`'s chunks are chunks the host saw"
+    assert row["n_searches"] == 1
+
+
+def test_resolve_conditions_names_an_unknown_label_and_dedupes():
+    assert resolve_conditions("host") == (NEUTRAL_CONDITION,)
+    assert resolve_conditions("host-product,host") == (PRODUCT_CONDITION, NEUTRAL_CONDITION)
+    assert resolve_conditions(" host , host ") == (NEUTRAL_CONDITION,)
+    with pytest.raises(ValueError, match="unknown host condition 'directed'"):
+        resolve_conditions("directed")
 
 
 def test_the_human_review_sample_is_actually_blind(retrievable_subject, gold, monkeypatch):
