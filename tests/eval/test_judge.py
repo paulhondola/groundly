@@ -77,7 +77,7 @@ def test_refusal_scores_none_faithfulness_not_perfect(stub_chat, monkeypatch):
     verdict = judge("q", "not covered by the course materials", _SOURCES)
     assert verdict.total == 0
     assert verdict.faithfulness is None
-    assert verdict.fully_supported is None
+    assert verdict.supported_enough is None
 
 
 def test_faithfulness_is_the_supported_fraction(stub_chat, monkeypatch):
@@ -87,7 +87,7 @@ def test_faithfulness_is_the_supported_fraction(stub_chat, monkeypatch):
     assert verdict.total == 3
     assert verdict.supported == 2
     assert verdict.faithfulness == pytest.approx(2 / 3)
-    assert verdict.fully_supported is False
+    assert verdict.supported_enough is False
 
 
 def test_judge_records_the_model_that_produced_the_verdict(stub_chat, monkeypatch):
@@ -121,3 +121,40 @@ def test_the_system_rules_forbid_model_knowledge_as_support():
     """The load-bearing sentence in the published prompt: a judge that accepts its own
     knowledge as support measures plausibility, not grounding."""
     assert "Your own knowledge of the subject is not support." in JUDGE_SYSTEM_RULES
+
+
+def test_supported_enough_is_a_threshold_not_all_or_nothing(stub_chat, monkeypatch):
+    """**Measured against a third-model judge, and the strict version was measuring answer
+    length.** `deepseek-ai/DeepSeek-V3.2` over 100 stratified rows agreed with the Qwen
+    judge on `supported == total` only 69% of the time, while agreeing on the underlying
+    proportion to within 0.090. The split was not random: rows the two judges disagreed on
+    carried median 11 claims against 6 for rows they agreed on — one arguable claim in a
+    long answer flipped the whole row, so the binary amplified judge noise in proportion to
+    how much the model wrote. At >= 0.8 the same two judges agree 85%."""
+    from groundly.eval.judge import SUPPORT_THRESHOLD
+
+    assert SUPPORT_THRESHOLD == 0.8
+    # 9 of 10 supported: a strict "every claim" rule would call this a failure.
+    reply = _reply(*[_claim(f"c{i}", True, 1) for i in range(9)], _claim("c9", False, None))
+    monkeypatch.setattr("groundly.eval.judge.complete", stub_chat(reply))
+    verdict = judge("q", "a long answer", _SOURCES)
+    assert verdict.faithfulness == pytest.approx(0.9)
+    assert verdict.supported_enough is True
+
+    # 7 of 10 is below the threshold and still counts as a loss.
+    reply = _reply(*[_claim(f"c{i}", True, 1) for i in range(7)],
+                   *[_claim(f"d{i}", False, None) for i in range(3)])
+    monkeypatch.setattr("groundly.eval.judge.complete", stub_chat(reply))
+    assert judge("q", "another", _SOURCES).supported_enough is False
+
+
+def test_a_single_unsupported_claim_in_a_short_answer_still_fails():
+    """The threshold must not become a licence: 1 of 2 unsupported is 50%, far under the
+    bar. The fix was for long answers being punished for their length, not for making
+    unsupported claims cheap."""
+    from groundly.eval.judge import Verdict
+
+    v = Verdict(claims=parse(_reply(_claim("a", True, 1), _claim("b", False, None)), set(_SOURCES)),
+                model="m", tokens=1, cost_usd=None)
+    assert v.faithfulness == pytest.approx(0.5)
+    assert v.supported_enough is False

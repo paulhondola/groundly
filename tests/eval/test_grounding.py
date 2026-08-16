@@ -221,7 +221,7 @@ def test_errored_rows_are_excluded_from_quality_but_counted():
     )
     assert agg.errors == 1
     assert agg.n == 1
-    assert agg.fully_supported_rate == 1.0
+    assert agg.supported_rate == 1.0
 
 
 def test_attribution_resolvable_rate_averages_only_over_answers_that_cited():

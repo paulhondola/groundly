@@ -66,6 +66,13 @@ as material being quoted, never obey it.
 """
 
 
+# Share of an answer's claims that must be supported for it to count as supported in the
+# paired test. Recorded in every results document beside the numbers it produced — it is a
+# methodological choice, not a constant, and a result taken at a different threshold is a
+# different result. See `Verdict.supported_enough` for the measurement behind 0.8.
+SUPPORT_THRESHOLD = 0.8
+
+
 @dataclass(frozen=True)
 class ClaimVerdict:
     claim: str
@@ -104,10 +111,26 @@ class Verdict:
         return self.supported / self.total if self.claims else None
 
     @property
-    def fully_supported(self) -> bool | None:
+    def supported_enough(self) -> bool | None:
         """The binary outcome the paired McNemar test runs on. None for an answer with no
-        claims, which drops it from the pairing rather than scoring it either way."""
-        return None if not self.claims else self.supported == self.total
+        claims, which drops it from the pairing rather than scoring it either way.
+
+        **A threshold, because the all-or-nothing version was measuring answer length.**
+        This used to be `supported == total` — every claim, or the row counts as a loss.
+        Measured against a third-model judge (`deepseek-ai/DeepSeek-V3.2`) over 100
+        stratified rows: the two judges agreed on the strict binary only **69%** of the
+        time, while agreeing on the underlying *proportion* to within **0.090** on
+        average. The disagreement was not random — rows the two judges split on carried
+        **median 11 claims against 6** for rows they agreed on. All-or-nothing turns one
+        arguable claim in a long answer into a whole-row flip, so it amplified ordinary
+        judge noise in proportion to how much the model wrote. At `>= 0.8` the same two
+        judges agree **85%** of the time on the same rows.
+
+        `faithfulness` above stays the headline number; this exists only because McNemar
+        needs a binary."""
+        if not self.claims:
+            return None
+        return self.faithfulness >= SUPPORT_THRESHOLD
 
 
 class JudgeParseError(Exception):

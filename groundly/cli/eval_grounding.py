@@ -257,7 +257,7 @@ def _report(results: dict) -> None:
     # without them: it is conditional on having produced a gradeable answer at all.
     table.add_column("Ungrounded", justify="right")
     table.add_column("No cite", justify="right")
-    table.add_column("Full support", justify="right")
+    table.add_column("Supported", justify="right")
     table.add_column("Cites", justify="right")
     table.add_column("Resolvable", justify="right")
     table.add_column("Cited support", justify="right")
@@ -271,7 +271,7 @@ def _report(results: dict) -> None:
             _pct(row["refusal_rate"]),
             _pct(row["ungrounded_rate"]),
             _pct(row["no_citation_rate"]),
-            _pct(row["fully_supported_rate"]),
+            _pct(row["supported_rate"]),
             _pct(row["attribution_present_rate"]),
             _pct(row["attribution_resolvable_rate"]),
             _pct(row["cited_support_rate"]),
@@ -306,7 +306,7 @@ def _report(results: dict) -> None:
             f"{results['questions']} questions where the host saw everything `ask` saw."
         )
         console.print(
-            f"  McNemar on full support: ask-only {matched['ask_only']}, "
+            f"  McNemar on supported: ask-only {matched['ask_only']}, "
             f"host-only {matched['host_only']}, p = {matched['p']:.3f} "
             f"({matched['n_pairs']} pairs)"
         )

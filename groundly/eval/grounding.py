@@ -466,9 +466,11 @@ class GroundingAggregate:
     # the answers where it didn't bother, and those were the majority on the first run.
     faithfulness: float | None
     # The composite, and the one the paired test runs on: every outcome that is not a
-    # fully-supported answer counts against the path here, including ungrounded answers and
-    # citation failures. This is where "it answered without looking" is paid for.
-    fully_supported_rate: float | None
+    # sufficiently-supported answer counts against the path here, including ungrounded
+    # answers and citation failures. This is where "it answered without looking" is paid
+    # for. "Sufficiently" is `judge.SUPPORT_THRESHOLD` — see there for why it is not "every
+    # claim": the strict version measured answer length as much as faithfulness.
+    supported_rate: float | None
     refusal_rate: float
     # Host-side failure mode: answered with an empty retrieved set.
     ungrounded_rate: float
@@ -515,7 +517,7 @@ def aggregate(rows: list[GroundingScored], **slice_: str) -> GroundingAggregate:
         errors=sum(1 for r in rows if r.outcome == ERROR),
         refusals=sum(1 for r in ok if r.outcome == REFUSED),
         faithfulness=_mean([r.faithfulness for r in answered if r.faithfulness is not None]),
-        fully_supported_rate=_mean([float(r.hit) for r in ok if r.hit is not None]),
+        supported_rate=_mean([float(r.hit) for r in ok if r.hit is not None]),
         refusal_rate=_rate(ok, REFUSED),
         ungrounded_rate=_rate(ok, UNGROUNDED),
         no_citation_rate=_rate(ok, NO_CITATIONS),
@@ -795,8 +797,8 @@ def judge_row(
     # a chunk the answer actually pointed at. This is what separates "the answer is true"
     # from "the answer told you where to check".
     row.cited_support = sum(1 for c in first.claims if c.supported and c.supporting_chunk in cited)
-    row.hit = first.fully_supported
-    row.hit_second_run = verdicts[1].fully_supported if len(verdicts) > 1 else None
+    row.hit = first.supported_enough
+    row.hit_second_run = verdicts[1].supported_enough if len(verdicts) > 1 else None
 
     # A host has no mandated refusal sentence, so path B's refusals can only be recognised
     # here: the judge's own rules define an empty verdict as "the answer makes no factual
@@ -1054,6 +1056,9 @@ def _document(
             "judge": {
                 **_judge_provenance(),
                 "runs": judge_runs,
+                # A methodological choice, not a constant: a result taken at a different
+                # threshold is a different result, so it travels with the numbers.
+                "support_threshold": judge_mod.SUPPORT_THRESHOLD,
                 "prompt_sha256": hashlib.sha256(judge_mod.JUDGE_SYSTEM_RULES.encode()).hexdigest(),
             },
             "host": {
