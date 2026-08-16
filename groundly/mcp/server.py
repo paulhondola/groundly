@@ -35,16 +35,29 @@ The factoid number is what this text aims at. A model that already knows Amdahl'
 no reason to open a slide deck unless something tells it why *this course's* treatment is
 the thing being examined.
 
-**It must not rank one tool above another, and the first version did.** That version ended
-"`ask` returns an enforced, cited answer; `search` returns raw chunks for you to compose
-from", and measured on apd it took the `search`-only host from 8 of 48 questions retrieved
-to **4 of 48** — the wrong direction. The likely mechanism is the same defect this whole
-change set was written to remove: the old `search` description sent a host to `ask`, a tool
-the control condition is not allowlisted for, and moving that ranking into the server
-instructions applied it to the entire surface instead of one tool. A host that wants
-grounded output is told the good option is one it does not have, and answering from memory
-becomes the path of least resistance. "Whichever groundly tools you have been given are
-enough" replaces it, and the re-run is the test of that reading."""
+**It must not rank one tool above another. The first version did, and that one clause was
+worth more than everything else here put together.** That version ended "`ask` returns an
+enforced, cited answer; `search` returns raw chunks for you to compose from". Measured on
+apd, three cells, one variable at a time:
+
+    descriptions   instructions            retrieved   factoids
+    old            none                      8/48        0/17     <- decision 30
+    new            ranked `ask` > `search`   4/48        1/17
+    new            no ranking               29/48        8/17
+
+Removing the ranking is the *only* difference between rows 2 and 3: 4/48 -> 29/48, Fisher
+exact **p = 8.3e-08**. Against decision 30's baseline, p = 1.9e-05; the 0-of-17 factoid
+failure becomes 8 of 17, p = 0.003.
+
+The mechanism is the defect this change set was written to remove, reintroduced one level
+up. The old `search` description sent a host to `ask`; the control condition is not
+allowlisted for `ask`, so a host that wanted grounded output was pointed at a tool it did
+not have. Moving that ranking into the server instructions applied it to the whole surface
+instead of one tool, and answering from memory stayed the path of least resistance.
+
+**So the rule is the finding**: instructions state the norm, tool descriptions say which
+tool. Naming a preferred tool here is invisible to whoever allowlists a subset later, and
+costs more than the norm gains."""
 
 mcp = FastMCP("groundly", instructions=SERVER_INSTRUCTIONS)
 
