@@ -57,17 +57,21 @@ def subject_free_home(monkeypatch, tmp_path):
 
 
 def test_importing_server_never_pulls_in_heavy_ml_deps():
-    for mod in ("sentence_transformers", "torch", "FlagEmbedding"):
-        sys.modules.pop(mod, None)
-    for mod in list(sys.modules):
-        if mod == "groundly.mcp.server" or mod.startswith("groundly.mcp.server."):
-            del sys.modules[mod]
-
-    import groundly.mcp.server  # noqa: F401
-
-    assert "sentence_transformers" not in sys.modules
-    assert "torch" not in sys.modules
-    assert "FlagEmbedding" not in sys.modules
+    """A subprocess rather than sys.modules surgery, for the reason spelled out below and
+    one of its own: popping `torch` does not unload torch's C++ extension, it only makes
+    the next real import re-run `torch/__init__.py`, which then dies re-registering a
+    process-global TORCH_LIBRARY namespace. The in-process version of this test poisoned
+    every later test that loads bge-m3 for real — invisibly, since whether it ran before
+    them depended on file ordering."""
+    probe = (
+        "import sys, groundly.mcp.server;"
+        "print(','.join(m for m in ('sentence_transformers', 'torch', 'FlagEmbedding')"
+        " if m in sys.modules))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+    assert result.stdout.strip() == "", f"ML deps imported at MCP spawn: {result.stdout.strip()}"
 
 
 def test_importing_server_never_pulls_in_graphrag():
@@ -687,8 +691,10 @@ def test_serve_cli_wires_http_transport_with_rebinding_protection(monkeypatch):
     from groundly.cli.app import app
 
     calls: dict = {}
-    # patch the class, not the module-level `mcp` instance: the heavy-imports test
-    # reloads groundly.mcp.server, so serve()'s lazy import may see a fresh instance
+    # patch the class, not the module-level `mcp` instance: `run` is inherited from a
+    # fastmcp mixin, so an instance patch cannot be undone — teardown writes it into
+    # `mcp.__dict__`, where it shadows this one and serve() boots a real server that
+    # blocks forever. tests/conftest.py fails whichever test leaks it.
     monkeypatch.setattr(FastMCP, "run", lambda self, **kw: calls.update(kw))
     result = CliRunner().invoke(app, ["serve", "--port", "5150"])
     assert result.exit_code == 0
