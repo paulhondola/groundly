@@ -142,8 +142,10 @@ def test_supported_enough_is_a_threshold_not_all_or_nothing(stub_chat, monkeypat
     assert verdict.supported_enough is True
 
     # 7 of 10 is below the threshold and still counts as a loss.
-    reply = _reply(*[_claim(f"c{i}", True, 1) for i in range(7)],
-                   *[_claim(f"d{i}", False, None) for i in range(3)])
+    reply = _reply(
+        *[_claim(f"c{i}", True, 1) for i in range(7)],
+        *[_claim(f"d{i}", False, None) for i in range(3)],
+    )
     monkeypatch.setattr("groundly.eval.judge.complete", stub_chat(reply))
     assert judge("q", "another", _SOURCES).supported_enough is False
 
@@ -154,7 +156,11 @@ def test_a_single_unsupported_claim_in_a_short_answer_still_fails():
     unsupported claims cheap."""
     from groundly.eval.judge import Verdict
 
-    v = Verdict(claims=parse(_reply(_claim("a", True, 1), _claim("b", False, None)), set(_SOURCES)),
-                model="m", tokens=1, cost_usd=None)
+    v = Verdict(
+        claims=parse(_reply(_claim("a", True, 1), _claim("b", False, None)), set(_SOURCES)),
+        model="m",
+        tokens=1,
+        cost_usd=None,
+    )
     assert v.faithfulness == pytest.approx(0.5)
     assert v.supported_enough is False

@@ -535,9 +535,7 @@ def test_a_host_that_declines_in_prose_counts_as_a_refusal(retrievable_subject, 
     assert next(r for r in doc["rows"] if r["path"] == HOST)["outcome"] == "refused"
 
 
-def test_a_host_that_never_searched_is_counted_not_dropped(
-    retrievable_subject, gold, monkeypatch
-):
+def test_a_host_that_never_searched_is_counted_not_dropped(retrievable_subject, gold, monkeypatch):
     """**The bug the first partial run exposed.** 9 of 12 host sessions answered without
     calling `search` at all, and the harness filed every one as "no source text for the
     chunks this answer saw" — a harness error, excluded from every column. That deleted
@@ -589,7 +587,9 @@ def test_ask_without_a_resolvable_citation_is_counted_not_dropped(
     monkeypatch.setattr(
         "groundly.agents.ask.complete",
         lambda *a, **k: ChatResult(
-            text="Deadlocks need mutual exclusion [chunk 9999].", tokens=5, cost_usd=0.001,
+            text="Deadlocks need mutual exclusion [chunk 9999].",
+            tokens=5,
+            cost_usd=0.001,
             model="stub-chat",
         ),
     )
@@ -689,7 +689,12 @@ def test_each_condition_gets_its_own_comparison_and_provenance(
 
     assert set(doc["comparisons"]) == {HOST, HOST_DIRECTED}
     for comp in doc["comparisons"].values():
-        assert {"matched_n", "matched_question_ids", "significance_matched", "significance_all"} <= set(comp)
+        assert {
+            "matched_n",
+            "matched_question_ids",
+            "significance_matched",
+            "significance_all",
+        } <= set(comp)
 
     recorded = doc["provenance"]["host"]["conditions"]
     assert set(recorded) == {HOST, HOST_DIRECTED}
@@ -766,8 +771,13 @@ def test_no_host_conditions_runs_the_enforced_path_alone(retrievable_subject, go
     monkeypatch.setattr(subprocess, "run", _must_not_spawn)
     store = SubjectStore(Subject(retrievable_subject).store_db_path)
     doc = run(
-        retrievable_subject, gold, store, host=_CFG, ask_config=_NO_RERANK,
-        conditions=(), judge_runs=1,
+        retrievable_subject,
+        gold,
+        store,
+        host=_CFG,
+        ask_config=_NO_RERANK,
+        conditions=(),
+        judge_runs=1,
     )
     assert {r["path"] for r in doc["rows"]} == {ASK}
     assert doc["comparisons"] == {}
