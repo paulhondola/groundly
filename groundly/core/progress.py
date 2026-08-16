@@ -76,6 +76,56 @@ def connect_progress(path: Path) -> sqlite3.Connection:
     return conn
 
 
+def max_trace_id(conn: sqlite3.Connection) -> int:
+    """The highest trace id so far — the bracket a caller takes *before* an operation so
+    it can read back exactly that operation's rows with `read_traces(since_id=...)`.
+
+    An id, not a timestamp. `traces.ts` has second resolution, and the grounding-fidelity
+    eval brackets a host subprocess that issues several `search` calls inside one second;
+    a `ts >= start` window would over-collect from the run before it. Ids are monotonic
+    and the bracket is exact.
+    """
+    return conn.execute("SELECT COALESCE(MAX(id), 0) FROM traces").fetchone()[0]
+
+
+def read_traces(
+    conn: sqlite3.Connection,
+    *,
+    since_id: int = 0,
+    kind: str | None = None,
+    query: str | None = None,
+) -> list[sqlite3.Row]:
+    """Trace rows after `since_id`, oldest first, optionally one `kind` and one `query`.
+
+    `query` narrows an id bracket that is otherwise **process-global**. progress.db is
+    shared by one-shot CLI runs and host-spawned MCP processes by design, so a bracket on
+    id alone collects whatever else happened to run in the window — including the
+    student's own `ask` from another terminal, whose answer text and chunk ids would then
+    be written into an eval results file. Narrow, but a real path from progress.db into an
+    artifact, and the caller always knows which question it asked.
+
+    **This module's first reader, and it is deliberately read-only.** The privacy boundary
+    is a file: progress.db never travels and export code never reads it. Reading it
+    *locally* is what it is for — the traces table is where the thesis's per-answer cost,
+    latency and citation data lives, and re-deriving that outside it would mean the
+    measured pipeline was not the shipped one. `core/bundle.py` still imports nothing from
+    here; keep it that way.
+
+    `chunk_ids`, `path` and `citations` come back as the raw JSON text they are stored as.
+    Callers decode what they need — a decoder here would have to guess at three different
+    shapes for no caller that wants all three.
+    """
+    sql = "SELECT * FROM traces WHERE id > ?"
+    params: list = [since_id]
+    if kind is not None:
+        sql += " AND kind = ?"
+        params.append(kind)
+    if query is not None:
+        sql += " AND query = ?"
+        params.append(query)
+    return conn.execute(sql + " ORDER BY id", params).fetchall()
+
+
 def record_verification(
     conn: sqlite3.Connection, *, generation_source: str, reason: str | None
 ) -> None:

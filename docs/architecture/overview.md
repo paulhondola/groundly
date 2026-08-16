@@ -9,12 +9,15 @@ There is no server to deploy. The product is a local **core library** with thin 
 ```
 groundly/
 ├── cli/         # typer verbs: init, index, list, remove, import, export, export-deck,
-│             #   export-graph, ask, eval, config, models, mcp, serve
+│             #   export-graph, ask, eval, eval-grounding, config, models, mcp, serve
 ├── mcp/         # FastMCP tool definitions over the core (stdio + streamable HTTP)
 ├── web/         # static mastery dashboard, served by `serve` (P7)
-├── eval/        # retrieval eval harness (decision 27): gold sets, metrics, runner.
-│             #   A client by dependency direction — drives the arms, imported by
-│             #   nothing. Research surface; no MCP tool or runtime path uses it.
+├── eval/        # eval harness. Retrieval slice (decision 27): gold sets, metrics,
+│             #   runner. Generation slice (decision 30): attribution, judge,
+│             #   grounding — the enforced-vs-host comparison, which calls the real
+│             #   ask() rather than a copy. A client by dependency direction —
+│             #   drives the arms, imported by nothing. No MCP tool or runtime
+│             #   path uses it.
 ├── assets/      # bundled data read via importlib.resources: theme.css, vendored
 │             #   vis-network (see assets/VENDORED.md). A bare data dir like prompts/,
 │             #   deliberately NOT under web/ so core/ can read it without a

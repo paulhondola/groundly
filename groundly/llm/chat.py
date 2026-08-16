@@ -73,8 +73,33 @@ def loaded_context_length(call_class: str) -> int | None:
 
 
 def complete(
-    call_class: str, messages: list[dict], *, response_format: object | None = None
+    call_class: str,
+    messages: list[dict],
+    *,
+    response_format: object | None = None,
+    model: str | None = None,
 ) -> ChatResult:
+    """`model` overrides the call class's configured model for this call only, against the
+    same `base_url` and key. It exists for one measurement: the grounding-fidelity
+    experiment compares an enforced `ask` against a host running a different model, and
+    without a way to re-run the enforced path on a *comparable* model the result cannot be
+    told apart from "the host's model is stronger".
+
+    It does not weaken the provider boundary — the client is still constructed here, from
+    the same configured section, and the model that actually ran is recorded in the trace
+    rather than assumed.
+
+    **An overridden model does not inherit the configured model's `reasoning_effort`**, and
+    that is load-bearing rather than tidy. The value is model-specific by its own
+    definition ("none" is what Ollama honours, OpenAI's o-series takes low/medium/high),
+    so carrying it across a model swap sends one model's tuning to another. Measured on
+    DeepInfra: `[providers.chat]` sets `reasoning_effort = "none"` for gpt-oss-120b, and
+    the same request against `Qwen/Qwen3-235B-A22B-Instruct-2507` returns **HTTP 200 with
+    a body of `"\\n"`** — an empty answer, not an error. The sensitivity run built on it
+    would have scored every enforced answer as a citation failure and reported that
+    enforcement collapses on Qwen, when the parameter had silently muted the model.
+    `temperature` is *not* dropped: it means the same thing on every model, and dropping
+    it would unpin sampling, which is the one thing decision 28 retracted a number over."""
     import litellm
     import openai
 
@@ -108,7 +133,10 @@ def complete(
     # flat reasoning_effort kwarg raises UnsupportedParamsError on every call instead of
     # degrading (measured — see llm/graphrag_adapter.completion_model_config, which nests
     # the same way so the setting means the same thing on every call class).
-    if cfg.reasoning_effort:
+    # Skipped entirely when the caller overrode the model — see the docstring: the value
+    # belongs to the configured model, and on a different one it can silently mute the
+    # reply rather than error.
+    if cfg.reasoning_effort and model is None:
         extra["extra_body"] = {"reasoning_effort": cfg.reasoning_effort}
     # Flat, unlike reasoning_effort: temperature is a first-class OpenAI parameter every
     # compatible endpoint accepts, so litellm maps it rather than rejecting it.
@@ -116,7 +144,7 @@ def complete(
         extra["temperature"] = cfg.temperature
     try:
         response = litellm.completion(
-            model=f"openai/{cfg.model}",
+            model=f"openai/{model or cfg.model}",
             messages=messages,
             api_base=cfg.base_url,
             api_key=cfg.api_key or _LOCAL_PLACEHOLDER_KEY,

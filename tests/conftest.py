@@ -141,17 +141,25 @@ class StubChat:
     ):
         self.replies = [replies] if isinstance(replies, str) else list(replies)
         self.calls: list[tuple[str, list[dict]]] = []
+        self.kwargs: list[dict] = []
         self.model = model
         self.tokens = tokens
         self.cost_usd = cost_usd
 
-    def __call__(self, call_class, messages):
+    def __call__(self, call_class, messages, **kwargs):
         from groundly.llm.chat import ChatResult
 
         self.calls.append((call_class, messages))
+        # `kwargs` absorbs the optional keyword arguments `complete()` accepts
+        # (`response_format`, `model`), and `model` is echoed back when given so a test can
+        # assert an override actually reached the client rather than being dropped.
+        self.kwargs.append(kwargs)
         i = min(len(self.calls) - 1, len(self.replies) - 1)
         return ChatResult(
-            text=self.replies[i], tokens=self.tokens, cost_usd=self.cost_usd, model=self.model
+            text=self.replies[i],
+            tokens=self.tokens,
+            cost_usd=self.cost_usd,
+            model=kwargs.get("model") or self.model,
         )
 
 

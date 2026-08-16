@@ -26,13 +26,20 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_valid
 
 from groundly.core.paths import groundly_home
 
-CALL_CLASSES = ("chat", "generation", "extraction", "router")
+CALL_CLASSES = ("chat", "generation", "extraction", "router", "judge")
 
 _PROVIDER_COMMENTS = {
     "chat": "ask pipeline generation",
     "generation": "exam/deck generation (thick path)",
     "extraction": "graphrag entity extraction",
     "router": "cheap query classifier",
+    # Its own class rather than a reuse of `chat`, for two reasons the grounding-fidelity
+    # experiment made concrete. The judge should be free to be a *stronger* model than the
+    # one being judged — sharing `chat` makes that impossible by construction. And a judge
+    # score is uncitable without its model attached (decision 28's retracted router
+    # figure), so "which model judged this" has to be a configured fact the results file
+    # can read back, not an inference from whichever section happened to be in use.
+    "judge": "grounding-fidelity faithfulness judge (eval only, never a runtime path)",
 }
 _PROVIDER_FIELDS = (
     "base_url",
