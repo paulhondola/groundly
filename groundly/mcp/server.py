@@ -18,9 +18,9 @@ SERVER_INSTRUCTIONS = """Groundly serves local, indexed course knowledge bases. 
 When the student asks about a subject listed by `list_subjects`, retrieve before you \
 answer. Do not answer from your own knowledge of the topic — a course's definitions, \
 notation and emphasis are what the student is graded on, and general knowledge is not a \
-substitute for them. `ask` returns an enforced, cited answer; `search` returns raw chunks \
-for you to compose from. Cite what you use: every chunk carries a `groundly://` uri that \
-resolves to a document and page."""
+substitute for them. Whichever groundly tools you have been given are enough to do this. \
+Cite what you use: every chunk carries a `groundly://` uri that resolves to a document \
+and page."""
 """The MCP `initialize` instructions — the one place a retrieval norm can be stated once
 for the whole server rather than repeated per tool.
 
@@ -33,7 +33,18 @@ in the tool surface supplied it.
 
 The factoid number is what this text aims at. A model that already knows Amdahl's law has
 no reason to open a slide deck unless something tells it why *this course's* treatment is
-the thing being examined."""
+the thing being examined.
+
+**It must not rank one tool above another, and the first version did.** That version ended
+"`ask` returns an enforced, cited answer; `search` returns raw chunks for you to compose
+from", and measured on apd it took the `search`-only host from 8 of 48 questions retrieved
+to **4 of 48** — the wrong direction. The likely mechanism is the same defect this whole
+change set was written to remove: the old `search` description sent a host to `ask`, a tool
+the control condition is not allowlisted for, and moving that ranking into the server
+instructions applied it to the entire surface instead of one tool. A host that wants
+grounded output is told the good option is one it does not have, and answering from memory
+becomes the path of least resistance. "Whichever groundly tools you have been given are
+enough" replaces it, and the re-run is the test of that reading."""
 
 mcp = FastMCP("groundly", instructions=SERVER_INSTRUCTIONS)
 
