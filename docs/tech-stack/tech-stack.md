@@ -43,10 +43,31 @@ Rules that make this real:
 
 1. **No provider SDK usage outside `groundly/llm/`.** LlamaIndex and graphrag accept OpenAI-compatible configs — only that form is used. `groundly/llm/chat.py` talks to providers via `litellm.completion()` — already `graphrag`'s own transitive dependency, pinned exactly (`litellm==1.86.2`, decision 20) — with the same `base_url`+`model`+`key` shape; import stays lazy so it never slows MCP spawn.
 2. **Per call class**, so "cheap router, strong verifier" is config, not refactoring. Local runtimes (LM Studio, Ollama) and cloud keys are the same code path — different `base_url`.
-3. **Every call passes through `llm/` and records tokens + cost into traces.** Visibility, not budget enforcement — it's the student's own key.
+3. **Every call passes through `llm/` and records tokens + cost into traces.** Visibility, not budget enforcement — it's the student's own key. One named exception: the compliance probe below runs from `groundly config check`, a *global* verb, and traces live in a per-subject `progress.db` — it prints its tokens and cost to the terminal instead (decision 32).
 4. **No subscription-OAuth piggybacking** (Claude Pro token reuse etc.) — ToS-fragile; opencode's history proves it.
 5. **Zero-key operation is first-class:** indexing, vector retrieval, `search`, and the thin `submit_*` generation path all work with no provider configured. Only `ask`, thick generation, and graph builds need a key.
 6. **Evaluation runs use one recorded provider config** — results from ad-hoc local models would be invalid; the config is part of the experimental record.
+
+### Chat model floor
+
+**`[providers.chat]` is the one call class with a capability requirement, not just a cost preference.** The enforced `ask` path mandates `[chunk <id>]` markers and refuses an answer whose citations resolve to nothing (`.claude/rules/grounding-and-privacy.md`) — so a model that will not follow the mandate does not degrade, it returns nothing. The student sees refusals and reasonably concludes the product is broken.
+
+Measured on two subjects, 2026-08-16 (decision 30) — `no_citations`, the share of questions the pipeline refused because the model cited nothing resolvable:
+
+| model | apd (48 q) | passc (76 q) | verdict |
+|---|---|---|---|
+| `Qwen/Qwen3-235B-A22B-Instruct-2507` | 0% | 0% | **meets the floor** — all 76 of passc's answers produced |
+| `gpt-oss-120b` | 28% | 47% | **below the floor** — refusals concentrated in the hard classes (44% global, 35% multi-hop, 12% factoid on apd) |
+
+That is one model failing the mandate, not enforcement converting answers into refusals: the same corpus, the same prompts, the same threshold.
+
+**For a model not on this list, measure it:**
+
+```bash
+groundly config check
+```
+
+One real call through `prompts.assemble()` — the ask builder itself, object for object — handing the model a single synthetic chunk and checking it cites the id it was given. Exits non-zero and names the model when it does not. `agents/probe.py` carries the reasoning; the precedent is `ingestion/graph.py::_probe_extraction`, which exists because a silent capability failure otherwise costs hours.
 
 ## Version pinning policy
 

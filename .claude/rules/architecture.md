@@ -14,7 +14,7 @@ Layers: clients (`cli/`, `mcp/`, `web/`, `eval/`) → services (`agents/`, `retr
 ## LLM provider boundary (hard rule)
 
 - LLM clients are constructed **only** in `groundly/llm/` — OpenAI-compatible `base_url` + model + key, **per call class** (`chat`, `generation`, `extraction`, `router`, `judge`) from `~/.groundly/config.toml`. Never hardcode a provider; cloud keys and LM Studio/Ollama are the same code path. `groundly/llm/chat.py`'s `complete()` is `litellm.completion()` under this same boundary — litellm is the sanctioned client library inside `llm/`, constructed nowhere else.
-- Every LLM call passes through `llm/` and records tokens + cost into the traces table.
+- Every LLM call passes through `llm/` and records tokens + cost into the traces table. **One named exception** (decision 32): `agents/probe.py`'s citation-compliance probe, run from the global `groundly config check`, has no subject whose `progress.db` it could write to — it returns tokens + cost on `ProbeResult` and the verb prints them.
 - **Zero-key operation is first-class**: index, `search`, thin `submit_*` generation must never require a provider.
 - Embeddings: `bge-m3`, pinned incl. hf_revision — the pin is the interchange compatibility contract. Changing it = full re-index migration + manifest bump, never a tweak.
 
