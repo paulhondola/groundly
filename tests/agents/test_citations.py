@@ -49,3 +49,29 @@ def test_resolve_citations_no_markers_raises_no_citations_error():
     store = _FakeStore([_row(1)])
     with pytest.raises(NoCitationsError):
         resolve_citations("No citations here.", retrieved_chunk_ids=[1], store=store)
+
+
+def test_cited_ids_extracts_every_marker():
+    """Shared with the compliance probe (agents/probe.py), which has no store to resolve
+    against and only needs to know which ids the model claimed."""
+    from groundly.agents.citations import cited_ids
+
+    assert cited_ids("a [chunk 1] b [chunk 42] c [chunk 1].") == {1, 42}
+
+
+def test_cited_ids_of_an_uncited_answer_is_empty():
+    from groundly.agents.citations import cited_ids
+
+    assert cited_ids("Deadlocks require mutual exclusion.") == set()
+
+
+def test_no_citations_error_points_at_the_compliance_probe():
+    """The message reaches the student verbatim through both surfaces (cli/ask.py and
+    mcp/server.py render `str(exc)`), and a refusal that does not name the probe reads
+    as a broken product rather than an unsuitable model."""
+    store = _FakeStore([_row(1)])
+
+    with pytest.raises(NoCitationsError) as exc:
+        resolve_citations("Deadlocks require mutual exclusion.", [1], store)
+
+    assert "groundly config check" in str(exc.value)

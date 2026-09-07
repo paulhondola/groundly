@@ -28,14 +28,22 @@ class NoCitationsError(Exception):
     retrieved set) — zero resolvable citations is an error, never a degraded answer."""
 
 
+def cited_ids(text: str) -> set[int]:
+    """Every chunk id the model claimed, resolvable or not.
+
+    Shared with `agents/probe.py`, which has no store to resolve against and only needs
+    to know whether the model emitted the marker it was given."""
+    return {int(m) for m in _CITATION_RE.findall(text)}
+
+
 def resolve_citations(
     text: str, retrieved_chunk_ids: list[int], store: SubjectStore
 ) -> list[Citation]:
-    cited_ids = {int(m) for m in _CITATION_RE.findall(text)}
+    claimed_ids = cited_ids(text)
     resolvable_ids = [
-        cid for cid in retrieved_chunk_ids if cid in cited_ids
+        cid for cid in retrieved_chunk_ids if cid in claimed_ids
     ]  # hallucinated ids dropped
-    hallucinated_ids = cited_ids - set(retrieved_chunk_ids)
+    hallucinated_ids = claimed_ids - set(retrieved_chunk_ids)
     if hallucinated_ids:
         logger.info(
             "dropped %d hallucinated citation id(s): %s",
@@ -44,7 +52,9 @@ def resolve_citations(
         )
     if not resolvable_ids:
         raise NoCitationsError(
-            "the model's response cited no chunk ids that resolve to retrieved chunks"
+            "the model's response cited no chunk ids that resolve to retrieved chunks. "
+            "Run `groundly config check` to test whether your chat model satisfies the "
+            "citation mandate."
         )
 
     details = {row["chunk_id"]: row for row in store.chunk_details(resolvable_ids)}
