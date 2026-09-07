@@ -115,6 +115,29 @@ def test_unknown_arm_is_refused(retrievable_subject, tmp_path, monkeypatch):
     assert "unknown retrieval arm" in result.output
 
 
+def test_unknown_condition_is_refused_by_name_before_spending(
+    retrievable_subject, tmp_path, monkeypatch
+):
+    """Same shape as an unknown arm: a sweep is expensive enough that a typo must not
+    silently buy fewer conditions than were asked for."""
+    _configured(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            "eval-grounding",
+            retrievable_subject,
+            "--gold",
+            str(_gold_file(tmp_path)),
+            "--conditions",
+            "product",
+            "-y",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "unknown host condition 'product'" in result.output
+    assert "host-product" in result.output, "the error names the valid set"
+
+
 def test_missing_gold_set_fails_with_the_path(retrievable_subject, tmp_path, monkeypatch):
     _configured(monkeypatch)
     result = runner.invoke(

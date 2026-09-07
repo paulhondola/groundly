@@ -71,12 +71,15 @@ from groundly.retrieval.arms import VECTOR, validate_arms
 logger = logging.getLogger(__name__)
 
 ASK = "ask"
-# Two path-B conditions. `host` is the neutral prompt — it measures whether an agent left
-# to itself grounds its answers at all. `host-directed` adds an instruction to search,
-# separating "won't retrieve" from "retrieves and then drifts"; without it those two very
-# different product failures are one number.
+# Three path-B conditions. `host` is the neutral prompt over `search` alone — it measures
+# whether an agent left to itself grounds its answers, and is the control for enforced
+# `ask`. `host-directed` adds an instruction to search, separating "won't retrieve" from
+# "retrieves and then drifts"; without it those two very different product failures are one
+# number. `host-product` holds the neutral prompt and opens the whole MCP surface, which is
+# the only one of the three a student ever runs.
 HOST = "host"
 HOST_DIRECTED = "host-directed"
+HOST_PRODUCT = "host-product"
 
 # What happened to one question on one path. **These are outcomes, not errors**, and the
 # distinction is what the first partial run got wrong: 9 host rows and 7 ask rows were
@@ -123,6 +126,29 @@ DENIED_HOST_TOOLS = (
     "Task",
 )
 
+# The MCP tools a condition may allowlist. `SEARCH_ONLY` is the thesis control — raw
+# retrieval and nothing else, so path B cannot reach the pipeline it is the control for.
+SEARCH_ONLY = ("mcp__groundly__search",)
+
+# Every tool a host can use to *answer a question*, which is what `host-product` measures.
+#
+# **Named for what it is rather than "the full surface", because it is 6 of 11.** The five
+# left out — `submit_cards`, `generate_deck`, `export_deck`, `list_decks`, `get_job` — are
+# excluded on a rule, not a hunch: a measurement must not mutate the subject it measures or
+# start background spend against the student's key. `submit_cards` and `export_deck` write
+# to `store.db`, and `generate_deck` launches a job on `[providers.generation]`. A student's
+# own Claude Code does see all eleven, so this condition is the answering surface rather
+# than a perfect replica, and that gap is a stated limitation of the number it produces.
+ANSWERING_SURFACE = (
+    "mcp__groundly__list_subjects",
+    "mcp__groundly__search",
+    "mcp__groundly__ask",
+    "mcp__groundly__get_page",
+    "mcp__groundly__drill_down",
+    "mcp__groundly__overview",
+)
+_ASK_TOOL = "mcp__groundly__ask"
+
 
 # --------------------------------------------------------------------------------------
 # Path B — the host
@@ -138,13 +164,19 @@ Answer this question about that course:
 Reply with your answer and nothing else."""
 """The task prompt, published verbatim in the thesis.
 
-**It says nothing about citing, and that is the measurement.** Whether an unprompted host
-attributes its claims at all is one of the three things this experiment is counting; a
-task prompt that asked for citations would be measuring compliance with our instruction
-instead. The host is not left uninformed, either — the `search` tool's own description
-tells it that "you compose the answer yourself from the returned chunks; grounding is not
-enforced here (use `ask` when you need an enforced, cited answer)". Being told that by the
-product, at the moment of use, is exactly the condition being studied.
+**It says nothing about retrieving or citing, and that is the measurement.** Whether an
+unprompted host retrieves at all, and whether it attributes what it says, are two of the
+three things this experiment counts; a task prompt that asked for either would be
+measuring compliance with our instruction instead. The host is not left uninformed — the
+tool surface itself tells it what `search` is and when to reach for it — and being told
+that *by the product, at the moment of use* is exactly the condition being studied.
+
+**Which makes the surface an experimental variable, and it has since changed.** The
+descriptions this prompt was first measured against opened with retrieval mechanics, named
+no occasion to call `search`, and closed by redirecting to `ask` — a tool the control
+condition is not allowed to call. Decision 31 rewrote them and added server instructions;
+`_mcp_provenance` now records the wording verbatim in every results file, because the
+numbers taken before and after are not measurements of the same thing.
 
 "Reply with your answer and nothing else" is a formatting instruction, not a grounding
 one: without it the reply is a chatty progress report and the judge grades prose about
@@ -182,16 +214,60 @@ conditions, so the attribution layers stay comparable across them."""
 
 @dataclass(frozen=True)
 class HostCondition:
-    """One path-B condition: what to call it, and the task prompt that defines it. Both
-    land in the results document, the prompt verbatim and by hash, because a condition is
-    only interpretable next to the exact words that produced it."""
+    """One path-B condition: what to call it, the task prompt that defines it, and which
+    MCP tools it may call. All three land in the results document, the prompt verbatim and
+    by hash, because a condition is only interpretable next to the exact words — and the
+    exact tools — that produced it.
+
+    **The allowlist is part of the condition, not a property of path B.** It was an argv
+    literal while `search`-only was the only thing anyone ran, which quietly made "does an
+    agent ground itself?" mean "does an agent with *raw retrieval alone* ground itself?".
+    Those are different questions and the product only ever asks the second one."""
 
     label: str
     prompt: str
+    allowed_tools: tuple[str, ...] = SEARCH_ONLY
 
 
 NEUTRAL_CONDITION = HostCondition(label=HOST, prompt=HOST_TASK_PROMPT)
 DIRECTED_CONDITION = HostCondition(label=HOST_DIRECTED, prompt=HOST_DIRECTED_TASK_PROMPT)
+PRODUCT_CONDITION = HostCondition(
+    label=HOST_PRODUCT, prompt=HOST_TASK_PROMPT, allowed_tools=ANSWERING_SURFACE
+)
+"""The neutral prompt over the answering surface — the configuration a student actually
+gets, and the only one whose retrieval rate is a fact about the product.
+
+The neutral and directed conditions are allowlisted to `search` alone because path B is
+the control for enforced `ask`: letting it call `ask` would make the comparison circular.
+That is right for the thesis and wrong for everything else, because nobody installs
+Groundly and then hides five of its six tools. A host here may call `ask`, and when it
+does that is a success — so `_collect_host` counts `ask` traces as retrieval and does not
+fire the leak guard.
+
+Same prompt as `NEUTRAL_CONDITION` on purpose: holding the words fixed makes the
+difference between the two conditions the tool surface and nothing else."""
+
+
+CONDITION_TABLE = {c.label: c for c in (NEUTRAL_CONDITION, DIRECTED_CONDITION, PRODUCT_CONDITION)}
+
+
+def resolve_conditions(spec: str) -> tuple[HostCondition, ...]:
+    """Comma-separated labels -> conditions, in the order given, deduped.
+
+    Mirrors `retrieval/arms.validate_arms`: an unknown label names itself and the valid
+    set rather than silently running fewer conditions than the caller paid for."""
+    labels, seen = [], set()
+    for raw in spec.split(","):
+        label = raw.strip()
+        if not label or label in seen:
+            continue
+        if label not in CONDITION_TABLE:
+            raise ValueError(
+                f"unknown host condition {label!r} — valid: {', '.join(CONDITION_TABLE)}"
+            )
+        seen.add(label)
+        labels.append(label)
+    return tuple(CONDITION_TABLE[label] for label in labels)
 
 
 @dataclass(frozen=True)
@@ -222,7 +298,9 @@ class HostRun:
     error: str | None
 
 
-def host_argv(cfg: HostConfig, prompt: str, subject: str) -> list[str]:
+def host_argv(
+    cfg: HostConfig, prompt: str, subject: str, allowed_tools: tuple[str, ...] = SEARCH_ONLY
+) -> list[str]:
     """The exact command, as a list — never a shell string.
 
     Two independent guards keep the host away from the filesystem, and getting here took
@@ -256,9 +334,12 @@ def host_argv(cfg: HostConfig, prompt: str, subject: str) -> list[str]:
          reach a real filesystem tool, and the answer is written to the results file and
          sent on to the judge provider.
 
-    `--allowedTools mcp__groundly__search` still does the other half: of the MCP surface,
-    only `search` is permitted, so the host cannot call `ask` — the pipeline it is the
-    control for.
+    `--allowedTools` does the other half, and **what it permits is the condition's, not
+    this function's**. At `SEARCH_ONLY` — the neutral and directed conditions — only
+    `search` is reachable, so the host cannot call `ask`, the pipeline it is the control
+    for. `PRODUCT_CONDITION` passes `ANSWERING_SURFACE` instead, because the question it asks is
+    what a student's own Claude Code does with every tool it was actually given; there,
+    reaching `ask` is the product working rather than the control leaking.
 
     `--setting-sources ""` loads no user, project or local settings, so the host inherits
     no CLAUDE.md, no hooks, no plugins and no output style from the machine that ran the
@@ -298,7 +379,7 @@ def host_argv(cfg: HostConfig, prompt: str, subject: str) -> list[str]:
         "--disallowedTools",
         *DENIED_HOST_TOOLS,
         "--allowedTools",
-        "mcp__groundly__search",
+        *allowed_tools,
         "--model",
         cfg.model,
         "--output-format",
@@ -310,7 +391,11 @@ def host_argv(cfg: HostConfig, prompt: str, subject: str) -> list[str]:
 
 
 def run_host(
-    query: str, subject: str, cfg: HostConfig, prompt_template: str = HOST_TASK_PROMPT
+    query: str,
+    subject: str,
+    cfg: HostConfig,
+    prompt_template: str = HOST_TASK_PROMPT,
+    allowed_tools: tuple[str, ...] = SEARCH_ONLY,
 ) -> HostRun:
     """One question through one cold host process.
 
@@ -328,7 +413,7 @@ def run_host(
     with tempfile.TemporaryDirectory(prefix="groundly-host-") as scratch:
         try:
             proc = subprocess.run(
-                host_argv(cfg, prompt, subject),
+                host_argv(cfg, prompt, subject, allowed_tools),
                 capture_output=True,
                 text=True,
                 timeout=cfg.timeout_seconds,
@@ -649,25 +734,34 @@ def _collect_host(
     calls wrote — no product change was needed for this, because `retrieval/vector.py`
     has always traced every `search`."""
     before = max_trace_id(conn)
-    run = run_host(question.query, subject, cfg, condition.prompt)
+    run = run_host(question.query, subject, cfg, condition.prompt, condition.allowed_tools)
     searches = read_traces(conn, since_id=before, kind="search")
+    asks = read_traces(conn, since_id=before, kind="ask")
 
-    # The isolation claim, verified in-repo rather than trusted. `--tools ""` and
-    # `--allowedTools mcp__groundly__search` are supposed to make it impossible for path B
-    # to reach the pipeline it is the control for, but that mechanism lives entirely
-    # inside a third-party CLI's permission handling. If an `ask` row appears in this
-    # window the measurement is void, and saying so beats publishing it.
-    leaked = read_traces(conn, since_id=before, kind="ask")
-    if leaked:
+    # The isolation claim, verified in-repo rather than trusted. `--allowedTools` is
+    # supposed to make it impossible for a control condition to reach the pipeline it is
+    # the control for, but that mechanism lives entirely inside a third-party CLI's
+    # permission handling. If an `ask` row appears in this window the measurement is void,
+    # and saying so beats publishing it.
+    #
+    # **Gated on the condition's own allowlist, not on being path B.** For
+    # `PRODUCT_CONDITION` the host is *given* `ask`, so an `ask` row is the product working
+    # — voiding it would report the shipped configuration as 100% harness failure.
+    if _ASK_TOOL not in condition.allowed_tools and asks:
         return _empty_row(
             question,
             condition.label,
-            f"host reached the `ask` pipeline ({len(leaked)} trace row(s)) — path B is "
-            "supposed to be restricted to `search`; this question's comparison is void",
+            f"host reached the `ask` pipeline ({len(asks)} trace row(s)) — this condition "
+            "is supposed to be restricted to `search`; this question's comparison is void",
         )
 
+    # Retrieval is retrieval whichever tool did it. A product host that answered entirely
+    # through `ask` opened the materials; counting only `search` rows would file the
+    # best possible outcome as `ungrounded`, which is the exact inversion of what this
+    # column means.
+    retrievals = searches + asks if _ASK_TOOL in condition.allowed_tools else searches
     seen: set[int] = set()
-    for row in searches:
+    for row in retrievals:
         seen.update(json.loads(row["chunk_ids"] or "[]"))
 
     # **An answer produced without retrieving anything is the finding, not an error.**
@@ -685,7 +779,7 @@ def _collect_host(
         path=condition.label,
         outcome=ERROR if run.error else (UNGROUNDED if ungrounded else ANSWERED),
         seen_chunks=sorted(seen),
-        n_searches=len(searches),
+        n_searches=len(retrievals),
         answer=run.answer,
         attributions_n=0,
         attributions_resolvable=0,
@@ -850,6 +944,47 @@ def _judge_provenance() -> dict:
         "base_url": cfg.base_url,
         "temperature": cfg.temperature,
         "reasoning_effort": cfg.reasoning_effort,
+    }
+
+
+def _mcp_provenance() -> dict:
+    """The tool surface the host was shown: server instructions plus every tool
+    description, verbatim and under one hash.
+
+    **The wording of the surface is part of the condition, and this is the gap that made
+    it un-recordable.** `HOST_TASK_PROMPT`'s own docstring argues that the neutral
+    condition is fair *because* the `search` tool tells the host what it is getting — so
+    the description is an experimental variable, not packaging. It was never recorded, so
+    changing one word of it moved a published retrieval rate with nothing in any results
+    file able to say which wording produced which number.
+
+    Read with `inspect.getdoc`, which is byte-identical to what the host receives over the
+    wire for all 11 tools (verified against a live `list_tools`) — so this records what was
+    shown rather than an approximation of it.
+
+    Imports are function-local: `groundly.mcp.server` pulls `fastmcp`, and a sweep that
+    never reaches this function should not pay for it. Client-importing-client is
+    deliberate and permitted (`tests/test_layering.py`: "a client may import its own
+    layer") — the alternative is a second copy of the descriptions inside `eval/`, which
+    would drift from the surface it claims to describe and defeat the entire point."""
+    import inspect
+
+    from groundly.mcp import server
+
+    # Public module-level functions: the 11 tools plus the citation resource, which is part
+    # of the surface the host reads. `isfunction` rather than `callable` because `CardIn` is
+    # a pydantic model and passes the looser test; the leading-underscore filter drops the
+    # module's own helpers, which the host never sees.
+    tools = {
+        name: inspect.getdoc(fn)
+        for name, fn in sorted(vars(server).items())
+        if inspect.isfunction(fn) and not name.startswith("_") and fn.__doc__
+    }
+    block = {"instructions": server.SERVER_INSTRUCTIONS, "tools": tools}
+    return block | {
+        "sha256": hashlib.sha256(
+            json.dumps(block, sort_keys=True, ensure_ascii=False).encode()
+        ).hexdigest()
     }
 
 
@@ -1061,17 +1196,27 @@ def _document(
                 "support_threshold": judge_mod.SUPPORT_THRESHOLD,
                 "prompt_sha256": hashlib.sha256(judge_mod.JUDGE_SYSTEM_RULES.encode()).hexdigest(),
             },
+            # The tool surface the host was shown, verbatim. A condition's wording is only
+            # half of it — the other half is which tools that wording was about.
+            "mcp": _mcp_provenance(),
             "host": {
                 "model": host.model,
                 "cli_version": _host_version(host),
-                "argv": host_argv(host, "<prompt>", subject),
-                # Every condition's prompt verbatim and by hash. A condition is only
-                # interpretable next to the exact words that produced it, and the whole
-                # point of the second one is that its wording differs by a single clause.
+                # Every condition's prompt verbatim and by hash, plus the argv it actually
+                # ran. A condition is only interpretable next to the exact words that
+                # produced it, and the whole point of the second one is that its wording
+                # differs by a single clause.
+                #
+                # **`argv` is per condition, not one line above.** It used to be recorded
+                # once from the default allowlist, which was true while every condition
+                # shared one; `host-product` allowlists a different tool set, so a single
+                # argv would have recorded `search`-only for a run that was not.
                 "conditions": {
                     c.label: {
                         "task_prompt": c.prompt,
                         "task_prompt_sha256": hashlib.sha256(c.prompt.encode()).hexdigest(),
+                        "allowed_tools": list(c.allowed_tools),
+                        "argv": host_argv(host, "<prompt>", subject, c.allowed_tools),
                     }
                     for c in conditions
                 },

@@ -68,6 +68,51 @@ def _reset_shared_embedder():
     embeddings_mod._shared = None
 
 
+@pytest.fixture(autouse=True)
+def _no_native_module_eviction():
+    """Blame the test that evicts a native extension from `sys.modules`, not its victims.
+    Popping `torch` does not unload torch's C++ side — it only makes the next real import
+    re-run `torch/__init__.py`, which dies re-registering a process-global TORCH_LIBRARY
+    namespace. The victim is whichever later test loads a model for real, in some other
+    file, so the suite goes red or green purely by file ordering. Probe import cost in a
+    subprocess instead (tests/mcp/test_mcp_server.py)."""
+    import sys
+
+    loaded = {"torch", "FlagEmbedding", "sentence_transformers"} & sys.modules.keys()
+    yield
+    evicted = loaded - sys.modules.keys()
+    assert not evicted, (
+        f"{sorted(evicted)} evicted from sys.modules — re-importing a native extension "
+        "in-process is fatal for every later test that loads a model; use a subprocess"
+    )
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_runtest_teardown(item):
+    """`groundly.mcp.server.mcp` is one FastMCP instance shared by the whole session, and
+    its `run` comes from a mixin. `monkeypatch.setattr("...mcp.run", ...)` therefore cannot
+    be undone — the undo writes the original into `mcp.__dict__`, where it outlives the test
+    and shadows the *class* patch the `groundly serve` test relies on. That test then boots
+    a real HTTP server inside CliRunner and blocks forever. Patch the class instead.
+
+    A trylast hook rather than a fixture: fixture teardown runs before `monkeypatch` undoes
+    itself, so a fixture would clean the attribute just before the undo put it back."""
+    import sys
+
+    module = sys.modules.get("groundly.mcp.server")
+    if module is None:
+        return
+    leaked = {"run", "run_async"} & vars(module.mcp).keys()
+    for name in leaked:
+        # repair before reporting: failing the culprit does not remove the leak, and a live
+        # one still makes the serve test boot a real server and hang the run forever.
+        delattr(module.mcp, name)
+    assert not leaked, (
+        f"{item.nodeid} leaked {sorted(leaked)} onto the shared mcp instance — patch the "
+        "FastMCP class, not the instance, or a later test starts a real server and hangs"
+    )
+
+
 @pytest.fixture
 def subject(monkeypatch, tmp_path):
     monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))

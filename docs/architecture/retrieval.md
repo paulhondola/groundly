@@ -190,10 +190,21 @@ be the shipped one.
 **Path B is a real MCP host**, one cold `claude -p` per question:
 
 ```
-claude -p "<task prompt>" --bare --strict-mcp-config \
+claude -p "<task prompt>" --setting-sources "" --disable-slash-commands \
+  --strict-mcp-config \
   --mcp-config '{"mcpServers":{"groundly":{"command":"groundly","args":["mcp"]}}}' \
-  --allowedTools mcp__groundly__search --model <pinned> --output-format json
+  --disallowedTools Read Write Edit NotebookEdit Bash Glob Grep WebFetch WebSearch Task \
+  --allowedTools <the condition's tools> --model <pinned> --output-format json
 ```
+
+**Three conditions, and the allowlist belongs to the condition** (decision 31). `host` and
+`host-directed` get `mcp__groundly__search` alone, because path B is the control for
+enforced `ask` and letting it call `ask` makes the comparison circular. `host-product` gets
+the whole `mcp__groundly__*` surface under the **neutral** prompt — the configuration a
+student actually runs, since installing Groundly does not hide five of its six tools, and
+the only condition whose retrieval rate is a fact about the product. Selected with
+`--conditions host,host-directed,host-product`; each is a whole extra host session per
+question.
 
 **Isolating the host took three attempts and two of them were wrong in ways that looked right.** `--allowedTools` does not block `Read` (measured: a host with only that flag read a canary in its cwd). `--tools ""` does block `Read` — and disables the MCP tools with it, so the host reports no search tool at all and the experiment measures nothing. What works, both verified: `--disallowedTools` over the built-in filesystem/exec/network tools, **and** a fresh empty temp directory per host, since Claude Code scopes file access to the working directory. The stake is experimental before it is security: with `Read` live in the repo, path B could open the gold set's answer key and score brilliantly for spurious reasons, invisibly. The restriction is also verified rather than trusted — an `ask` trace row appearing in the host's window voids that question.
 
@@ -203,18 +214,31 @@ A scripted "answer from these sources" prompt was rejected: it would have been c
 fully reproducible, and it would have let the enforced path win by construction. The
 price is stated rather than hidden — **the host's system prompt is Anthropic's, is not
 publishable, and drifts between CLI versions**, so the run is re-runnable, not frozen. The
-results file records the CLI version, model id and full argv. `--bare` is load-bearing:
-without it the host inherits the operator's hooks, CLAUDE.md and output style, none of it
-publishable and all of it changing the answer. `--allowedTools` pinned to `search` is the
-one hard constraint, and it is what stops path B calling the pipeline it is the control
-for. One cold process per question, because a single session would answer question 12 from
-chunks it read at question 5.
+results file records the CLI version, model id and the full argv **of each condition**
+(one argv recorded from the default allowlist would claim `search`-only for a
+`host-product` run). `--setting-sources ""` is load-bearing: without it the host inherits
+the operator's hooks, CLAUDE.md and output style, none of it publishable and all of it
+changing the answer. `--allowedTools` pinned to `search` is the one hard constraint on the
+two *control* conditions, and it is what stops them calling the pipeline they are the
+control for; `host-product` lifts it on purpose and the `ask`-leak guard is gated on the
+condition's own allowlist rather than on being path B. One cold process per question,
+because a single session would answer question 12 from chunks it read at question 5.
 
-**The task prompt says nothing about citing.** Whether an unprompted host attributes at
-all is one of the three things being counted; asking for citations would measure
-compliance with our instruction instead. The host is not uninformed — the `search` tool's
-description tells it grounding is not enforced there — and being told that by the product,
-at the moment of use, is the condition under study.
+**The task prompt says nothing about retrieving or citing.** Whether an unprompted host
+retrieves at all, and whether it attributes what it says, are two of the three things being
+counted; asking for either would measure compliance with our instruction instead. The host
+is not uninformed — the tool surface tells it what `search` is and when to reach for it —
+and being told that by the product, at the moment of use, is the condition under study.
+
+**Which makes the surface an experimental variable, and decision 31 changed it.** The
+descriptions the 2026-08-16 numbers were taken against named no occasion to call `search`
+and redirected to `ask`; they now lead with the trigger and end with "cite the chunks you
+used". Two consequences, stated rather than buried: **attribution is no longer unprompted**
+in the host conditions, so that half of the result must be re-taken before it is quoted
+again, and the pre-31 retrieval rates are not comparable to anything measured after it.
+`_mcp_provenance()` records the instructions and every tool description verbatim under one
+sha256 in each results file, which is what tells the two eras apart — read with
+`inspect.getdoc`, byte-identical to what the host receives over the wire.
 
 **Both paths must see the same chunks, and this is verified rather than assumed.**
 `_build_vector` reranks a `RERANK_POOL` = 20 pool; `ask` truncates to `context_k` = 8 and
@@ -347,6 +371,10 @@ The results document also records **spend split three ways** — path A, path B 
 Enforced `ask` (`vector` arm) against a `claude-sonnet-5` MCP host in two conditions.
 `supported` = faithfulness >= 0.8 (`judge.SUPPORT_THRESHOLD`).
 
+**Taken under the pre-decision-31 tool descriptions**, which is part of what the host
+conditions measured — see above. `host-product` did not exist yet, so nothing here is a
+measurement of the surface a student runs. The surface's own effect is measured below.
+
 | | apd ask | apd host | apd directed | passc ask | passc host | passc directed |
 |---|---|---|---|---|---|---|
 | ungrounded | 0% | **83%** | 0% | 0% | **72%** | 0% |
@@ -387,3 +415,48 @@ three of four groups; self-agreement across runs was 88-93%; the control's paire
 cross-run; `matched_n` is 2-19 for the neutral condition because the host so rarely
 retrieved; and at n=48/76 a difference under ~10 questions is unresolvable, so "draw" means
 "not detectable".
+
+### The tool surface is a variable, measured (apd 48 questions, 2026-08-16)
+
+Decision 31. Three sweeps of `--conditions host` — the same neutral prompt and the same
+`search`-only allowlist every time, so the only thing that changes is what the surface
+says. `claude-sonnet-5`, CLI 2.1.224 (decision 30 ran 2.1.223).
+
+| descriptions | server instructions | retrieved | factoids | ungrounded | attributes |
+|---|---|---|---|---|---|
+| old | none (decision 30) | 8/48 — 17% | 0/17 | 83% | 6% |
+| new | ranked `ask` above `search` | 4/48 — 8% | 1/17 | 92% | 6% |
+| new | no ranking | **29/48 — 60%** | **8/17** | **41%** | **59%** |
+
+Fisher exact: row 2 → row 3, **p = 8.3e-08**; row 1 → row 3, p = 1.9e-05; factoids
+0/17 → 8/17, p = 0.003. Row 2 on its own is not resolvable against row 1 (p = 0.355) — it
+does not establish harm, only that the rewrite had not worked.
+
+**One clause was worth more than everything else in the change.** The first instructions
+ended "`ask` returns an enforced, cited answer; `search` returns raw chunks for you to
+compose from" — the same defect the rewrite existed to remove, moved from one tool's
+description to the whole server. A `search`-only host was being told, surface-wide, that
+the good option was one it did not have, and answering from memory stayed the cheapest
+path. **The rule this leaves behind: instructions state the norm, tool descriptions say
+which tool.** A preferred tool named server-wide is invisible to whoever allowlists a
+subset later.
+
+**What is not separable**: rows 1 and 3 differ in *both* descriptions and instructions, so
+8 → 29 is the pair. Isolating the descriptions alone needs a fourth cell (old descriptions,
+unranked instructions), unrun.
+
+`host-product` retrieved **48/48**, every class, 17/17 factoids — but with no baseline under
+the old descriptions, and the likeliest mechanism is simply that `ask` is reachable rather
+than anything the descriptions say. Against it, enforced `ask` alone **lost** the paired
+test (McNemar 1–13, p=0.002, 34 pairs): `ask` refused 33% of questions for unresolvable
+citations (`gpt-oss-120b`, decision 30's 28%), while the host called `ask`, took the
+`ToolError`, and recovered through `search`. **An agent wrapping the enforced pipeline is
+more robust than the enforced pipeline alone** — first visible here because `matched_n` is
+37/48 for `host-product` against 0/48 for the `search`-only host.
+
+> **Provenance**
+> - Measured 2026-08-16 · apd, 187 materials / 1,193 chunks / 48 gold questions
+> - Host: `claude-sonnet-5`, Claude Code CLI 2.1.224 · judge: `Qwen/Qwen3-235B-A22B-Instruct-2507` @ temperature 0.0, 2 runs, threshold 0.8
+> - Arm `vector`, `context_k=8`; path A on `openai/gpt-oss-120b`
+> - Source: `evals/apd/results-grounding-20260816T{165523,184933}+0000.json`, commits `08150d6` and `7dc6653`, `provenance.mcp.sha256` `290a3fef9693` and `87c769144632`
+> - Spend: $8.11 + $4.80 = $12.91

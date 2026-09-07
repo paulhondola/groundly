@@ -57,17 +57,21 @@ def subject_free_home(monkeypatch, tmp_path):
 
 
 def test_importing_server_never_pulls_in_heavy_ml_deps():
-    for mod in ("sentence_transformers", "torch", "FlagEmbedding"):
-        sys.modules.pop(mod, None)
-    for mod in list(sys.modules):
-        if mod == "groundly.mcp.server" or mod.startswith("groundly.mcp.server."):
-            del sys.modules[mod]
-
-    import groundly.mcp.server  # noqa: F401
-
-    assert "sentence_transformers" not in sys.modules
-    assert "torch" not in sys.modules
-    assert "FlagEmbedding" not in sys.modules
+    """A subprocess rather than sys.modules surgery, for the reason spelled out below and
+    one of its own: popping `torch` does not unload torch's C++ extension, it only makes
+    the next real import re-run `torch/__init__.py`, which then dies re-registering a
+    process-global TORCH_LIBRARY namespace. The in-process version of this test poisoned
+    every later test that loads bge-m3 for real — invisibly, since whether it ran before
+    them depended on file ordering."""
+    probe = (
+        "import sys, groundly.mcp.server;"
+        "print(','.join(m for m in ('sentence_transformers', 'torch', 'FlagEmbedding')"
+        " if m in sys.modules))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+    assert result.stdout.strip() == "", f"ML deps imported at MCP spawn: {result.stdout.strip()}"
 
 
 def test_importing_server_never_pulls_in_graphrag():
@@ -90,6 +94,41 @@ def test_importing_server_never_pulls_in_graphrag():
         [sys.executable, "-c", probe], capture_output=True, text=True, check=True
     )
     assert result.stdout.strip() == "", f"heavy deps imported at MCP spawn: {result.stdout.strip()}"
+
+
+# --- tool surface as UX -------------------------------------------------------------
+# `.claude/rules/conventions.md`: tool descriptions are UX, written for the host model.
+# Nothing asserted that until decision 30 measured what the old wording cost — a host told
+# nothing about retrieval called `search` on 8 of 48 apd questions and 0 of 17 factoids.
+# These two pin the trigger that fixes it, the same way test_grounding.py pins the eval's
+# condition prompts: an edit may reword them, but not quietly delete them.
+
+
+async def test_handshake_tells_the_host_to_retrieve_before_answering():
+    async with Client(mcp) as client:
+        instructions = client.initialize_result.instructions
+    assert instructions, "the server advertises no instructions — the one server-wide trigger"
+    lowered = instructions.lower()
+    assert "retrieve before you answer" in lowered
+    assert "not a substitute" in lowered, (
+        "the instructions must say model knowledge does not substitute for the course's "
+        "own treatment — that is what the 0-of-17 factoid failure needed to hear"
+    )
+
+
+async def test_search_description_leads_with_when_to_use_not_retrieval_mechanics():
+    async with Client(mcp) as client:
+        search_tool = next(t for t in await client.list_tools() if t.name == "search")
+    description = search_tool.description.lower()
+    assert "use it for any question" in description, "no trigger clause — the old wording's defect"
+    assert "already" in description and "know" in description, (
+        "the description must cover questions the model already knows the answer to; "
+        "those were the ones it never retrieved for"
+    )
+    assert "use `ask` when you need" not in description, (
+        "the old redirect sent a host that is allowlisted to `search` alone toward a tool "
+        "it cannot call, leaving it with model knowledge as the only option"
+    )
 
 
 # --- list_subjects ----------------------------------------------------------------
@@ -652,8 +691,10 @@ def test_serve_cli_wires_http_transport_with_rebinding_protection(monkeypatch):
     from groundly.cli.app import app
 
     calls: dict = {}
-    # patch the class, not the module-level `mcp` instance: the heavy-imports test
-    # reloads groundly.mcp.server, so serve()'s lazy import may see a fresh instance
+    # patch the class, not the module-level `mcp` instance: `run` is inherited from a
+    # fastmcp mixin, so an instance patch cannot be undone — teardown writes it into
+    # `mcp.__dict__`, where it shadows this one and serve() boots a real server that
+    # blocks forever. tests/conftest.py fails whichever test leaks it.
     monkeypatch.setattr(FastMCP, "run", lambda self, **kw: calls.update(kw))
     result = CliRunner().invoke(app, ["serve", "--port", "5150"])
     assert result.exit_code == 0

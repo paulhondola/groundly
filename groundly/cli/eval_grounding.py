@@ -75,24 +75,26 @@ def eval_grounding(
             "cost cents instead of re-buying every host session.",
         ),
     ] = False,
-    directed: Annotated[
-        bool,
+    conditions_spec: Annotated[
+        str,
         typer.Option(
-            "--directed/--no-directed",
-            help="Also run a host condition whose prompt tells it to use `search`. "
-            "Separates 'will not retrieve' from 'retrieves and then drifts'. Doubles path B.",
+            "--conditions",
+            help="Path-B conditions, comma-separated. `host`: neutral prompt, `search` "
+            "only — the control for enforced `ask`. `host-directed`: prompt tells it to "
+            "search, separating 'will not retrieve' from 'retrieves and then drifts'. "
+            "`host-product`: neutral prompt over the full MCP surface — what a student "
+            "actually runs. Each is a whole extra host session per question.",
         ),
-    ] = False,
+    ] = "host",
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the cost confirmation.")] = False,
 ) -> None:
     """Compare enforced `ask` grounding against a real MCP host composing from `search`."""
     from groundly.core.config import load_provider
     from groundly.eval.gold import GoldSetError
     from groundly.eval.grounding import (
-        DIRECTED_CONDITION,
-        NEUTRAL_CONDITION,
         AskConfig,
         HostConfig,
+        resolve_conditions,
         run,
         write_results,
     )
@@ -124,7 +126,10 @@ def eval_grounding(
     # `--host-budget 0` is how the cap is turned off; None and 0.0 mean the same thing to
     # everything downstream, so they are collapsed here rather than in two places.
     budget = budget if budget else None
-    conditions = (NEUTRAL_CONDITION, DIRECTED_CONDITION) if directed else (NEUTRAL_CONDITION,)
+    try:
+        conditions = resolve_conditions(conditions_spec)
+    except ValueError as exc:
+        _fail(str(exc))
     if no_host:
         # Path A alone. The comparison block comes out empty, which is honest: there is
         # nothing to compare against in this run, and the numbers are read against a

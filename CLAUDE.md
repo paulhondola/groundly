@@ -14,6 +14,16 @@ Local-first course knowledge bases for AI agents — index course materials, ser
 
 Binding invariants auto-load from `.claude/rules/` (module boundaries, grounding guarantees, conventions). Docs are the source of truth — a decision change updates the docs in the same change set (use `/decision`). Implement use cases with `/implement-uc UC-XX`; review with the `spec-guardian` and `security-reviewer` agents. Commit finished, reviewed work on a feature branch — never commit to `main`.
 
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (github.com/paulhondola/groundly), via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context — decisions live in the existing docs, not a fresh CONTEXT.md. See `docs/agents/domain.md`.
+
 ## graphify
 
 This project has a graphify knowledge graph at graphify-out/.
