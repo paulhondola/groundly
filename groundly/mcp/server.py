@@ -1,12 +1,10 @@
-"""The MCP tool surface: `list_subjects`, `search`, `ask`, `drill_down`, `overview`,
-`get_page`, plus a citation resource template — thin wrappers over the same functions
-`groundly` CLI verbs call (docs/superpowers/specs/2026-07-18-mcp-skeleton-design.md).
+"""The MCP tool surface: `list_subjects`, `search`, `get_page`, `submit_cards`,
+`list_decks`, `export_deck`, plus a citation resource template — thin wrappers over the
+same functions the `groundly` CLI verbs call.
 No heavy imports at module top: service imports live inside tool/resource bodies so
-host spawn -> handshake is fast and bge-m3/torch load lazily on first `search`/`ask`
+host spawn -> handshake is fast and bge-m3/torch load lazily on first `search`
 (.claude/rules/architecture.md).
 """
-
-import functools
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ResourceError, ToolError
@@ -90,73 +88,11 @@ def _subject_or_error(subject: str, error_cls: type[Exception]):
     return subj
 
 
-def _answer_payload(subject: str, result) -> dict:
-    """The wire shape of a grounded answer: the text plus every citation resolved to a
-    `groundly://` URI the host can open. Shared by `ask`, `drill_down` and `overview` —
-    written out once each, they drifted into three copies of the same six lines."""
-    return {
-        "answer": result.answer,
-        "citations": [
-            {
-                "chunk_id": c.chunk_id,
-                "filename": c.filename,
-                "page": c.page,
-                "heading_path": c.heading_path,
-                "uri": _citation_uri(subject, c.filename, c.page),
-            }
-            for c in result.citations
-        ],
-    }
-
-
-def _maps_service_errors(tool: str):
-    """Turn the service layer's named exceptions into `ToolError`s the host can show.
-
-    Every answer tool had a byte-identical five-clause ladder; the only per-tool part is
-    which tool name the no-provider message opens with, so that is the one parameter.
-
-    **The exception classes are imported inside the wrapper, not at module scope**, and
-    that is load-bearing: `GraphNotBuiltError` pulls pandas and graphrag, and
-    `ModelDownloadError` pulls the embedding stack. Importing either at module top would
-    move that cost onto every host spawn, when the rule is that a handshake stays fast
-    and models load on first use (.claude/rules/architecture.md). Decoration itself runs
-    at import; the body only runs once a tool is actually called, by which point the
-    service being wrapped has pulled these in anyway.
-    """
-
-    def decorate(fn):
-        @functools.wraps(fn)
-        def wrapper(*args, **kwargs):
-            from groundly.agents.citations import NoCitationsError
-            from groundly.llm.chat import ChatUnreachableError
-            from groundly.llm.config import ProviderNotConfiguredError
-            from groundly.llm.embeddings import ModelDownloadError
-            from groundly.retrieval.graph import GraphNotBuiltError
-
-            try:
-                return fn(*args, **kwargs)
-            except ProviderNotConfiguredError as exc:
-                raise ToolError(
-                    f"{tool} needs a configured chat provider; search works without one — {exc}"
-                ) from exc
-            except (
-                GraphNotBuiltError,
-                NoCitationsError,
-                ModelDownloadError,
-                ChatUnreachableError,
-            ) as exc:
-                raise ToolError(str(exc)) from exc
-
-        return wrapper
-
-    return decorate
-
-
 @mcp.tool
 def list_subjects() -> list[dict]:
     """List every initialized subject with its material/page/chunk counts and whether
     its knowledge graph has been built. Call this first to discover valid subject
-    names for search/ask/get_page."""
+    names for search/get_page."""
     from groundly.core.paths import discover_subjects
     from groundly.core.store import SubjectStore
     from groundly.core.subject import Subject
@@ -214,54 +150,6 @@ def search(subject: str, query: str, k: int | None = None) -> list[dict]:
             }
         )
     return results
-
-
-@mcp.tool
-@_maps_service_errors("ask")
-def ask(subject: str, query: str) -> dict:
-    """Enforced grounded answer: retrieves relevant chunks from `subject`'s materials,
-    generates an answer that must cite them, and refuses ("not covered by the course
-    materials") rather than fall back to model knowledge when nothing supports an
-    answer. Needs a configured chat provider — `search` does not."""
-    from groundly.agents.ask import ask as ask_fn
-
-    _subject_or_error(subject, ToolError)
-    return _answer_payload(subject, ask_fn(subject, query))
-
-
-@mcp.tool
-@_maps_service_errors("drill_down")
-def drill_down(subject: str, entity: str) -> dict:
-    """Entity-anchored deep dive: multi-hop graph search anchored on one specific
-    `entity`, producing a cited answer drawn from `subject`'s knowledge graph rather
-    than plain vector retrieval. Use this instead of `ask`/`search` when the question
-    is about how one entity connects to others (multi-hop), not a single fact.
-    Requires the subject's graph to be built — check `graph_built` via `list_subjects`
-    first, and run `groundly index --graph` if it's false. Needs a configured chat
-    provider, same as `ask`."""
-    from groundly.agents.study_modes import drill_down as drill_down_fn
-
-    _subject_or_error(subject, ToolError)
-    return _answer_payload(subject, drill_down_fn(subject, entity))
-
-
-@mcp.tool
-@_maps_service_errors("overview")
-def overview(subject: str, topic: str) -> dict:
-    """Course-wide synthesis: community-summary global search over `subject`'s
-    knowledge graph, producing a cited answer about `topic` plus the graph communities
-    consulted to build it. Use this instead of `ask`/`drill_down` when the question is
-    broad or thematic (e.g. "what does this course cover about X") rather than anchored
-    on one entity. Requires the subject's graph to be built — check `graph_built` via
-    `list_subjects` first, and run `groundly index --graph` if it's false. Needs a
-    configured chat provider, same as `ask`."""
-    from groundly.agents.study_modes import overview as overview_fn
-
-    _subject_or_error(subject, ToolError)
-    result = overview_fn(subject, topic)
-    # UC-12: "an overview answer names its constituent communities" — the one field
-    # that makes this tool's payload wider than the shared answer shape.
-    return _answer_payload(subject, result) | {"communities": result.communities}
 
 
 @mcp.tool
@@ -331,7 +219,7 @@ def export_deck(subject: str, deck: str) -> dict:
 @mcp.tool
 def get_page(subject: str, filename: str, page: int) -> list[dict]:
     """Verbatim chunk text for one page of one material, in chunk order — the precise
-    way to open what a search/ask citation points to. Never returns raw file bytes or
+    way to open what a search citation points to. Never returns raw file bytes or
     a summary; empty list if the page/filename has no indexed chunks."""
     from groundly.core.store import SubjectStore
 

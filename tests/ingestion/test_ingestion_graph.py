@@ -1111,13 +1111,11 @@ def test_zero_row_entities_parquet_refuses(subj, store, home, monkeypatch):
         build_graph(subj, store)
 
 
-def test_refused_build_is_not_served_by_the_query_path(subj, store, home, monkeypatch):
+def test_refused_build_is_not_reported_as_built(subj, store, home, monkeypatch):
     """The gate refuses to *record* the build but leaves partial parquet on disk so
     graphrag's LLM cache survives the retry. Retrieval must therefore gate on the
-    manifest, not the directory — otherwise a graph missing most of the corpus is still
-    answered from, which is the grounding violation the gate exists to prevent."""
-    from groundly.retrieval.graph import GraphLocalRetriever, GraphNotBuiltError
-
+    manifest, not the directory — otherwise a graph missing most of the corpus is
+    reported as built."""
     _configure_extraction(home)
     _add_chunks(store, 20)
 
@@ -1133,8 +1131,7 @@ def test_refused_build_is_not_served_by_the_query_path(subj, store, home, monkey
         build_graph(subj, store)
 
     assert (subj.root_dir / "graph" / "entities.parquet").exists()  # left for the retry
-    with pytest.raises(GraphNotBuiltError):
-        GraphLocalRetriever(subject=subj.name).retrieve("anything")
+    assert not subj.graph_is_built()  # the manifest decides, not the directory
 
 
 # --- community reports: the second swallowed-failure stage ------------------------------

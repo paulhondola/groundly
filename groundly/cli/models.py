@@ -76,31 +76,6 @@ def config_set(
     console.print(f"set {key}")
 
 
-@config_app.command(name="check")
-def config_check() -> None:
-    """Probe whether the configured chat model obeys the citation mandate `ask` enforces."""
-    from groundly.agents.probe import probe_citation_compliance
-    from groundly.llm.chat import ChatUnreachableError
-    from groundly.llm.config import ProviderNotConfiguredError
-
-    try:
-        result = probe_citation_compliance()
-    except (ProviderNotConfiguredError, ChatUnreachableError) as exc:
-        _fail(str(exc))
-
-    cost = "unpriced" if result.cost_usd is None else f"${result.cost_usd:.4f}"
-    console.print(f"model: {result.model}  ({result.tokens} tokens, {cost})")
-    if not result.compliant:
-        # Names what the model did, not that a probe failed: the student's next move is
-        # to change models, and "probe failed" sends them to debug Groundly instead.
-        _fail(
-            f"{result.model} answered without citing the chunk it was given — it does not "
-            "satisfy the citation mandate, so `ask` will refuse rather than answer "
-            "ungrounded. See docs/tech-stack/tech-stack.md for models measured to comply."
-        )
-    console.print("cites its sources — `ask` will work on this model.")
-
-
 @models_app.command()
 def install(
     force: Annotated[

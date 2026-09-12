@@ -265,7 +265,7 @@ def test_remove_whole_subject_aborts_without_confirmation():
         ["init"],  # subject required
         ["index", "PDSS"],  # paths required
         ["config", "set", "chat.model"],  # value required
-        ["ask", "PDSS"],  # query required
+        ["search", "PDSS"],  # query required
     ],
 )
 def test_bad_usage_is_usage_error(args):

@@ -4,7 +4,7 @@ import pytest
 
 from groundly.core.manifest import EMBEDDING_DIM
 from groundly.core.paths import subject_dir
-from groundly.core.store import SubjectStore, connect
+from groundly.core.store import SubjectStore
 from groundly.retrieval.vector import CONTEXT_K, VectorRetriever, rrf, search
 
 
@@ -136,28 +136,19 @@ def test_vector_retriever_respects_context_k(retrievable_subject):
 # --- search() shared function ---------------------------------------------------------
 
 
-def test_search_returns_nodes_and_records_trace(retrievable_subject):
-    nodes = search(retrievable_subject, "deadlock", embedder=_near_embedder(), rerank=False)
-    assert len(nodes) <= CONTEXT_K
-    assert nodes
-    conn = connect(subject_dir(retrievable_subject) / "store.db")
-    conn.close()
+def test_search_returns_ranked_nodes_and_writes_no_trace(retrievable_subject):
+    """search is read-only: every query the student asks used to land in progress.db,
+    and nothing reads those rows any more."""
     from groundly.core.progress import connect_progress
 
-    pconn = connect_progress(subject_dir(retrievable_subject) / "progress.db")
-    try:
-        row = pconn.execute("SELECT * FROM traces").fetchone()
-        assert row["kind"] == "search"
-        assert row["outcome"] == "results"
-        assert row["arm"] == "vector"
-        assert row["query"] == "deadlock"
-        import json
+    nodes = search(retrievable_subject, "deadlock", embedder=_near_embedder(), rerank=False)
+    assert nodes and len(nodes) <= CONTEXT_K
 
-        assert json.loads(row["path"]) == ["dense", "sparse", "bm25", "rrf"]
-        assert json.loads(row["chunk_ids"])
-        assert row["latency_ms"] is not None
+    conn = connect_progress(subject_dir(retrievable_subject) / "progress.db")
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM traces").fetchone()[0] == 0
     finally:
-        pconn.close()
+        conn.close()
 
 
 def test_rrf_breaks_ties_by_cross_ranking_agreement():

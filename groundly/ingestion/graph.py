@@ -200,7 +200,7 @@ class _WorkflowErrorCounter(logging.Handler):
     `on_error` callback) and carries on, so they never appear in
     `PipelineRunResult.error` and a build that dropped most of its content still
     reports success. Entity extraction drops chunks; community reports drop the
-    summaries that global search and `overview` answer from.
+    summaries that global search answers from.
 
     Attached to the exact extractor logger rather than to `graphrag`: `init_loggers`
     clears handlers on `graphrag`/`graphrag_llm` when build_index starts, but never on
@@ -366,7 +366,7 @@ def _probe_extraction(
                 response_format=CommunityReportResponse,
             ),
             f"the {plan.report_call_class} model rejected graphrag's structured-output request: "
-            "{exc}. Community reports — the summaries global search and `overview` answer "
+            "{exc}. Community reports — the summaries global search answers "
             "from — are sent as `response_format: json_schema`, and a model that refuses it "
             "cannot finish a graph build. Note this is a *stricter* capability than JSON "
             'mode: providers that accept `{{"type": "json_object"}}` may still refuse '
@@ -627,7 +627,7 @@ def _verify_build_output(
             "Re-run with --debug to see graphrag's own errors"
         )
 
-    # Community reports are what global search and `overview` answer from, and graphrag
+    # Community reports are what global search answers from, and graphrag
     # swallows their failures the same way it swallows extraction's. A graph with
     # communities but no reports for them is a graph the global arm cannot use.
     graph_dir = subj.root_dir / "graph"
@@ -638,7 +638,7 @@ def _verify_build_output(
     if community_count and not report_count:
         raise GraphBuildError(
             f"none of the {community_count} community summaries could be generated, so "
-            f"global search and `overview` would have nothing to answer from. Last error: "
+            f"global search would have nothing to answer from. Last error: "
             f"{reports_counter.last_message or 'unknown'}."
             + _report_failure_hint(reports_counter.last_message)
             + f" Community reports are the one stage that requires JSON mode — if your "

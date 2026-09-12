@@ -1,7 +1,5 @@
-"""groundly/mcp/server.py: the FastMCP tool surface (list_subjects/search/ask/
-get_page + citation resource) — thin wrappers over the same functions the CLI calls
-(docs/superpowers/specs/2026-07-18-mcp-skeleton-design.md). Uses FastMCP's in-memory
-Client: no subprocess servers, no network."""
+"""groundly/mcp/server.py: the FastMCP tool surface (list_subjects/search/get_page/
+submit_cards/list_decks/export_deck + citation resource)."""
 
 import subprocess
 import sys
@@ -30,12 +28,6 @@ class _PassthroughReranker:
 
     def compute_score(self, pairs):
         return list(range(len(pairs), 0, -1))
-
-
-def _configure_chat(subject_name):
-    (subject_dir(subject_name).parent / "config.toml").write_text(
-        '[providers.chat]\nbase_url = "http://x"\nmodel = "m"\n'
-    )
 
 
 @pytest.fixture(autouse=True)
@@ -76,10 +68,8 @@ def test_importing_server_never_pulls_in_heavy_ml_deps():
 
 def test_importing_server_never_pulls_in_graphrag():
     """The graph stack is the other half of spawn cost, and the easy one to reintroduce
-    by accident: `_maps_service_errors` needs `GraphNotBuiltError`, which lives in
-    retrieval/graph.py behind graphrag and pandas. Hoisting that import to module scope
-    to tidy the decorator would look harmless and would put the whole graph stack on
-    every host handshake.
+    by accident: a heavy import hoisted to module scope to "tidy" some helper would look
+    harmless and would put the whole graph stack on every host handshake.
 
     A subprocess rather than sys.modules surgery: popping `graphrag` mid-session while
     its submodules stay loaded leaves a half-initialized package, and
@@ -131,6 +121,23 @@ async def test_search_description_leads_with_when_to_use_not_retrieval_mechanics
     )
 
 
+async def test_the_tool_surface_is_exactly_these_seven_entries():
+    """The surface is UX (.claude/rules/conventions.md). A tool that creeps back in —
+    or one quietly dropped — should fail here rather than in a host months later."""
+    async with Client(mcp) as client:
+        tools = {t.name for t in await client.list_tools()}
+        templates = {t.uriTemplate for t in await client.list_resource_templates()}
+    assert tools == {
+        "list_subjects",
+        "search",
+        "get_page",
+        "submit_cards",
+        "list_decks",
+        "export_deck",
+    }
+    assert templates == {"groundly://{subject}/{filename}"}
+
+
 # --- list_subjects ----------------------------------------------------------------
 
 
@@ -180,94 +187,6 @@ async def test_search_works_with_no_provider_configured(retrievable_subject):
     assert result.data
 
 
-# --- ask --------------------------------------------------------------------------
-
-
-async def test_ask_happy_path_returns_answer_and_citations(
-    retrievable_subject, monkeypatch, stub_chat
-):
-    _configure_chat(retrievable_subject)
-    chat = stub_chat("Deadlocks need mutual exclusion [chunk 1].")
-    monkeypatch.setattr("groundly.agents.ask.complete", chat)
-
-    async with Client(mcp) as client:
-        result = await client.call_tool(
-            "ask", {"subject": "TEST", "query": "what causes a deadlock?"}
-        )
-    assert "mutual exclusion" in result.data["answer"]
-    assert result.data["citations"][0]["chunk_id"] == 1
-    assert result.data["citations"][0]["filename"] == "lec.pdf"
-    assert result.data["citations"][0]["uri"] == "groundly://TEST/lec.pdf#page=1"
-
-
-async def test_ask_unknown_subject_errors(subject_free_home):
-    async with Client(mcp) as client:
-        with pytest.raises(ToolError, match="unknown subject 'NOPE'"):
-            await client.call_tool("ask", {"subject": "NOPE", "query": "q"})
-
-
-async def test_ask_no_provider_fails_with_specific_message_while_search_works(
-    retrievable_subject,
-):
-    # zero-key: UC-02 criterion — ask needs a provider, search does not, same subject
-    async with Client(mcp) as client:
-        with pytest.raises(ToolError, match="ask needs a configured chat provider"):
-            await client.call_tool("ask", {"subject": "TEST", "query": "what is a deadlock?"})
-        search_result = await client.call_tool("search", {"subject": "TEST", "query": "deadlock"})
-    assert search_result.data
-
-
-async def test_ask_hallucinated_citation_raises_tool_error(
-    retrievable_subject, monkeypatch, stub_chat
-):
-    _configure_chat(retrievable_subject)
-    chat = stub_chat("Deadlocks need mutual exclusion [chunk 999].")
-    monkeypatch.setattr("groundly.agents.ask.complete", chat)
-
-    async with Client(mcp) as client:
-        with pytest.raises(ToolError, match="no chunk ids that resolve"):
-            await client.call_tool("ask", {"subject": "TEST", "query": "what causes a deadlock?"})
-
-
-async def test_ask_refusal_returns_no_citations(retrievable_subject, monkeypatch, stub_chat):
-    _configure_chat(retrievable_subject)
-    chat = stub_chat("not covered by the course materials")
-    monkeypatch.setattr("groundly.agents.ask.complete", chat)
-
-    async with Client(mcp) as client:
-        result = await client.call_tool(
-            "ask", {"subject": "TEST", "query": "what is the capital of France?"}
-        )
-    assert result.data["answer"] == "not covered by the course materials"
-    assert result.data["citations"] == []
-
-
-async def test_ask_model_download_error_raises_tool_error(retrievable_subject, monkeypatch):
-    _configure_chat(retrievable_subject)
-    from groundly.llm.embeddings import ModelDownloadError
-
-    def fake_ask(*a, **k):
-        raise ModelDownloadError("failed to load bge-m3: boom")
-
-    monkeypatch.setattr("groundly.agents.ask.ask", fake_ask)
-    async with Client(mcp) as client:
-        with pytest.raises(ToolError, match="failed to load bge-m3"):
-            await client.call_tool("ask", {"subject": "TEST", "query": "q"})
-
-
-async def test_ask_chat_unreachable_error_raises_tool_error(retrievable_subject, monkeypatch):
-    _configure_chat(retrievable_subject)
-    from groundly.llm.chat import ChatUnreachableError
-
-    def fake_ask(*a, **k):
-        raise ChatUnreachableError("[providers.chat] at http://x is unreachable: boom")
-
-    monkeypatch.setattr("groundly.agents.ask.ask", fake_ask)
-    async with Client(mcp) as client:
-        with pytest.raises(ToolError, match="unreachable"):
-            await client.call_tool("ask", {"subject": "TEST", "query": "q"})
-
-
 async def test_search_model_download_error_raises_tool_error(retrievable_subject, monkeypatch):
     from groundly.llm.embeddings import ModelDownloadError
 
@@ -278,139 +197,6 @@ async def test_search_model_download_error_raises_tool_error(retrievable_subject
     async with Client(mcp) as client:
         with pytest.raises(ToolError, match="failed to load bge-m3"):
             await client.call_tool("search", {"subject": "TEST", "query": "q"})
-
-
-async def test_mcp_ask_matches_cli_ask_for_the_same_query(
-    retrievable_subject, monkeypatch, stub_chat
-):
-    # UC-02 equivalence: both surfaces call the exact same groundly.agents.ask.ask()
-    _configure_chat(retrievable_subject)
-    chat = stub_chat("Deadlocks need mutual exclusion [chunk 1].")
-    monkeypatch.setattr("groundly.agents.ask.complete", chat)
-
-    from groundly.agents.ask import ask as direct_ask
-
-    direct_result = direct_ask("TEST", "what causes a deadlock?")
-
-    async with Client(mcp) as client:
-        mcp_result = await client.call_tool(
-            "ask", {"subject": "TEST", "query": "what causes a deadlock?"}
-        )
-    assert mcp_result.data["answer"] == direct_result.answer
-    assert [c["chunk_id"] for c in mcp_result.data["citations"]] == [
-        c.chunk_id for c in direct_result.citations
-    ]
-
-
-# --- drill_down / overview -----------------------------------------------------------
-
-
-class _FakeGraphLocalRetriever:
-    def __init__(self, subject):
-        self.subject = subject
-        self.path: list[str] = []
-
-    def retrieve(self, query):
-        from llama_index.core.schema import NodeWithScore, TextNode
-
-        self.path = ["graphrag-local", "entity-search"]
-        node = TextNode(
-            text="graph text",
-            id_="1",
-            metadata={"chunk_id": 1, "filename": "lec.pdf", "page": 1, "heading_path": None},
-        )
-        return [NodeWithScore(node=node, score=1.0)]
-
-
-class _FakeGraphGlobalRetriever:
-    def __init__(self, subject):
-        self.subject = subject
-        self.path: list[str] = []
-        self.communities: list[dict] = []
-
-    def retrieve(self, query):
-        from llama_index.core.schema import NodeWithScore, TextNode
-
-        self.path = ["graphrag-global", "community-search"]
-        self.communities = [{"id": "0", "title": "Deadlocks"}]
-        node = TextNode(
-            text="graph text",
-            id_="1",
-            metadata={"chunk_id": 1, "filename": "lec.pdf", "page": 1, "heading_path": None},
-        )
-        return [NodeWithScore(node=node, score=1.0)]
-
-
-async def test_drill_down_happy_path_returns_answer_and_citations(
-    retrievable_subject, monkeypatch, stub_chat
-):
-    _configure_chat(retrievable_subject)
-    chat = stub_chat("Deadlocks need mutual exclusion [chunk 1].")
-    monkeypatch.setattr("groundly.agents.study_modes.complete", chat)
-    monkeypatch.setattr("groundly.agents.study_modes.GraphLocalRetriever", _FakeGraphLocalRetriever)
-
-    async with Client(mcp) as client:
-        result = await client.call_tool("drill_down", {"subject": "TEST", "entity": "deadlock"})
-    assert "mutual exclusion" in result.data["answer"]
-    assert result.data["citations"][0]["chunk_id"] == 1
-    assert result.data["citations"][0]["filename"] == "lec.pdf"
-    assert result.data["citations"][0]["uri"] == "groundly://TEST/lec.pdf#page=1"
-
-
-async def test_drill_down_unknown_subject_errors(subject_free_home):
-    async with Client(mcp) as client:
-        with pytest.raises(ToolError, match="unknown subject 'NOPE'"):
-            await client.call_tool("drill_down", {"subject": "NOPE", "entity": "e"})
-
-
-async def test_drill_down_graph_not_built_raises_tool_error(retrievable_subject):
-    _configure_chat(retrievable_subject)
-    async with Client(mcp) as client:
-        with pytest.raises(ToolError, match="graph not built"):
-            await client.call_tool("drill_down", {"subject": "TEST", "entity": "deadlock"})
-
-
-async def test_drill_down_no_provider_fails_with_specific_message(retrievable_subject):
-    async with Client(mcp) as client:
-        with pytest.raises(ToolError, match="drill_down needs a configured chat provider"):
-            await client.call_tool("drill_down", {"subject": "TEST", "entity": "deadlock"})
-
-
-async def test_overview_happy_path_returns_answer_citations_and_communities(
-    retrievable_subject, monkeypatch, stub_chat
-):
-    _configure_chat(retrievable_subject)
-    chat = stub_chat("The course broadly covers deadlocks [chunk 1].")
-    monkeypatch.setattr("groundly.agents.study_modes.complete", chat)
-    monkeypatch.setattr(
-        "groundly.agents.study_modes.GraphGlobalRetriever", _FakeGraphGlobalRetriever
-    )
-
-    async with Client(mcp) as client:
-        result = await client.call_tool("overview", {"subject": "TEST", "topic": "deadlocks"})
-    assert "deadlocks" in result.data["answer"]
-    assert result.data["citations"][0]["chunk_id"] == 1
-    assert result.data["citations"][0]["uri"] == "groundly://TEST/lec.pdf#page=1"
-    assert result.data["communities"] == [{"id": "0", "title": "Deadlocks"}]
-
-
-async def test_overview_unknown_subject_errors(subject_free_home):
-    async with Client(mcp) as client:
-        with pytest.raises(ToolError, match="unknown subject 'NOPE'"):
-            await client.call_tool("overview", {"subject": "NOPE", "topic": "t"})
-
-
-async def test_overview_graph_not_built_raises_tool_error(retrievable_subject):
-    _configure_chat(retrievable_subject)
-    async with Client(mcp) as client:
-        with pytest.raises(ToolError, match="graph not built"):
-            await client.call_tool("overview", {"subject": "TEST", "topic": "deadlocks"})
-
-
-async def test_overview_no_provider_fails_with_specific_message(retrievable_subject):
-    async with Client(mcp) as client:
-        with pytest.raises(ToolError, match="overview needs a configured chat provider"):
-            await client.call_tool("overview", {"subject": "TEST", "topic": "deadlocks"})
 
 
 # --- submit_cards (thin door) --------------------------------------------------------

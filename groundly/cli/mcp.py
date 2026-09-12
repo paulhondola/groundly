@@ -11,7 +11,7 @@ from groundly.cli.app import app
 
 @app.command()
 def mcp() -> None:
-    """Serve the groundly MCP tools (list_subjects/search/ask/get_page) over stdio."""
+    """Serve the groundly MCP tools (list_subjects/search/get_page) over stdio."""
     from groundly.core.logs import setup_logging
     from groundly.mcp.server import mcp as mcp_server
 

@@ -1,13 +1,11 @@
-"""The thin door (P6 slice 1): `submit_cards` is the single gate both doors call —
-accepted cards land in store.db with their generation source, rejected cards store
-nothing and come back with a machine-readable rejection, and every verdict lands in
-progress.db's verifications table (the rejection-rate-by-source measurement)."""
+"""The thin door: `submit_cards` is the single gate into a deck — accepted cards land in
+store.db with their generation source, rejected cards store nothing and come back with a
+machine-readable rejection."""
 
 from groundly.agents.decks import submit_cards
 from groundly.agents.verifier import CardCandidate
 from groundly.core.manifest import EMBEDDING_DIM
 from groundly.core.paths import subject_dir
-from groundly.core.progress import connect_progress
 from groundly.core.store import SubjectStore
 
 
@@ -58,23 +56,3 @@ def test_accepted_stored_with_source_rejected_stores_nothing(retrievable_subject
 
     cards = store.deck_cards("OS Deck")
     assert len(cards) == 1 and cards[0]["filename"] == "lec.pdf"
-
-
-def test_every_verdict_recorded_in_verifications(retrievable_subject):
-    submit_cards(
-        retrievable_subject,
-        "OS Deck",
-        _cards(),
-        generation_source="host",
-        embedder=AlignedEmbedder(),
-    )
-    conn = connect_progress(subject_dir(retrievable_subject) / "progress.db")
-    try:
-        rows = conn.execute(
-            "SELECT generation_source, reason FROM verifications ORDER BY id"
-        ).fetchall()
-    finally:
-        conn.close()
-    assert len(rows) == 2
-    assert rows[0]["generation_source"] == "host" and rows[0]["reason"] is None
-    assert rows[1]["reason"] == "not_answerable_from_chunks"
