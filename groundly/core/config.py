@@ -26,11 +26,10 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_valid
 
 from groundly.core.paths import groundly_home
 
-CALL_CLASSES = ("chat", "generation", "extraction", "router", "judge")
+CALL_CLASSES = ("chat", "extraction", "router", "judge")
 
 _PROVIDER_COMMENTS = {
     "chat": "ask pipeline generation",
-    "generation": "exam/deck generation (thick path)",
     "extraction": "graphrag entity extraction",
     "router": "cheap query classifier",
     # Its own class rather than a reuse of `chat`, for two reasons the grounding-fidelity

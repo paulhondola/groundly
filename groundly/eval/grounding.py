@@ -132,13 +132,13 @@ SEARCH_ONLY = ("mcp__groundly__search",)
 
 # Every tool a host can use to *answer a question*, which is what `host-product` measures.
 #
-# **Named for what it is rather than "the full surface", because it is 6 of 11.** The five
-# left out — `submit_cards`, `generate_deck`, `export_deck`, `list_decks`, `get_job` — are
-# excluded on a rule, not a hunch: a measurement must not mutate the subject it measures or
-# start background spend against the student's key. `submit_cards` and `export_deck` write
-# to `store.db`, and `generate_deck` launches a job on `[providers.generation]`. A student's
-# own Claude Code does see all eleven, so this condition is the answering surface rather
-# than a perfect replica, and that gap is a stated limitation of the number it produces.
+# **Named for what it is rather than "the full surface", because it is 6 of 9.** The three
+# left out — `submit_cards`, `export_deck`, `list_decks` — are excluded on a rule, not a
+# hunch: a measurement must not mutate the subject it measures or start background spend
+# against the student's key. `submit_cards` and `export_deck` write to `store.db`. A
+# student's own Claude Code does see all nine, so this condition is the answering surface
+# rather than a perfect replica, and that gap is a stated limitation of the number it
+# produces.
 ANSWERING_SURFACE = (
     "mcp__groundly__list_subjects",
     "mcp__groundly__search",

@@ -1,6 +1,5 @@
-"""The verifier gate (P6 slice 1 design doc): the single check both the thin
-(`submit_cards`) and thick (`generate_deck`) doors run before anything lands in
-store.db. Nothing unverified enters the question bank
+"""The verifier gate (P6 slice 1 design doc): the single check `submit_cards`
+runs before anything lands in store.db. Nothing unverified enters the question bank
 (.claude/rules/grounding-and-privacy.md).
 
 This slice implements the first two of the four canonical rejection reasons —
