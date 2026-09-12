@@ -94,7 +94,7 @@ Each commit leaves the non-slow suite green and ruff clean.
   `decks.py`; MCP `generate_deck`/`get_job`; card prompts; the `generation` call class.
   Tests: delete `test_jobs.py`; trim `test_decks.py`, `test_mcp_server.py`,
   `test_agents_prompts.py`.
-- **C2 — answer paths and research surface out.** Delete `eval/`, `cli/eval.py`,
+- **C2a — answer paths and research surface out.** Delete `eval/`, `cli/eval.py`,
   `cli/eval_grounding.py`, `agents/{ask,citations,prompts,tracing,probe,router,study_modes}.py`,
   `retrieval/{arms,graph,adaptive}.py`, `HybridLocalRetriever`, `groundly ask`,
   `config check`, MCP `ask`/`drill_down`/`overview`, `evals/*/gold.jsonl`. Stop `search`
@@ -106,6 +106,11 @@ Each commit leaves the non-slow suite green and ruff clean.
   `test_retrieval_stubs.py`; trim `test_cli_ask.py` (keep `search`), `test_mcp_server.py`,
   `test_config.py`, `test_progress.py`, `test_cli_models.py`, `test_retrieval_vector.py`;
   rewrite `test_layering.py` to keep only "nothing imports the client layer".
+- **C2b — one provider.** `CALL_CLASSES` → `("extraction",)` and `graph.report_call_class`
+  removed, which also strips report routing from `ingestion/graph.py` (plan fields, probe
+  target, second completion model, manifest write), `llm/graphrag_adapter.py`,
+  `llm/graph_cost.py` and `cli/cost_display.py`; `complete()`'s eval-only `model=`
+  override goes with it. Old `config.toml` files keep loading, retired keys ignored.
 - **C3 — LlamaIndex → `Hit`.** `nodes.py` → `hits.py`; plain `VectorRetriever`; callers in
   `mcp/server.py`, `cli/search.py`, `agents/verifier.py`, `agents/decks.py` read `Hit`
   fields.
