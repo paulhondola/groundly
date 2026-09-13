@@ -25,7 +25,7 @@ stdio servers are spawned and killed by the host — there is no daemon to manag
 
 - macOS / Linux / Windows; ~6GB disk (deps + models); 8GB RAM comfortable (indexing peaks with Docling + embedding in memory; sequential per-file processing bounds it).
 - CPU-only works: indexing is one-time per subject (minutes); queries are milliseconds (retrieval) + rerank (~1s CPU). Apple Silicon/GPU accelerates both.
-- No API key needed for indexing and search. `ask`, thick generation, and graph builds use the student's configured provider ([`cost-model.md`](cost-model.md)).
+- No API key needed for indexing, search, verification, Anki export or sharing. Only `groundly index --graph` uses the student's configured provider ([`cost-model.md`](cost-model.md)).
 
 ## Release process
 

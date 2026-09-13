@@ -14,7 +14,7 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: the **student**
 1. `groundly index <SUBJECT> <paths...>` — files are hashed (sha-256); already-indexed hashes are skipped (idempotent re-run = the "new lecture this week" workflow; no watch daemon). `--ocr-lang <code>` (e.g. `ro`) sets the subject's OCR language on first use — recorded in the manifest; changing it later requires re-indexing and is refused with a specific message (decision 15).
 2. Per file, in one transaction: Docling extraction **in a subprocess** (OCR via bundled RapidOCR for scanned/bitmap regions) → HybridChunker (section-aligned, heading path prepended) → bge-m3 dense + learned sparse (lazy-loaded, local) → sqlite-vec / sparse table / FTS5 rows → `indexed`.
 3. Progress per file (`queued → extracting → embedding → indexed`), rich CLI output.
-4. Corpus hash changed → offer the graph build with a **cost estimate first** (skippable; vector-only subjects are first-class — see UC-12).
+4. Corpus hash changed → offer the graph build with a **cost estimate first** (skippable; subjects without a graph are first-class).
 
 **Alternate / error flows**
 
@@ -32,28 +32,24 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: the **student**
 
 ---
 
-## UC-02 — Grounded Q&A
+## UC-02 — Grounded search
 
-**Actor:** host agent (MCP `ask`/`search`) or student (`groundly ask`).
-**Preconditions:** subject has ≥1 indexed material; `ask` additionally needs a configured chat provider.
+**Actor:** host agent (MCP `search`) or student (`groundly search`).
+**Preconditions:** subject has ≥1 indexed material. No provider needed, ever.
 
-**Main flow (`ask` — the enforced path)**
+**Main flow**
 
-1. The arm is taken from the caller — `vector` unless `--arm` says otherwise (decision 29). No router classifies here (decision 28); a graph arm on a subject with no graph **raises**, before anything is started or traced, rather than being skipped or degraded.
-2. The selected arm fires (three-channel vector baseline, or `hybrid-local`'s graph-fused variant); RRF fusion; cross-encoder rerank (default ON).
-3. Prompt assembled in trust layers; retrieved content is delimited data.
-4. Generation → **citation resolution**: every claim carries chunk ids resolving to document + page + heading path. Zero resolvable citations = error.
-5. Response: cited answer, or **"not covered by the course materials"** — never model knowledge.
-6. Trace row recorded (arm, path, chunk ids, tokens, cost, latency) in `progress.db`.
-
-**Main flow (`search` — the raw path)**: query → same retrieval stack → top-k chunks with text + citations returned to the host, which composes its own answer (best-effort grounding, measured — not enforced).
+1. `search(subject, query, k=None)` → three-channel retrieval (bge-m3 dense + learned sparse + FTS5/BM25), RRF fusion, cross-encoder rerank (default ON), truncated to `retrieval.context_k`.
+2. Each hit returns verbatim text plus `chunk_id`, `filename`, `page`, `heading_path` and a `groundly://` URI.
+3. The host composes the answer and cites the chunks it used. Grounding here is **best-effort by construction** — the server's `instructions` and the tool description carry the norm (decision 31); the enforced-pipeline alternative was measured and removed (decision 33).
+4. `get_page(subject, filename, page)` opens exactly what a citation points to; the same document is readable as an MCP resource.
 
 **Acceptance criteria**
 
-- Every `ask` answer contains ≥1 citation resolving to the correct page; the no-coverage case returns the refusal, not a hallucination.
-- A Romanian question over English-only slides retrieves relevant chunks (dense channel; cross-lingual slice in the eval).
-- `groundly ask` and the MCP `ask` tool produce identical results for the same query (same function). The CLI additionally accepts `--arm`, which MCP deliberately withholds (decision 29) — the two agree on every query the MCP tool can express.
-- With no API key configured, `ask` fails with a clear message while `search` works fully.
+- Every hit resolves to the correct page of the correct material.
+- A Romanian question over English-only slides retrieves relevant chunks (dense channel).
+- `groundly search` and the MCP `search` tool return the same hits for the same query.
+- With no `config.toml` at all, both work.
 
 ---
 

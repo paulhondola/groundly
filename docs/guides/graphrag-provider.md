@@ -1,6 +1,6 @@
 # Configuring the GraphRAG provider
 
-`groundly index --graph` builds the graph retrieval arm: entity/relation
+`groundly index --graph` builds the subject's knowledge graph: entity/relation
 extraction, Leiden community detection, and hierarchical summarization over
 your indexed materials. Extraction is a real LLM call per chunk — this is the
 one call class that needs a specific kind of provider, not just any
@@ -77,7 +77,7 @@ local or cloud.
 
 If you don't want to deal with any of this — model choice, reasoning
 verification, context sizing — go straight to a cloud provider, or skip
-`--graph` entirely: the vector arm works with zero API key, and
+`--graph` entirely: search works with zero API key, and
 `groundly index` (without `--graph`) is completely unaffected either way.
 
 ## Configure it
@@ -110,23 +110,14 @@ class, including `extraction`.
 groundly config set extraction.reasoning_effort none
 ```
 
-`reasoning_effort` is settable under any call class the same way
-(`chat.reasoning_effort`, etc.) — **it's a passthrough value, not
-validated**; Groundly forwards whatever string you set. What it should be
-depends on the provider: `"none"` for Ollama; OpenAI's o-series reasoning
-models take `low`, `medium`, or `high` instead.
+`reasoning_effort` is a passthrough value, not validated — Groundly forwards
+whatever string you set. What it should be depends on the provider: `"none"`
+for Ollama; OpenAI's o-series reasoning models take `low`, `medium`, or
+`high` instead.
 
-**Only `extraction` is measured, and the recommendation stops there.** The
-9.2× above is an extraction result, and extraction is the one call class
-whose job — emit a delimited tuple list — genuinely has nothing to reason
-about. `chat` is a different task: it synthesises an answer *and* has to keep
-citation discipline while doing it. Setting `chat.reasoning_effort=none` on
-`gemma4:12b`, a broad "what is this course about" question came back with no
-resolvable citations at all (a refusal, since zero citations is an error and
-never a degraded answer), while narrow factoid questions answered fine with
-citations on repeated runs. That is one model on a handful of questions, not
-a characterised failure — but it is enough that you should not set it on
-`chat` or `generation` without checking your own grounded answers first.
+Extraction is the one call class Groundly has, and its job — emit a
+delimited tuple list — genuinely has nothing to reason about, which is what
+the 9.2× above measures.
 
 **Verify it with one call, per model — the setting doesn't mean the same
 thing on every model.** On `gemma4:12b`, `"none"` genuinely suppresses
@@ -340,8 +331,8 @@ doubled extraction bill for no measured gain: 12288 fits a community report
 with room to spare and keeps extraction at one call.
 
 Raising the model's context past 12288 is still worth it if your hardware
-has room — more context means richer community reports, which is most of
-what the global arm answers from — just know that 16384 is where that
+has room — more context means richer community reports, which are what the
+topic map is built from — just know that 16384 is where that
 richness starts costing a second extraction call per chunk, not a free
 upgrade.
 
@@ -403,17 +394,13 @@ right one if you also use that server for anything else.
 
 ## Community reports need JSON-schema structured output — by default, that's the extraction model
 
-Community reports — what global search and `overview` answer from — are the one
+Community reports — what the topic map is built from — are the one
 stage graphrag requests structured output for. It passes a Pydantic model, which
 litellm turns into `response_format: {"type": "json_schema", …, "strict": true}`.
 
-**If your extraction model can't clear this bar, you don't have to replace it** —
-`graph.report_call_class` (default `"extraction"`; see "Routing community reports
-to a different provider" below) sends just the 23–436 community-report calls to a
-different configured call class, while extraction itself sends no `response_format`
-at all — it's plain delimited text. Everything below describes what happens when
-the model actually serving reports doesn't support the schema, whichever call
-class that is.
+**If your extraction model can't clear this bar, replace it** — reports and
+extraction run on the same provider, and the preflight probe refuses the build
+up front rather than failing hours in.
 
 **This is stricter than "JSON mode".** The older `{"type": "json_object"}` is a
 different capability, and endpoints disagree about which they accept — in both
@@ -478,8 +465,7 @@ gives you nothing:
   29k tokens to spare, and the complete report sitting in `reasoning_content`
   instead. The schema grammar constrains the content channel only, so a model
   whose template never exits its thinking channel never fills it. **Do not use
-  `qwen/qwen3.5-9b` for `extraction`** — it is fine for `chat`/`generation`,
-  which never request structured output.
+  `qwen/qwen3.5-9b` for `extraction`.**
 - **The report is valid and empty.** `google/gemma-4-12b` (MLX) returned
   `"findings": []` in 2 of 3 samples — schema-valid, parses fine, and `findings`
   is where the entire body of a community report lives. Nothing errors; the
@@ -515,49 +501,6 @@ then produces an empty report for every community, which surfaces as the same
 If you use a local model for `extraction`, build one small subject first and look
 at the community reports before trusting a large run.
 
-### Routing community reports to a different provider
-
-Community reports are the one stage that requires structured output, and —
-per the two local failure modes above — the stage where a local model most
-often fails silently even after "accepting" the schema.
-`graph.report_call_class` names which configured call class actually serves
-community reports, independent of `extraction`:
-
-```bash
-groundly config set graph.report_call_class chat
-```
-
-Default is `"extraction"` — reports go to the same provider as everything
-else in this guide, which is fine if that provider passed the JSON-schema
-checks above. Setting it to `"chat"` (or any other configured call class)
-routes just the 23–436 community-report calls to that provider's config,
-while the far larger extraction pass — up to 1,194 calls on the reference
-corpus — keeps running wherever you've pointed `extraction`, local included.
-This is the practical way to keep a local build cheap on the stage with all
-the call volume, and pay for schema support only on the stage that actually
-needs it.
-
-**This routes the build only.** Query-time global search — the `overview`
-tool, and any `ask` the router sends down the global arm — makes its own
-synthesis call through the `extraction` provider, not `report_call_class`
-(`retrieval/graph.py`'s query-time completion config is always `extraction`,
-for both local and global search). So if you set `report_call_class` because
-your `extraction` model can't do structured output, `overview` still calls
-that same model — a different, non-schema-gated call, but still the model
-you moved reports away from. Current limitation, not something you can
-configure around today.
-
-**A free local extraction model can blank the whole build's cost line.**
-`metered_usage()` sums tokens across both models regardless, but prices the
-whole build with one shared flag: if either model's price can't be resolved
-(no litellm entry, no manual override), the printed figure is the token
-counts with no dollar amount at all — even though the other model is
-priced. If `extraction` is local/unpriced and `report_call_class` points at
-a paid provider, set `extraction.input_price_per_mtok = 0` and
-`extraction.output_price_per_mtok = 0` explicitly (rather than leaving them
-unset) so the local model prices at $0 instead of unknown, and the paid
-report model's real cost still prints.
-
 ## Rate limits, if your provider has them
 
 A graph build fires hundreds of concurrent calls, and graphrag swallows a 429
@@ -588,27 +531,14 @@ number to compare against your daily allowance.
 
 ## What else needs configuring
 
-Extraction only covers the build. Two other call classes matter once the
-graph exists:
-
-- **`chat`** — every `ask` (multi-hop/global routed), `drill_down`, and
-  `overview` call still needs a configured chat provider for Groundly's own
-  answer synthesis, same as the vector arm. This can be local (LM Studio) —
-  see [using-lm-studio.md](lm-studio.md).
-- **`router`** — the query classifier that decides whether `ask` actually
-  routes to a graph arm at all. Unconfigured or unreachable, every query
-  degrades to `factoid` → vector-only, so a built graph never gets used by
-  `ask` (though `drill_down`/`overview` still work directly, since they
-  don't go through the router).
-
-Mixing providers is normal — e.g. a cheap cloud model for `extraction`, a
-local model for `chat`, nothing for `router` if you don't need `ask` to
-auto-route.
+Nothing. `extraction` is the only call class Groundly has: search, verification, Anki
+export and sharing never call a provider. Set it, build the graph, and the rest of the
+product runs offline.
 
 ## What leaves your machine
 
 This is the one path in Groundly where your course materials' text gets
-sent to a provider beyond what `ask` already sends per-question: extraction
+sent to a provider: extraction
 reads every indexed chunk once, in full, to build the graph. It goes only to
 whichever provider you configured for `extraction` — nothing else changes
 about Groundly's privacy model (`progress.db` still never exports, `graph/`
@@ -621,8 +551,8 @@ travels with the rest of the subject on export like `store.db` does).
   extraction provider set. Configure it (or delete `<subject>/graph/` if you
   no longer want a graph for this subject).
 - `graph not built for this subject — run \`groundly index --graph\` first`
-  — from `drill_down`, `overview`, or a multi-hop/global `ask` on a subject
-  that's never had `--graph` run. Vector-only `ask` still works.
+  — from `groundly export-graph` on a subject that has never had `--graph`
+  run. Search is unaffected.
 - Import dropped an imported bundle's graph and printed a note — the
   bundle's `graph/` didn't match its own `store.db` (tampered, stale export,
   or an embedding-pin change triggered a re-embed). Rebuild locally with
@@ -649,14 +579,14 @@ travels with the rest of the subject on export like `store.db` does).
   `curl -s localhost:1234/v1/chat/completions -d '{"model":"…","messages":[…],
   "response_format":{"type":"json_schema",…}}'` — and check whether
   `choices[0].message.content` is `""` while `reasoning_content` holds the
-  answer. If so, that model cannot do `extraction`; it is still fine for
-  `chat`/`generation`.
+  answer. If so, that model cannot do `extraction`; it cannot serve a graph
+  build.
 - `entity extraction failed for N of M chunks — … not recorded and stays
   unusable until a build succeeds` — graphrag catches extraction errors per
   chunk and carries on, so a build can "succeed" having indexed almost
   nothing. Above 5% failures Groundly refuses to record the build: the graph
   stays stale, the next `groundly index` retries it, and until then
-  `drill_down`/`overview` report the graph as not built. The partial files
+  `list_subjects` reports `graph_built: false`. The partial files
   are left on disk on purpose — graphrag caches the LLM responses it already
   paid for, so the retry is much cheaper. Below 5% the build completes and
   the count is printed alongside "Graph built".
@@ -680,7 +610,7 @@ travels with the rest of the subject on export like `store.db` does).
   retry is cheap) and the log. That's deliberate: a rebuild only runs once your
   corpus has changed, so the old graph was already not a graph of the current
   materials, and serving it would be a lie. Until a build succeeds,
-  `drill_down`/`overview` report the graph as not built. The clearing happens
+  `list_subjects` reports `graph_built: false`. The clearing happens
   *after* the preflight probe, so a misconfigured provider fails without
   touching a graph that still works.
 - `ValueError: Graph Extraction failed. No entities detected` with a

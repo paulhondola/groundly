@@ -1,74 +1,45 @@
 # Tech Stack
 
-Expands [`groundly-spec.md`](../groundly-spec.md) §4. Every row is a **decision** with its decisive reason, not a menu. Alternatives appear only as live migration paths.
+Expands [`groundly-spec.md`](../groundly-spec.md) §4. Every row is a **decision** with its decisive reason, not a menu.
 
 | Layer | Choice | Decisive reason | Documented alternative |
 |---|---|---|---|
-| Language / distribution | Python ≥3.11, installed via **uv** (`uv tool install groundly`) | Docling + LlamaIndex + graphrag + RAGAS coexist only in Python; uv makes `curl \| bash` honest | — |
+| Language / distribution | Python ≥3.11, installed via **uv** (`uv tool install groundly`) | Docling + graphrag coexist only in Python; uv makes `curl \| bash` honest | — |
 | CLI | **typer + rich** | Batch verbs with progress output; the host agent is the interactive surface (no TUI) | — |
-| MCP surface | **FastMCP** | stdio + streamable HTTP from one tool set; tools, resources, prompts | — |
+| MCP surface | **FastMCP** | stdio + streamable HTTP from one tool set; tools and resources | — |
 | Storage | **SQLite (WAL) + sqlite-vec + FTS5**, files on disk | Zero services; export = zip; exact KNN at 5k–50k chunks/subject | LanceDB/IVF if a corpus ever outgrows brute force |
-| Document extraction | **Docling with bundled RapidOCR** (PP-OCR ONNX, ships in base docling) | Local/offline, zero-key; layout/table/reading-order plus OCR for scanned/bitmap PDF content and standalone raster images (PNG/JPG/JPEG/TIF/TIFF/BMP/WEBP, via the same IMAGE→OCR pipeline; per-subject OCR lang via `--ocr-lang`, persisted in the manifest); HybridChunker for structure-aware chunks | none — documents with no readable text fail cleanly |
-| Embeddings | **`bge-m3` local** (FlagEmbedding — sentence-transformers' SparseEncoder does not expose bge-m3's learned-sparse head), pinned incl. **hf_revision**; dense + learned sparse from one forward pass | Quality over performance (Paul); RO/EN cross-lingual; the pin is the interchange compatibility contract. Changing it = full re-index migration, never a tweak | ColBERT vectors rejected (~100× storage) |
+| Document extraction | **Docling with bundled RapidOCR** | Local/offline, zero-key; layout/table/reading order plus OCR for scanned PDFs and raster images; HybridChunker for structure-aware chunks | none — documents with no readable text fail cleanly |
+| Embeddings | **`bge-m3` local** (FlagEmbedding), pinned incl. **hf_revision**; dense + learned sparse from one forward pass | RO/EN cross-lingual; the pin is the interchange compatibility contract | ColBERT vectors rejected (~100× storage) |
 | Rerank | **`bge-reranker-v2-m3`**, default ON | Quality-first; same model family as the embedder | `--no-rerank` for weak hardware |
-| Graph engine | **Microsoft `graphrag`** (batch, per subject, parquet on disk) | Canonical GraphRAG — Leiden + community summaries + local/global search | timeboxed; vector-only operation is first-class |
-| Retrieval orchestration | **LlamaIndex** | One `Retriever` interface across all four evaluation arms — the comparison's fairness depends on it | — |
-| Agent loops | **Plain async functions** | Post-pivot roster = one pipeline + two bounded loops; a graph framework wraps nothing (LangGraph dropped) | — |
+| Retrieval | **A plain `VectorRetriever` returning `Hit`** | One arm left, so an orchestration framework wrapped a SQLite row (decision 36) | — |
+| Graph engine | **Microsoft `graphrag`** (batch, per subject, parquet on disk) — **build only** | Leiden communities + summaries are the topic map's input; the retrieval arms were measured and retired (decision 35) | vector-only subjects are first-class |
+| Answer generation | **The host agent** | It is already an LLM; enforced server-side answering was measured and removed (decision 33) | — |
 | Flashcards | **genanki → .apkg** | Anki owns daily review; Groundly owns verified generation | — |
-| Observability | **Local `traces` table** in progress.db | Offline, private, shippable eval artifact (LangSmith dropped — cloud tracing inside a local-first tool) | — |
-| Dashboard | One **static HTML page** (theme as CSS variables in `groundly/assets/theme.css`) | A React toolchain for one page was unjustifiable (final review) | — |
-| Graph visualization | `groundly export-graph` → one self-contained HTML file; **vis-network 9.1.6 vendored** in `groundly/assets/`, inlined per page | No CDN is permitted (privacy rule), and the page must open offline years later — decision 26 | 9.1.6, SHA-384 pinned in `assets/VENDORED.md` |
-| Web serving | FastAPI + uvicorn, only inside `groundly serve` (loopback-only) | FastMCP mounts into it; dashboard rides along | — |
+| Observability | **Local `traces` table** in progress.db | Offline, private (LangSmith dropped — cloud tracing inside a local-first tool) | — |
+| Graph visualization | `groundly export-graph` → one self-contained HTML file; **vis-network 9.1.6 vendored** | No CDN is permitted (privacy rule), and the page must open offline years later | 9.1.6, SHA-384 pinned in `assets/VENDORED.md` |
+| HTTP transport | `groundly serve`, loopback-only | fastmcp's own Streamable HTTP app (uvicorn arrives with `mcp`) | — |
 
 ## LLM provider boundary
 
-**Decision: one OpenAI-compatible boundary, per call class, bring-your-own provider.**
-
-All LLM clients are constructed in **one module** (`groundly/llm/`) from `~/.groundly/config.toml`:
+**One OpenAI-compatible boundary, one call class, bring-your-own provider.** The only operation that calls a provider is `groundly index --graph`.
 
 ```toml
-[providers.chat]        # ask pipeline generation
+[providers.extraction]  # graphrag entity extraction + community reports
 base_url = "..."        # https://api.openai.com/v1 | http://localhost:1234/v1 | ...
 model    = "..."
 api_key  = "..."
-
-[providers.generation]  # exam/deck generation (thick path)
-[providers.extraction]  # graphrag entity extraction — cloud default; local floor ~12B, reasoning off (decision 24)
-[providers.router]      # cheap classifier
 ```
 
-The same file also carries operational settings (`[ingestion]`/`[llm]`/`[retrieval]`, decision 18, plus `[graph]`, decision 21) — tunable knobs like extraction/HTTP timeouts, size caps, and the extraction model's context window, whose defaults equal the shipped constants. Config **parsing** lives in `groundly/core/config.py` (a foundation); `groundly/llm/` still constructs every client (parsing ≠ construction).
+The same file carries operational settings (`[ingestion]`/`[llm]`/`[retrieval]`/`[graph]`) whose defaults equal the shipped constants. Config **parsing** lives in `groundly/core/config.py` (a foundation); `groundly/llm/` still constructs every client.
 
 Rules that make this real:
 
-1. **No provider SDK usage outside `groundly/llm/`.** LlamaIndex and graphrag accept OpenAI-compatible configs — only that form is used. `groundly/llm/chat.py` talks to providers via `litellm.completion()` — already `graphrag`'s own transitive dependency, pinned exactly (`litellm==1.86.2`, decision 20) — with the same `base_url`+`model`+`key` shape; import stays lazy so it never slows MCP spawn.
-2. **Per call class**, so "cheap router, strong verifier" is config, not refactoring. Local runtimes (LM Studio, Ollama) and cloud keys are the same code path — different `base_url`.
-3. **Every call passes through `llm/` and records tokens + cost into traces.** Visibility, not budget enforcement — it's the student's own key. One named exception: the compliance probe below runs from `groundly config check`, a *global* verb, and traces live in a per-subject `progress.db` — it prints its tokens and cost to the terminal instead (decision 32).
-4. **No subscription-OAuth piggybacking** (Claude Pro token reuse etc.) — ToS-fragile; opencode's history proves it.
-5. **Zero-key operation is first-class:** indexing, vector retrieval, `search`, and the thin `submit_*` generation path all work with no provider configured. Only `ask`, thick generation, and graph builds need a key.
-6. **Evaluation runs use one recorded provider config** — results from ad-hoc local models would be invalid; the config is part of the experimental record.
-
-### Chat model floor
-
-**`[providers.chat]` is the one call class with a capability requirement, not just a cost preference.** The enforced `ask` path mandates `[chunk <id>]` markers and refuses an answer whose citations resolve to nothing (`.claude/rules/grounding-and-privacy.md`) — so a model that will not follow the mandate does not degrade, it returns nothing. The student sees refusals and reasonably concludes the product is broken.
-
-Measured on two subjects, 2026-08-16 (decision 30) — `no_citations`, the share of questions the pipeline refused because the model cited nothing resolvable:
-
-| model | apd (48 q) | passc (76 q) | verdict |
-|---|---|---|---|
-| `Qwen/Qwen3-235B-A22B-Instruct-2507` | 0% | 0% | **meets the floor** — all 76 of passc's answers produced |
-| `gpt-oss-120b` | 28% | 47% | **below the floor** — refusals concentrated in the hard classes (44% global, 35% multi-hop, 12% factoid on apd) |
-
-That is one model failing the mandate, not enforcement converting answers into refusals: the same corpus, the same prompts, the same threshold.
-
-**For a model not on this list, measure it:**
-
-```bash
-groundly config check
-```
-
-One real call through `prompts.assemble()` — the ask builder itself, object for object — handing the model a single synthetic chunk and checking it cites the id it was given. Exits non-zero and names the model when it does not. `agents/probe.py` carries the reasoning; the precedent is `ingestion/graph.py::_probe_extraction`, which exists because a silent capability failure otherwise costs hours.
+1. **No provider SDK usage outside `groundly/llm/`.** graphrag accepts OpenAI-compatible configs — only that form is used. `groundly/llm/chat.py` talks to providers via `litellm.completion()` (pinned `litellm==1.86.2`, decision 20).
+2. **Every call passes through `llm/` and records tokens + cost into traces.**
+3. **No subscription-OAuth piggybacking** — ToS-fragile.
+4. **Zero-key operation is first-class:** indexing, search, verification, Anki export and import/export all work with no provider configured.
+5. **The extraction model must accept JSON-schema structured output** — community reports request it, and the build's preflight probe refuses a model that cannot, naming it. Configs written before 2026-09 may carry retired sections (`chat`, `generation`, `router`, `judge`) and `graph.report_call_class`; they are ignored, never rejected.
 
 ## Version pinning policy
 
-Pin **exact** versions of `graphrag`, `llama-index`, `docling`, `sentence-transformers`, and `FlagEmbedding` (and bge-m3's hf_revision) at P1 start; record them in the thesis and in every export manifest. Pinned 2026-07-16: `docling==2.113.0`, `llama-index==0.14.23`, `graphrag==3.1.0`, `sentence-transformers==5.6.0`, `FlagEmbedding==1.3.5`, bge-m3 hf_revision `5617a9f61b028005a4858fdac845db406aefb181`. The graphrag and embedding pins are **interchange compatibility contracts**, not just hygiene — an import built with different pins is a different experimental condition. Upgrades are deliberate events.
+Pin **exact** versions of `graphrag`, `docling`, `sentence-transformers`, `FlagEmbedding`, `rapidocr` and `litellm` (and bge-m3's hf_revision); record them in the thesis and in every export manifest. Pinned 2026-07-16: `docling==2.113.0`, `graphrag==3.1.0`, `sentence-transformers==5.6.0`, `FlagEmbedding==1.3.5`, `rapidocr==3.9.1`, `litellm==1.86.2`, bge-m3 hf_revision `5617a9f61b028005a4858fdac845db406aefb181`. The graphrag and embedding pins are **interchange compatibility contracts**; upgrades are deliberate events, guarded by `.claude/hooks/guard-pins.sh`.

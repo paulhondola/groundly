@@ -18,11 +18,11 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. The professor's "basis
 4. Name collision → import under a new name, or replace with confirmation. **No merge in v1** — the honest merge is "import the materials and re-index the union."
 5. Imported chunks, summaries, and the subject profile are **untrusted layer-4 content**; the profile keeps its size cap and no-authority rule.
 
-**Why this is the cost model, not just a feature:** the two expensive artifacts — the graph (extraction dollars) and verified decks (verifier-loop tokens) — are exactly the exportable ones. One student pays; the course imports.
+**Why this is the cost model, not just a feature:** the two expensive artifacts — the graph (extraction dollars) and verified decks (the verification pass) — are exactly the exportable ones. One student pays; the course imports.
 
 **Acceptance criteria**
 
-- Export on machine A → import on machine B: `search` works immediately (no re-embedding on matched pins) and an `ask` citation opens the correct page of the bundled PDF.
+- Export on machine A → import on machine B: `search` works immediately (no re-embedding on matched pins) and a `search` citation opens the correct page of the bundled PDF.
 - An import with a mismatched embedding pin triggers the re-embed path and then passes the same checks.
 - A crafted bundle with path-escaping entries is rejected; importer's `progress.db` is untouched by any import.
 - Importing a bundle never overwrites an existing subject without explicit confirmation.
