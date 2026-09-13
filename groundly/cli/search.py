@@ -44,16 +44,15 @@ def search(
     subj = _subject_checked(subject)
     _store_checked(subj)
     try:
-        nodes = search_fn(subject, query, k=k, rerank=rerank)
+        hits = search_fn(subject, query, k=k, rerank=rerank)
     except ModelDownloadError as exc:
         _fail(str(exc))
-    if not nodes:
+    if not hits:
         console.print("[dim]no results[/dim]")
         return
-    for i, n in enumerate(nodes, start=1):
-        m = n.node.metadata
-        loc = f" p.{m['page']}" if m["page"] else ""
-        heading = f" — {escape(m['heading_path'])}" if m["heading_path"] else ""
-        console.print(f"[bold]{i}.[/bold] {escape(m['filename'])}{loc}{heading}")
-        console.print(escape(n.node.get_content()))
+    for i, hit in enumerate(hits, start=1):
+        loc = f" p.{hit.page}" if hit.page else ""
+        heading = f" — {escape(hit.heading_path)}" if hit.heading_path else ""
+        console.print(f"[bold]{i}.[/bold] {escape(hit.filename)}{loc}{heading}")
+        console.print(escape(hit.text))
         console.print()

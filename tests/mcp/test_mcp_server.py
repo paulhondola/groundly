@@ -169,8 +169,16 @@ async def test_search_happy_path_returns_ranked_chunks_with_uri(retrievable_subj
         result = await client.call_tool("search", {"subject": "TEST", "query": "deadlock", "k": 3})
     assert result.data
     top = result.data[0]
+    assert set(top) == {
+        "chunk_id",
+        "text",
+        "score",
+        "filename",
+        "page",
+        "heading_path",
+        "uri",
+    }
     assert top["filename"] == "lec.pdf"
-    assert "chunk_id" in top and "text" in top and "score" in top and "heading_path" in top
     assert top["uri"] == f"groundly://TEST/lec.pdf#page={top['page']}"
 
 

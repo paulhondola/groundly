@@ -68,28 +68,22 @@ def test_rrf_single_ranking_preserves_order():
 def test_vector_retriever_fuses_channels_and_ranks_relevant_chunk_first(retrievable_subject):
     store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
     retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False)
-    nodes = retriever.retrieve("deadlock")
-    ids = [n.node.metadata["chunk_id"] for n in nodes]
+    hits = retriever.retrieve("deadlock")
+    ids = [h.chunk_id for h in hits]
     assert ids[0] == 1  # dense=near, sparse=token 1 both point at chunk 1; bm25 too
     assert 2 not in ids[:2]  # chunk 2 ("semaphores") is off-topic on every channel
 
 
-def test_vector_retriever_node_metadata_and_text(retrievable_subject):
+def test_vector_retriever_returns_hits_with_citation_fields(retrievable_subject):
+    from groundly.retrieval.hits import Hit
+
     store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
     retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False)
-    nodes = retriever.retrieve("deadlock")
-    node = next(n for n in nodes if n.node.metadata["chunk_id"] == 1)
-    assert node.node.metadata["filename"] == "lec.pdf"
-    assert node.node.metadata["page"] == 1
-    assert node.node.metadata["heading_path"] == "Intro > Deadlocks"
-    assert "mutual exclusion" in node.node.get_content()
-
-
-def test_vector_retriever_path_without_rerank(retrievable_subject):
-    store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
-    retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False)
-    retriever.retrieve("deadlock")
-    assert retriever.path == ["dense", "sparse", "bm25", "rrf"]
+    hits = retriever.retrieve("deadlock")
+    hit = next(h for h in hits if h.chunk_id == 1)
+    assert isinstance(hit, Hit)
+    assert (hit.filename, hit.page, hit.heading_path) == ("lec.pdf", 1, "Intro > Deadlocks")
+    assert "mutual exclusion" in hit.text
 
 
 def test_vector_retriever_reranker_skipped_when_rerank_false(retrievable_subject):
@@ -115,9 +109,8 @@ def test_vector_retriever_reranks_when_enabled(retrievable_subject):
     retriever = VectorRetriever(
         store_obj, embedder=_near_embedder(), reranker=reranker, rerank=True
     )
-    nodes = retriever.retrieve("deadlock")
-    assert nodes[0].node.metadata["chunk_id"] == 2
-    assert retriever.path == ["dense", "sparse", "bm25", "rrf", "rerank"]
+    hits = retriever.retrieve("deadlock")
+    assert hits[0].chunk_id == 2
 
 
 def test_vector_retriever_empty_store_returns_no_nodes(subject):
@@ -129,8 +122,8 @@ def test_vector_retriever_empty_store_returns_no_nodes(subject):
 def test_vector_retriever_respects_context_k(retrievable_subject):
     store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
     retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False, context_k=1)
-    nodes = retriever.retrieve("deadlock")
-    assert len(nodes) == 1
+    hits = retriever.retrieve("deadlock")
+    assert len(hits) == 1
 
 
 # --- search() shared function ---------------------------------------------------------
@@ -141,8 +134,8 @@ def test_search_returns_ranked_nodes_and_writes_no_trace(retrievable_subject):
     and nothing reads those rows any more."""
     from groundly.core.progress import connect_progress
 
-    nodes = search(retrievable_subject, "deadlock", embedder=_near_embedder(), rerank=False)
-    assert nodes and len(nodes) <= CONTEXT_K
+    hits = search(retrievable_subject, "deadlock", embedder=_near_embedder(), rerank=False)
+    assert hits and len(hits) <= CONTEXT_K
 
     conn = connect_progress(subject_dir(retrievable_subject) / "progress.db")
     try:

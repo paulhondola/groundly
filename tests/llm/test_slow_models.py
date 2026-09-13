@@ -78,6 +78,6 @@ def test_cross_lingual_romanian_query_matches_english_deadlock_chunk(tmp_path, m
 
     store = SubjectStore(subject_dir("PDA") / "store.db")
     retriever = VectorRetriever(store, embedder=embedder, rerank=False)
-    nodes = retriever.retrieve("ce condiții sunt necesare pentru un deadlock?")
-    assert nodes
-    assert "mutual exclusion" in nodes[0].node.get_content()
+    hits = retriever.retrieve("ce condiții sunt necesare pentru un deadlock?")
+    assert hits
+    assert "mutual exclusion" in hits[0].text

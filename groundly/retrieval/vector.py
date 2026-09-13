@@ -4,34 +4,25 @@ behind `groundly search` and the MCP `search` tool."""
 
 import logging
 
-from llama_index.core.callbacks import CallbackManager
-from llama_index.core.retrievers import BaseRetriever
-from llama_index.core.schema import NodeWithScore, QueryBundle
-
 from groundly.core.store import SubjectStore
-from groundly.retrieval.nodes import node_from_row
+from groundly.retrieval.hits import Hit, hit_from_row
 
 logger = logging.getLogger(__name__)
 
 CHANNEL_K = 50  # candidates pulled per channel before fusion
 RRF_K = 60  # standard reciprocal-rank-fusion constant
 RERANK_POOL = 20  # fused candidates handed to the cross-encoder
-CONTEXT_K = 8  # final chunks assembled into the prompt
+CONTEXT_K = 8  # default number of hits returned
 
 
 def rrf(rankings: list[list[int]], k: int = RRF_K) -> list[tuple[int, float]]:
-    """Reciprocal rank fusion over already-ranked (best-first) id lists. Pure
-    function: no I/O, easy to unit-test independent of any store.
+    """Reciprocal rank fusion over already-ranked (best-first) id lists. Pure function:
+    no I/O, testable without a store.
 
     Ties break by *how many rankings contributed*, then by id. An id at rank i in one
-    list scores exactly the same as a different id at rank i in another, and Python's
-    stable `sorted` then hands rank 1 to whichever list was passed first — so in
-    `hybrid-local` a weak graph ordering silently owned position 1 on every query
-    (measured on apd: hybrid put the first relevant chunk at rank 1 on 4/48 questions
-    against vector's 7/48). Agreement across channels is the honest tie-break: an id
-    both retrievers found beats one only a single retriever found. The final `doc_id`
-    key just makes the order deterministic instead of insertion-dependent.
-    """
+    list scores exactly the same as a different id at rank i in another, and a stable
+    sort would then hand rank 1 to whichever list was passed first; agreement across
+    channels is the honest tie-break, and the id keeps the order deterministic."""
     scores: dict[int, float] = {}
     votes: dict[int, int] = {}
     for ranking in rankings:
@@ -41,12 +32,11 @@ def rrf(rankings: list[list[int]], k: int = RRF_K) -> list[tuple[int, float]]:
     return sorted(scores.items(), key=lambda kv: (kv[1], votes[kv[0]], -kv[0]), reverse=True)
 
 
-class VectorRetriever(BaseRetriever):
+class VectorRetriever:
     """dense + sparse + BM25 -> RRF -> optional cross-encoder rerank -> top context_k.
 
-    `embedder`/`reranker` default to the real (lazy-loaded) bge-m3 / bge-reranker-v2-m3
-    models; tests inject stubs. `self.path` records which stages ran, for trace logging.
-    """
+    `embedder`/`reranker` default to the lazily loaded bge-m3 / bge-reranker-v2-m3
+    models; tests inject stubs."""
 
     def __init__(
         self,
@@ -58,7 +48,6 @@ class VectorRetriever(BaseRetriever):
         rerank_pool: int = RERANK_POOL,
         context_k: int | None = None,
     ) -> None:
-        super().__init__(callback_manager=CallbackManager([]))
         # rerank/context_k default from config (retrieval.*); explicit args override.
         if rerank is None or context_k is None:
             from groundly.core.config import load_settings
@@ -73,7 +62,6 @@ class VectorRetriever(BaseRetriever):
         self.context_k = context_k
         self._embedder = embedder
         self._reranker = reranker
-        self.path: list[str] = []
 
     @property
     def embedder(self):
@@ -91,14 +79,13 @@ class VectorRetriever(BaseRetriever):
             self._reranker = BgeReranker()
         return self._reranker
 
-    def _retrieve(self, query_bundle: QueryBundle) -> list[NodeWithScore]:
-        query = query_bundle.query_str
+    def retrieve(self, query: str) -> list[Hit]:
         dense, sparse = self.embedder.encode([query])  # one pass feeds both channels
 
         dense_ids = self.store.dense_search(dense[0], self.channel_k)
         sparse_ids = self.store.sparse_search(sparse[0], self.channel_k)
         bm25_ids = self.store.bm25_search(query, self.channel_k)
-        path = ["dense", "sparse", "bm25", "rrf"]
+        stages = ["dense", "sparse", "bm25", "rrf"]
         logger.debug(
             "channel hits: dense=%d sparse=%d bm25=%d",
             len(dense_ids),
@@ -109,7 +96,6 @@ class VectorRetriever(BaseRetriever):
         fused = rrf([dense_ids, sparse_ids, bm25_ids])[: self.rerank_pool]
         logger.debug("fused pool size=%d rerank=%s", len(fused), self.rerank)
         if not fused:
-            self.path = path
             return []
 
         fused_ids = [doc_id for doc_id, _ in fused]
@@ -117,25 +103,22 @@ class VectorRetriever(BaseRetriever):
         details = {row["chunk_id"]: row for row in self.store.chunk_details(fused_ids)}
 
         if self.rerank:
-            path.append("rerank")
+            stages.append("rerank")
             pairs = [(query, details[cid]["text"]) for cid in fused_ids if cid in details]
             scores = self.reranker.compute_score(pairs)
             ranked = sorted(zip(fused_ids, scores), key=lambda cs: cs[1], reverse=True)
         else:
             ranked = [(cid, fused_scores[cid]) for cid in fused_ids]
 
-        self.path = path
-        nodes = []
+        hits = []
         for chunk_id, score in ranked[: self.context_k]:
             row = details.get(chunk_id)
             if row is None:  # removed between fusion and detail lookup — skip, don't crash
                 logger.debug("chunk %s vanished between fusion and detail lookup", chunk_id)
                 continue
-            nodes.append(node_from_row(row, score))
-        logger.debug(
-            "path=%s top=%s", path, [(n.node.metadata["chunk_id"], n.score) for n in nodes]
-        )
-        return nodes
+            hits.append(hit_from_row(row, score))
+        logger.debug("stages=%s top=%s", stages, [(h.chunk_id, h.score) for h in hits])
+        return hits
 
 
 def search(
@@ -146,9 +129,9 @@ def search(
     rerank: bool | None = None,
     embedder=None,
     reranker=None,
-) -> list[NodeWithScore]:
-    """The raw retrieval path: query -> ranked chunks, no LLM call, no provider needed.
-    Shared by `groundly search` and the MCP `search` tool."""
+) -> list[Hit]:
+    """The raw retrieval path: query -> ranked hits, no LLM call, no provider needed,
+    nothing written. Shared by `groundly search` and the MCP `search` tool."""
     from groundly.core.subject import Subject
 
     store = SubjectStore(Subject(subject).store_db_path)

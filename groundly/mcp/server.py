@@ -132,24 +132,21 @@ def search(subject: str, query: str, k: int | None = None) -> list[dict]:
 
     _subject_or_error(subject, ToolError)
     try:
-        nodes = search_fn(subject, query, k=k)
+        hits = search_fn(subject, query, k=k)
     except ModelDownloadError as exc:
         raise ToolError(str(exc)) from exc
-    results = []
-    for n in nodes:
-        m = n.node.metadata
-        results.append(
-            {
-                "chunk_id": m["chunk_id"],
-                "text": n.node.get_content(),
-                "score": float(n.score),
-                "filename": m["filename"],
-                "page": m["page"],
-                "heading_path": m["heading_path"],
-                "uri": _citation_uri(subject, m["filename"], m["page"]),
-            }
-        )
-    return results
+    return [
+        {
+            "chunk_id": h.chunk_id,
+            "text": h.text,
+            "score": h.score,
+            "filename": h.filename,
+            "page": h.page,
+            "heading_path": h.heading_path,
+            "uri": _citation_uri(subject, h.filename, h.page),
+        }
+        for h in hits
+    ]
 
 
 @mcp.tool

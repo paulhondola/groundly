@@ -55,8 +55,7 @@ def verify_card(card: CardCandidate, store: SubjectStore, *, embedder=None) -> R
         )
 
     retriever = VectorRetriever(store, embedder=embedder, rerank=False, context_k=VERIFY_TOP_K)
-    nodes = retriever.retrieve(card.front + "\n" + card.back)
-    retrieved_ids = {n.node.metadata["chunk_id"] for n in nodes}
+    retrieved_ids = {h.chunk_id for h in retriever.retrieve(card.front + "\n" + card.back)}
     if not (set(card.chunk_ids) & retrieved_ids):
         return Rejection(
             "not_answerable_from_chunks",
