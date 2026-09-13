@@ -61,7 +61,9 @@ def config(ctx: typer.Context) -> None:
 def config_set(
     key: Annotated[
         str,
-        typer.Argument(help="Dotted key, e.g. chat.model, chat.key, ingestion.timeout_seconds."),
+        typer.Argument(
+            help="Dotted key, e.g. extraction.model, extraction.key, ingestion.timeout_seconds."
+        ),
     ],
     value: Annotated[str, typer.Argument(help="Value to set.")],
 ) -> None:

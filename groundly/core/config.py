@@ -259,7 +259,7 @@ def set_key(dotted_key: str, value: str) -> None:
     section, _, field = dotted_key.partition(".")
     if not field:
         raise ConfigKeyError(
-            f"key must be dotted, e.g. chat.model or ingestion.timeout_seconds (got {dotted_key!r})"
+            f"key must be dotted, e.g. extraction.model or ingestion.timeout_seconds (got {dotted_key!r})"
         )
     data = _load_raw()
     if section in CALL_CLASSES:
@@ -339,7 +339,7 @@ def render_config_toml(providers: dict, settings: Settings) -> str:
                     "# requests_per_minute   = 30    # optional; your provider tier's RPM. Unset = no throttling (right for local runtimes)",
                     "# tokens_per_minute     = 6000  # optional; your provider tier's TPM. Set these on [providers.extraction] before a graph build — it fires hundreds of concurrent calls",
                     '# reasoning_effort      = "none"  # optional; passed as extra_body — "none" for Ollama, low/medium/high for OpenAI-style o-series reasoning models. Some hosted models ignore it (measured: gpt-oss-120b on DeepInfra still emits reasoning_content)',
-                    "# temperature           = 0.0   # defaults to 0.0, NOT the provider's ~1.0 — an unpinned classifier or extractor makes every measurement a draw from a distribution. Raise it only where variety is the point",
+                    "# temperature           = 0.0   # defaults to 0.0, NOT the provider's ~1.0 — an unpinned extractor makes every measurement a draw from a distribution. Raise it only where variety is the point",
                 ]
         lines.append("")
 
@@ -363,7 +363,7 @@ def render_config_toml(providers: dict, settings: Settings) -> str:
         f"timeout_seconds = {_toml_value(settings.llm.timeout_seconds)}   # read timeout for provider calls; local models can be slow to first token",
         "",
         "[retrieval]",
-        f"context_k = {_toml_value(settings.retrieval.context_k)}   # chunks assembled into the answer / prompt",
+        f"context_k = {_toml_value(settings.retrieval.context_k)}   # chunks returned per search",
         f"rerank = {_toml_value(settings.retrieval.rerank)}   # cross-encoder rerank (off is faster on weak hardware)",
         "",
         "[graph]",

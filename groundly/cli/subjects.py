@@ -46,7 +46,7 @@ def index(
         bool,
         typer.Option(
             "--graph",
-            help="Build the graphrag arm for this subject (first build only; once built, "
+            help="Build the knowledge graph for this subject (first build only; once built, "
             "later index runs auto-rebuild on corpus changes without needing this flag again).",
         ),
     ] = False,
@@ -181,7 +181,7 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool, debug: bool = False) -> 
         console.print(f"[yellow]The graph is stale[/yellow] — {reason}.")
         prompt = "Rebuild it now?"
     elif not recorded and graph:
-        prompt = "Build the graphrag arm for this subject now?"
+        prompt = "Build the knowledge graph for this subject now?"
     else:
         return
 
