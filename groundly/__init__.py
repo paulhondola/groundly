@@ -1,27 +1,15 @@
-"""Groundly — local-first course knowledge bases for AI agents.
+"""Groundly: local-first course knowledge bases for AI agents.
 
-The NullHandler below is the stdlib library convention, and load-bearing here:
-with no handler anywhere in the chain, `logging.lastResort` emits every WARNING+
-record to stderr on its own. That would break the promise that with no `--debug`
-and no GROUNDLY_LOG_LEVEL Groundly emits nothing via logging, and would surface
-the raw tracebacks the CLI deliberately wraps. Attached to the package root so
-it covers every `groundly.*` logger regardless of import order; propagation is
-untouched, so core/logs.py's root handler still receives everything when logging
-is on.
+The NullHandler keeps logging silent by default: with no handler in the chain,
+`logging.lastResort` prints every WARNING+ record, including tracebacks the CLI wraps. It
+sits on the package root to cover every `groundly.*` logger; propagation to
+core/logs.py's root handler is untouched.
 
-Two env vars for litellm live here rather than in `llm/`, because litellm reads both
-at *its* import and `ingestion/graph.py` imports graphrag -> graphrag_llm -> litellm at
-the top, before its `from groundly.llm.graphrag_adapter import ...` line. Python runs
-this package init before any `groundly.*` submodule, so it is the only placement that
-holds.
-
-- LITELLM_LOCAL_MODEL_COST_MAP: unset, litellm's __init__ fetches its price map from
-  GitHub, which the privacy rule forbids (.claude/rules/grounding-and-privacy.md).
-- LITELLM_LOG: litellm sets its handler level from this at import and defaults to
-  DEBUG, so it warns on every run that botocore is absent and Bedrock/SageMaker
-  event-stream decoding is unavailable — providers Groundly never uses. ERROR keeps
-  real failures, which also reach us as exceptions. Both use setdefault, so an
-  explicit LITELLM_LOG=DEBUG still works for debugging litellm itself.
+litellm reads two env vars at its own import, which graphrag triggers before any llm/
+module runs, so they are set here, the only place early enough.
+LITELLM_LOCAL_MODEL_COST_MAP stops a price-map fetch from GitHub (privacy rule);
+LITELLM_LOG=ERROR silences import-time warnings about providers Groundly never uses.
+setdefault leaves an explicit value in charge.
 """
 
 import logging

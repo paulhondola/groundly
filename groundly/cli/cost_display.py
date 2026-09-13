@@ -4,9 +4,8 @@ from groundly.cli.app import console
 
 
 def _usd(amount: float) -> str:
-    """Two decimals reads as money; below a cent it reads as zero, which is worse than
-    verbose. No four-decimal figures — this is a heuristic, and printing it to a
-    hundredth of a cent claims a precision it does not have."""
+    """Two decimals reads as money, but under a dollar three keep a cheap build from reading
+    as $0.00. Never more: this is a heuristic."""
     return f"${amount:,.2f}" if amount >= 1 else f"${amount:.3f}"
 
 

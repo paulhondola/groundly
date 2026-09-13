@@ -1,10 +1,7 @@
-"""The graphrag batch builder — ingestion writes stores, never serves queries
-(.claude/rules/architecture.md).
+"""The graphrag batch builder. Ingestion writes stores; it never serves queries.
 
-Groundly feeds graphrag pre-chunked text: each stored chunk becomes one input
-"document", with chunking size set generously above CHUNK_MAX_TOKENS so graphrag
-produces exactly one text unit per document — `document_id == chunk_id` directly,
-no sidecar mapping table needed.
+Each stored chunk goes to graphrag as one input document, with graphrag's chunk size far
+above CHUNK_MAX_TOKENS, so `document_id == chunk_id` and no mapping table is needed.
 """
 
 import asyncio
@@ -57,9 +54,8 @@ from groundly.llm.graphrag_adapter import (
 
 logger = logging.getLogger(__name__)
 
-# Generously above manifest.CHUNK_MAX_TOKENS (512) so graphrag's own chunker never
-# splits a Groundly chunk further — one text unit per document, guaranteed.
-# Internal-only: never exposed in the manifest or CLI (not an interchange knob).
+# Well above manifest.CHUNK_MAX_TOKENS (512), so graphrag never splits a Groundly chunk.
+# Internal only: not an interchange knob.
 _GRAPH_CHUNK_SIZE = 4096
 
 # Above this share of chunks failing entity extraction, the graph is missing too much
@@ -67,25 +63,22 @@ _GRAPH_CHUNK_SIZE = 4096
 # Below it, a transient blip shouldn't throw away a long build; the count is reported.
 _MAX_EXTRACTION_FAILURE_RATE = 0.05
 
-# graphrag swallows per-item LLM failures in both of these stages and only logs them,
-# so these loggers are the only signal that content is being dropped. Each stage logs a
-# failure *twice* — the extractor's own `logger.exception` plus the calling operation's
-# `on_error` — so attach to the extractor specifically or every count doubles.
+# graphrag swallows per-item LLM failures in these stages and only logs them. Each failure
+# is logged twice (the extractor's `logger.exception`, then the operation's `on_error`), so
+# attach to the extractor's logger or every count doubles.
 _EXTRACTION_ERROR_SOURCE = "graphrag.index.operations.extract_graph.graph_extractor"
 _COMMUNITY_ERROR_SOURCE = (
     "graphrag.index.operations.summarize_communities.community_reports_extractor"
 )
 
-# The preflight probe's own progress phase. Two calls, because it checks two independent
-# provider capabilities (see _probe_extraction) — and it needs a phase at all because it
-# runs before graphrag's pipeline reports anything.
+# The preflight probe's progress phase: it runs before graphrag reports anything, and
+# makes two calls (see _probe_extraction).
 _PROBE_STEP = "checking the extraction model…"
 _PROBE_CALLS = 2
 
 
-# A rebuild inherits nothing but these. `cache/` is graphrag's LLM response cache —
-# expensive and already paid for, so a retry must keep it; `logs/` is how a failed run
-# gets diagnosed. Everything else under graph/ is derived output.
+# A rebuild keeps only these: `cache/` holds graphrag's already-paid LLM responses, and
+# `logs/` is how a failed run gets diagnosed. Everything else under graph/ is derived.
 _PRESERVED_ON_REBUILD = frozenset({"cache", "logs"})
 
 
@@ -95,15 +88,14 @@ class GraphBuildError(Exception):
 
 @dataclass(frozen=True)
 class GraphBuildResult:
-    """What the build actually managed to index. `failed` is chunks graphrag dropped
-    during entity extraction, `reports_failed` communities whose summary it dropped —
-    see _WorkflowErrorCounter for why neither can come from build_index."""
+    """What the build indexed. `failed` counts chunks graphrag dropped during extraction,
+    `reports_failed` communities whose summary it dropped (see _WorkflowErrorCounter)."""
 
     chunks: int
     failed: int
     reports_failed: int = 0
-    # Metered usage from graphrag's own aggregates — None when nothing was metered.
-    # `cost_usd` needs prices on top of that, so it can be None while the counts are not.
+    # Metered from graphrag's own aggregates; None when nothing was metered. `cost_usd`
+    # also needs prices, so it can be None while the counts are not.
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     cost_usd: float | None = None
@@ -113,11 +105,8 @@ class GraphBuildResult:
 class _BuildPlan:
     """Every input one graph build depends on, resolved exactly once.
 
-    The probe checks these, the config registers models from them and the manifest
-    records what they named, so each is read **once**: a `config set` landing between
-    two reads would produce a build whose probe, model and recorded provenance disagree.
-    `frozen` stops a field being rebound (`entity_types` is a list because
-    `ExtractGraphConfig` wants one).
+    The probe, the model config and the manifest all read from this, so a `config set`
+    landing mid-build cannot make them disagree.
     """
 
     provider: ProviderConfig
@@ -129,22 +118,17 @@ class _BuildPlan:
 
     @property
     def fingerprint(self) -> str:
-        """What the manifest records, derived from the same read the build ran on —
-        the whole reason these three travel together."""
+        """What the manifest records, derived from the same read the build ran on."""
         return extraction_fingerprint(self.prompt_text, self.entity_types, self.gleanings)
 
 
 @contextmanager
 def _plan_build() -> Iterator[_BuildPlan]:
-    """Resolve the plan, holding the extraction prompt open for as long as it lives.
+    """Resolve the plan, keeping the extraction prompt file available while it lives.
 
-    A context manager because `ExtractGraphConfig.prompt` is a *path* graphrag re-reads
-    at extraction time, so the file has to outlive `build_index` — and because the
-    fingerprint in the plan is computed from that same file's text.
-
-    The provider is resolved before the prompt, and both before the caller enumerates
-    chunks: a misconfigured provider should fail in milliseconds, not after a full
-    corpus read (and never after a graph has been cleared for a rebuild)."""
+    graphrag re-reads `ExtractGraphConfig.prompt` from disk at extraction time, so the file
+    must outlive `build_index`. The provider resolves first, so a misconfigured one fails
+    before any corpus read or graph reset."""
     provider = require_provider("extraction")
     settings = load_settings()
     with _extraction_prompt() as (prompt_path, prompt_text):
@@ -161,16 +145,10 @@ def _plan_build() -> Iterator[_BuildPlan]:
 class _WorkflowErrorCounter(logging.Handler):
     """Counts per-item LLM failures for one graphrag stage, which reach us no other way.
 
-    graphrag catches them per item (an `except Exception` -> `logger.exception` ->
-    `on_error` callback) and carries on, so they never appear in
-    `PipelineRunResult.error` and a build that dropped most of its content still
-    reports success. Entity extraction drops chunks; community reports drop community
-    summaries.
-
-    Attached to the exact extractor logger rather than to `graphrag`: `init_loggers`
-    clears handlers on `graphrag`/`graphrag_llm` when build_index starts, but never on
-    their descendants. Works with Groundly logging off too, since init_loggers always
-    raises that tree to at least INFO.
+    graphrag catches them per item and carries on, so they never reach
+    `PipelineRunResult.error` and a build that dropped most of its content reports success.
+    Attached to the exact extractor logger, not `graphrag`: `init_loggers` clears handlers
+    on `graphrag`/`graphrag_llm` when build_index starts, but not on their descendants.
     """
 
     def __init__(self, source: str) -> None:
@@ -225,33 +203,15 @@ def _probe_extraction(
     plan: _BuildPlan,
     on_event: Callable[[str, int, int], None],
 ) -> None:
-    """Send one real extraction prompt before committing to the whole corpus.
+    """Check the provider with what the build sends before committing to the whole corpus.
 
-    Entity extraction is the largest prompt graphrag sends per chunk, and its failure
-    mode is silent (see _WorkflowErrorCounter), so a model whose context is too
-    small burns hours producing an empty graph. One call up front turns that into a
-    named error in seconds.
-
-    Two calls, because the build depends on two independent provider capabilities and a
-    reachability check proves neither: the extraction prompt itself (size), and structured
-    output (community reports are the one stage that requests `response_format`). Each is a
-    real billable call, so each records its own trace row (.claude/rules/architecture.md:
-    every LLM call records tokens + cost).
-
-    **Both probes send what the build sends, object for object**, so the probe is never
-    laxer or stricter than the build:
-
-    - The extraction prompt comes from the *same config the build will use*, formatted with
-      the *same keys* graphrag formats it with — only `entity_types` and `input_text`
-      (graph_extractor._process_document). Extra keys would let a prompt pass here that
-      raises KeyError on every chunk of the real run.
-    - The structured-output probe passes graphrag's own `CommunityReportResponse`, not a
-      hand-written `{"type": "json_object"}`: providers disagree on json_object versus the
-      json_schema litellm derives from the model class, in both directions.
-
-    Reports its own progress, because it runs *before* graphrag's pipeline emits
-    anything: two real network calls against a model that may still be loading, under a
-    300s timeout each."""
+    Extraction fails silently per chunk (see _WorkflowErrorCounter), so a model that cannot
+    take the prompt would burn hours on an empty graph. One call per provider capability
+    the build needs: the extraction prompt, and structured output (community reports send
+    `response_format`). **Both send the build's own objects**, so the probe is never laxer
+    or stricter than the build: the prompt from the same config, formatted with only the
+    keys graphrag uses, and graphrag's own `CommunityReportResponse` rather than a
+    hand-written json_object. Each call is billable, so each records a trace row."""
     from groundly.llm.chat import complete, loaded_context_length
 
     prompt = config.extract_graph.resolved_prompts().extraction_prompt.format(
@@ -275,14 +235,9 @@ def _probe_extraction(
             "tool-using endpoints have their own request limits and are the wrong fit here.",
         )
         on_event(_PROBE_STEP, 1, _PROBE_CALLS)
-        # After the first call, never before it: a local runtime JIT-loads on first
-        # request, so asking earlier reports "not loaded" and this would never fire.
-        #
-        # Warn, never refuse — this reads a field only LM Studio publishes, so its
-        # *absence* says nothing (see llm/chat.loaded_context_length). A mismatch is worth
-        # saying out loud anyway: every budget in this build is carved from
-        # graph.context_window, so serving a smaller window invalidates all of them at
-        # once, and the call that finally fails is a community report ~40 minutes in.
+        # Only after the first call: a local runtime JIT-loads on first request. Warn, never
+        # refuse, since only LM Studio publishes the field; a smaller served window breaks
+        # every prompt budget at once, and the build would fail late, in community reports.
         loaded = loaded_context_length("extraction")
         if loaded is not None and loaded < plan.context_window:
             logger.warning(
@@ -295,13 +250,9 @@ def _probe_extraction(
                 plan.context_window,
                 loaded,
             )
-        # A separate capability: a provider can answer plain completions fine and still
-        # reject graphrag's structured-output request, which otherwise surfaces deep into
-        # the build as KeyError 'community' (pandas merging an empty reports frame).
-        #
-        # `CommunityReportResponse` is graphrag's *own* response model, passed here exactly
-        # as community_reports_extractor passes it, so litellm derives the same wire request
-        # both times.
+        # A provider can serve plain completions and still reject structured output, which
+        # otherwise surfaces deep in the build as KeyError 'community'. Passing graphrag's own
+        # response model makes litellm derive the same wire request the build sends.
         _probe_call(
             conn,
             lambda: complete(
@@ -322,11 +273,10 @@ def _probe_extraction(
 
 
 def _probe_call(conn, call: Callable[[], object], failure_message: str) -> None:
-    """Run one probe call, trace it either way, and wrap any failure as a named
-    GraphBuildError. Catches `Exception`, not just `ChatUnreachableError`: this runs
-    outside build_graph's own wrapper, so anything else escaping here would reach the
-    CLI as a raw traceback past its `except (GraphBuildError, ProviderNotConfiguredError)`.
-    `failure_message` is a template with a single `{exc}` placeholder."""
+    """Run one probe call, trace it either way, and wrap any failure as GraphBuildError.
+
+    Catches every Exception: this runs outside build_graph's wrapper, so anything else would
+    reach the CLI as a raw traceback. `failure_message` has a single `{exc}` placeholder."""
     try:
         result = call()
     except Exception as exc:
@@ -349,9 +299,8 @@ def _probe_call(conn, call: Callable[[], object], failure_message: str) -> None:
 
 @contextmanager
 def _extraction_prompt() -> Iterator[tuple[Path, str]]:
-    """`resolve_extraction_prompt` with its named error mapped onto this module's, so the
-    CLI's existing `except GraphBuildError` covers a bad custom prompt with no new
-    handler — and so the message still names the cause."""
+    """`resolve_extraction_prompt`, its named error re-raised as GraphBuildError so the
+    CLI's existing handler covers a bad custom prompt."""
     try:
         with resolve_extraction_prompt() as resolved:
             yield resolved
@@ -378,10 +327,7 @@ def current_extraction_fingerprint() -> str:
 def graph_is_stale(subj: Subject, store: SubjectStore) -> str | None:
     """Why the recorded graph no longer describes this subject, or None if it still does.
 
-    A reason string rather than a bool because there are several causes and the CLI
-    quotes this to the student. Telling someone "the corpus changed" when what they
-    changed was `graph.entity_types` is exactly the kind of confident-but-wrong message
-    the gates in this module exist to prevent (conventions: name the cause specifically).
+    A reason string, not a bool: the CLI quotes it, and it must name the actual cause.
     """
     manifest = subj.load_manifest()
     if manifest.graphrag.corpus_hash is None:
@@ -396,14 +342,9 @@ def graph_is_stale(subj: Subject, store: SubjectStore) -> str | None:
 
 
 def _build_config(subj: Subject, plan: _BuildPlan) -> GraphRagConfig:
-    """graphrag's config, rooted entirely under <subject>/graph/ — nothing touches
-    cwd, nothing leaks outside the subject's own directory. Every prompt budget is
-    scaled to `plan.context_window` (graph.context_window in config.toml); graphrag's own
-    defaults assume ~16k and 400 out on a small local model.
-
-    Everything it needs comes off the plan rather than being read here, so the
-    fingerprint recorded in the manifest is computed from the same resolution that
-    produced this config — see `_BuildPlan`."""
+    """graphrag's config, rooted entirely under <subject>/graph/ so nothing touches cwd.
+    Prompt budgets scale to `plan.context_window`. Everything comes off the plan, so the
+    recorded fingerprint matches this config."""
     graph_dir = subj.root_dir / "graph"
     budgets = prompt_budgets(plan.context_window, plan.gleanings)
 
@@ -414,8 +355,7 @@ def _build_config(subj: Subject, plan: _BuildPlan) -> GraphRagConfig:
     }
 
     return GraphRagConfig(
-        # graphrag defaults this to 25. Against a local runtime that is what exhausts the
-        # shared KV cache the prompt budgets above were sized against — see
+        # graphrag's default of 25 exhausts a local runtime's shared KV cache; see
         # llm/graphrag_adapter.concurrent_requests.
         concurrent_requests=concurrent_requests(plan.provider),
         extract_graph=ExtractGraphConfig(
@@ -432,9 +372,8 @@ def _build_config(subj: Subject, plan: _BuildPlan) -> GraphRagConfig:
         completion_models=completion_models,
         embedding_models=bge_m3_embedding_models(),
         chunking=ChunkingConfig(size=_GRAPH_CHUNK_SIZE, overlap=0),
-        # input is unused (input_documents bypasses graphrag's own file loading
-        # entirely) but the config is still validated — root it under graph/ so
-        # nothing gets created relative to cwd.
+        # Unused (input_documents bypasses graphrag's file loading) but still validated,
+        # so root it under graph/ too.
         input_storage=StorageConfig(base_dir=str(graph_dir / "input")),
         output_storage=StorageConfig(base_dir=str(graph_dir)),
         update_output_storage=StorageConfig(base_dir=str(graph_dir / "update_output")),
@@ -445,22 +384,13 @@ def _build_config(subj: Subject, plan: _BuildPlan) -> GraphRagConfig:
 
 
 def _reset_graph_artifacts(subj: Subject) -> None:
-    """Drop the previous build's outputs, and the manifest's claim to a graph, before a
-    rebuild starts.
+    """Before a rebuild, drop the previous outputs and the manifest's claim to a graph.
 
-    graphrag writes into an existing `graph/` without clearing it, so a build that
-    produces nothing leaves the *previous* build's parquet in place — and the gates in
-    build_graph, which check that entities.parquet exists and has rows, would pass on those
-    and stamp a fresh corpus_hash over a stale graph.
-
-    `manifest.graphrag` is reset in the same step because a non-None corpus_hash is what
-    every reader takes as "there is a graph here"; clearing the artifacts while leaving the
-    old hash behind would claim a graph that no longer exists. Cleared together, a failed
-    rebuild leaves an honest "no graph" that `graph_is_stale` re-prompts on.
-
-    The previous graph is genuinely lost if the rebuild fails — correct, because a rebuild
-    only runs when the corpus already changed, so that graph was no longer a graph *of
-    this corpus*."""
+    graphrag writes into an existing `graph/` without clearing it, so a build that produces
+    nothing would leave the old parquet to pass the output gates. `manifest.graphrag` is
+    reset in the same step because a recorded corpus_hash is what every reader takes as
+    "there is a graph". A failed rebuild therefore loses the old graph, which no longer
+    described this corpus anyway."""
     graph_dir: Path = subj.root_dir / "graph"
     if graph_dir.exists():
         for entry in graph_dir.iterdir():
@@ -484,17 +414,11 @@ _CAPACITY_MARKERS = ("context size", "context window", "context length", "too ma
 
 
 def _report_failure_hint(last_message: str) -> str:
-    """A sentence naming concurrency when the report stage died of context capacity,
-    otherwise "".
+    """A sentence blaming concurrency when the report stage died of context capacity, else "".
 
-    Community reports carry by far the largest prompt in the build (graphrag's stock
-    template is ~2,200 tokens before any content), so they are the first stage to overrun
-    a runtime whose real limit is `in-flight calls x prompt` rather than one prompt. The
-    existing message blames JSON mode, the right guess for a provider that refuses the
-    request outright and the wrong one here.
-
-    Matching on message text is approximate, but it only ever *adds* a sentence, so a miss
-    costs nothing and a false positive costs one extra line."""
+    Community reports carry the build's largest prompt, so they are the first to overrun a
+    runtime whose real limit is in-flight calls x prompt. Text matching is approximate, but
+    it only adds a sentence: a miss costs nothing and a false positive one line."""
     lowered = last_message.lower()
     if not any(marker in lowered for marker in _CAPACITY_MARKERS):
         return ""
@@ -515,25 +439,21 @@ def _verify_build_output(
     chunk_count: int,
     plan: _BuildPlan,
 ) -> None:
-    """Refuse a build that reported success while producing an unusable graph.
-    graphrag swallows per-item failures, so nothing above this catches a graph
-    that quietly omits most of the corpus."""
+    """Refuse a build that reported success but produced an unusable graph. graphrag
+    swallows per-item failures, so nothing upstream catches one."""
     failed = [r for r in results if r.error is not None]
     if failed:
         for r in failed:
             logger.debug("workflow %s failed", r.workflow, exc_info=r.error)
         names = ", ".join(r.workflow for r in failed)
-        # A workflow error is graphrag's *symptom*; the swallowed per-item failures
-        # above are usually the cause. `create_community_reports` raising
-        # `KeyError: 'community'` is what an empty reports frame looks like when every
-        # report call failed — pandas merging a frame that has no columns.
+        # A workflow error is usually a symptom of swallowed per-item failures: every report
+        # call failing leaves an empty frame that pandas merges into `KeyError: 'community'`.
         cause = reports_counter.last_message or counter.last_message
         detail = f" — last LLM error: {cause}" if cause else ""
         raise GraphBuildError(f"graph build failed: workflow(s) {names} failed{detail}")
 
-    # graphrag swallows per-chunk extraction failures, so nothing above catches a
-    # graph that quietly omits most of the corpus. Refuse before the manifest is
-    # stamped: an unstamped manifest leaves the graph stale, so the next index retries.
+    # Refuse before the manifest is stamped: an unstamped graph stays stale, so the next
+    # index retries.
     if counter.count > chunk_count * _MAX_EXTRACTION_FAILURE_RATE:
         raise GraphBuildError(
             f"entity extraction failed for {counter.count} of {chunk_count} chunks — the graph "
@@ -543,9 +463,8 @@ def _verify_build_output(
             f"graph.context_window (currently {plan.context_window})"
         )
 
-    # The build's core artifact. Row count, not file size: a
-    # zero-row parquet is ~1.9 KB of schema, so a size check would pass an empty graph
-    # (reachable when a model returns unparseable output that never raises).
+    # Row count, not file size: a zero-row parquet is ~1.9 KB of schema. Reachable when a
+    # model returns unparseable output that never raises.
     entities = subj.root_dir / "graph" / "entities.parquet"
     if not entities.exists() or len(pd.read_parquet(entities)) == 0:
         raise GraphBuildError(
@@ -553,8 +472,8 @@ def _verify_build_output(
             "Re-run with --debug to see graphrag's own errors"
         )
 
-    # graphrag swallows community-report failures the same way it swallows extraction's.
-    # A graph with communities but no reports for them has no summaries to build from.
+    # Community-report failures are swallowed too. Without reports, the export-graph
+    # sidebar (and later the topic map) has no community summaries to show.
     graph_dir = subj.root_dir / "graph"
     communities = graph_dir / "communities.parquet"
     reports = graph_dir / "community_reports.parquet"
@@ -598,28 +517,16 @@ def build_graph(
     estimated_cost_usd: float | None = None,
     on_event: Callable[[str, int, int], None] | None = None,
 ) -> GraphBuildResult:
-    """Batch build graphrag's graph for a subject (parquet artifacts + a LanceDB
-    vector store under <subject>/graph/). Cost-estimate confirmation is the CLI's
-    job, not this module's — ingestion never does interactive I/O.
+    """Build graphrag's graph for a subject: parquet artifacts plus a LanceDB vector store
+    under <subject>/graph/. Confirming the cost estimate is the CLI's job; ingestion does no
+    interactive I/O. `estimated_*` are the CLI's `estimate_cost()` figures, traced only when
+    nothing was metered; `on_event` reports workflow-level progress.
 
-    `estimated_tokens`/`estimated_cost_usd` are the CLI's already-computed
-    `graph_cost.estimate_cost()` figures, threaded through so this function
-    doesn't recompute them — recorded into progress.db as a trace row on success.
-
-    `on_event` reports workflow-level progress (mirrors ingestion/pipeline.py's
-    own `on_event` contract).
-
-    graphrag is deliberately left at its own default INFO level — `build_index`'s
-    `verbose=True` would raise its loggers to DEBUG, and `graphrag/api/index.py`
-    logs `str(output.result)` at DEBUG, which for the text-unit workflows is a
-    sample DataFrame *including the text column*: verbatim course material onto
-    stderr and into graph/logs/indexing-engine.log. INFO already carries the
-    workflow names and progress counts that `--debug` exists to show."""
+    graphrag stays at its default INFO level: `verbose=True` would log a sample DataFrame
+    including the text column at DEBUG, putting verbatim course material on stderr and in
+    graph/logs/."""
     on_event = on_event or (lambda description, completed, total: None)
 
-    # `_plan_build` resolves the provider before anything else and holds the extraction
-    # prompt open for the whole pipeline (ExtractGraphConfig.prompt is a path graphrag
-    # re-reads at extraction time, so the file has to outlive build_index).
     with (
         _plan_build() as plan,
         _WorkflowErrorCounter(_EXTRACTION_ERROR_SOURCE) as counter,
@@ -634,9 +541,7 @@ def build_graph(
         config = _make_config(subj, plan)
         _probe_extraction(subj, config, rows[0]["text"], plan, on_event)
 
-        # After the probe on purpose: a misconfigured provider should fail without
-        # destroying a graph that still works, so nothing is cleared until the provider
-        # has answered a real extraction prompt and a JSON-mode call.
+        # Only after the probe: a misconfigured provider must not destroy a graph that works.
         _reset_graph_artifacts(subj)
         results = _run_index(config, rows, plan, on_event)
 
@@ -654,12 +559,11 @@ def build_graph(
 
 
 def _make_config(subj: Subject, plan: _BuildPlan) -> GraphRagConfig:
-    """`_build_config` with the one failure mode that must never surface verbatim.
+    """`_build_config`, with a failure that never echoes the config.
 
-    The config embeds the extraction provider's api_key, and a pydantic ValidationError
-    echoes the offending input value — so neither the wrapped message nor a logged
-    traceback may ever carry this one. Deliberately no `logger.debug(exc_info=True)`
-    here, unlike every other failure path in this module."""
+    The config carries the provider's api_key and a pydantic ValidationError echoes input
+    values, so neither the message nor a logged traceback may include it: no
+    `logger.debug(exc_info=True)` here."""
     try:
         return _build_config(subj, plan)
     except Exception as exc:
@@ -676,9 +580,8 @@ def _run_index(
     plan: _BuildPlan,
     on_event: Callable[[str, int, int], None],
 ):
-    """Hand the corpus to graphrag and run the pipeline. One input "document" per stored
-    chunk, with `id = str(chunk_id)` — that is what makes graphrag's `document_id` equal
-    Groundly's chunk_id with no sidecar mapping table."""
+    """Run graphrag's pipeline with one input document per stored chunk, `id =
+    str(chunk_id)`, so graphrag's `document_id` is Groundly's chunk_id."""
     try:
         register_bge_m3_embedding()
         register_groundly_metrics_store()
@@ -715,23 +618,20 @@ def _record_build(
     estimated_tokens: int,
     estimated_cost_usd: float | None,
 ) -> GraphBuildResult:
-    """Stamp the manifest and record what the build actually spent. Runs only after
-    `_verify_build_output` has passed: a refused build records neither the corpus hash
-    nor the fingerprint, so the next `groundly index` re-offers the build."""
+    """Stamp the manifest and record what the build spent. Runs only after
+    `_verify_build_output` passes, so a refused build records neither the corpus hash nor
+    the fingerprint and the next `groundly index` re-offers it."""
     manifest = subj.load_manifest()
     manifest.graphrag = Graphrag(
         version=_package_version("graphrag"),
         extraction_model=plan.provider.model,
         corpus_hash=corpus_hash(store),
-        # Same write as corpus_hash, so a refused build records neither.
         extraction_fingerprint=plan.fingerprint,
     )
     subj.save_manifest(manifest)
 
-    # Metered where possible, estimated only as a fallback. graphrag's extraction calls
-    # don't pass through llm/, but graphrag_llm aggregates their usage itself and
-    # `track_usage=True` puts that aggregate somewhere this process can read — so the
-    # trace records what was spent rather than what was guessed.
+    # Metered where possible, estimated only as a fallback: graphrag's calls bypass llm/,
+    # but `track_usage=True` exposes graphrag_llm's own usage aggregate to this process.
     metered = metered_usage()
     conn = connect_progress(subj.progress_db_path)
     try:

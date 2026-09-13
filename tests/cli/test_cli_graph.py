@@ -1,9 +1,4 @@
-"""`groundly export-graph`: the CLI wrapper over core/graph_html.py's export_graph_html.
-
-Until groundly/core/graph_html.py lands (written in parallel — see groundly/cli/graph.py's
-module docstring), every invocation here fails at import time inside the command, since
-the lazy import runs before subject validation, the same ordering export-deck uses. That
-is expected and temporary, not a bug in this file."""
+"""`groundly export-graph`: the CLI wrapper over core/graph_html.py's export_graph_html."""
 
 from typer.testing import CliRunner
 

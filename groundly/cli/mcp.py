@@ -16,10 +16,8 @@ def mcp() -> None:
     from groundly.core.logs import setup_logging
     from groundly.mcp.server import mcp as mcp_server
 
-    # No --debug flag here: the host spawns this process, so GROUNDLY_LOG_LEVEL is
-    # the only reachable switch. A bad value is reported to stderr by hand rather
-    # than through _fail() — that prints via the shared rich Console, i.e. stdout,
-    # which is the MCP protocol stream.
+    # No --debug flag: the host spawns this process, so GROUNDLY_LOG_LEVEL is the only
+    # switch. A bad value goes to stderr by hand; _fail() prints to stdout, the MCP stream.
     try:
         setup_logging()
     except ValueError as exc:

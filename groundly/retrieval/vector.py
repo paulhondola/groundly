@@ -16,13 +16,10 @@ CONTEXT_K = 8  # default number of hits returned
 
 
 def rrf(rankings: list[list[int]], k: int = RRF_K) -> list[tuple[int, float]]:
-    """Reciprocal rank fusion over already-ranked (best-first) id lists. Pure function:
-    no I/O, testable without a store.
+    """Reciprocal rank fusion over best-first id lists. Pure function, no I/O.
 
-    Ties break by *how many rankings contributed*, then by id. An id at rank i in one
-    list scores exactly the same as a different id at rank i in another, and a stable
-    sort would then hand rank 1 to whichever list was passed first; agreement across
-    channels is the honest tie-break, and the id keeps the order deterministic."""
+    Ties break by how many rankings contributed, then by id: otherwise a stable sort would
+    hand equal scores to whichever list was passed first."""
     scores: dict[int, float] = {}
     votes: dict[int, int] = {}
     for ranking in rankings:

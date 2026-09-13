@@ -1,8 +1,6 @@
-"""Translates Groundly's own provider config into graphrag's config primitives — the
-one place doing so (.claude/rules/architecture.md: LLM clients constructed only in
-llm/, same interpretation already implied by embeddings.py/rerank.py). graphrag's
-LiteLLM-based client speaks the same OpenAI-compatible base_url+model+key shape
-Groundly already assumes everywhere else.
+"""Translates Groundly's provider config into graphrag's config primitives, the one place
+that does so (LLM clients are constructed only in llm/). graphrag's LiteLLM client speaks
+the same OpenAI-compatible base_url + model + key shape.
 """
 
 import hashlib
@@ -45,21 +43,15 @@ _BUNDLED_PROMPT = ("groundly", "prompts/extract_graph.txt")
 # (graph_extractor._process_document) — nothing else is interpolated.
 _REQUIRED_PLACEHOLDERS = ("{entity_types}", "{input_text}")
 
-# ...and these are *not*, despite reading like they would be. graphrag 3.1.0 writes the
-# delimiters into the prompt literally and parses with hardcoded TUPLE_DELIMITER /
-# RECORD_DELIMITER / COMPLETION_DELIMITER constants. A prompt carrying them raises
-# KeyError inside graph_extractor's per-chunk `except Exception`, which is swallowed and
-# logged — i.e. every chunk fails silently. Rejecting them up front is cheaper than
-# discovering that through the failure gate hours later.
+# ...and these are *not*, though they look it: graphrag 3.1.0 writes delimiters literally
+# and parses with hardcoded constants. A prompt carrying one raises KeyError per chunk,
+# which graphrag swallows, so every chunk fails silently. Reject them up front.
 _FORBIDDEN_PLACEHOLDERS = ("{tuple_delimiter}", "{record_delimiter}", "{completion_delimiter}")
 
 
 class ExtractionPromptError(Exception):
-    """A configured `graph.extraction_prompt` that cannot be used — missing, unreadable,
-    or malformed. Named cause, raised before any LLM call.
-
-    Lives here rather than in ingestion/ because llm/ is a foundation *below* ingestion
-    (.claude/rules/architecture.md); the dependency may not point the other way.
+    """A configured `graph.extraction_prompt` that is missing, unreadable or malformed,
+    raised before any LLM call. Defined in llm/ because ingestion/ sits above it.
     """
 
 
@@ -87,15 +79,12 @@ def _validate_prompt(text: str, source: str) -> None:
 
 @contextmanager
 def resolve_extraction_prompt() -> Iterator[tuple[Path, str]]:
-    """Yield `(path, text)` for the entity-extraction prompt the build will send.
+    """Yield `(path, text)` for the extraction prompt the build will send, validated so a
+    bad override is a named error before any LLM call.
 
-    A path, not just text: `ExtractGraphConfig.prompt` is a *filesystem path* and
-    `resolved_prompts()` does `Path(self.prompt).read_text()`, so the file has to exist
-    for as long as the build runs. `as_file()` is what makes that true for a zipped
-    install as well as an unzipped one, which is why this is a context manager.
-
-    Validated here so a bad override is a named error before any LLM call, rather than a
-    graphrag internal surfacing hours in.
+    A path, not just text: graphrag reads `ExtractGraphConfig.prompt` from disk, so the
+    file must exist for the whole build. `as_file()` makes that true for a zipped install
+    too, hence the context manager.
     """
     configured = load_settings().graph.extraction_prompt
     if configured:
@@ -125,13 +114,10 @@ def extraction_entity_types() -> list[str]:
 
 
 def extraction_fingerprint(prompt_text: str, entity_types: list[str], gleanings: int = 0) -> str:
-    """sha256 over exactly what the build sends: the prompt text, the entity-type list as
-    graphrag joins it, and the number of gleaning rounds. Not sorted — reordering the
-    types genuinely changes the prompt the model sees, so it counts as a change.
-
-    `gleanings` belongs here because it changes what is *sent* (a gleaning round is a
-    second extraction call per chunk carrying graphrag's CONTINUE_PROMPT), so a changed
-    value makes `graph_is_stale` offer a rebuild. Every in-tree caller passes it."""
+    """sha256 over exactly what the build sends: the prompt text, the entity types as
+    graphrag joins them (unsorted, since order changes the prompt), and the gleaning rounds
+    (each one another extraction call per chunk). A change makes `graph_is_stale` offer a
+    rebuild."""
     return hashlib.sha256(
         f"{prompt_text}\n{','.join(entity_types)}\ngleanings={gleanings}".encode()
     ).hexdigest()
@@ -143,19 +129,12 @@ _service_tier_widened = False
 
 
 def completion_model_config(track_usage: bool = False) -> ModelConfig:
-    """Build graphrag's ModelConfig from `[providers.extraction]`. Fails fast (via
-    require_provider) — a *configured* provider is always required, but not necessarily a
-    real API key: graphrag's ModelConfig validator rejects an empty api_key outright, so a
-    local/keyless provider (LM Studio, Ollama) gets a truthy placeholder that the local
-    server never checks.
+    """graphrag's ModelConfig from `[providers.extraction]`, which must be configured. A
+    keyless local provider gets a placeholder key, because ModelConfig rejects an empty one.
 
-    `track_usage` swaps graphrag_llm's metrics store for one this process can read back
-    (see `metered_usage`), which is how the build learns what it actually spent.
-
-    `reasoning_effort`, when the provider sets it, goes into `call_args["extra_body"]`:
-    passed flat, litellm raises UnsupportedParamsError on every call (its `drop_params` is
-    False, so it never degrades). Omitted entirely when unset, so `call_args` keeps its
-    `{}` default."""
+    `track_usage` swaps in a metrics store this process can read back (see
+    `metered_usage`). `reasoning_effort` goes under `call_args["extra_body"]`: passed flat,
+    litellm raises UnsupportedParamsError on every call."""
     cfg = require_provider("extraction")
     extra = (
         {"call_args": {"extra_body": {"reasoning_effort": cfg.reasoning_effort}}}
@@ -197,20 +176,12 @@ def graph_vector_store(graph_dir: Path) -> VectorStoreConfig:
 
 
 class ReadableMetricsStore(MemoryMetricsStore):
-    """graphrag_llm's own in-memory metrics store, plus a handle on every instance.
+    """graphrag_llm's in-memory metrics store, plus a handle on every instance.
 
-    graphrag aggregates real per-model usage but only ever *writes* it from
-    `MemoryMetricsStore._on_exit_`, registered with `atexit` — so the log line and the
-    file writer alike land after the interpreter is done, long past any point a build
-    could read them. `get_metrics()` has the same numbers live; all that was missing was
-    a reference to the store holding them. Keeping the log writer on means the indexing
-    log still gets its end-of-run summary, unchanged.
-
-    Keyed by `id` (graphrag's `model_provider/model`) rather than held as a single
-    `latest` pointer, because graphrag_llm caches these as singletons keyed on hashed
-    init args *including* that `id` (`graphrag_common/factory/factory.py`'s `cache_key`).
-    A different model therefore produces a SECOND store, not a second write into the
-    first, and `metered_usage` sums over every instance.
+    graphrag writes its usage only from an `atexit` hook, after the interpreter is done,
+    but `get_metrics()` holds the same numbers live. Keyed by `id` (`model_provider/model`)
+    because graphrag_llm caches stores as singletons keyed on init args including that id:
+    a different model gets its own store, and `metered_usage` sums them all.
     """
 
     instances: "dict[str, ReadableMetricsStore]" = {}
@@ -221,33 +192,21 @@ class ReadableMetricsStore(MemoryMetricsStore):
 
 
 def register_groundly_metrics_store() -> None:
-    """Register `ReadableMetricsStore` under the `groundly` store name. Idempotent:
-    the factory's register() is a plain dict assignment (graphrag_common/factory.py),
-    mirroring register_bge_m3_embedding."""
+    """Register `ReadableMetricsStore` under the `groundly` store name. Idempotent: the
+    factory's register() is a plain dict assignment."""
     register_metrics_store(GROUNDLY_METRICS_STORE_TYPE, ReadableMetricsStore, "singleton")
 
 
 def _retry_config() -> RetryConfig:
-    """Always on. graphrag fires extraction concurrently across the whole corpus and
-    swallows a 429 per text unit exactly like any other failure, so without a retry a
-    rate-limited provider silently drops chunks. Jitter matters as much as the backoff:
-    without it every concurrent worker retries in lockstep and re-creates the burst.
+    """Always on: graphrag fires extraction concurrently and swallows a 429 per text unit,
+    so without retries a rate-limited provider silently drops chunks. Jitter stops workers
+    retrying in lockstep; base_delay must exceed 1.0 for exponential backoff.
 
-    base_delay must be strictly > 1.0 for exponential backoff (graphrag validates it);
-    2.0 gives 2/4/8/16/32s, capped at max_delay.
-
-    `exceptions_to_skip` drops BadRequestError from graphrag_llm's default never-retry
-    list. A local runtime reports *capacity* exhaustion as a 400 — llama.cpp/LM Studio
-    answer "Context size has been exceeded" when concurrent slots overrun the shared KV
-    cache — and litellm maps that to the same BadRequestError as a malformed request, which
-    a backed-off retry recovers once the other slots drain. `concurrent_requests()` below is
-    the actual fix; this is the backstop for runtimes it cannot detect.
-
-    The cost when the 400 *is* structural: 2/4/8/16/32s before the failure surfaces.
-    ingestion/graph.py's probe screens that case up front through llm/chat.py's complete()
-    (litellm directly, not graphrag's retrier). Importing graphrag_llm's private default is
-    deliberate: a pin bump that renames it raises ImportError here rather than silently
-    reinstating the old behavior."""
+    BadRequestError is dropped from graphrag_llm's never-retry list: a local runtime
+    reports KV-cache exhaustion as a 400 that a backed-off retry recovers from.
+    `concurrent_requests()` is the fix and this the backstop; a structural 400 costs ~1 min
+    of retries, and the build's probe screens that case first. The private default is
+    imported on purpose, so a pin bump that renames it fails loudly."""
     return RetryConfig(
         max_retries=5,
         base_delay=2.0,
@@ -257,9 +216,7 @@ def _retry_config() -> RetryConfig:
     )
 
 
-# graphrag has ONE global concurrency setting covering every stage (extract_graph,
-# summarize_descriptions, create_community_reports all pass `num_threads=
-# config.concurrent_requests`), and leaves it at 25.
+# graphrag has one concurrency setting for every stage, defaulting to 25.
 _LOCAL_CONCURRENT_REQUESTS = 1
 
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
@@ -271,22 +228,14 @@ def _is_loopback(cfg: ProviderConfig) -> bool:
 
 
 def concurrent_requests(*cfgs: ProviderConfig) -> int:
-    """How many calls a graph build may keep in flight. 1 against a local runtime,
-    graphrag's own default against everything else.
+    """How many calls a graph build keeps in flight: 1 if any given provider is loopback,
+    else graphrag's default.
 
-    prompt_budgets() below sizes every stage to fit `graph.context_window` *once*, but a
-    llama.cpp-family server (LM Studio loads with `n_slots = 4, kv_unified = 'true'`) serves
-    several concurrent requests from ONE cache of that size. The budget is per *request*,
-    the runtime's limit is per *cache*, and `n_slots` is a load-time setting no
-    OpenAI-compatible endpoint reports — so serialize. It costs little: the slots share one
-    GPU either way.
-
-    Loopback is the signal because a shared KV cache is what "the model runs on this
-    machine" means. Known gap: a local runtime reached over the LAN looks remote and still
-    needs its slots reduced by hand (docs/guides/graphrag-provider.md says so).
-
-    Variadic and pessimistic ("any local wins") because graphrag has one global
-    concurrency setting for the whole build."""
+    prompt_budgets() sizes each request to `graph.context_window`, but a llama.cpp-family
+    server serves concurrent requests from one shared KV cache of that size, and no
+    OpenAI-compatible endpoint reports its slot count, so a local build serializes (cheap:
+    the slots share one GPU anyway). A local runtime reached over the LAN looks remote and
+    needs its slots reduced by hand (docs/guides/graphrag-provider.md)."""
     return (
         _LOCAL_CONCURRENT_REQUESTS
         if any(_is_loopback(cfg) for cfg in cfgs)
@@ -295,9 +244,8 @@ def concurrent_requests(*cfgs: ProviderConfig) -> int:
 
 
 def _rate_limit_config(cfg: ProviderConfig) -> RateLimitConfig | None:
-    """Only when the provider's limits have been declared in config.toml. There is no
-    portable way to discover them, and guessing would throttle a local runtime that
-    has no limits at all — so unset means unthrottled, the previous behavior."""
+    """Only when the provider's limits are declared in config.toml: they cannot be
+    discovered, and guessing would throttle a local runtime that has none."""
     if cfg.requests_per_minute is None and cfg.tokens_per_minute is None:
         return None
     return RateLimitConfig(
@@ -319,29 +267,18 @@ class PromptBudgets:
 
 
 def prompt_budgets(context_window: int, gleanings: int = 0) -> PromptBudgets:
-    """Scale graphrag's stage budgets to the model actually configured.
+    """Scale graphrag's stage budgets to the configured context window.
 
-    graphrag's defaults assume a large-context cloud model: community reports alone
-    ask for 8000 tokens in + 2000 out, and entity extraction sends a ~1620-token
-    few-shot preamble plus the chunk, then replays the whole conversation for a
-    gleaning round. On a 4096-token local model every one of those 400s with
-    "Context size has been exceeded", and graphrag swallows the failure per text
-    unit — an empty graph reported as a successful build.
-
-    Each budget is `min(graphrag's default, a share of the window)`, so this only
-    ever scales *down*: a large context_window reproduces stock graphrag behavior.
-
-    These are *per-request* budgets, and that is only half the constraint. A llama.cpp
-    -family runtime serves several requests from one shared KV cache, so what has to fit
-    is `in-flight calls x prompt`, not one prompt — see concurrent_requests() above, which
-    is what keeps the divisor at 1 locally so these numbers mean what they say.
+    graphrag's defaults assume a large cloud context; on a small local model every call
+    overflows, and graphrag swallows each failure, reporting an empty graph as a success.
+    Each budget is `min(graphrag's default, a share of the window)`, so this only scales
+    down. The budgets are per request; concurrent_requests() keeps a local runtime to one
+    request so they hold against its shared KV cache.
     """
     return PromptBudgets(
-        # `gleanings` is the student's choice (`graph.gleanings`); the window only ever
-        # *clamps* it. A gleaning round re-sends prompt + chunk + the model's whole first
-        # answer, so it roughly doubles peak context — below 16384 that does not fit
-        # beside the stage budgets carved out above, and asking for it anyway would fail
-        # every call rather than extract more.
+        # The student's `graph.gleanings`, clamped by the window: a gleaning round re-sends
+        # prompt, chunk and first answer, roughly doubling peak context, which does not fit
+        # beside the stage budgets below 16384.
         max_gleanings=gleanings if context_window >= 16384 else 0,
         summarize_max_input_tokens=min(4000, context_window // 2),
         summarize_max_length=min(500, context_window // 4),
@@ -351,14 +288,9 @@ def prompt_budgets(context_window: int, gleanings: int = 0) -> PromptBudgets:
 
 
 class Bgem3GraphEmbedding(LLMEmbedding):
-    """graphrag's entity-description embedding store, delegated to the already-loaded
-    BgeM3Embedder — zero marginal cost, zero new provider config (graph build stays
-    cheap beyond the one extraction cost). Dense vectors only: graphrag's embedding
-    store only needs similarity, not our sparse channel.
-
-    `embedder` mirrors VectorRetriever's pattern (retrieval/vector.py): None in
-    production (lazily resolves to the process-wide `shared_embedder()` singleton on
-    first use, same resident model VectorRetriever uses), or a stub injected by tests.
+    """graphrag's entity-description embedder, delegated to the process-wide bge-m3: no new
+    provider config and no marginal cost. Dense vectors only. `embedder` is None in
+    production (lazily `shared_embedder()`) or a stub injected by tests.
     """
 
     def __init__(
@@ -413,28 +345,16 @@ class Bgem3GraphEmbedding(LLMEmbedding):
 
 
 def allow_nonstandard_service_tier() -> None:
-    """Widen `graphrag_llm.LLMCompletionResponse.service_tier` from OpenAI's literal
-    set to any string.
+    """Widen `graphrag_llm.LLMCompletionResponse.service_tier` from OpenAI's literal set
+    to any string.
 
-    graphrag_llm builds its response as `LLMCompletionResponse(**response.model_dump())`
-    (lite_llm_completion.py) and types `service_tier` as
-    `Literal['auto','default','flex','scale','priority']` — OpenAI's exact enum. Groq
-    returns `'on_demand'`, so pydantic rejects **every** response: the HTTP calls
-    succeed, tokens are spent, and the results are discarded at parse time.
-
-    Not a Groq special case — the field is provider-reported metadata that graphrag
-    never reads, and any OpenAI-compatible provider may put its own value there
-    (.claude/rules/architecture.md: never hardcode a provider). The construction site
-    is a closure inside a factory function, so there is no subclass or
-    `register_completion` seam to override; widening the field is the available fix.
-
-    Idempotent, and safe for OpenAI itself: `'default'` and `None` still validate.
-
-    The guard is a module flag, not a comparison against the annotation: `str | None`
-    builds a fresh `types.UnionType` on every evaluation, so `field.annotation is not
-    (str | None)` is *always* true and would re-run `model_rebuild(force=True)` on every
-    call, on a shared third-party model class. pydantic makes no thread-safety promise
-    for that.
+    graphrag_llm validates every response against OpenAI's exact enum, so a provider that
+    reports its own tier (Groq's 'on_demand') has every paid-for response discarded at
+    parse time. graphrag never reads the field, and the model is built in a closure with no
+    override seam, so widening it is the available fix. Idempotent; OpenAI's values still
+    validate. The guard is a module flag because `str | None` builds a new UnionType each
+    time, so comparing annotations would re-run `model_rebuild(force=True)` on a shared
+    third-party class every call.
     """
     global _service_tier_widened
 
@@ -449,7 +369,6 @@ def allow_nonstandard_service_tier() -> None:
 
 
 def register_bge_m3_embedding() -> None:
-    """Register Bgem3GraphEmbedding under the `bge_m3` strategy name. Idempotent:
-    the factory's register() is a plain dict assignment (graphrag_common/factory.py),
-    so calling this more than once just re-assigns the same entry."""
+    """Register Bgem3GraphEmbedding under the `bge_m3` strategy name. Idempotent: the
+    factory's register() is a plain dict assignment."""
     register_embedding(BGE_M3_EMBEDDING_TYPE, Bgem3GraphEmbedding)

@@ -1,13 +1,7 @@
-"""store.db access — the file that travels on export. Schema versioned via PRAGMA
-user_version — no migration framework; refuse to open a newer schema than this tool
-understands.
-
-Every connection gets WAL + busy_timeout: one-shot CLI runs and host-spawned MCP
-processes share the same files (.claude/rules/architecture.md).
-
-progress.db is not served from here — it lives in core/progress.py and is never
-exported. Keep its accessors out of this module: this is the file that ships
-(.claude/rules/grounding-and-privacy.md — the privacy boundary is a file).
+"""store.db access: the file that travels on export. Schema versioned via PRAGMA
+user_version with no migration framework; a newer schema than this tool knows is refused.
+Every connection gets WAL + busy_timeout, since CLI runs and host-spawned MCP processes
+share the file. Keep progress.db accessors out of this module: that file never ships.
 """
 
 import json
@@ -92,10 +86,8 @@ CREATE TABLE IF NOT EXISTS question_citations (
 );
 """
 
-# Additive-only migrations, applied in order by connect() when an older store.db is
-# opened — no migration framework, just "run this DDL, bump user_version" per step
-# (.claude/rules/architecture.md: schema via PRAGMA user_version, no migration
-# framework). Keyed by the version each migration upgrades *to*.
+# Additive DDL that connect() applies in order to an older store.db, bumping user_version
+# after each step. Keyed by the version each migration upgrades to.
 _MIGRATIONS: dict[int, str] = {2: _SCHEMA_V2}
 
 
@@ -167,10 +159,8 @@ class SubjectStore:
 
     @contextmanager
     def _open(self) -> Iterator[sqlite3.Connection]:
-        """Open-and-always-close, the shape every accessor below needs. Distinct from
-        the `with conn:` blocks nested inside the writers — that is sqlite3's *commit*
-        context (commit on success, rollback on exception) and does not close anything.
-        Both are needed; a writer uses them together."""
+        """Open and always close. A writer's nested `with conn:` is sqlite3's commit context,
+        which commits or rolls back but never closes, so writers use both."""
         conn = self.connect()
         try:
             yield conn

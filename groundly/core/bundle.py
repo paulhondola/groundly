@@ -1,8 +1,7 @@
-"""Export/import zip bundles (UC-30, docs/architecture/data-model.md Export/import).
+"""Export/import zip bundles (UC-30, docs/architecture/data-model.md).
 
-Export zips a fixed allowlist — manifest.json, store.db, materials/**, graph/** — never
-a directory walk. The student's private per-subject study-state file is structurally
-unreachable from this module: it is never opened, referenced, or named here.
+Export zips a fixed allowlist (manifest.json, store.db, materials/**, graph/**), never a
+directory walk. The private study-state file is never opened, referenced or named here.
 """
 
 import stat
@@ -49,16 +48,14 @@ def export_subject(
         (subj.store_db_path, "store.db"),
     ]
     if include_materials:
-        # Ship only files store.db knows are indexed — a materials/ file with no row
-        # (e.g. copied just before a transient embed failure, decision 19) is an
-        # un-indexed original and must not leak into the bundle (security.md §5).
+        # Ship only files store.db records as indexed: a materials/ file with no row (copied
+        # before a failed embed) is an un-indexed original and must not leak (security.md §5).
         for f in sorted(subj.materials_dir.rglob("*")):
             if f.is_file() and f.name in indexed:
                 entries.append((f, f"materials/{f.relative_to(subj.materials_dir).as_posix()}"))
     graph_dir = subj.root_dir / "graph"
     if graph_dir.exists():
-        # cache/ (graphrag's own incremental-rebuild cache) and logs/ (operational
-        # debug output) are never needed for a portable knowledge base; parquet
+        # cache/ (graphrag's LLM response cache) and logs/ are local build state; parquet
         # artifacts and lancedb/ ship.
         _excluded_graph_prefixes = ("cache/", "logs/")
         for f in sorted(graph_dir.rglob("*")):

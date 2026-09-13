@@ -49,12 +49,9 @@ def subject_free_home(monkeypatch, tmp_path):
 
 
 def test_importing_server_never_pulls_in_heavy_ml_deps():
-    """A subprocess rather than sys.modules surgery, for the reason spelled out below and
-    one of its own: popping `torch` does not unload torch's C++ extension, it only makes
-    the next real import re-run `torch/__init__.py`, which then dies re-registering a
-    process-global TORCH_LIBRARY namespace. The in-process version of this test poisoned
-    every later test that loads bge-m3 for real — invisibly, since whether it ran before
-    them depended on file ordering."""
+    """A subprocess rather than sys.modules surgery: popping `torch` does not unload its C++
+    extension, and the next real import dies re-registering a process-global
+    TORCH_LIBRARY namespace, breaking any later test that loads bge-m3 for real."""
     probe = (
         "import sys, groundly.mcp.server;"
         "print(','.join(m for m in ('sentence_transformers', 'torch', 'FlagEmbedding')"
@@ -67,14 +64,12 @@ def test_importing_server_never_pulls_in_heavy_ml_deps():
 
 
 def test_importing_server_never_pulls_in_graphrag():
-    """The graph stack is the other half of spawn cost, and the easy one to reintroduce
-    by accident: a heavy import hoisted to module scope to "tidy" some helper would look
-    harmless and would put the whole graph stack on every host handshake.
+    """The graph stack is the other half of spawn cost, and easy to reintroduce by hoisting
+    a heavy import to module scope.
 
-    A subprocess rather than sys.modules surgery: popping `graphrag` mid-session while
-    its submodules stay loaded leaves a half-initialized package, and
-    `allow_nonstandard_service_tier`'s idempotence flag would then claim a patch that a
-    re-imported `graphrag_llm` no longer carries.
+    A subprocess rather than sys.modules surgery: popping `graphrag` mid-session leaves a
+    half-initialized package, and `allow_nonstandard_service_tier`'s flag would then claim a
+    patch that a re-imported `graphrag_llm` no longer carries.
     """
     probe = (
         "import sys, groundly.mcp.server;"
@@ -88,10 +83,8 @@ def test_importing_server_never_pulls_in_graphrag():
 
 # --- tool surface as UX -------------------------------------------------------------
 # `.claude/rules/conventions.md`: tool descriptions are UX, written for the host model.
-# Nothing asserted that until decision 30 measured what the old wording cost — a host told
-# nothing about retrieval called `search` on 8 of 48 apd questions and 0 of 17 factoids.
-# These two pin the trigger that fixes it, the same way test_grounding.py pins the eval's
-# condition prompts: an edit may reword them, but not quietly delete them.
+# These two pin the retrieval trigger (decision 31; basis in docs/thesis/experiments.md):
+# an edit may reword it, but not quietly delete it.
 
 
 async def test_handshake_tells_the_host_to_retrieve_before_answering():

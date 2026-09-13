@@ -74,10 +74,9 @@ def test_completion_model_config_local_provider_gets_placeholder_key(home):
 
 def test_completion_model_config_nests_reasoning_effort_under_extra_body(home):
     """litellm's drop_params is False, so a flat call_args={"reasoning_effort": ...}
-    makes litellm raise UnsupportedParamsError on *every* call instead of degrading —
-    measured: nesting the same value under extra_body is what actually reaches the
-    provider (93 -> 2 completion tokens on a local reasoning model). Assert the nesting
-    specifically, not just that the value ends up somewhere in call_args."""
+    makes litellm raise UnsupportedParamsError on *every* call; only the value nested under
+    extra_body reaches the provider. Assert the nesting specifically, not just that the
+    value ends up somewhere in call_args."""
     (home / "config.toml").write_text(
         "[providers.extraction]\n"
         'base_url = "http://localhost:1234/v1"\n'
@@ -90,9 +89,8 @@ def test_completion_model_config_nests_reasoning_effort_under_extra_body(home):
 
 
 def test_completion_model_config_omits_call_args_when_reasoning_effort_unset(home):
-    """The default path: no reasoning_effort configured must reproduce today's
-    ModelConfig exactly — call_args left at its own `{}` default, not an explicitly-set
-    empty dict standing in for one."""
+    """No reasoning_effort configured leaves call_args at its own `{}` default, not an
+    explicitly set empty dict standing in for one."""
     (home / "config.toml").write_text(
         "[providers.extraction]\n"
         'base_url = "http://localhost:1234/v1"\n'
@@ -160,9 +158,8 @@ def test_register_bge_m3_embedding_is_idempotent():
 
 @pytest.mark.parametrize("window", [4096, 8192, 16384, 32768, 131072])
 def test_prompt_budgets_always_fit_the_window(window):
-    """Every stage's input + output reserve has to fit the model's actual context —
-    graphrag's own defaults want ~10k for community reports alone, which is what
-    made every extraction call 400 on a 4k local model."""
+    """Every stage's input + output reserve has to fit the model's actual context;
+    graphrag's own defaults want ~10k for community reports alone."""
     from groundly.llm.graphrag_adapter import prompt_budgets
 
     b = prompt_budgets(window)
@@ -183,10 +180,8 @@ def test_prompt_budgets_never_exceed_graphrag_defaults(window):
 
 
 def test_gleanings_default_to_off_at_every_window():
-    """The window must not *enable* gleaning on its own. It used to: `1 if
-    context_window >= 16384 else 0` meant raising the window for capacity reasons
-    silently doubled extraction calls and changed the shape of the graph, with nothing
-    recording that the two builds differed in anything but the model."""
+    """The window must not *enable* gleaning on its own: raising it for capacity reasons
+    would silently double extraction calls and change the shape of the graph."""
     from groundly.llm.graphrag_adapter import prompt_budgets
 
     for window in (4096, 8192, 12288, 16384, 131072):
@@ -212,8 +207,8 @@ def test_the_window_clamps_gleanings_but_never_grants_them():
 def test_allow_nonstandard_service_tier_accepts_groqs_value():
     """graphrag_llm types service_tier with OpenAI's exact literal set and builds its
     response as LLMCompletionResponse(**response.model_dump()). Groq returns
-    'on_demand', so pydantic rejected *every* response — HTTP 200, tokens spent,
-    result discarded. Observed as 258 requests / 258 failures / no entities."""
+    'on_demand', so pydantic would reject *every* response: HTTP 200, tokens spent,
+    result discarded."""
     from graphrag_llm.types.types import LLMCompletionResponse
 
     from groundly.llm.graphrag_adapter import allow_nonstandard_service_tier
@@ -228,7 +223,7 @@ def test_allow_nonstandard_service_tier_accepts_groqs_value():
 
 
 def test_allow_nonstandard_service_tier_is_idempotent():
-    """Called on every build and every graph query, so it must be cheap to repeat."""
+    """Called on every build, so it must be cheap to repeat."""
     from graphrag_llm.types.types import LLMCompletionResponse
 
     from groundly.llm.graphrag_adapter import allow_nonstandard_service_tier
@@ -251,9 +246,8 @@ def _write_extraction(home, extra: str = "") -> None:
 
 def test_completion_model_config_always_retries_with_jittered_backoff(home):
     """graphrag swallows a 429 per text unit like any other failure, so without a retry
-    a rate-limited provider silently drops chunks (283 of 304 against Groq's free tier).
-    Jitter matters as much as backoff: without it every concurrent worker retries in
-    lockstep and rebuilds the burst that caused the 429."""
+    a rate-limited provider silently drops chunks. Jitter matters as much as backoff:
+    without it every concurrent worker retries in lockstep and rebuilds the burst."""
     _write_extraction(home)
     retry = completion_model_config().retry
 
@@ -264,8 +258,7 @@ def test_completion_model_config_always_retries_with_jittered_backoff(home):
 
 
 def test_completion_model_config_leaves_rate_limit_unset_by_default(home):
-    """Unset means unthrottled — correct for a local runtime, which has no limits, and
-    preserves the previous behavior for anyone who hasn't declared their tier."""
+    """Unset means unthrottled, which is correct for a local runtime with no limits."""
     _write_extraction(home)
     assert completion_model_config().rate_limit is None
 
@@ -283,9 +276,8 @@ def test_completion_model_config_builds_a_per_minute_rate_limit(home):
 def test_retry_config_retries_a_capacity_400(home):
     """A local runtime reports capacity exhaustion as a 400 ("Context size has been
     exceeded" when concurrent slots overrun the shared KV cache), and litellm maps it to
-    the same BadRequestError as a malformed request — which graphrag never retries.
-    Measured 2026-08-01: 8 report calls failed, `"retries": 0`, and the wave that ran
-    with fewer in flight succeeded unaided."""
+    the same BadRequestError as a malformed request, which graphrag never retries by
+    default."""
     _write_extraction(home)
     retry = completion_model_config().retry
 
@@ -322,8 +314,7 @@ def test_retry_config_reaches_the_retrier_that_graphrag_actually_builds(home):
 )
 def test_concurrent_requests_serializes_a_local_runtime(base_url):
     """graphrag's default of 25 assumes each call owns the context window. A llama.cpp
-    -family server serves several from ONE shared KV cache — measured 2026-08-01, 4 slots
-    x ~2,300-token report prompts against an 8192 cache, which llama.cpp answers with
+    -family server serves several from ONE shared KV cache and, once it overruns, answers
     `decode: Context size has been exceeded`."""
     assert concurrent_requests(ProviderConfig(base_url=base_url, model="m")) == 1
 
@@ -364,10 +355,9 @@ def test_rate_limit_honours_either_limit_alone(home):
 
 
 def test_allow_nonstandard_service_tier_rebuilds_the_model_only_once(monkeypatch):
-    """Called on every build *and every graph query*. `str | None` builds a fresh
-    types.UnionType each evaluation, so a guard of `field.annotation is not (str | None)`
-    is always true and re-ran model_rebuild(force=True) on a shared third-party class
-    from concurrent query handlers — pydantic promises nothing about that."""
+    """`str | None` builds a fresh types.UnionType each evaluation, so a guard of
+    `field.annotation is not (str | None)` would always be true and re-run
+    model_rebuild(force=True) on a shared third-party class on every call."""
     from graphrag_llm.types.types import LLMCompletionResponse
 
     from groundly.llm import graphrag_adapter
@@ -414,9 +404,8 @@ def test_bundled_prompt_has_no_delimiter_placeholders():
 
 
 def test_bundled_prompt_stays_within_its_token_budget():
-    """The whole point of decision 22: this preamble is sent once per chunk, so its size
-    *is* the build's bill. 700 tokens keeps a 1194-chunk apd build near 1.0M (from
-    2.12M). Growing the worked example past this silently re-inflates every build."""
+    """Decision 22: this preamble is sent once per chunk, so its size is most of the
+    build's bill. Growing the worked example past this silently re-inflates every build."""
     from groundly.llm.graphrag_adapter import _bundled_prompt_text
 
     assert len(_bundled_prompt_text()) // 4 <= 700
@@ -427,11 +416,9 @@ def test_bundled_prompt_reuses_graphrags_instruction_block_verbatim():
     format the downstream parser depends on, so it is copied verbatim — this fails
     if a graphrag upgrade changes it and the bundled prompt is not re-derived.
 
-    Compared modulo *trailing* whitespace: graphrag's block has five lines that are a lone
-    space and no final newline, and this repo strips both (73023cd did exactly that in
-    passing, while renaming something else — `git grep -l ' $'` finds no other tracked
-    file). Trailing whitespace cannot reach the delimited record format, so tolerating it
-    loses no detection and stops the guard firing on ordinary repo hygiene."""
+    Compared modulo *trailing* whitespace: graphrag's block has lines that are a lone space
+    and no final newline, and this repo strips both. Trailing whitespace cannot reach the
+    delimited record format, so tolerating it loses no detection."""
     from graphrag.prompts.index.extract_graph import GRAPH_EXTRACTION_PROMPT
 
     from groundly.llm.graphrag_adapter import _bundled_prompt_text
@@ -448,8 +435,8 @@ def test_bundled_prompt_reuses_graphrags_instruction_block_verbatim():
 
 
 def test_default_entity_types_target_course_material():
-    """graphrag's defaults are organization/person/geo/event, which produced 75
-    ORGANIZATION and 34 EVENT entities on a parallel-algorithms corpus."""
+    """graphrag's defaults are organization/person/geo/event, news-wire types that fill a
+    course graph with ORGANIZATION and EVENT noise."""
     from groundly.llm.graphrag_adapter import extraction_entity_types
 
     types = extraction_entity_types()
@@ -524,9 +511,8 @@ def test_fingerprint_changes_with_prompt_and_with_types():
 
 def test_fingerprint_changes_with_gleanings():
     """A gleaning round is a second extraction call per chunk, so two builds differing
-    only in it are genuinely different builds — apd produced 2,685 entities at 0 and
-    6,184 at 1. Folding it into the fingerprint is what makes `graph_is_stale` say so
-    and offer a rebuild, without adding a manifest field."""
+    only in it are genuinely different builds. Folding it into the fingerprint makes
+    `graph_is_stale` offer a rebuild, without adding a manifest field."""
     from groundly.llm.graphrag_adapter import extraction_fingerprint
 
     types = ["concept", "algorithm"]

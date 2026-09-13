@@ -174,18 +174,15 @@ def test_complete_unreachable_names_cause(monkeypatch, home):
 
 
 def test_temperature_is_pinned_to_zero_by_default(monkeypatch, home):
-    """Unset temperature means the provider's default (~1.0). Measured on gpt-oss-120b:
-    one unchanged router question returned three different labels across 10 calls, and
-    whole-gold-set router accuracy swung 39.6% -> 58.3% between two identical runs. Any
-    published number that passes through a model is a draw from a distribution until this
-    is pinned, so the default is 0.0 and sampling must be opted into per call class."""
+    """Unset temperature would mean the provider's default (~1.0), making every call a draw
+    from a distribution, so the default is 0.0 and sampling is opted into per call class."""
     capture = _stub_completion(monkeypatch, capture={})
     complete("extraction", [{"role": "user", "content": "hi"}])
     assert capture["temperature"] == 0.0
 
 
 def test_temperature_can_be_opted_out_per_call_class(monkeypatch, home):
-    """Deck generation may legitimately want variety; a classifier never does."""
+    """A temperature set in config.toml overrides the 0.0 default."""
     (home / "config.toml").write_text(
         '[providers.extraction]\nbase_url = "http://localhost:1234/v1"\nmodel = "qwen2.5-7b"\n'
         'api_key = "sk-local"\ntemperature = 0.8\n'

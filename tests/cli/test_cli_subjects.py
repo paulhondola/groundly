@@ -273,11 +273,9 @@ def test_bad_usage_is_usage_error(args):
 
 
 # --- index --graph / --yes -----------------------------------------------------------
-# `pipeline.index_paths` is stubbed (as above) — these tests only exercise the graph
-# build trigger/confirm/skip logic that runs after it, so `build_graph` itself is also
-# stubbed (real graphrag never runs in tests). The fake mimics build_graph's real
-# side effects (create graph/, stamp manifest.graphrag) closely enough that the
-# staleness/no-rebuild logic on a second `index` run is exercised for real.
+# `pipeline.index_paths` and `build_graph` are both stubbed. The fake mimics build_graph's
+# side effects (graph/, manifest.graphrag stamped), so the staleness logic on a second
+# `index` run is exercised for real.
 
 
 def _seed_material(sdir, filename, sha256, text="some chunk text"):
@@ -395,10 +393,8 @@ def _invoke_graph_build(monkeypatch, home, tmp_path, **stub_kwargs):
 def test_index_graph_cost_estimate_is_a_range_with_its_assumptions_named(
     monkeypatch, home, tmp_path
 ):
-    """conventions.md: print a cost estimate before spending the student's tokens. The
-    previous line was a bare dollar figure that priced *input tokens for the extraction
-    pass only* and said so nowhere, presenting a build as costing a fraction of what it
-    did. Every part of this is load-bearing: the range, the exclusion, the source."""
+    """conventions.md: print a cost estimate before spending the student's tokens. Every
+    part is load-bearing: the range, the extraction-only exclusion, the price source."""
     _write_extraction_provider(home)
     result = _invoke_graph_build(monkeypatch, home, tmp_path)
 
@@ -430,9 +426,8 @@ def test_index_graph_cost_estimate_names_the_litellm_price_map_and_its_version(
 
 
 def test_index_graph_warns_about_a_moving_alias(monkeypatch, home, tmp_path):
-    """Drift is certain for an unpinned alias, not merely possible: litellm prices
-    mistral-small-latest at $0.06/$0.18 per Mtok while the alias resolves today to
-    Mistral Small 4 at $0.15/$0.60. Warn, never block — confirmation still gates it."""
+    """An unpinned alias can resolve to a differently priced model than litellm's map
+    records. Warn, never block; confirmation still gates it."""
     _write_extraction_provider(home, "mistral-small-latest")
     result = _invoke_graph_build(monkeypatch, home, tmp_path)
 
@@ -476,9 +471,9 @@ def test_index_graph_omits_metered_spend_when_unavailable(monkeypatch, home, tmp
 
 
 def _leave_failed_build_artifacts(sdir) -> None:
-    """The state a refused or Ctrl-C'd build leaves behind: `graph/` on disk (decision 21
-    keeps cache/ and logs/ so a retry doesn't re-buy the LLM responses) and
-    `manifest.graphrag` reset, i.e. no recorded corpus_hash."""
+    """The state a refused or Ctrl-C'd build leaves behind: `graph/` on disk (cache/ and
+    logs/ kept so a retry doesn't re-buy the LLM responses) and `manifest.graphrag` reset,
+    i.e. no recorded corpus_hash."""
     (sdir / "graph" / "cache").mkdir(parents=True)
     (sdir / "graph" / "logs").mkdir(parents=True)
 
@@ -487,9 +482,8 @@ def test_index_after_a_failed_build_does_not_offer_a_graph_without_the_flag(
     monkeypatch, home, tmp_path
 ):
     """A first build is opt-in via --graph. A failed one leaves `graph/` on disk with no
-    recorded corpus_hash, and keying off the *directory* read that as a stale graph — so
-    every later plain `groundly index` prompted to "rebuild" a graph that never existed.
-    The rest of the tree already gates on the manifest (mcp/server.py's graph_is_built())."""
+    recorded corpus_hash, which a plain `groundly index` must not read as a stale graph
+    and prompt to "rebuild" one that never existed."""
     runner.invoke(app, ["init", "PDSS"])
     sdir = subject_dir("PDSS")
     _seed_material(sdir, "a.pdf", "a" * 64)
@@ -527,8 +521,8 @@ def test_index_after_a_failed_build_offers_a_first_build_with_the_flag(monkeypat
 
 
 def test_remove_only_calls_the_graph_stale_when_one_was_recorded(monkeypatch, home, tmp_path):
-    """Same predicate, same wrong message: `graph/` left by a failed build made `remove`
-    promise a rebuild that no later index run would trigger."""
+    """Same predicate: `graph/` left by a failed build must not make `remove` promise a
+    rebuild that no later index run would trigger."""
     runner.invoke(app, ["init", "PDSS"])
     sdir = subject_dir("PDSS")
     _seed_material(sdir, "a.pdf", "a" * 64)

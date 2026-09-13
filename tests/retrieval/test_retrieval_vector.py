@@ -130,8 +130,7 @@ def test_vector_retriever_respects_context_k(retrievable_subject):
 
 
 def test_search_returns_ranked_nodes_and_writes_no_trace(retrievable_subject):
-    """search is read-only: every query the student asks used to land in progress.db,
-    and nothing reads those rows any more."""
+    """search is read-only: a query writes nothing to progress.db."""
     from groundly.core.progress import connect_progress
 
     hits = search(retrievable_subject, "deadlock", embedder=_near_embedder(), rerank=False)
@@ -146,9 +145,8 @@ def test_search_returns_ranked_nodes_and_writes_no_trace(retrievable_subject):
 
 def test_rrf_breaks_ties_by_cross_ranking_agreement():
     """Equal RRF scores must not be resolved by argument order. Both list A's rank-0 and
-    list B's rank-0 score 1/61; before the vote tie-break, stable `sorted` handed rank 1
-    to whichever list came first, which is how a weak graph ordering owned position 1 for
-    every hybrid-local query. Id 7 is found by both channels and must win."""
+    list B's rank-0 score 1/61, and a stable `sorted` would hand rank 1 to whichever list
+    came first. Id 7 is found by both channels and must win."""
     fused = rrf([[1, 7], [7, 2]], k=60)
     ids = [doc_id for doc_id, _ in fused]
     assert ids[0] == 7  # 1/61 + 1/62, strictly higher than either singleton

@@ -10,12 +10,9 @@ from groundly.llm.graphrag_adapter import (
 
 
 def _preamble_tokens() -> int:
-    """The extraction preamble, sent with every single chunk. Measured off the prompt
-    that will actually be used, so it tracks a custom prompt instead of going stale.
-
-    Falls back to the bundled prompt when an override is unreadable: this feeds
-    `estimate_cost`, which is an estimate and must degrade rather than fail. The named
-    failure is `build_graph`'s job, and it still fires before any LLM call.
+    """The size of the extraction preamble sent with every chunk, from the prompt the build
+    will use. Falls back to the bundled prompt when an override is unreadable: an estimate
+    must degrade, and `build_graph` still names the failure before any LLM call.
     """
     try:
         with resolve_extraction_prompt() as (_path, text):
@@ -35,22 +32,13 @@ class MeteredUsage:
 
 
 def metered_usage() -> MeteredUsage | None:
-    """The usage graphrag accumulated since `reset_metered_usage()`, summed across every
-    metered completion model and priced.
+    """Usage graphrag accumulated since `reset_metered_usage()`, summed over every model's
+    metrics store (see `ReadableMetricsStore`) and priced.
 
-    Summed rather than read from one store: graphrag caches metrics stores as singletons
-    keyed on hashed init args *including* the model id (see `ReadableMetricsStore`), so
-    each model gets its own store.
-
-    **Cache hits are counted in the token totals but were never paid for**, and a warm
-    cache is the normal path: ingestion/graph.py preserves `cache/` across a failed rebuild
-    so the retry keeps the responses already bought. Tokens stay as metered (they were
-    genuinely processed); the *cost* is scaled to the responses that actually reached the
-    provider — computed PER STORE, because the billed fraction is a property of that
-    store's own cache hits.
-
-    Returns None on anything unexpected. This is a number printed after a successful
-    build — it must never be the reason one fails.
+    **Cache hits count in the token totals but were never billed**, and a retry against the
+    preserved `cache/` is the normal path, so each store's cost is scaled by its own billed
+    fraction. Returns None on anything unexpected: a printed number must never fail a
+    finished build.
     """
     stores = list(ReadableMetricsStore.instances.values())
     if not stores:
@@ -65,11 +53,9 @@ def metered_usage() -> MeteredUsage | None:
             store_prompt = int(metrics.get("prompt_tokens", 0))
             store_completion = int(metrics.get("completion_tokens", 0))
             if store_prompt == 0 and store_completion == 0:
-                # Two different things reach zero tokens, and only one is harmless.
-                # Registered but never *called* contributes nothing and can be skipped.
-                # Called and metered nothing — a provider that omitted `usage` — is
-                # missing information, not absent spend, and an absence must never read
-                # as a fact: the total goes unpriced.
+                # A store never called is skipped. One called that metered nothing (a
+                # provider omitting `usage`) is missing information, so the total goes
+                # unpriced rather than reading as $0.
                 if int(metrics.get("attempted_request_count", 0)) > 0:
                     priced = False
                 continue
@@ -103,24 +89,17 @@ def metered_usage() -> MeteredUsage | None:
 
 
 def reset_metered_usage() -> None:
-    """Zero every store a previous build left behind, so `metered_usage()` can only ever
-    return this build's numbers. graphrag registers stores as singletons, so a repeat
-    build in the same process reuses the same store(s) and would otherwise keep
-    accumulating into their totals. The handles are deliberately *not* dropped — those
-    reused stores are the ones the repeat build writes into.
-
-    That reuse is keyed on *hashed init args* (graphrag_common/factory.create), so change
-    `extraction.model` or `base_url` between two in-process builds and graphrag constructs
-    a *new* store; the old one is cleared here and contributes zero."""
+    """Zero every metrics store a previous in-process build left, so `metered_usage()`
+    reports only this build. The handles are kept: graphrag reuses those singleton stores,
+    and a changed model or base_url gets a new store while the old one stays at zero."""
     for instance in ReadableMetricsStore.instances.values():
         instance.clear_metrics()
 
 
 @dataclass(frozen=True)
 class ModelPrices:
-    """Per-token prices for one model, plus where they came from — the source string is
-    printed at the spend gate, because a price the student can't attribute is a price
-    they can't sanity-check."""
+    """Per-token prices for one model, plus their source, which the spend gate prints so
+    the student can sanity-check the price."""
 
     input_per_token: float
     output_per_token: float
@@ -130,18 +109,11 @@ class ModelPrices:
 def _litellm_prices(model: str) -> ModelPrices | None:
     """litellm's bundled price map, looked up by the bare model name from config.toml.
 
-    litellm keys OpenAI models bare (`gpt-4o-mini`) but everything else with its
-    provider (`groq/llama-3.3-70b-versatile`, `mistral/mistral-large-latest`). Groundly
-    only ever knows the bare name, because the
-    provider is expressed as a `base_url`, so a plain `.get()` silently misses every
-    non-OpenAI model. Fall back to a suffix match, which stays provider-agnostic
-    (.claude/rules/architecture.md: never hardcode a provider).
-
-    Only a *unique* suffix match counts: an ambiguous bare name must return None
-    rather than quietly bill against some unrelated provider's price.
-
-    Both prices must be present. A half-priced entry would produce a range whose upper
-    bound silently omits output — the exact failure this function's caller exists to fix.
+    litellm keys OpenAI models bare but others with their provider
+    (`groq/llama-3.3-70b-versatile`), and Groundly only knows the bare name, so fall back
+    to a suffix match. Only a unique match counts, so an ambiguous name never bills
+    against another provider's price. Both prices must be present, or the range's upper
+    bound would silently omit output.
     """
     import litellm
 
@@ -174,9 +146,8 @@ def _litellm_version() -> str:
 def extraction_prices() -> ModelPrices | None:
     """The extraction provider's prices: manual override, else litellm's bundled map.
 
-    Both manual fields are required for the override, matching llm/chat.py. A half-set
-    override falls through to litellm rather than being partly honoured, so there is
-    exactly one price *pair* in play and one source to name.
+    The override needs both fields, as in llm/chat.py; a half-set one falls through to
+    litellm, so one price pair and one source are ever in play.
     """
     cfg = load_provider("extraction")
     if cfg is None:
@@ -191,12 +162,9 @@ def extraction_prices() -> ModelPrices | None:
 
 
 def _prices_for_model(store_id: str) -> ModelPrices | None:
-    """Prices for one metrics store's model, keyed off the store's own `id`.
-
-    `store_id` is graphrag's `model_provider/model` (`completion_model_config` always
-    sets `model_provider="openai"`, so this is `openai/<cfg.model>` for any store Groundly
-    creates). Manual override when `[providers.extraction]` names this model, else
-    litellm's bundled map by bare model name.
+    """Prices for one metrics store's model. `store_id` is `openai/<model>` for every
+    store Groundly creates; the manual override applies when `[providers.extraction]` names
+    that model, else litellm's map by bare name.
     """
     bare_model = store_id.removeprefix("openai/")
     cfg = load_provider("extraction")
@@ -216,11 +184,9 @@ def _prices_for_model(store_id: str) -> ModelPrices | None:
 
 @dataclass(frozen=True)
 class BuildEstimate:
-    """What `groundly index --graph` prints before spending anything.
-
-    A *range*, not a point, because output volume is a property of the model rather than
-    the corpus and cannot be predicted from the corpus alone (a reasoning model emits
-    several times more). Both ends cover the extraction pass only — see `estimate_cost`.
+    """What `groundly index --graph` prints before spending anything. A range, because
+    output volume depends on the model, not the corpus; both ends price the extraction
+    pass only (see `estimate_cost`).
     """
 
     input_tokens: int
@@ -228,17 +194,15 @@ class BuildEstimate:
     low_usd: float | None
     high_usd: float | None
     price_source: str | None
-    # Set when the configured model name is an unpinned alias (`*-latest`), where price
-    # drift is certain rather than merely possible: the alias can resolve to a newer,
-    # differently priced model than litellm's bundled map records.
+    # Set for an unpinned `*-latest` alias, which can resolve to a differently priced model
+    # than litellm's bundled map records.
     moving_alias: str | None
 
 
 def _max_output_tokens_per_call() -> int:
-    """The room an extraction call has left to answer in, once its own prompt is in the
-    window. Derived, not fitted: it moves with `graph.context_window` the way the real
-    ceiling does, where a coefficient fitted to one provider's output would be wrong on
-    the next (see BuildEstimate)."""
+    """The room an extraction call has left to answer in once its prompt is in the window.
+    Derived rather than fitted to one provider's output, so it tracks
+    `graph.context_window`."""
     from groundly.core.manifest import CHUNK_MAX_TOKENS
 
     window = load_settings().graph.context_window
@@ -246,19 +210,13 @@ def _max_output_tokens_per_call() -> int:
 
 
 def estimate_cost(total_chars: int, chunk_count: int) -> BuildEstimate:
-    """Rough heuristic graph-build cost estimate: no tokenizer, no LLM call. Uses
-    `load_provider` (not `require_provider`) — this is an estimate, not the fail-fast
-    build path, so an unconfigured provider degrades to an unpriced estimate.
+    """Heuristic graph-build cost: no tokenizer, no LLM call. An unconfigured provider gives
+    an unpriced estimate rather than an error.
 
-    Every chunk is sent with the whole few-shot extraction preamble, which at Groundly's
-    chunk size is the *majority* of the input, so it is counted per chunk — measured per
-    call rather than at import, because the prompt is configurable.
-
-    **Both ends of the range price the extraction pass only.** `summarize_descriptions`
-    and `create_community_reports` are billed on top and are sized by the *extracted
-    graph*, which varies widely between builds of one corpus. Disclosing that is the CLI's
-    job (cli/cost_display.py); inventing a number for it would be the same lie in a new
-    place."""
+    The extraction preamble is most of each call's input, so it is counted per chunk.
+    **Both ends price the extraction pass only**: description summaries and community
+    reports scale with the extracted graph and cannot be sized beforehand, which the CLI
+    discloses (cli/cost_display.py)."""
     input_tokens = total_chars // 4 + chunk_count * _preamble_tokens()
     max_output_tokens = chunk_count * _max_output_tokens_per_call()
 

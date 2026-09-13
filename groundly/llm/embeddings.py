@@ -1,10 +1,7 @@
 """bge-m3 embedding: dense (1024-d, normalized) + learned sparse from one forward pass.
 
-Lives in llm/ because model clients are constructed only here; it is local and key-free,
-so no cost metering applies. Lazy-loaded — never at import/spawn time
-(.claude/rules/architecture.md). Resolved at the pinned hf_revision via
-snapshot_download, which is the interchange compatibility contract: same pin ⇒ shared
-vectors transfer as-is.
+Local and key-free, lazy-loaded (never at MCP spawn), resolved at the pinned hf_revision.
+The pin is the interchange contract: the same pin means shared vectors transfer as-is.
 """
 
 import os
@@ -15,10 +12,8 @@ from typing import Protocol
 
 from groundly.core.manifest import EMBEDDING_MODEL, HF_REVISION
 
-# suppress transformers' advisory warnings (e.g. the fast-tokenizer pad() notice).
-# Must be the env var, not logging.setLevel("transformers"): transformers resets its
-# root logger level on first (lazy) import, clobbering any level set here at import
-# time; the env var is read per call, so ordering can't break it.
+# Silence transformers' advisory warnings. The env var, not logging.setLevel: transformers
+# resets its logger level on first (lazy) import, while the env var is read per call.
 os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
 
 SparseWeights = dict[int, float]
@@ -120,12 +115,10 @@ class BgeM3Embedder:
     def encode_stream(
         self, texts: list[str], batch_size: int = 64
     ) -> Iterator[tuple[Sequence[float], SparseWeights]]:
-        """Memory-bounded index path: yield (dense_row, sparse) per text, running the
-        model on batch_size texts at a time. FlagEmbedding pre-tokenizes *and*
-        accumulates dense+sparse for whatever list it is handed, so encoding a whole
-        document at once makes peak RAM scale with the document; slicing here caps it to
-        one batch. Dense rows stay as numpy fp32 — never boxed into list[float] (8x, and
-        sqlite_vec.serialize_float32 takes the numpy row directly)."""
+        """Memory-bounded index path: yield (dense_row, sparse) per text, encoding batch_size
+        texts at a time. FlagEmbedding accumulates results for whatever list it is handed,
+        so slicing caps peak RAM at one batch. Dense rows stay numpy fp32, never boxed into
+        list[float]; sqlite_vec.serialize_float32 takes them directly."""
         model = self._load()
         for start in range(0, len(texts), batch_size):
             batch = texts[start : start + batch_size]
@@ -138,12 +131,9 @@ _shared: BgeM3Embedder | None = None
 
 
 def shared_embedder() -> BgeM3Embedder:
-    """Process-level singleton: one resident bge-m3 model shared by every production
-    call site (VectorRetriever, Bgem3GraphEmbedding, sharing.py's re-embed) instead of
-    each constructing its own several-hundred-MB-to-GB copy. Lazily constructs
-    `BgeM3Embedder()` once; every call thereafter returns the same instance. Tests keep
-    injecting their own stub via the `embedder=` constructor params — this is only the
-    default production path."""
+    """Process-wide singleton, so one resident bge-m3 serves every production call site
+    (retrieval, graph builds, re-embedding) instead of each loading a GB-scale copy. Tests
+    inject stubs via `embedder=`."""
     global _shared
     if _shared is None:
         _shared = BgeM3Embedder()

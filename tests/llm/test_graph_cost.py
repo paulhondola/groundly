@@ -14,9 +14,8 @@ def home(monkeypatch, tmp_path):
 
 
 def _priced(**extra: str) -> str:
-    """An extraction provider with both manual prices set. Both are required for the
-    override (matching llm/chat.py and agents/decks.py), so tests that want a priced
-    estimate have to say so in full."""
+    """An extraction provider with both manual prices set. The override needs both
+    (matching llm/chat.py), so tests that want a priced estimate say so in full."""
     body = (
         '[providers.extraction]\nbase_url = "http://x"\nmodel = "m"\n'
         "input_price_per_mtok = 5.0\noutput_price_per_mtok = 10.0\n"
@@ -68,8 +67,8 @@ def test_estimate_cost_half_set_manual_prices_fall_through_to_litellm(monkeypatc
 
 
 def test_estimate_cost_prices_output_tokens_too(home):
-    """The whole point: the previous estimate priced input only, understating a build
-    several-fold on its own (measured completion:prompt ran from 0.87:1 to 4.06:1)."""
+    """The upper bound must price output too: output volume depends on the model, and
+    input alone can understate a build several-fold."""
     (home / "config.toml").write_text(_priced())
     est = estimate_cost(4_000_000, 10)
     assert est.max_output_tokens > 0
@@ -105,9 +104,8 @@ def test_estimate_cost_output_ceiling_never_goes_negative(home, tmp_path):
 
 
 def test_estimate_cost_flags_a_moving_alias(home):
-    """litellm 1.86.2 prices mistral/mistral-small-latest at $0.06/$0.18 per Mtok; the
-    alias resolves today to Mistral Small 4 at $0.15/$0.60. Drift is certain here, not
-    merely possible, so the CLI gets something specific to warn about."""
+    """An unpinned `*-latest` alias can resolve to a differently priced model than
+    litellm's map records, so the CLI gets something specific to warn about."""
     (home / "config.toml").write_text(
         _priced().replace('model = "m"', 'model = "mistral-small-latest"')
     )
@@ -178,8 +176,7 @@ def test_estimate_cost_manual_price_overrides_litellm_map(home):
 
 def test_estimate_cost_counts_the_per_chunk_extraction_preamble(home):
     """The whole few-shot preamble is sent with every chunk, which at Groundly's chunk
-    size dominates the input — counting chunk text alone understated a real 1194-chunk
-    build by 11.4x."""
+    size dominates the input, so counting chunk text alone badly understates a build."""
     from groundly.llm.graph_cost import _preamble_tokens
 
     (home / "config.toml").write_text(_priced())
@@ -190,8 +187,8 @@ def test_estimate_cost_counts_the_per_chunk_extraction_preamble(home):
 
 
 def test_estimate_cost_prices_the_bundled_prompt_not_graphrags(home):
-    """The saving only reaches the student if the confirmation gate quotes it. Pricing
-    graphrag's 1620-token preamble here would over-quote every build by ~2x."""
+    """The confirmation gate must price the bundled preamble actually sent, not graphrag's
+    much larger stock one."""
     from graphrag.prompts.index.extract_graph import GRAPH_EXTRACTION_PROMPT
 
     from groundly.llm.graph_cost import _preamble_tokens
@@ -229,8 +226,8 @@ def test_estimate_cost_falls_back_when_a_custom_prompt_is_unreadable(home, tmp_p
 
 def test_estimate_cost_prices_a_provider_prefixed_model_by_suffix(monkeypatch, home):
     """litellm keys OpenAI bare but everything else provider-prefixed. Groundly only
-    knows the bare name (the provider is a base_url), so a plain .get() missed all
-    2199 prefixed entries — including every Groq model."""
+    knows the bare name (the provider is a base_url), so a plain .get() would miss every
+    prefixed entry, including every Groq model."""
     (home / "config.toml").write_text(
         '[providers.extraction]\nbase_url = "https://api.groq.com/openai/v1"\n'
         'model = "llama-3.3-70b-versatile"\n'

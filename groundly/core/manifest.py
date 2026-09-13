@@ -29,14 +29,11 @@ class Embedding(BaseModel):
 class Graphrag(BaseModel):
     version: str | None = None
     extraction_model: str | None = None
-    # Legacy: builds before 2026-09 could run community reports on a second provider and
-    # recorded it here. Never written now; kept so those bundles' manifests still parse.
+    # Never written; kept so manifests that recorded a second report provider still parse.
     report_model: str | None = None
     corpus_hash: str | None = None
-    # sha256 over the extraction prompt text, entity types and gleaning rounds the graph
-    # was built with. corpus_hash alone answers "is this a graph of this corpus?"; this
-    # answers "was it built the way the config now asks?". Compared by
-    # ingestion/graph.graph_is_stale exactly as corpus_hash is.
+    # sha256 over the extraction prompt, entity types and gleaning rounds. corpus_hash says
+    # "a graph of this corpus"; this says "built the way the config now asks".
     extraction_fingerprint: str | None = None
 
 

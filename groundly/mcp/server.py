@@ -1,9 +1,6 @@
-"""The MCP tool surface: `list_subjects`, `search`, `get_page`, `submit_cards`,
-`list_decks`, `export_deck`, plus a citation resource template — thin wrappers over the
-same functions the `groundly` CLI verbs call.
-No heavy imports at module top: service imports live inside tool/resource bodies so
-host spawn -> handshake is fast and bge-m3/torch load lazily on first `search`
-(.claude/rules/architecture.md).
+"""The MCP tool surface plus a citation resource template: thin wrappers over the functions
+the `groundly` CLI verbs call. Service imports live inside tool bodies, so host spawn is
+fast and bge-m3/torch load on first use.
 """
 
 from fastmcp import FastMCP
@@ -19,11 +16,9 @@ notation and emphasis are what the student is graded on, and general knowledge i
 substitute for them. Whichever groundly tools you have been given are enough to do this. \
 Cite what you use: every chunk carries a `groundly://` uri that resolves to a document \
 and page."""
-"""The MCP `initialize` instructions: the one place a retrieval norm is stated once for
-the whole server. It must not rank one tool above another — a preferred tool named here
-is invisible to whoever allowlists a subset later, and a host pointed at a tool it does
-not have falls back to answering from memory. Measured basis:
-docs/thesis/experiments.md (decision 31)."""
+"""The MCP `initialize` instructions: the retrieval norm, stated once for the whole server.
+Never rank one tool above another here: a host pointed at a tool it was not given falls
+back to answering from memory (decision 31; basis in docs/thesis/experiments.md)."""
 
 mcp = FastMCP("groundly", instructions=SERVER_INSTRUCTIONS)
 

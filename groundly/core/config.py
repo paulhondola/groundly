@@ -1,11 +1,9 @@
-"""Groundly config: ~/.groundly/config.toml — the one place that reads and writes it.
+"""~/.groundly/config.toml: the one place that reads and writes it.
 
-The one provider (`[providers.extraction]`, used only by `index --graph`) is read lazily;
-zero-key operation is first-class, so a missing section is None, never an error, until a
-caller needs it. Settings are all
-defaulted. Client construction stays in llm/; interchange-affecting knobs (chunk size,
-embedding pin) are deliberately not config — changing them is a full re-index. `tomllib`
-is read-only, so the writer regenerates the whole documented template.
+The one provider (`[providers.extraction]`, used only by `index --graph`) is optional:
+zero-key operation is first-class, so a missing section is None until a caller needs it.
+Interchange-affecting knobs (chunk size, embedding pin) are not config; changing them is a
+full re-index. `tomllib` is read-only, so the writer regenerates the whole template.
 """
 
 import logging
@@ -39,25 +37,19 @@ _PROVIDER_FIELDS = (
 class ProviderConfig(BaseModel):
     base_url: str
     model: str
-    # `repr=False` so the key cannot reach a log line, a traceback frame or a `%r` by
-    # accident (`_BuildPlan` carries this through the whole build); display paths use
-    # `mask_key` below.
+    # `repr=False` so the key never reaches a log line, traceback frame or `%r` by accident;
+    # display paths use `mask_key`.
     api_key: str = Field(default="", repr=False)
     input_price_per_mtok: float | None = None
     output_price_per_mtok: float | None = None
-    # Provider/tier rate limits. Unset means no throttling — correct for a local
-    # runtime, which has none. Honoured by graphrag's client, which fires hundreds of
-    # concurrent calls; see llm/graphrag_adapter.py.
+    # Provider/tier limits for graphrag's concurrent client. Unset means no throttling,
+    # which is right for a local runtime.
     requests_per_minute: int | None = None
     tokens_per_minute: int | None = None
-    # Passed through as `extra_body: {"reasoning_effort": ...}` (never flat — litellm's
-    # drop_params is False, so a flat reasoning_effort kwarg raises UnsupportedParamsError
-    # on every call instead of degrading). A plain str, not an enum: "none" is what Ollama
-    # honours, OpenAI's o-series takes low/medium/high, and providers are not enumerable
-    # here (architecture.md: never hardcode a provider).
+    # Sent as `extra_body: {"reasoning_effort": ...}`: litellm's drop_params is False, so a
+    # flat kwarg raises on every call. A plain str, since accepted values vary by provider.
     reasoning_effort: str | None = None
-    # Defaults to 0.0, not the provider's default (~1.0): an unpinned extractor makes
-    # every build a draw from a distribution, which makes a re-run non-reproducible.
+    # 0.0, not the provider's ~1.0: an unpinned extractor makes builds non-reproducible.
     temperature: float | None = 0.0
 
 
@@ -76,43 +68,27 @@ class RetrievalSettings(BaseModel):
     rerank: bool = True
 
 
-# Course-tuned defaults (decision 22). graphrag ships `organization,person,geo,event`
-# — news-wire types that fill a course graph with ORGANIZATION and EVENT noise. `person`
-# stays: courses cite Dijkstra and Lamport, and those are legitimate nodes. These lean
-# CS-ward; a law or history course retargets them via graph.entity_types.
+# Course-tuned defaults (decision 22) instead of graphrag's news-wire types. `person` stays
+# because courses cite Dijkstra and Lamport; a non-CS course retargets via graph.entity_types.
 DEFAULT_ENTITY_TYPES = "concept,algorithm,data_structure,theorem,technique,tool,metric,person"
 
 
 class GraphSettings(BaseModel):
-    # The extraction model's usable context. graphrag's own prompt budgets assume
-    # ~16k (community reports alone want 8000 in + 2000 out); llm/graphrag_adapter.py
-    # scales every stage down to whatever is set here. 4096 is LM Studio's common
-    # default, so a graph build works out of the box — raise it to match your model.
-    # Floored at 2048: the bundled extraction preamble is ~700 tokens and a chunk can
-    # reach CHUNK_MAX_TOKENS (512), so anything smaller cannot fit one call plus the
-    # room its stage budgets are carved from.
+    # The extraction model's usable context; llm/graphrag_adapter.py scales every stage
+    # budget to it. 4096 is LM Studio's common default. Floored at 2048: the bundled
+    # preamble (~700 tokens) plus a 512-token chunk must fit beside the stage budgets.
     context_window: int = Field(default=4096, ge=2048)
 
-    # How many *gleaning* rounds entity extraction runs: extra passes that re-send the
-    # prompt, the chunk and the model's own answer, asking what it missed. Its own knob;
-    # the window only clamps it (below 16384 it runs as 0, see
-    # llm/graphrag_adapter.prompt_budgets), so with gleanings >= 1 raising context_window
-    # across 16384 does change cost, and the fingerprint records the configured value, not
-    # the clamped one. Each round doubles extraction calls and roughly doubles spend
-    # (measured basis: docs/thesis/experiments.md).
-    #
-    # Default 0. Note 1 is the least coherent setting available: graphrag's LOOP_PROMPT
-    # ("any more? Y/N") is only sent when another round could follow, so at exactly 1 the
-    # extra pass is unconditional. Capped at 2 because each round re-sends the whole
-    # conversation; beyond that the prompt outgrows any window this project targets.
+    # Extra extraction passes per chunk, each re-sending prompt, chunk and answer, and each
+    # roughly doubling extraction spend (docs/thesis/experiments.md). Runs as 0 below a
+    # 16384 window; the fingerprint records the configured value. At exactly 1 the pass is
+    # unconditional, since graphrag only asks "any more?" when another round could follow.
+    # Capped at 2: beyond that the conversation outgrows any window this project targets.
     gleanings: int = Field(default=0, ge=0, le=2)
 
-    # Path to a custom entity-extraction prompt; unset uses the bundled course-tuned
-    # one (groundly/prompts/extract_graph.txt). A student outside CS needs different
-    # framing, and comparing extraction prompts means swapping this. Validated at
-    # read time (llm/graphrag_adapter.resolve_extraction_prompt), never as a graphrag
-    # internal error. Changing it changes the extraction fingerprint, so the next
-    # `groundly index` offers a rebuild.
+    # A custom entity-extraction prompt; unset uses groundly/prompts/extract_graph.txt.
+    # Validated when read, and part of the extraction fingerprint, so a change offers a
+    # rebuild.
     extraction_prompt: str | None = None
 
     # Comma-separated, NOT list[str]: _toml_value emits scalars only, so a list would
@@ -151,8 +127,8 @@ def config_path() -> Path:
 def _load_raw() -> dict:
     path = config_path()
     data = tomllib.loads(path.read_text()) if path.exists() else {}
-    # Configs written before the single-provider cut carry retired sections. Ignored,
-    # never rejected: this file is the student's own deployed state.
+    # Retired provider sections and keys are ignored, never rejected: this file is the
+    # student's own deployed state.
     retired = sorted(set(data.get("providers", {})) - set(CALL_CLASSES))
     if retired:
         logger.debug("config.toml: ignoring retired provider sections %s", retired)
@@ -237,10 +213,8 @@ def set_key(dotted_key: str, value: str) -> None:
         valid = ", ".join(CALL_CLASSES + tuple(_SETTINGS_SECTIONS))
         raise ConfigKeyError(f"unknown config section '{section}' — valid: {valid}")
 
-    # `_coerce` only checks the field's *annotation*; whole-model validators
-    # (`context_window`'s ge=2048) fire here, and must surface as a named ConfigKeyError
-    # rather than a raw pydantic traceback. Nothing has been written at this point, so the
-    # file is untouched.
+    # `_coerce` checks only the annotation; field constraints (`context_window`'s ge=2048)
+    # fire here and must surface as a named ConfigKeyError. Nothing is written yet.
     try:
         settings = _settings_from_raw(data)
     except ValidationError as exc:

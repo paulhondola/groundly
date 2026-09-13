@@ -21,8 +21,8 @@ def test_bge_m3_dense_and_sparse_contract():
 
 def test_encode_stream_yields_one_numpy_vector_per_text_in_batches():
     """encode_stream is the memory-bounded index path: it yields (dense, sparse) per
-    text — dense as a numpy row (not list[float], finding 1) — running the model on
-    batch_size texts at a time so peak never scales with the whole document."""
+    text, dense as a numpy row rather than list[float], running the model on batch_size
+    texts at a time so peak never scales with the whole document."""
     import numpy as np
 
     from groundly.core.manifest import EMBEDDING_DIM

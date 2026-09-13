@@ -1,14 +1,8 @@
-"""progress.db access — the graph build's spend trace.
+"""progress.db access: the graph build's spend trace.
 
-**Never exported.** The privacy boundary is a file
-(.claude/rules/grounding-and-privacy.md): progress.db never travels in a bundle and
-export code never reads it. core/bundle.py imports nothing from this module, by
-design — keep it that way.
-
-No PRAGMA user_version gate here, unlike store.db: progress.db never travels, so its
-schema grows locally through CREATE TABLE IF NOT EXISTS with no interchange impact.
-Every connection still gets WAL + busy_timeout — one-shot CLI runs and host-spawned
-MCP processes share the file (.claude/rules/architecture.md).
+**Never exported**: the privacy boundary is a file, so core/bundle.py imports nothing
+from here. No user_version gate: the file never travels, so its schema grows locally via
+CREATE TABLE IF NOT EXISTS. Every connection still gets WAL + busy_timeout.
 """
 
 import json
@@ -38,8 +32,7 @@ CREATE TABLE IF NOT EXISTS traces (
 
 
 def create_progress(path: Path) -> None:
-    # The traces table arrives with the first connect_progress; progress.db never
-    # travels, so its schema can grow locally without interchange impact.
+    # The traces table arrives with the first connect_progress.
     conn = sqlite3.connect(path)
     try:
         conn.execute("PRAGMA journal_mode = WAL")
@@ -51,9 +44,8 @@ def create_progress(path: Path) -> None:
 
 
 def connect_progress(path: Path) -> sqlite3.Connection:
-    """Open progress.db, creating it (and the traces table) if missing. `CREATE TABLE IF
-    NOT EXISTS` idempotently upgrades an older progress.db with no migration framework —
-    progress.db never travels, so this is safe."""
+    """Open progress.db, creating it and the traces table if missing; CREATE TABLE IF NOT
+    EXISTS upgrades an older file in place."""
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL")

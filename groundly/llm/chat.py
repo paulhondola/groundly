@@ -1,11 +1,7 @@
-"""Chat completion client: litellm.completion() against any OpenAI-compatible
-endpoint (LM Studio, Ollama, cloud providers). LLM clients are constructed only in llm/
-(.claude/rules/architecture.md); callers name a call class and the provider resolves
-from groundly.llm.config.
-
-litellm import stays lazy (inside complete()): cold import costs ~2.5s and must never
-happen at MCP spawn time. The env vars litellm reads at *its* import are set in
-groundly/__init__.py, because callers reach litellm via graphrag before this module runs."""
+"""Chat completion via litellm against any OpenAI-compatible endpoint; callers name a call
+class and the provider resolves from config. litellm is imported inside complete(): its
+multi-second cold import must never run at MCP spawn. The env vars it reads at import are
+set in groundly/__init__.py."""
 
 from dataclasses import dataclass
 from urllib.parse import urlparse, urlunparse
@@ -30,19 +26,12 @@ class ChatUnreachableError(Exception):
 
 
 def loaded_context_length(call_class: str) -> int | None:
-    """The context length the provider *actually* loaded its model with, or None if it
-    does not say. Best-effort and never raises.
+    """The context length the provider actually loaded its model with, or None if it does
+    not say. Never raises: a build must not fail over an unrelated HTTP hiccup.
 
-    `graph.context_window` is a number Groundly asserts, not one it measures: every
-    prompt budget is carved from it, so a model reloaded at a smaller window silently
-    invalidates the whole sizing.
-
-    Only LM Studio is asked, via its own REST API (`GET /api/v0/models`,
-    `loaded_context_length`); the OpenAI-compatible surface has no equivalent field. That
-    fits "never hardcode a provider" (.claude/rules/architecture.md): the rule protects the
-    *call* path, and nothing here reaches an LLM or gates a build — any other answer
-    returns None and the build proceeds. Deliberately never raises: refusing a build over
-    an unrelated HTTP hiccup would be worse than missing the drift."""
+    `graph.context_window` is asserted, not measured, so a model loaded smaller silently
+    invalidates every prompt budget. Only LM Studio's REST API (`GET /api/v0/models`)
+    reports it; nothing here reaches an LLM, and any other endpoint yields None."""
     cfg = require_provider(call_class)
     # base_url is the OpenAI surface (…/v1); the REST API is a sibling at the origin.
     origin = urlunparse(urlparse(cfg.base_url)._replace(path="", query="", fragment=""))
@@ -77,25 +66,17 @@ def complete(
     litellm.suppress_debug_info = True
 
     cfg = require_provider(call_class)
-    # Structured output is a provider *capability*, and the accepted shape differs per
-    # endpoint (json_object vs json_schema, in both directions). So this takes the
-    # response_format the caller actually needs rather than a bool naming one shape: the
-    # graph build's probe hands over graphrag's own response model, which litellm converts
-    # into the same wire request the build sends (ingestion/graph.py's _probe_extraction).
-    #
-    # enable_json_schema_validation is graphrag_llm's global — lite_llm_completion.py sets
-    # it True at import, and graphrag is imported well before the probe runs — and it makes
-    # litellm validate the *response* against the schema client-side and raise. Off here:
-    # this call asks whether the provider accepts the request, and how well a model fills
-    # the schema is the build's problem, not a reason to refuse to start it.
+    # The caller's own response_format, not a JSON-mode flag: endpoints accept different
+    # shapes. Client-side schema validation (turned on globally by graphrag_llm's import) is
+    # off, because this asks whether the provider accepts the request, not how well the
+    # model fills the schema.
     extra = (
         {"response_format": response_format, "enable_json_schema_validation": False}
         if response_format is not None
         else {}
     )
-    # Nested under extra_body, never passed flat: litellm's drop_params is False, so a
-    # flat reasoning_effort kwarg raises UnsupportedParamsError on every call instead of
-    # degrading. llm/graphrag_adapter.completion_model_config nests the same way.
+    # Under extra_body, never flat: litellm's drop_params is False, so a flat kwarg raises
+    # UnsupportedParamsError on every call.
     if cfg.reasoning_effort:
         extra["extra_body"] = {"reasoning_effort": cfg.reasoning_effort}
     # Flat, unlike reasoning_effort: temperature is a first-class OpenAI parameter every
@@ -115,18 +96,14 @@ def complete(
             timeout=httpx.Timeout(10.0, read=load_settings().llm.timeout_seconds),
         )
     except openai.APIStatusError as exc:
-        # The server answered and refused (400 context overflow, 401 bad key, 429).
-        # Checked before APIError below, which it subclasses: calling a rejected
-        # request "unreachable" sends people to debug their network instead of the
-        # actual cause (conventions.md — name the cause specifically).
+        # The server answered and refused (400, 401, 429). Checked before its base class
+        # APIError, so a rejection is never reported as a network problem.
         raise ChatUnreachableError(
             f"[providers.{call_class}] at {cfg.base_url} rejected the request "
             f"(HTTP {getattr(exc, 'status_code', '?')}): {exc}"
         ) from exc
     except openai.APIError as exc:
-        # Every remaining litellm exception raised by completion() (connection
-        # failures, timeouts) subclasses openai.APIError — the tightest common base
-        # covering the rest of this call's failure surface.
+        # Every remaining completion() failure (connection, timeout) subclasses APIError.
         raise ChatUnreachableError(
             f"[providers.{call_class}] at {cfg.base_url} is unreachable: {exc}"
         ) from exc

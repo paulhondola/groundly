@@ -1,8 +1,7 @@
-"""Contract tests for the verifier gate (P6 slice 1). These pin the machine-readable
-contract both doors depend on: `verify_card` returns None iff the card passes, and
-every failure is a `Rejection` whose reason comes from REJECTION_REASONS. Future
-checks (answer key, distractors, code execution) extend `verify_card` behind the
-same contract."""
+"""Contract tests for the verifier gate: `verify_card` returns None iff the card passes,
+and every failure is a `Rejection` whose reason comes from REJECTION_REASONS. Future
+checks (answer key, distractors, code execution) extend `verify_card` behind the same
+contract."""
 
 from groundly.agents import verifier as verifier_mod
 from groundly.agents.verifier import (

@@ -1,22 +1,14 @@
-"""Self-contained HTML visualization of a subject's graphrag knowledge graph
-(`groundly export-graph`) — entity nodes coloured by Leiden community, force-directed,
-with a sidebar of community reports and citations back to source documents.
+"""Self-contained HTML visualization of a subject's knowledge graph (`groundly
+export-graph`): entities coloured by Leiden community, with community reports and
+citations in a sidebar.
 
-Self-contained because nothing may leave the machine beyond the student's own provider,
-HF downloads and pinned OCR models (.claude/rules/grounding-and-privacy.md), so a CDN
-script is out: vendored vis-network, theme.css and this page's `assets/graph.js`,
-`graph.css`, `graph.html` and `graph_body.html` are inlined at generation time. They are
-real files rather than string literals so their escapes survive one parser, not two
-(`tests/core/test_graph_html.py::test_app_js_parses` guards that). `graph.html`'s
-`{{placeholder}}` tokens are filled by `str.replace()` in a fixed order with `data_blob`
-last — course text is attacker-controlled (layer 4 below), and a later `.replace()` would
-rescan, and could corrupt, any `{{...}}`-shaped substring it injected.
-
-Entity titles/descriptions come from course PDFs, which a hostile `groundly import`
-bundle can populate with anything (layer 4, trusted content never trusted authority —
-.claude/rules/grounding-and-privacy.md). So the two hard rules here: (1) every piece of
-graph data is embedded as one escaped `json.dumps` blob, never string-concatenated into
-markup; (2) the JS reaches the DOM only via textContent/createElement, never innerHTML.
+Nothing may leave the machine, so there is no CDN: vendored vis-network and the page's
+`assets/` files are inlined at generation time. They are real files, not string literals,
+so their escapes pass through one parser. Entity text comes from course material, which
+an imported bundle controls (layer 3), so: (1) all graph data is embedded as one escaped
+`json.dumps` blob, never concatenated into markup; (2) the JS reaches the DOM only via
+textContent/createElement, never innerHTML; (3) `data_blob` is substituted last, so no
+later `.replace()` rescans course text for `{{...}}` tokens.
 """
 
 import json
@@ -33,29 +25,24 @@ import pyarrow.parquet as pq  # row-count metadata + bounded batch reads — see
 from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
 
-# vis-network's forceAtlas2Based physics stops being interactively draggable well before
-# a large course's entity count. Above the cap we render one node per community (the
-# "aggregated" view) rather than serve an unusable page.
+# Above this many entities the force-directed page stops being usable, so one node per
+# community (the "aggregated" view) is rendered instead.
 _MAX_NODES = 5000
 
-# Per-field display cap — see _text. _MAX_NODES bounds *how many* things are drawn;
-# this bounds how big each one may be, which is the other half of the resource question
-# once field contents are attacker-controlled.
+# Per-field display cap (see _text): _MAX_NODES bounds how many things are drawn, this
+# bounds how big each attacker-controlled field may be.
 _MAX_FIELD_CHARS = 8000
 
-# Uncompressed ceiling per parquet artifact, read from the footer before any decompression
-# — see _refuse_oversized_artifacts. Generous: a real subject's whole graph/ is a few MB.
+# Ceiling on what one parquet artifact may expand to in memory (see _read_bounded).
+# Generous: a real subject's whole graph/ is a few MB.
 _MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
 
-# Rows per streaming batch in _read_bounded. Peak memory is the limit plus one batch, and
-# a single row's size is itself attacker-controlled, so no row count bounds bytes outright
-# — a smaller batch just tightens how far past the limit the overshoot can go before the
-# check fires. 512 keeps that overshoot small without making a real subject's read chatty.
+# Rows per streaming batch in _read_bounded. Row size is attacker-controlled, so a small
+# batch keeps the overshoot past the limit small before the check fires.
 _READ_BATCH_ROWS = 512
 
-# The only columns the aggregated (community meta-graph) view needs. Reading just these
-# keeps an inflated `description` column off the heap entirely on the one path where the
-# entity count already says the file is huge.
+# All the aggregated view needs, so an inflated `description` column never reaches the
+# heap on the path where the entity count already says the file is huge.
 _AGGREGATED_ENTITY_COLUMNS = ["id", "title"]
 
 # Every artifact this module reads. Checked together up front: a build interrupted
@@ -98,9 +85,8 @@ class GraphHtmlResult:
 
 
 def _citation_line(filename: str, page: int | None, heading_path: str | None) -> str:
-    """Mirrors anki.py::_source_line's conditional style. Markdown chunks have page=None
-    (no PDF page to cite), so the check is `page is not None` with heading_path as the
-    fallback — never a "knowledge-base.md#pNone" citation."""
+    """Markdown chunks have page=None, so fall back to the heading path; never render a
+    "#pNone" citation."""
     if page is not None:
         return f"{filename}, p.{page}"
     if heading_path:
@@ -109,10 +95,8 @@ def _citation_line(filename: str, page: int | None, heading_path: str | None) ->
 
 
 def _num(value, default=0):
-    """A parquet cell as a JSON-safe python number. graphrag leaves numeric columns as
-    numpy scalars (json.dumps doesn't know them) and NaN for optional community-report
-    fields like rank/rating_explanation (json.dumps emits the bare token `NaN`, which
-    is not valid JSON and fails a strict `JSON.parse` in the browser)."""
+    """A parquet cell as a JSON-safe number: numpy scalars become Python numbers, and NaN
+    (which json.dumps emits as invalid JSON) becomes `default`."""
     if value is None:
         return default
     if isinstance(value, float) and math.isnan(value):
@@ -125,17 +109,11 @@ def _num(value, default=0):
 
 
 def _text(value, default=""):
-    """A parquet cell as display text, length-capped.
+    """A parquet cell as display text, capped at _MAX_FIELD_CHARS.
 
-    The cap is a resource bound, not formatting. Every string on the page originates in
-    course material, and an imported bundle is untrusted (grounding-and-privacy.md), so
-    field length is attacker-controlled: a few entities with MiB-sized descriptions sit far
-    under _MAX_NODES, so no other guard fires. _MAX_NODES bounds how many things are drawn;
-    this bounds how big each one can be. 8k chars is far past any real description and
-    still leaves the worst case bounded at tens of MB.
-
-    This is the one choke point every attacker-controlled string passes through on its way
-    into the payload — keep it that way rather than capping at each call site."""
+    The cap is a resource bound: field length is attacker-controlled in an imported bundle,
+    and a few MiB-sized descriptions sit far under _MAX_NODES. This is the one choke point
+    every such string passes through; keep it that way rather than capping per call site."""
     if value is None:
         return default
     if isinstance(value, float) and math.isnan(value):
@@ -165,21 +143,13 @@ def _findings(value) -> list[dict]:
 
 
 def _read_bounded(path: Path, subject_name: str, columns: list[str] | None = None) -> pd.DataFrame:
-    """`pd.read_parquet` with a ceiling on what it will materialize.
+    """`pd.read_parquet` with a ceiling on what it materializes.
 
-    `groundly import` is a trust boundary, so a bundle's *decompressed* size is the
-    sender's choice, and parquet inflates repetitive text spectacularly (a KiB-sized file
-    can expand to hundreds of MiB). Neither `_MAX_NODES` nor `_MAX_FIELD_CHARS` helps —
-    they bound the page, and the read that feeds it has already happened.
-
-    The footer is no help either: `total_byte_size` claims to be the uncompressed size but
-    is the *encoded* size, and identical strings dictionary-encode to one value plus
-    indices — a check on it passes exactly the attack it would be meant to catch.
-
-    So bound it by actually streaming: read row-group batches, add up their real nbytes,
-    and stop the moment the running total crosses the limit. Peak memory is the limit plus
-    one batch, whatever the encoding. The limit is generous against any genuine course and
-    exists to turn an OOM into a sentence."""
+    An imported bundle's decompressed size is the sender's choice, and parquet inflates
+    repetitive text enormously. The footer cannot bound it: `total_byte_size` is the
+    encoded size, which dictionary encoding shrinks for exactly that attack. So stream
+    batches and stop once their real nbytes cross the limit; peak memory is the limit plus
+    one batch, whatever the encoding."""
     parquet = pq.ParquetFile(path)
     batches, total = [], 0
     for batch in parquet.iter_batches(batch_size=_READ_BATCH_ROWS, columns=columns):
@@ -198,17 +168,10 @@ def _read_bounded(path: Path, subject_name: str, columns: list[str] | None = Non
 
 
 def _resolve_level(level: int | None, communities: pd.DataFrame) -> tuple[int | None, list[int]]:
-    """`level=None` means the *coarsest* level (0), which is the one that actually
-    colours the graph.
-
-    Not the finest, which is the intuitive choice and the wrong one: Leiden only
-    subdivides communities large enough to split, so every level below the root covers
-    strictly fewer entities, and entities in no community at the chosen level render
-    grey — the finest level can open a real subject as an almost entirely grey graph.
-    The page's own level toggle still reaches every level.
-
-    An explicit level that doesn't exist is a caller error, not a silent fallback — it
-    would otherwise render an empty legend with no explanation."""
+    """`level=None` means the coarsest level (0). Leiden only subdivides communities large
+    enough to split, so finer levels cover fewer entities and can leave most of the graph
+    grey; the page's toggle still reaches every level. A missing explicit level is an
+    error, not a silent fallback to an empty legend."""
     levels = (
         sorted({int(v) for v in communities["level"].unique()}) if not communities.empty else []
     )
@@ -262,16 +225,11 @@ def _legend_for_level(
 def _entity_citations(
     entities: pd.DataFrame, text_units: pd.DataFrame, store: SubjectStore
 ) -> dict[str, list[str]]:
-    """entities.text_unit_ids (text-unit hash ids) -> text_units.id -> document_id,
-    which build_graph sets to str(chunk_id) directly — so it resolves straight into
-    store.db's chunks table via the store's own chunk_details helper, one batch call
-    for every chunk any rendered entity cites."""
-    # A LIST of document_ids per text-unit id, not set_index()["document_id"]: text_unit
-    # ids are content hashes, so two Groundly chunks with byte-identical text collide onto
-    # one id — and they are still *different chunks*, on different pages of different
-    # files. With a pandas index lookup those rows make `.get()` return a Series instead of
-    # a scalar, `int()` raises TypeError, and the except below would swallow it — silently
-    # dropping the affected entities' citations.
+    """Entity -> text units -> `document_id`, which build_graph sets to str(chunk_id), then
+    one store.db lookup for every chunk a rendered entity cites."""
+    # A list per text-unit id: text-unit ids are content hashes, so byte-identical chunks on
+    # different pages collide onto one id. An index lookup would return a Series there, and
+    # the except below would silently drop those entities' citations.
     doc_ids_by_tu: dict[str, list] = {}
     for tu_id, doc_id in zip(text_units["id"], text_units["document_id"], strict=True):
         doc_ids_by_tu.setdefault(tu_id, []).append(doc_id)
@@ -337,11 +295,8 @@ def _entity_graph(
         tgt = title_to_id.get(row["target"])
         if src is None or tgt is None:  # relationship refers to a title we never saw
             continue
-        # No `description`: the page renders node and community-report text but has no
-        # surface that ever shows a relationship's description, so shipping it put layer-4
-        # course text into a shareable file that its own viewer cannot see to review before
-        # sharing. It was also the bulk of the export's size. Add it back only alongside the
-        # UI that displays it.
+        # No `description`: the page never shows it, so it would put layer-3 course text into
+        # a shareable file where its viewer cannot review it. Add it only with UI that does.
         edges.append(
             {
                 "from": src,
@@ -358,11 +313,9 @@ def _meta_graph(
     title_to_id: dict[str, str],
     legend: list[dict],
 ) -> tuple[list[dict], list[dict]]:
-    """The community meta-graph used above _MAX_NODES entities: one node per
-    community, edge weight = number of relationships whose two entities fall in
-    different communities. Self-loops (both ends in the same community) aren't
-    meta-edges — they're exactly the intra-community structure the community
-    already summarizes."""
+    """The community meta-graph used above _MAX_NODES entities: one node per community,
+    edge weight = relationships crossing between two communities. Intra-community edges
+    are dropped; the community's summary already covers them."""
     nodes = [
         {
             "id": f"c{item['community']}",
@@ -389,30 +342,18 @@ def _meta_graph(
 
 
 def _bundled_static_text(relative_path: str) -> str:
-    """Reads a vendored asset out of the installed package (same pattern as
-    graphrag_adapter._bundled_prompt_text) — not a client-layer import, just package
-    data, so this stays inside architecture.md's layering rule."""
+    """A vendored asset read from package data, not from a client-layer module."""
     return files("groundly").joinpath(relative_path).read_text(encoding="utf-8")
 
 
 def _safe_json(data) -> str:
-    """One json.dumps blob, escaped so a hostile entity title/description cannot close
-    the <script> tag early.
+    """One json.dumps blob that a hostile entity string cannot use to close <script> early.
 
-    PRECONDITION, and the thing to re-check before reusing this: the output is only ever
-    written into a `<script>` **text node**. That is what makes escaping `<` alone
-    sufficient. Move any of this data into an HTML attribute, a `title=`/`data-*` on the
-    page shell, or a `<style>` block and `"`, `'` and `>` immediately start mattering --
-    this function would silently stop being enough, with no test failing.
-
-    `<` alone is what matters: the HTML tokenizer only starts down the "script end tag" /
-    "comment open" path on a literal `<` (`</script`, `<!--`), never on a bare `>` -- so
-    replacing every `<` with `\\u003c` removes every literal `<` from the blob and the
-    browser never begins parsing a tag inside the script element. `>` is left alone: a
-    bare `>` cannot start a tag, and leaving it keeps the blob greppable. \\u2028/\\u2029
-    are raw newline characters in JS that json.dumps otherwise emits literally, written
-    here as escape sequences rather than literal characters so nothing in the toolchain
-    can silently eat an invisible line separator out of this source file."""
+    PRECONDITION: the output is only ever written into a `<script>` **text node**. There,
+    escaping `<` alone is sufficient, because the tokenizer can only leave script data on a
+    literal `<` (`</script`, `<!--`). In an attribute or `<style>`, `"`, `'` and `>` would
+    matter too and this would silently stop being enough. U+2028/U+2029 are escaped as
+    well, written as escape sequences so no tool can strip them from this file."""
     blob = json.dumps(data)
     return blob.replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
 
@@ -420,16 +361,13 @@ def _safe_json(data) -> str:
 def export_graph_html(
     subject_name: str, out_path: Path, *, level: int | None = None
 ) -> GraphHtmlResult:
-    """Write `subject_name`'s graphrag graph as one self-contained HTML file to
-    `out_path`. `level=None` colours by the coarsest Leiden level, the one with the
-    widest entity coverage (see _resolve_level); the page's own
-    level toggle switches between every level without re-running this function."""
+    """Write `subject_name`'s graph as one self-contained HTML file. `level=None` colours by
+    the coarsest Leiden level (see _resolve_level); the page toggles between levels."""
     subj = Subject(subject_name)
     graph_dir = subj.root_dir / "graph"
     entities_path = graph_dir / "entities.parquet"
-    # Short-circuits before load_manifest() when entities.parquet is missing, so a
-    # subject that was never initialized (no manifest.json at all) fails with this
-    # message instead of a FileNotFoundError from inside load_manifest().
+    # Checked before load_manifest(), so a never-initialized subject gets this message
+    # rather than a FileNotFoundError.
     if not entities_path.exists() or subj.load_manifest().graphrag.corpus_hash is None:
         raise GraphHtmlError(
             f"no graph is built for {subject_name!r} — run `groundly index --graph` first"
@@ -447,10 +385,8 @@ def export_graph_html(
             "rebuild it"
         )
 
-    # Decide the view from the parquet FOOTER, before materializing anything. num_rows is
-    # metadata — it costs no memory — whereas read_parquet() decompresses the whole column
-    # set first and only then meets _MAX_NODES. An imported bundle is untrusted input
-    # (grounding-and-privacy.md), so the decompressed size is the attacker's choice.
+    # Choose the view from the footer's row count, which costs no memory, before reading
+    # column data: an imported bundle's decompressed size is the attacker's choice.
     entity_rows = pq.ParquetFile(entities_path).metadata.num_rows
     if entity_rows == 0:
         raise GraphHtmlError(
@@ -458,12 +394,8 @@ def export_graph_html(
             "the corpus, so there is nothing to visualize"
         )
     aggregated = entity_rows > _MAX_NODES
-    # _read_bounded, not pd.read_parquet: row count alone is no memory bound — 100 rows of
-    # 1 MiB descriptions sit 50x *under* _MAX_NODES and still expand to 100 MiB.
-    #
-    # Above the cap only the community meta-graph is drawn, and that needs nothing but the
-    # id/title join keys — so on the one path where the row count already says the file is
-    # huge, the description column is never read at all.
+    # Row count alone bounds no memory (100 rows of 1 MiB descriptions sit far under the
+    # cap), so every read is bounded, and the aggregated view never reads `description`.
     entities = _read_bounded(
         entities_path, subject_name, _AGGREGATED_ENTITY_COLUMNS if aggregated else None
     )
@@ -531,11 +463,8 @@ def export_graph_html(
         "edges": edges,
     }
 
-    # groundly/assets/ is a bare package-data directory (the same shape as `prompts/`), so
-    # this foundation module reads nothing from a client layer.
-    # data_blob goes last: it carries course text (attacker-controlled per
-    # grounding-and-privacy.md), and .replace() calls after it would rescan — and could
-    # corrupt — any "{{placeholder}}"-shaped substring the data injected earlier.
+    # data_blob goes last: it carries course text, and a later .replace() would rescan it
+    # for "{{placeholder}}"-shaped substrings.
     html = _bundled_static_text("assets/graph.html")
     for placeholder, value in {
         "theme_css": _bundled_static_text("assets/theme.css"),
@@ -554,10 +483,8 @@ def export_graph_html(
         path=out_path,
         nodes=len(nodes),
         edges=len(edges),
-        # Communities at the level actually rendered, not every level summed: len(communities)
-        # counts parquet rows across the whole Leiden hierarchy, a number the user never sees
-        # at once. It also keeps the aggregated view's invariant true: the meta-graph is one
-        # node per community *at chosen_level*, so nodes == communities only with this count.
+        # Communities at the rendered level, not the whole hierarchy: that is what the page
+        # shows, and it keeps nodes == communities in the aggregated view.
         communities=len(legend_by_level[chosen_level]) if chosen_level is not None else 0,
         aggregated=aggregated,
     )

@@ -1,16 +1,13 @@
 """groundly/core/graph_html.py: `groundly export-graph` writes ONE self-contained HTML
-file visualizing a subject's graphrag knowledge graph — entity nodes coloured by Leiden
-community, force-directed, sidebar with community reports and citations. Fixtures here
-write small parquet frames directly with pandas — no test ever runs a real graphrag
-pipeline (same discipline as tests/ingestion/test_ingestion_graph.py and
-tests/retrival/test_retrieval_graph.py).
+file visualizing a subject's knowledge graph. Fixtures write small parquet frames with
+pandas; no test runs a real graphrag pipeline.
 
-Fixtures honour the join asymmetry verified against a real build (do not "simplify" it
-away — each half is a different join key):
+Fixtures honour a real build's join asymmetry (do not "simplify" it away; each half is a
+different join key):
   - communities.entity_ids holds entity UUIDs, matching entities.id
   - relationships.source/.target hold entity TITLES, matching entities.title
   - text_units.document_id holds the Groundly chunk_id as a STRING, joining to store.db's
-    chunks.id — the same join groundly/core/graph_html.py's _entity_citations uses.
+    chunks.id
 """
 
 import base64
@@ -250,12 +247,10 @@ def _add_chunk(store: SubjectStore, filename: str, sha256: str, text: str, *, pa
 
 
 def test_entity_text_cannot_break_out_of_the_script_block(subj, store):
-    """Entity/relationship text comes straight from course PDFs (layer 4 per
-    .claude/rules/grounding-and-privacy.md), and `groundly import` is the trust boundary —
-    a hostile bundle can carry a title engineered to close the <script> tag the graph JSON
-    is embedded in and run arbitrary JS the instant a student opens the exported page.
-    HTML-encoding the surrounding markup is not enough to stop this; the escape has to live
-    *inside* the JSON string itself (`<` -> `\\u003c`), which is what this pins down."""
+    """Entity/relationship text comes straight from course material (layer 3), and
+    `groundly import` is the trust boundary: a hostile bundle can carry a title built to
+    close the <script> tag the graph JSON sits in and run arbitrary JS when the page opens.
+    The escape has to live *inside* the JSON string itself (`<` -> `\\u003c`)."""
     xss_title = "</script><img src=x onerror=alert(1)>"
     attacker = _entity_row(xss_title, description="attacker entity", hrid=0)
     comment_open = _entity_row(
@@ -280,12 +275,9 @@ def test_entity_text_cannot_break_out_of_the_script_block(subj, store):
     # content past the comment marker must survive intact — proves the escape didn't
     # truncate or otherwise corrupt the string, it just neutralized the dangerous chars
     assert "comment-close-marker" in html
-    # The load-bearing assertion, stated as the structural property rather than as one
-    # spelling of the escape: no <script> body may contain a premature "</script". That
-    # sequence is the *only* way the element can end early — per the HTML spec the
-    # script-data end-tag-open state requires "</" — so escaping "<" is sufficient, and
-    # escaping ">" as well would be defense against nothing. Pinning the literal
-    # "</script>" instead would fail a future, equally-correct escaping.
+    # The load-bearing assertion, stated as the structural property: no <script> body may
+    # contain a premature "</script", the only way the element can end early. Pinning one
+    # spelling of the escape would fail a future, equally correct escaping.
     bodies = re.findall(r"<script[^>]*>(.*?)</script>", html, re.S)
     assert bodies, "no <script> block found — the embedded data blob is missing"
     for body in bodies:
@@ -296,17 +288,8 @@ def test_entity_text_cannot_break_out_of_the_script_block(subj, store):
 
 
 def test_app_js_parses(subj, store):
-    """Every other test here inspects the page as *text* — structure, escaping, substrings —
-    and none of them execute it, so a page whose script cannot parse passes them all.
-
-    That is not hypothetical. Moving `_APP_JS` out of a Python string literal into
-    `assets/graph.js` doubled every backslash escape along the way: `\\'` became `\\\\'`,
-    which closes the JS string early, and the exported page died with
-    `SyntaxError: Unexpected identifier 's'` while the whole suite stayed green. The
-    escape-doubling class of bug is gone now that the JS is a plain file, but "the script
-    runs at all" deserves an assertion rather than an assumption.
-
-    Skipped where node is unavailable — this guards a real failure mode, not the CI image."""
+    """Every other test here inspects the page as *text* and none executes it, so a page
+    whose script cannot parse would pass them all. Skipped where node is unavailable."""
     node = shutil.which("node")
     if node is None:
         pytest.skip("node not available to parse-check the emitted JS")
@@ -333,15 +316,10 @@ def test_app_js_parses(subj, store):
 
 
 def test_vendored_vis_network_matches_its_recorded_hash():
-    """A 700 KB minified third-party file is unreviewable in a diff: nobody reads it, and a
-    substituted build would sail through review and CI on the strength of the filename.
-    `groundly/assets/VENDORED.md` records the SHA-384 and the upstream URL, but a hash
-    written only in prose enforces nothing — this is the assertion that makes the pin real.
-
-    `test_page_references_no_external_url` guards the *other* direction (someone
-    reintroducing a CDN reference); this guards the blob itself being swapped. On an
-    intentional upgrade both this expected value and VENDORED.md change together, in the
-    same commit, which is exactly the review moment that should exist."""
+    """A 700 KB minified third-party file is unreviewable in a diff, so a substituted build
+    would pass review on the strength of its filename. `groundly/assets/VENDORED.md` records
+    the SHA-384; this assertion is what enforces it. On an intentional upgrade both change
+    in the same commit."""
     blob = files("groundly").joinpath("assets/vis-network.min.js").read_bytes()
     digest = base64.b64encode(hashlib.sha384(blob).digest()).decode()
 
@@ -357,13 +335,10 @@ _URL_IN_MARKUP_ATTR = re.compile(r'(?:src|href)\s*=\s*["\']https?://', re.IGNORE
 
 
 def test_page_references_no_external_url(subj, store):
-    """The privacy rule (.claude/rules/grounding-and-privacy.md) permits exactly three
-    egress paths and a CDN is not one of them: vis-network is vendored
-    (groundly/web/static/VENDORED.md) precisely so a page opened offline, months later,
-    never phones unpkg on every view — that would disclose that the student is looking at
-    a knowledge graph, plus their IP and the time. A URL inside the vendored library's own
-    license comment is expected and must not fail this test, so the assertion is scoped to
-    markup attributes (src=/href=), not the whole file."""
+    """The privacy rule permits no CDN: vis-network is vendored so an exported page never
+    phones a CDN on view, disclosing the student's IP and viewing time. A URL inside the
+    vendored library's license comment is expected, so the assertion is scoped to markup
+    attributes (src=/href=), not the whole file."""
     entity = _entity_row("Solo Entity", description="d")
     community = _community_row(0, 0, "Community 0", [entity["id"]])
     report = _report_row(0, 0, "Report", "summary")
@@ -399,12 +374,9 @@ def test_sidebar_shows_the_reports_human_label_not_the_raw_community_title(subj,
 
 
 def test_citations_resolve_and_the_pageless_case_falls_back_to_the_heading(subj, store):
-    """Citation targets must come from store.db (chunk id -> filename/page/heading_path),
-    not from graphrag's own documents.title — which literally contains
-    "knowledge-base.md#pNone" for a page-less chunk (groundly/ingestion/graph.py builds
-    that title as f"{filename}#p{page}"). A generator that ever formatted a citation from
-    documents.title directly, instead of resolving through the store, would leak that
-    literal "pNone" onto the page."""
+    """Citation targets must resolve through store.db (chunk id -> filename/page/
+    heading_path), not graphrag's documents.title, which reads "knowledge-base.md#pNone"
+    for a page-less chunk."""
     chunk_pdf = _add_chunk(store, "lec.pdf", "a" * 64, "slides text", page=3, heading_path=None)
     chunk_md = _add_chunk(
         store, "notes.md", "b" * 64, "markdown text", page=None, heading_path="Intro > Overview"
@@ -439,11 +411,9 @@ def test_citations_resolve_and_the_pageless_case_falls_back_to_the_heading(subj,
 
 
 def test_graphs_above_the_node_cap_render_the_community_meta_graph(subj, store):
-    """A subject with thousands of entities would produce an unusable force-directed
-    hairball, and an HTML file too large to comfortably open — above `_MAX_NODES` the
-    generator must fall back to one node per community instead of one per entity. Imports
-    `_MAX_NODES` from the module itself so this test tracks the real cap rather than a
-    copy of the constant that could silently drift from it."""
+    """Above `_MAX_NODES` a force-directed page is an unusable hairball, so the generator
+    must fall back to one node per community. Imports `_MAX_NODES` so the test tracks the
+    real cap."""
     n_communities = 10
     per_community = (_MAX_NODES // n_communities) + 1  # guarantees > _MAX_NODES entities total
     entities: list[dict] = []
@@ -470,10 +440,8 @@ def test_graphs_above_the_node_cap_render_the_community_meta_graph(subj, store):
 
 
 def test_missing_graph_names_the_cause(subj):
-    """No graph/ directory at all (never built, or `groundly index --graph` never run) is
-    the most basic "cannot visualize" case. It must surface as a named GraphHtmlError —
-    per the module's own contract, "a subject that cannot be visualized — named cause,
-    never a traceback" — not a raw KeyError/FileNotFoundError bubbling out of a parquet
+    """No graph/ directory at all is the most basic "cannot visualize" case. It must
+    surface as a named GraphHtmlError, not a raw KeyError/FileNotFoundError from a parquet
     read that assumed the directory existed."""
     with pytest.raises(GraphHtmlError) as exc_info:
         export_graph_html("TEST", subj.root_dir / "out.html")

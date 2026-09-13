@@ -1,10 +1,7 @@
-"""groundly/core/subject.py — the subject workspace, and the one predicate its callers
-must agree on.
-
-`graph_is_built()` replaced a two-term check that was written out in several places in
-slightly different shapes. These tests pin the two terms and the states between them,
+"""groundly/core/subject.py: the subject workspace, and the one predicate its callers
+must agree on. These tests pin `graph_is_built()`'s two terms and the states between them,
 because the failure they guard against is silent: `list_subjects` reporting a graph as
-built, or `export-graph` rendering one, from a build that never finished.
+built from a build that never finished.
 """
 
 from groundly.core.subject import Subject
@@ -39,6 +36,5 @@ def test_graph_is_built_survives_a_hash_with_no_directory(subject):
 
 def test_graph_is_built_on_a_subject_that_was_never_initialized(subject):
     """The `and` short-circuits before `load_manifest()`, which would otherwise raise
-    FileNotFoundError. The eval preflight depends on this: it is handed a subject name,
-    not a checked workspace."""
+    FileNotFoundError for a subject that was never initialized."""
     assert Subject("never-created").graph_is_built() is False

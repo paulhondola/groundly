@@ -57,10 +57,9 @@ def _fixed_console_width(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _reset_shared_embedder():
-    """`llm/embeddings.py`'s shared_embedder() is a process-level singleton (perf
-    fix: one resident bge-m3 model per process) — reset it around every test so one
-    test's stub (or a stray real load) never leaks into the next via the cached
-    module global."""
+    """`llm/embeddings.py`'s shared_embedder() is a process-level singleton; reset it
+    around every test so one test's stub (or a stray real load) never leaks into the
+    next."""
     import groundly.llm.embeddings as embeddings_mod
 
     embeddings_mod._shared = None
