@@ -58,8 +58,8 @@ def export_subject(
     graph_dir = subj.root_dir / "graph"
     if graph_dir.exists():
         # cache/ (graphrag's own incremental-rebuild cache) and logs/ (operational
-        # debug output) are never needed for a portable knowledge base — parquet
-        # artifacts and lancedb/ still ship as before.
+        # debug output) are never needed for a portable knowledge base; parquet
+        # artifacts and lancedb/ ship.
         _excluded_graph_prefixes = ("cache/", "logs/")
         for f in sorted(graph_dir.rglob("*")):
             if f.is_file():

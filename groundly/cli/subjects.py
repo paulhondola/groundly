@@ -162,9 +162,8 @@ def _maybe_build_graph(subj, *, graph: bool, yes: bool, debug: bool = False) -> 
     store_obj = SubjectStore(subj.store_db_path)
     # The manifest, not the directory: a refused or Ctrl-C'd build deliberately leaves
     # graph/ behind so the retry keeps graphrag's paid-for cache (decision 21), and
-    # reading that as "there is a graph here" turned every later plain `groundly index`
-    # into a prompt to *rebuild* a graph that was never recorded — the opt-in this
-    # function documents, bypassed. Same gate as mcp/server.py and _require_graph.
+    # reading that as "there is a graph here" would turn a plain `groundly index` into a
+    # prompt to *rebuild* a graph that was never recorded, bypassing the --graph opt-in.
     recorded = subj.load_manifest().graphrag.corpus_hash is not None
 
     # graph_is_stale resolves the configured extraction prompt, so a broken custom path

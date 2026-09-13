@@ -69,7 +69,7 @@ class Subject:
         own check that way for the same reason.
 
         Narrower checks deliberately do *not* call this. `ingestion/graph.py`'s build
-        gates and `cli/subjects.py` ask whether a hash is *recorded*, ignoring the
+        gates and `cli/subjects.py` check whether a hash is *recorded*, ignoring the
         directory — `graph_is_stale` is what reports a directory that went missing, and
         folding the directory term in here would make that branch unreachable.
         """

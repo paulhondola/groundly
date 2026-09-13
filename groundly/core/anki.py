@@ -1,4 +1,4 @@
-"""Verified decks -> Anki .apkg via genanki (P6 slice 1; decision 6: Anki owns daily
+"""Verified decks -> Anki .apkg via genanki (decision 6: Anki owns daily
 review, Groundly owns verified generation). Citations render on the card back — the
 UC-11 acceptance criterion. Ids are deterministic (sha-derived deck id, guid_for note
 guids) so a re-export updates the deck in Anki instead of duplicating it."""

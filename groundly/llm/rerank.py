@@ -1,4 +1,4 @@
-"""Cross-encoder reranker for the vector arm's fused candidate pool. Lives in llm/
+"""Cross-encoder reranker for the retriever's fused candidate pool. Lives in llm/
 alongside embeddings.py (model clients constructed only here); local and key-free,
 lazy-loaded — never at import/spawn time (.claude/rules/architecture.md). Pinned at
 the resolved hf_revision, same interchange-compatibility contract as bge-m3."""

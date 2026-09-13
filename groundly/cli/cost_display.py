@@ -12,9 +12,8 @@ def _usd(amount: float) -> str:
 
 def _print_cost_estimate(est) -> None:
     """The spend gate (conventions.md: print cost estimates before spending the
-    student's tokens). A range, and every assumption behind it named — the previous
-    single figure priced input tokens for the extraction pass only and said so nowhere,
-    which presented a build as costing a fraction of what it did."""
+    student's tokens). A range, with every assumption behind it named — a single figure
+    would understate a build that is billed beyond the extraction pass."""
     console.print(
         f"Estimated graph build: ~{est.input_tokens:,} input tokens, "
         f"up to ~{est.max_output_tokens:,} output"

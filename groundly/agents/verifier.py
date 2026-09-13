@@ -1,11 +1,10 @@
-"""The verifier gate (P6 slice 1 design doc): the single check `submit_cards`
-runs before anything lands in store.db. Nothing unverified enters the question bank
+"""The verifier gate: the single check `submit_cards` runs before anything lands in
+store.db. Nothing unverified enters the question bank
 (.claude/rules/grounding-and-privacy.md).
 
-This slice implements the first two of the four canonical rejection reasons —
-citation resolution and answerability-by-re-retrieval. Answer-key / distractor /
-code-execution checks arrive with UC-10/13, added as further checks inside
-`verify_card` without changing its signature or the `Rejection` contract.
+Implements citation resolution and answerability-by-re-retrieval. Answer-key /
+distractor / code-execution checks arrive with UC-10/UC-13 as further checks inside
+`verify_card`, without changing its signature or the `Rejection` contract.
 """
 
 from dataclasses import dataclass

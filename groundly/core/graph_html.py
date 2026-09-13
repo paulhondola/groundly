@@ -2,21 +2,15 @@
 (`groundly export-graph`) — entity nodes coloured by Leiden community, force-directed,
 with a sidebar of community reports and citations back to source documents.
 
-Self-contained by requirement (.claude/rules/grounding-and-privacy.md: no egress beyond
-the student's own provider, HF downloads, and pinned OCR models — a CDN script is none
-of those). The page works offline forever, so everything is inlined at generation time:
-vendored vis-network, theme.css, and this page's own `assets/graph.js`, `graph.css`,
-`graph.html` (outer shell) and `graph_body.html` (sidebar markup).
-
-Those last four are real files rather than Python string literals so an editor can lint
-and format them — and because a string literal actively hurt: the JS lived here until the
-escapes in it had to survive two parsers, and moving it out doubled every backslash
-(`\\'` -> `\\\\'`, closing a JS string early) while the whole test suite stayed green.
-`tests/core/test_graph_html.py::test_app_js_parses` exists because of that. `graph.html`'s
-`{{placeholder}}` tokens are filled by plain `str.replace()`, not `str.format()`, and in a
-fixed order with `data_blob` last — course text is attacker-controlled (layer 4 below), and
-a `.replace()` call after it would rescan, and could corrupt, any `{{...}}`-shaped substring
-that text injected.
+Self-contained because nothing may leave the machine beyond the student's own provider,
+HF downloads and pinned OCR models (.claude/rules/grounding-and-privacy.md), so a CDN
+script is out: vendored vis-network, theme.css and this page's `assets/graph.js`,
+`graph.css`, `graph.html` and `graph_body.html` are inlined at generation time. They are
+real files rather than string literals so their escapes survive one parser, not two
+(`tests/core/test_graph_html.py::test_app_js_parses` guards that). `graph.html`'s
+`{{placeholder}}` tokens are filled by `str.replace()` in a fixed order with `data_blob`
+last — course text is attacker-controlled (layer 4 below), and a later `.replace()` would
+rescan, and could corrupt, any `{{...}}`-shaped substring it injected.
 
 Entity titles/descriptions come from course PDFs, which a hostile `groundly import`
 bundle can populate with anything (layer 4, trusted content never trusted authority —
@@ -39,13 +33,9 @@ import pyarrow.parquet as pq  # row-count metadata + bounded batch reads — see
 from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
 
-# Real subjects measured so far: test_graph 114 entities, gm-validate 385. Extraction
-# density varies a lot with material — gm-validate (PDF slides) yields 4.3 entities per
-# chunk, test_graph (markdown prose) 8.1 — so a 1,194-chunk subject lands somewhere
-# between ~5,200 and ~9,700 entities, i.e. over this cap either way. vis-network's
-# forceAtlas2Based physics stops being interactively draggable well before that. Above
-# the cap we render one node per community (the "aggregated" view) rather than serve an
-# unusable page.
+# vis-network's forceAtlas2Based physics stops being interactively draggable well before
+# a large course's entity count. Above the cap we render one node per community (the
+# "aggregated" view) rather than serve an unusable page.
 _MAX_NODES = 5000
 
 # Per-field display cap — see _text. _MAX_NODES bounds *how many* things are drawn;
@@ -78,8 +68,7 @@ _REQUIRED_ARTIFACTS = (
     "text_units.parquet",
 )
 
-# Tableau10 — the same categorical palette graphify's graph.html uses, so this page and
-# a future P7 dashboard read as one product.
+# Tableau10 categorical palette.
 _PALETTE = [
     "#4E79A7",
     "#F28E2B",
@@ -109,10 +98,9 @@ class GraphHtmlResult:
 
 
 def _citation_line(filename: str, page: int | None, heading_path: str | None) -> str:
-    """Mirrors anki.py::_source_line's conditional style, but markdown chunks have
-    page=None (no PDF page to cite), so a bare `page is not None` check — not falling
-    through to heading_path when page is merely absent-but-zero-ish — is what keeps
-    the `documents.title`-style "knowledge-base.md#pNone" bug off this sidebar."""
+    """Mirrors anki.py::_source_line's conditional style. Markdown chunks have page=None
+    (no PDF page to cite), so the check is `page is not None` with heading_path as the
+    fallback — never a "knowledge-base.md#pNone" citation."""
     if page is not None:
         return f"{filename}, p.{page}"
     if heading_path:
@@ -141,11 +129,10 @@ def _text(value, default=""):
 
     The cap is a resource bound, not formatting. Every string on the page originates in
     course material, and an imported bundle is untrusted (grounding-and-privacy.md), so
-    field length is attacker-controlled: measured, 100 entities carrying 1 MiB
-    descriptions — 50x *under* the _MAX_NODES cap, so no other guard fires — produced a
-    300 MiB HTML file. _MAX_NODES bounds how many things are drawn; this bounds how big
-    each one can be. 8k chars is far past any real description (longest measured on a real
-    subject: 706) and still leaves the worst case bounded at tens of MB.
+    field length is attacker-controlled: a few entities with MiB-sized descriptions sit far
+    under _MAX_NODES, so no other guard fires. _MAX_NODES bounds how many things are drawn;
+    this bounds how big each one can be. 8k chars is far past any real description and
+    still leaves the worst case bounded at tens of MB.
 
     This is the one choke point every attacker-controlled string passes through on its way
     into the payload — keep it that way rather than capping at each call site."""
@@ -181,21 +168,18 @@ def _read_bounded(path: Path, subject_name: str, columns: list[str] | None = Non
     """`pd.read_parquet` with a ceiling on what it will materialize.
 
     `groundly import` is a trust boundary, so a bundle's *decompressed* size is the
-    sender's choice, and parquet inflates repetitive text spectacularly: measured, a 63 KiB
-    entities.parquet expanding to 600 MiB of pandas objects. Neither `_MAX_NODES` nor
-    `_MAX_FIELD_CHARS` helps — they bound the page, and the read that feeds it has already
-    happened.
+    sender's choice, and parquet inflates repetitive text spectacularly (a KiB-sized file
+    can expand to hundreds of MiB). Neither `_MAX_NODES` nor `_MAX_FIELD_CHARS` helps —
+    they bound the page, and the read that feeds it has already happened.
 
-    The footer is no help either, which is the trap worth recording: `total_byte_size`
-    claims to be the uncompressed size, but it is the *encoded* size, and 600 identical
-    1 MiB strings dictionary-encode to one value plus 600 indices. On the file above it
-    reports 1.02 MiB against 600 MiB actual — a check that passes an attack it is supposed
-    to catch is worse than no check, because it reads as protection.
+    The footer is no help either: `total_byte_size` claims to be the uncompressed size but
+    is the *encoded* size, and identical strings dictionary-encode to one value plus
+    indices — a check on it passes exactly the attack it would be meant to catch.
 
     So bound it by actually streaming: read row-group batches, add up their real nbytes,
     and stop the moment the running total crosses the limit. Peak memory is the limit plus
-    one batch, whatever the encoding. The limit is generous against any genuine course —
-    gm-validate's entire graph/ is a few MB — and exists to turn an OOM into a sentence."""
+    one batch, whatever the encoding. The limit is generous against any genuine course and
+    exists to turn an OOM into a sentence."""
     parquet = pq.ParquetFile(path)
     batches, total = [], 0
     for batch in parquet.iter_batches(batch_size=_READ_BATCH_ROWS, columns=columns):
@@ -220,10 +204,8 @@ def _resolve_level(level: int | None, communities: pd.DataFrame) -> tuple[int | 
     Not the finest, which is the intuitive choice and the wrong one: Leiden only
     subdivides communities large enough to split, so every level below the root covers
     strictly fewer entities, and entities in no community at the chosen level render
-    grey. Measured 2026-08-02 — test_graph colours 81/114 (71%) at level 0 against
-    41/114 (36%) at level 1, and gm-validate 188/385 (49%) at level 0 against 12/385
-    (**3%**) at level 2. Defaulting to the finest level opens gm-validate as an almost
-    entirely grey graph. The page's own level toggle still reaches every level.
+    grey — the finest level can open a real subject as an almost entirely grey graph.
+    The page's own level toggle still reaches every level.
 
     An explicit level that doesn't exist is a caller error, not a silent fallback — it
     would otherwise render an empty legend with no explanation."""
@@ -262,7 +244,7 @@ def _legend_for_level(
             {
                 "community": cid,
                 # communities.title is the literal string "Community N" — never a real
-                # label (measured fact). community_reports.title is the LLM-generated one.
+                # label. community_reports.title is the LLM-generated one.
                 "title": _text(report["title"]) if report is not None else f"Community {cid}",
                 "size": _num(row.get("size"), 0),
                 "color": colors[cid],
@@ -287,11 +269,9 @@ def _entity_citations(
     # A LIST of document_ids per text-unit id, not set_index()["document_id"]: text_unit
     # ids are content hashes, so two Groundly chunks with byte-identical text collide onto
     # one id — and they are still *different chunks*, on different pages of different
-    # files. Measured on gm-validate: 3 ids collide, every one of them spanning more than
-    # one document_id. With a pandas index lookup those rows make `.get()` return a Series
-    # instead of a scalar, `int()` raises TypeError, and the except below swallows it — 10
-    # entities (VECTOR, SIMD, SPMD, NVIDIA GPU ARCHITECTURE, ...) silently lost *every*
-    # citation and 6 more lost some, while the page still claimed to resolve them.
+    # files. With a pandas index lookup those rows make `.get()` return a Series instead of
+    # a scalar, `int()` raises TypeError, and the except below would swallow it — silently
+    # dropping the affected entities' citations.
     doc_ids_by_tu: dict[str, list] = {}
     for tu_id, doc_id in zip(text_units["id"], text_units["document_id"], strict=True):
         doc_ids_by_tu.setdefault(tu_id, []).append(doc_id)
@@ -360,8 +340,8 @@ def _entity_graph(
         # No `description`: the page renders node and community-report text but has no
         # surface that ever shows a relationship's description, so shipping it put layer-4
         # course text into a shareable file that its own viewer cannot see to review before
-        # sharing. It was also the bulk of the export's size — measured, 200 MiB of a
-        # 300 MiB page. Add it back only alongside the UI that displays it.
+        # sharing. It was also the bulk of the export's size. Add it back only alongside the
+        # UI that displays it.
         edges.append(
             {
                 "from": src,
@@ -423,18 +403,16 @@ def _safe_json(data) -> str:
     written into a `<script>` **text node**. That is what makes escaping `<` alone
     sufficient. Move any of this data into an HTML attribute, a `title=`/`data-*` on the
     page shell, or a `<style>` block and `"`, `'` and `>` immediately start mattering --
-    this function would silently stop being enough, with no test failing. `<` alone is what matters: the HTML tokenizer only starts
-    down the "script end tag" / "comment open" path on a literal `<` (`</script`,
-    `<!--`), never on a bare `>` -- so replacing every `<` with `\\u003c` removes every
-    literal `<` from the blob and the browser never begins parsing a tag inside the
-    script element. `>` is deliberately left alone because it buys nothing: a bare `>`
-    cannot start a tag, so escaping it would defend against no reachable attack. It is
-    *safe* either way -- `\\u003e` round-trips through JSON.parse back to `>`, so
-    citation text like "Use Cases > UC-14" would render identically -- the escape is
-    simply unnecessary, and leaving it off keeps the blob greppable. \\u2028/\\u2029 are
-    raw newline characters in JS that json.dumps otherwise emits literally, written here
-    as escape sequences rather than literal characters so nothing in the toolchain can
-    silently eat an invisible line separator out of this source file."""
+    this function would silently stop being enough, with no test failing.
+
+    `<` alone is what matters: the HTML tokenizer only starts down the "script end tag" /
+    "comment open" path on a literal `<` (`</script`, `<!--`), never on a bare `>` -- so
+    replacing every `<` with `\\u003c` removes every literal `<` from the blob and the
+    browser never begins parsing a tag inside the script element. `>` is left alone: a
+    bare `>` cannot start a tag, and leaving it keeps the blob greppable. \\u2028/\\u2029
+    are raw newline characters in JS that json.dumps otherwise emits literally, written
+    here as escape sequences rather than literal characters so nothing in the toolchain
+    can silently eat an invisible line separator out of this source file."""
     blob = json.dumps(data)
     return blob.replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
 
@@ -458,9 +436,8 @@ def export_graph_html(
         )
 
     # All five, not just entities: a build interrupted between workflows leaves some
-    # artifacts and not others, and reading those unguarded raised a bare
-    # FileNotFoundError straight past the CLI's `except GraphHtmlError` — a raw traceback
-    # on precisely the broken-build case this whole feature exists to diagnose.
+    # artifacts and not others, and reading those unguarded would raise a bare
+    # FileNotFoundError straight past the CLI's `except GraphHtmlError`.
     missing = [name for name in _REQUIRED_ARTIFACTS if not (graph_dir / name).exists()]
     if missing:
         raise GraphHtmlError(
@@ -472,9 +449,7 @@ def export_graph_html(
 
     # Decide the view from the parquet FOOTER, before materializing anything. num_rows is
     # metadata — it costs no memory — whereas read_parquet() decompresses the whole column
-    # set first and only then meets _MAX_NODES. Measured on a hostile file: a 216 KiB
-    # entities.parquet (7,564x expansion) drove peak RSS to ~5.9 GiB and wrote a 1.6 GiB
-    # page *while reporting success*. An imported bundle is untrusted input
+    # set first and only then meets _MAX_NODES. An imported bundle is untrusted input
     # (grounding-and-privacy.md), so the decompressed size is the attacker's choice.
     entity_rows = pq.ParquetFile(entities_path).metadata.num_rows
     if entity_rows == 0:
@@ -556,11 +531,8 @@ def export_graph_html(
         "edges": edges,
     }
 
-    # groundly/assets/, not groundly/web/static/: `web/` is a named *client* layer
-    # (architecture.md — nothing below it may depend on it), and while reading package
-    # data is not an import, pointing a foundation module at a client directory is an
-    # invisible coupling no import graph would ever surface. `assets/` is a bare data
-    # directory, the same shape as `prompts/`, which llm/graphrag_adapter.py already reads.
+    # groundly/assets/ is a bare package-data directory (the same shape as `prompts/`), so
+    # this foundation module reads nothing from a client layer.
     # data_blob goes last: it carries course text (attacker-controlled per
     # grounding-and-privacy.md), and .replace() calls after it would rescan — and could
     # corrupt — any "{{placeholder}}"-shaped substring the data injected earlier.
@@ -582,12 +554,10 @@ def export_graph_html(
         path=out_path,
         nodes=len(nodes),
         edges=len(edges),
-        # Communities at the level actually rendered, not every level summed. len(communities)
-        # counts parquet rows across the whole Leiden hierarchy — 20 for test_graph (9 at
-        # level 0 + 11 at level 1) — a number the user never sees at once, and one that
-        # contradicted the page's own footer. It also makes the aggregated view's defining
-        # invariant true rather than accidental: the meta-graph is one node per community
-        # *at chosen_level*, so nodes == communities only holds with this count.
+        # Communities at the level actually rendered, not every level summed: len(communities)
+        # counts parquet rows across the whole Leiden hierarchy, a number the user never sees
+        # at once. It also keeps the aggregated view's invariant true: the meta-graph is one
+        # node per community *at chosen_level*, so nodes == communities only with this count.
         communities=len(legend_by_level[chosen_level]) if chosen_level is not None else 0,
         aggregated=aggregated,
     )

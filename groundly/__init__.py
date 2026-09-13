@@ -10,13 +10,10 @@ untouched, so core/logs.py's root handler still receives everything when logging
 is on.
 
 Two env vars for litellm live here rather than in `llm/`, because litellm reads both
-at *its* import and the modules that need them import litellm transitively before
-their own module body runs: `ingestion/graph.py` and `retrieval/graph.py` do
-`from graphrag.api... import ...` at the top, which pulls graphrag -> graphrag_llm ->
-litellm well before their `from groundly.llm.graphrag_adapter import ...` line. A
-setdefault in `llm/` was therefore a no-op on exactly the paths that matter (verified:
-litellm's warnings still appeared). Python runs this package init before any
-`groundly.*` submodule, so it is the only placement that actually holds.
+at *its* import and `ingestion/graph.py` imports graphrag -> graphrag_llm -> litellm at
+the top, before its `from groundly.llm.graphrag_adapter import ...` line. Python runs
+this package init before any `groundly.*` submodule, so it is the only placement that
+holds.
 
 - LITELLM_LOCAL_MODEL_COST_MAP: unset, litellm's __init__ fetches its price map from
   GitHub, which the privacy rule forbids (.claude/rules/grounding-and-privacy.md).

@@ -1,5 +1,5 @@
 """The graphrag batch builder — ingestion writes stores, never serves queries
-(.claude/rules/architecture.md); local/global search live in retrieval/graph.py.
+(.claude/rules/architecture.md).
 
 Groundly feeds graphrag pre-chunked text: each stored chunk becomes one input
 "document", with chunking size set generously above CHUNK_MAX_TOKENS so graphrag
@@ -70,8 +70,7 @@ _MAX_EXTRACTION_FAILURE_RATE = 0.05
 # graphrag swallows per-item LLM failures in both of these stages and only logs them,
 # so these loggers are the only signal that content is being dropped. Each stage logs a
 # failure *twice* — the extractor's own `logger.exception` plus the calling operation's
-# `on_error` — so attach to the extractor specifically or every count doubles (verified
-# on real runs: 252 records from each extract_graph logger, 44 from each community one).
+# `on_error` — so attach to the extractor specifically or every count doubles.
 _EXTRACTION_ERROR_SOURCE = "graphrag.index.operations.extract_graph.graph_extractor"
 _COMMUNITY_ERROR_SOURCE = (
     "graphrag.index.operations.summarize_communities.community_reports_extractor"
@@ -114,16 +113,11 @@ class GraphBuildResult:
 class _BuildPlan:
     """Every input one graph build depends on, resolved exactly once.
 
-    These used to be seven locals threaded by hand into four helpers, under four
-    separate comment blocks all saying the same thing: read each of them **once**,
-    because the probe checks them, the config registers models from them, and the
-    manifest records what they named — and a `config set` landing between two reads
-    produces a build whose probe, model and recorded provenance disagree about what
-    just ran. A frozen object passed by reference is that rule as a type instead of as
-    a warning.
-
-    (`entity_types` is a list because `ExtractGraphConfig` wants one; `frozen` stops the
-    field being rebound, which is the drift that actually happened.)
+    The probe checks these, the config registers models from them and the manifest
+    records what they named, so each is read **once**: a `config set` landing between
+    two reads would produce a build whose probe, model and recorded provenance disagree.
+    `frozen` stops a field being rebound (`entity_types` is a list because
+    `ExtractGraphConfig` wants one).
     """
 
     provider: ProviderConfig
@@ -148,7 +142,7 @@ def _plan_build() -> Iterator[_BuildPlan]:
     at extraction time, so the file has to outlive `build_index` — and because the
     fingerprint in the plan is computed from that same file's text.
 
-    Providers are resolved before the prompt, and both before the caller enumerates
+    The provider is resolved before the prompt, and both before the caller enumerates
     chunks: a misconfigured provider should fail in milliseconds, not after a full
     corpus read (and never after a graph has been cleared for a rebuild)."""
     provider = require_provider("extraction")
@@ -170,8 +164,8 @@ class _WorkflowErrorCounter(logging.Handler):
     graphrag catches them per item (an `except Exception` -> `logger.exception` ->
     `on_error` callback) and carries on, so they never appear in
     `PipelineRunResult.error` and a build that dropped most of its content still
-    reports success. Entity extraction drops chunks; community reports drop the
-    summaries that global search answers from.
+    reports success. Entity extraction drops chunks; community reports drop community
+    summaries.
 
     Attached to the exact extractor logger rather than to `graphrag`: `init_loggers`
     clears handlers on `graphrag`/`graphrag_llm` when build_index starts, but never on
@@ -244,28 +238,20 @@ def _probe_extraction(
     real billable call, so each records its own trace row (.claude/rules/architecture.md:
     every LLM call records tokens + cost).
 
-    **Both probes send what the build sends, object for object.** A probe that merely
-    approximates the build tests a capability nobody exercises, and has been wrong in both
-    directions here:
+    **Both probes send what the build sends, object for object**, so the probe is never
+    laxer or stricter than the build:
 
     - The extraction prompt comes from the *same config the build will use*, formatted with
       the *same keys* graphrag formats it with — only `entity_types` and `input_text`
-      (graph_extractor._process_document). Passing the delimiter keys too, as this used to,
-      made the probe more forgiving than the build: a prompt containing `{tuple_delimiter}`
-      formatted fine here and then raised KeyError on every chunk of the real run.
-      graphrag_adapter rejects such a prompt outright now.
+      (graph_extractor._process_document). Extra keys would let a prompt pass here that
+      raises KeyError on every chunk of the real run.
     - The structured-output probe passes graphrag's own `CommunityReportResponse`, not a
-      hand-written `{"type": "json_object"}`. That shortcut was too lax for DeepSeek, which
-      accepts json_object and refuses the json_schema litellm derives from the model class
-      (one full extraction pass wasted, 2.96M tokens), *and* too strict for LM Studio, which
-      refuses json_object and requires json_schema — it would have refused a local model
-      that builds graphs fine, on the zero-key path that is meant to be first-class.
-
-    So the probe can never be the laxer of the two, nor the stricter.
+      hand-written `{"type": "json_object"}`: providers disagree on json_object versus the
+      json_schema litellm derives from the model class, in both directions.
 
     Reports its own progress, because it runs *before* graphrag's pipeline emits
     anything: two real network calls against a model that may still be loading, under a
-    300s timeout each, showing the caller nothing. That silence read as a hang."""
+    300s timeout each."""
     from groundly.llm.chat import complete, loaded_context_length
 
     prompt = config.extract_graph.resolved_prompts().extraction_prompt.format(
@@ -275,9 +261,8 @@ def _probe_extraction(
     on_event(_PROBE_STEP, 0, _PROBE_CALLS)
     conn = connect_progress(subj.progress_db_path)
     try:
-        # Deliberately does not assert *why* this one failed: it catches every provider
-        # refusal, and guessing "your context is too small" sent a real user to check
-        # their context window over a 413 a ~1800-token prompt could not have caused.
+        # Deliberately does not guess *why* this one failed: it catches every provider
+        # refusal, and a 413 or a bad key is not a context-window problem.
         _probe_call(
             conn,
             lambda: complete("extraction", [{"role": "user", "content": prompt}]),
@@ -310,18 +295,13 @@ def _probe_extraction(
                 plan.context_window,
                 loaded,
             )
-        # A separate capability: every DeepSeek model answers plain completions fine and
-        # rejects graphrag's structured-output request outright, which used to surface 80
-        # minutes in as KeyError 'community' — pandas merging the empty reports frame every
-        # failed community call left behind.
+        # A separate capability: a provider can answer plain completions fine and still
+        # reject graphrag's structured-output request, which otherwise surfaces deep into
+        # the build as KeyError 'community' (pandas merging an empty reports frame).
         #
         # `CommunityReportResponse` is graphrag's *own* response model, passed here exactly
         # as community_reports_extractor passes it, so litellm derives the same wire request
-        # both times. Sending a hand-written `{"type": "json_object"}` instead is what let
-        # the DeepSeek run start: measured 2026-07-26, DeepSeek accepts json_object and
-        # refuses json_schema, and LM Studio refuses json_object and requires json_schema —
-        # so that shortcut was simultaneously too lax for one provider and too strict for
-        # the other, and would have refused a local model that builds graphs fine.
+        # both times.
         _probe_call(
             conn,
             lambda: complete(
@@ -398,7 +378,7 @@ def current_extraction_fingerprint() -> str:
 def graph_is_stale(subj: Subject, store: SubjectStore) -> str | None:
     """Why the recorded graph no longer describes this subject, or None if it still does.
 
-    A reason string rather than a bool because there are now three causes and the CLI
+    A reason string rather than a bool because there are several causes and the CLI
     quotes this to the student. Telling someone "the corpus changed" when what they
     changed was `graph.entity_types` is exactly the kind of confident-but-wrong message
     the gates in this module exist to prevent (conventions: name the cause specifically).
@@ -470,19 +450,17 @@ def _reset_graph_artifacts(subj: Subject) -> None:
 
     graphrag writes into an existing `graph/` without clearing it, so a build that
     produces nothing leaves the *previous* build's parquet in place — and the gates in
-    build_graph, which check that entities.parquet exists and has rows, pass on those and
-    stamp a fresh corpus_hash over a stale graph (verified: a second build writing nothing
-    and logging no failures inherited build 1's entities and was recorded as current).
+    build_graph, which check that entities.parquet exists and has rows, would pass on those
+    and stamp a fresh corpus_hash over a stale graph.
 
-    Resetting `manifest.graphrag` in the same step is what makes this safe rather than a
-    new crash: `_require_graph` treats a non-None corpus_hash as "there is a graph here",
-    so clearing the artifacts while leaving the old hash behind would send the query path
-    into `_load_artifacts` looking for parquet that no longer exists. Cleared together,
-    a failed rebuild leaves an honest "no graph" that `graph_is_stale` re-prompts on.
+    `manifest.graphrag` is reset in the same step because a non-None corpus_hash is what
+    every reader takes as "there is a graph here"; clearing the artifacts while leaving the
+    old hash behind would claim a graph that no longer exists. Cleared together, a failed
+    rebuild leaves an honest "no graph" that `graph_is_stale` re-prompts on.
 
     The previous graph is genuinely lost if the rebuild fails — correct, because a rebuild
     only runs when the corpus already changed, so that graph was no longer a graph *of
-    this corpus*. Serving it is the staleness lie the gates exist to prevent."""
+    this corpus*."""
     graph_dir: Path = subj.root_dir / "graph"
     if graph_dir.exists():
         for entry in graph_dir.iterdir():
@@ -511,15 +489,12 @@ def _report_failure_hint(last_message: str) -> str:
 
     Community reports carry by far the largest prompt in the build (graphrag's stock
     template is ~2,200 tokens before any content), so they are the first stage to overrun
-    a runtime whose real limit is `in-flight calls x prompt` rather than one prompt —
-    measured 2026-08-01: 8 of 11 died in waves of exactly n_slots while extraction, at
-    450-750 tokens a call, had just finished cleanly. The existing message blames JSON
-    mode, which is the right guess for a provider that refuses the request outright and
-    the wrong one here; without this, the reader tunes graph.context_window and watches it
-    fail again.
+    a runtime whose real limit is `in-flight calls x prompt` rather than one prompt. The
+    existing message blames JSON mode, the right guess for a provider that refuses the
+    request outright and the wrong one here.
 
-    Matching on message text, which is inherently approximate — but it only ever *adds* a
-    sentence, so a miss costs nothing and a false positive costs one extra line."""
+    Matching on message text is approximate, but it only ever *adds* a sentence, so a miss
+    costs nothing and a false positive costs one extra line."""
     lowered = last_message.lower()
     if not any(marker in lowered for marker in _CAPACITY_MARKERS):
         return ""
@@ -568,7 +543,7 @@ def _verify_build_output(
             f"graph.context_window (currently {plan.context_window})"
         )
 
-    # The artifact retrieval/graph.py actually reads. Row count, not file size: a
+    # The build's core artifact. Row count, not file size: a
     # zero-row parquet is ~1.9 KB of schema, so a size check would pass an empty graph
     # (reachable when a model returns unparseable output that never raises).
     entities = subj.root_dir / "graph" / "entities.parquet"
@@ -578,9 +553,8 @@ def _verify_build_output(
             "Re-run with --debug to see graphrag's own errors"
         )
 
-    # Community reports are what global search answers from, and graphrag
-    # swallows their failures the same way it swallows extraction's. A graph with
-    # communities but no reports for them is a graph the global arm cannot use.
+    # graphrag swallows community-report failures the same way it swallows extraction's.
+    # A graph with communities but no reports for them has no summaries to build from.
     graph_dir = subj.root_dir / "graph"
     communities = graph_dir / "communities.parquet"
     reports = graph_dir / "community_reports.parquet"
@@ -597,9 +571,8 @@ def _verify_build_output(
             "one that supports structured output"
         )
     if reports_counter.count:
-        # A partial failure still costs the global arm those communities, and it is the
-        # shape capacity exhaustion actually takes — the build that prompted this hint
-        # lost 8 of 11 reports and returned "success" for the rest.
+        # A partial failure still loses those communities' summaries, and it is the shape
+        # capacity exhaustion usually takes.
         logger.warning(
             "community reports failed for %d of %d communities: %s%s",
             reports_counter.count,
@@ -644,7 +617,7 @@ def build_graph(
     workflow names and progress counts that `--debug` exists to show."""
     on_event = on_event or (lambda description, completed, total: None)
 
-    # `_plan_build` resolves both providers before anything else and holds the extraction
+    # `_plan_build` resolves the provider before anything else and holds the extraction
     # prompt open for the whole pipeline (ExtractGraphConfig.prompt is a path graphrag
     # re-reads at extraction time, so the file has to outlive build_index).
     with (
@@ -759,7 +732,6 @@ def _record_build(
     # don't pass through llm/, but graphrag_llm aggregates their usage itself and
     # `track_usage=True` puts that aggregate somewhere this process can read — so the
     # trace records what was spent rather than what was guessed.
-    # (retrieval/graph.py's query-side gap is unchanged.)
     metered = metered_usage()
     conn = connect_progress(subj.progress_db_path)
     try:

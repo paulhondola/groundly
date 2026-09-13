@@ -1,6 +1,6 @@
 """`groundly mcp`: run the FastMCP tool surface over stdio for a host-spawned MCP
-client (Claude Code/Codex/Desktop). P4 v1 — see cli/ask.py for the same lazy-import
-wrapper pattern."""
+client (Claude Code/Codex/Desktop). A lazy-import wrapper: the server module loads only
+when the verb runs."""
 
 import sys
 

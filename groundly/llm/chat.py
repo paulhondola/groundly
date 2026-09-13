@@ -1,15 +1,11 @@
 """Chat completion client: litellm.completion() against any OpenAI-compatible
-endpoint (LM Studio, Ollama, cloud providers) — see .claude/rules/architecture.md:
-LLM clients constructed only in llm/. Every call resolves its provider from
-groundly.llm.config, so callers only ever name a call class.
+endpoint (LM Studio, Ollama, cloud providers). LLM clients are constructed only in llm/
+(.claude/rules/architecture.md); callers name a call class and the provider resolves
+from groundly.llm.config.
 
-litellm import stays lazy (inside complete()): cold import costs ~2.5s and must
-never happen at MCP spawn time. The env vars litellm reads at *its* import —
-LITELLM_LOCAL_MODEL_COST_MAP (unset, its __init__ fetches the price map from GitHub,
-violating the privacy rule in .claude/rules/grounding-and-privacy.md) and LITELLM_LOG
-— are set in groundly/__init__.py, not here: callers reach litellm transitively via
-graphrag before this module's body ever runs, so setting them here was a no-op on
-exactly those paths."""
+litellm import stays lazy (inside complete()): cold import costs ~2.5s and must never
+happen at MCP spawn time. The env vars litellm reads at *its* import are set in
+groundly/__init__.py, because callers reach litellm via graphrag before this module runs."""
 
 from dataclasses import dataclass
 from typing import Protocol
@@ -35,7 +31,7 @@ class ChatFn(Protocol):
 
 
 class ChatUnreachableError(Exception):
-    """The configured chat provider could not be reached (network/HTTP error)."""
+    """The configured provider could not be reached, or refused the request."""
 
 
 def loaded_context_length(call_class: str) -> int | None:
@@ -43,20 +39,15 @@ def loaded_context_length(call_class: str) -> int | None:
     does not say. Best-effort and never raises.
 
     `graph.context_window` is a number Groundly asserts, not one it measures: every
-    prompt budget is carved from it and nothing checks it against the endpoint, so a
-    model reloaded at a smaller window silently invalidates the whole sizing. Observed
-    2026-08-01 — config said 12288, LM Studio was serving 8192 after a reload.
+    prompt budget is carved from it, so a model reloaded at a smaller window silently
+    invalidates the whole sizing.
 
-    LM Studio is the only endpoint asked, via its own REST API (`GET /api/v0/models`,
-    `loaded_context_length`); the OpenAI-compatible surface has no equivalent field and
-    Ollama's context is server-side only. That makes this an unusually literal reading of
-    "never hardcode a provider" (.claude/rules/architecture.md): the rule protects the
-    *call* path, where a hardcoded provider would make some endpoints unusable. Nothing
-    here reaches an LLM or gates a build — a server that 404s, times out, or answers a
-    shape this does not recognise returns None and the build proceeds exactly as before.
-
-    Deliberately not raising on *anything*: this is a diagnostic, and the one failure mode
-    worse than missing the drift is refusing a build over an unrelated HTTP hiccup."""
+    Only LM Studio is asked, via its own REST API (`GET /api/v0/models`,
+    `loaded_context_length`); the OpenAI-compatible surface has no equivalent field. That
+    fits "never hardcode a provider" (.claude/rules/architecture.md): the rule protects the
+    *call* path, and nothing here reaches an LLM or gates a build — any other answer
+    returns None and the build proceeds. Deliberately never raises: refusing a build over
+    an unrelated HTTP hiccup would be worse than missing the drift."""
     cfg = require_provider(call_class)
     # base_url is the OpenAI surface (…/v1); the REST API is a sibling at the origin.
     origin = urlunparse(urlparse(cfg.base_url)._replace(path="", query="", fragment=""))
@@ -91,14 +82,11 @@ def complete(
     litellm.suppress_debug_info = True
 
     cfg = require_provider(call_class)
-    # Structured output is a provider *capability*, not universally available on
-    # OpenAI-compatible endpoints — and the accepted shape differs per endpoint, in both
-    # directions: DeepSeek takes `{"type": "json_object"}` and refuses `json_schema`,
-    # LM Studio refuses `json_object` and demands `json_schema`. So this takes the
+    # Structured output is a provider *capability*, and the accepted shape differs per
+    # endpoint (json_object vs json_schema, in both directions). So this takes the
     # response_format the caller actually needs rather than a bool naming one shape: the
     # graph build's probe hands over graphrag's own response model, which litellm converts
-    # into the same wire request the build sends, so the probe can never test a shape the
-    # build never sends (ingestion/graph.py's _probe_extraction).
+    # into the same wire request the build sends (ingestion/graph.py's _probe_extraction).
     #
     # enable_json_schema_validation is graphrag_llm's global — lite_llm_completion.py sets
     # it True at import, and graphrag is imported well before the probe runs — and it makes
@@ -112,8 +100,7 @@ def complete(
     )
     # Nested under extra_body, never passed flat: litellm's drop_params is False, so a
     # flat reasoning_effort kwarg raises UnsupportedParamsError on every call instead of
-    # degrading (measured — see llm/graphrag_adapter.completion_model_config, which nests
-    # the same way so the setting means the same thing on every call class).
+    # degrading. llm/graphrag_adapter.completion_model_config nests the same way.
     if cfg.reasoning_effort:
         extra["extra_body"] = {"reasoning_effort": cfg.reasoning_effort}
     # Flat, unlike reasoning_effort: temperature is a first-class OpenAI parameter every

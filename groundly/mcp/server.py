@@ -19,43 +19,11 @@ notation and emphasis are what the student is graded on, and general knowledge i
 substitute for them. Whichever groundly tools you have been given are enough to do this. \
 Cite what you use: every chunk carries a `groundly://` uri that resolves to a document \
 and page."""
-"""The MCP `initialize` instructions — the one place a retrieval norm can be stated once
-for the whole server rather than repeated per tool.
-
-**Measured, not assumed.** The grounding-fidelity experiment (decision 30) ran a real
-`claude -p` host over both gold sets under two prompts. Told nothing about retrieval, it
-called `search` on 8 of 48 apd questions and **0 of 17 factoids**, answering the rest out
-of model knowledge without opening the materials; told "use the `search` tool", it
-retrieved on 48 of 48. The capability was never missing — the *trigger* was, and nothing
-in the tool surface supplied it.
-
-The factoid number is what this text aims at. A model that already knows Amdahl's law has
-no reason to open a slide deck unless something tells it why *this course's* treatment is
-the thing being examined.
-
-**It must not rank one tool above another. The first version did, and that one clause was
-worth more than everything else here put together.** That version ended "`ask` returns an
-enforced, cited answer; `search` returns raw chunks for you to compose from". Measured on
-apd, three cells, one variable at a time:
-
-    descriptions   instructions            retrieved   factoids
-    old            none                      8/48        0/17     <- decision 30
-    new            ranked `ask` > `search`   4/48        1/17
-    new            no ranking               29/48        8/17
-
-Removing the ranking is the *only* difference between rows 2 and 3: 4/48 -> 29/48, Fisher
-exact **p = 8.3e-08**. Against decision 30's baseline, p = 1.9e-05; the 0-of-17 factoid
-failure becomes 8 of 17, p = 0.003.
-
-The mechanism is the defect this change set was written to remove, reintroduced one level
-up. The old `search` description sent a host to `ask`; the control condition is not
-allowlisted for `ask`, so a host that wanted grounded output was pointed at a tool it did
-not have. Moving that ranking into the server instructions applied it to the whole surface
-instead of one tool, and answering from memory stayed the path of least resistance.
-
-**So the rule is the finding**: instructions state the norm, tool descriptions say which
-tool. Naming a preferred tool here is invisible to whoever allowlists a subset later, and
-costs more than the norm gains."""
+"""The MCP `initialize` instructions: the one place a retrieval norm is stated once for
+the whole server. It must not rank one tool above another — a preferred tool named here
+is invisible to whoever allowlists a subset later, and a host pointed at a tool it does
+not have falls back to answering from memory. Measured basis:
+docs/thesis/experiments.md (decision 31)."""
 
 mcp = FastMCP("groundly", instructions=SERVER_INSTRUCTIONS)
 
@@ -109,8 +77,7 @@ def list_subjects() -> list[dict]:
                 "pages": sum(r["pages"] or 0 for r in indexed),
                 "chunks": sum(r["chunk_count"] for r in rows),
                 # Manifest, not directory: a refused or interrupted build leaves
-                # partial parquet on disk that must never be reported as a graph
-                # (same gate as retrieval/graph.py's _require_graph).
+                # partial parquet on disk that must never be reported as a graph.
                 "graph_built": subj.graph_is_built(),
             }
         )

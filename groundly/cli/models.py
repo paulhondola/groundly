@@ -1,5 +1,5 @@
-"""Embedding model management verbs, plus the still-stubbed config verbs (small;
-not worth a module of their own)."""
+"""Embedding model management verbs, plus the config verbs (small; not worth a module
+of their own)."""
 
 from typing import Annotated
 

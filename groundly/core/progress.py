@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS traces (
 
 
 def create_progress(path: Path) -> None:
-    # Tables arrive in P3 (traces) / P6 (quiz_events, notes); progress.db never
+    # The traces table arrives with the first connect_progress; progress.db never
     # travels, so its schema can grow locally without interchange impact.
     conn = sqlite3.connect(path)
     try:

@@ -1,10 +1,10 @@
 """bge-m3 embedding: dense (1024-d, normalized) + learned sparse from one forward pass.
 
-Lives in llm/ because embedding clients are constructed only here (overview.md module
-rules); it is local and key-free, so no cost metering applies. Lazy-loaded — never at
-import/spawn time (.claude/rules/architecture.md). The model is
-resolved at the pinned hf_revision via snapshot_download, which is the interchange
-compatibility contract: same pin ⇒ shared vectors transfer as-is.
+Lives in llm/ because model clients are constructed only here; it is local and key-free,
+so no cost metering applies. Lazy-loaded — never at import/spawn time
+(.claude/rules/architecture.md). Resolved at the pinned hf_revision via
+snapshot_download, which is the interchange compatibility contract: same pin ⇒ shared
+vectors transfer as-is.
 """
 
 import os
