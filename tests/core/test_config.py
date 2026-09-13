@@ -64,26 +64,12 @@ def test_graph_context_window_round_trips_through_set_and_rewrite(home):
     assert load_settings().graph.context_window == 16384
 
 
-def test_graph_report_call_class_round_trips_through_set_and_rewrite(home):
-    """`config set graph.report_call_class chat` printed success and wrote nothing: the
-    key was missing from render_config_toml's [graph] block, and set_key regenerates the
-    whole file from that renderer, so the value was dropped on the way to disk and read
-    back as the default. The documented command was a silent no-op — and every other test
-    for this setting missed it by writing config.toml by hand instead of going through
-    set_key, which is the only path a user actually has."""
-    set_key("graph.report_call_class", "chat")
-    assert load_settings().graph.report_call_class == "chat"
-
-    set_key("retrieval.context_k", "12")  # rewrite triggered by an unrelated section
-    assert load_settings().graph.report_call_class == "chat"
-
-
 def test_render_then_load_round_trips(home):
     (home / "config.toml").write_text(render_config_toml({}, Settings()))
     s = load_settings()
     assert s.ingestion.timeout_seconds == 300
     assert s.retrieval.rerank is True
-    assert load_provider("chat") is None  # all provider sections commented
+    assert load_provider("extraction") is None  # all provider sections commented
 
 
 def test_set_settings_int(home):
@@ -103,28 +89,28 @@ def test_set_max_file_size(home):
 
 
 def test_set_provider_and_key_alias(home):
-    set_key("chat.base_url", "http://localhost:1234/v1")
-    set_key("chat.model", "qwen2.5-7b")
-    set_key("chat.key", "sk-secret")
-    cfg = load_provider("chat")
+    set_key("extraction.base_url", "http://localhost:1234/v1")
+    set_key("extraction.model", "qwen2.5-7b")
+    set_key("extraction.key", "sk-secret")
+    cfg = load_provider("extraction")
     assert cfg.base_url == "http://localhost:1234/v1"
     assert cfg.model == "qwen2.5-7b"
     assert cfg.api_key == "sk-secret"
 
 
 def test_set_preserves_other_sections(home):
-    set_key("chat.base_url", "http://x")
-    set_key("chat.model", "m")
+    set_key("extraction.base_url", "http://x")
+    set_key("extraction.model", "m")
     set_key("ingestion.timeout_seconds", "700")
     # setting a setting must not wipe the configured provider
-    assert load_provider("chat").model == "m"
+    assert load_provider("extraction").model == "m"
     assert load_settings().ingestion.timeout_seconds == 700
 
 
 def test_unknown_section_lists_valid(home):
     with pytest.raises(ConfigKeyError) as exc:
         set_key("nope.field", "x")
-    assert "chat" in str(exc.value) and "ingestion" in str(exc.value)
+    assert "extraction" in str(exc.value) and "ingestion" in str(exc.value)
 
 
 def test_unknown_field_rejected(home):
@@ -138,15 +124,9 @@ def test_bad_type_rejected(home):
 
 
 def test_model_validator_failures_are_named_not_raw_tracebacks(home):
-    """`_coerce` checks the field's annotation only; whole-model validators fire later,
-    in `_settings_from_raw`. They used to escape as a raw pydantic traceback — on the one
-    command whose entire job is rejecting bad input (conventions.md: name the cause,
-    never a generic error, and a stack dump is worse than generic). Both surfaces:
-    report_call_class's CALL_CLASSES check and context_window's pre-existing ge=2048."""
-    with pytest.raises(ConfigKeyError) as exc:
-        set_key("graph.report_call_class", "bogus")
-    assert "report_call_class" in str(exc.value) and "extraction" in str(exc.value)
-
+    """`_coerce` checks the field's annotation only; whole-model validators fire later, in
+    `_settings_from_raw`, and must surface as a named ConfigKeyError rather than a raw
+    pydantic traceback."""
     with pytest.raises(ConfigKeyError) as exc:
         set_key("graph.context_window", "512")
     assert "2048" in str(exc.value)
@@ -165,9 +145,9 @@ def test_mask_key():
 def test_providers_raw_tolerates_partial_section(home):
     # a half-edited section (base_url only, no model) would fail ProviderConfig,
     # but display reads raw and must not crash
-    set_key("chat.base_url", "http://x")
+    set_key("extraction.base_url", "http://x")
     raw = providers_raw()
-    assert raw["chat"]["base_url"] == "http://x"
+    assert raw["extraction"]["base_url"] == "http://x"
 
 
 def test_config_path_under_home(home):
@@ -176,10 +156,10 @@ def test_config_path_under_home(home):
 
 def test_set_value_with_control_chars_stays_valid_toml(home):
     # a pasted value with a newline must not corrupt the file for every later read
-    set_key("chat.base_url", "http://x\n[providers.router]\nbase_url=evil")
-    set_key("chat.model", "m")
+    set_key("extraction.base_url", "http://x\n[providers.router]\nbase_url=evil")
+    set_key("extraction.model", "m")
     assert load_provider("router") is None  # no injected section
-    assert "evil" in load_provider("chat").base_url  # round-trips as one string
+    assert "evil" in load_provider("extraction").base_url  # round-trips as one string
 
 
 def test_provider_rate_limits_round_trip(home):
@@ -204,3 +184,31 @@ def test_provider_rate_limits_default_to_unset(home):
     )
     cfg = load_provider("extraction")
     assert cfg.tokens_per_minute is None and cfg.requests_per_minute is None
+
+
+def test_extraction_is_the_only_provider_section(home):
+    """One call class left: the graph build's. `config set chat.model` has to say so
+    rather than writing a section nothing reads."""
+    with pytest.raises(ConfigKeyError) as exc:
+        set_key("chat.model", "m")
+    assert "unknown config section 'chat'" in str(exc.value)
+
+
+def test_config_with_retired_sections_still_loads(home):
+    """A config.toml written before the cut carries retired provider sections and
+    graph.report_call_class. Loading must ignore them, never reject them — the student's
+    own file is the deployed state, and there is no server to migrate."""
+    (home / "config.toml").write_text(
+        '[providers.chat]\nbase_url = "http://c"\nmodel = "c"\n'
+        '[providers.judge]\nbase_url = "http://j"\nmodel = "j"\n'
+        '[providers.extraction]\nbase_url = "http://e"\nmodel = "e"\n'
+        '[graph]\nreport_call_class = "chat"\ncontext_window = 8192\n'
+    )
+    assert load_settings().graph.context_window == 8192
+    assert load_provider("extraction").model == "e"
+
+    set_key("retrieval.context_k", "12")  # whole-file rewrite must not choke on them
+    text = (home / "config.toml").read_text()
+    assert "providers.chat" not in text and "report_call_class" not in text
+    assert load_provider("extraction").model == "e"
+    assert load_settings().graph.context_window == 8192

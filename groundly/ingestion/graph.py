@@ -41,7 +41,6 @@ from groundly.llm.config import ProviderConfig, require_provider
 from groundly.llm.graph_cost import metered_usage, reset_metered_usage
 from groundly.llm.graphrag_adapter import (
     COMPLETION_MODEL_ID,
-    REPORT_COMPLETION_MODEL_ID,
     ExtractionPromptError,
     allow_nonstandard_service_tier,
     bge_m3_embedding_models,
@@ -128,10 +127,6 @@ class _BuildPlan:
     """
 
     provider: ProviderConfig
-    report_call_class: str
-    # None on the default path, where community reports are served by the extraction
-    # provider and naming it twice would only invite the two to drift.
-    report_provider: ProviderConfig | None
     context_window: int
     gleanings: int
     entity_types: list[str]
@@ -143,22 +138,6 @@ class _BuildPlan:
         """What the manifest records, derived from the same read the build ran on —
         the whole reason these three travel together."""
         return extraction_fingerprint(self.prompt_text, self.entity_types, self.gleanings)
-
-    @property
-    def providers(self) -> list[ProviderConfig]:
-        """Every provider this build will call. `concurrent_requests()` is variadic and
-        pessimistic over these: graphrag has one global concurrency setting, so a local
-        extraction provider binds the whole build even when reports go to a cloud one."""
-        return [cfg for cfg in (self.provider, self.report_provider) if cfg is not None]
-
-    @property
-    def model_label(self) -> str:
-        """One trace row, both names: `tokens`/`cost_usd` are summed across every
-        completion model the build metered, so naming only the extraction model would
-        attribute the report model's spend to the wrong one."""
-        if self.report_provider is None:
-            return self.provider.model
-        return f"{self.provider.model}+{self.report_provider.model}"
 
 
 @contextmanager
@@ -174,17 +153,9 @@ def _plan_build() -> Iterator[_BuildPlan]:
     corpus read (and never after a graph has been cleared for a rebuild)."""
     provider = require_provider("extraction")
     settings = load_settings()
-    report_call_class = settings.graph.report_call_class
-    # Resolved here rather than at the manifest write so a report provider that is named
-    # but unconfigured fails alongside the extraction one.
-    report_provider = (
-        require_provider(report_call_class) if report_call_class != "extraction" else None
-    )
     with _extraction_prompt() as (prompt_path, prompt_text):
         yield _BuildPlan(
             provider=provider,
-            report_call_class=report_call_class,
-            report_provider=report_provider,
             context_window=settings.graph.context_window,
             gleanings=settings.graph.gleanings,
             entity_types=extraction_entity_types(),
@@ -351,28 +322,19 @@ def _probe_extraction(
         # refuses json_schema, and LM Studio refuses json_object and requires json_schema —
         # so that shortcut was simultaneously too lax for one provider and too strict for
         # the other, and would have refused a local model that builds graphs fine.
-        # Probe the call class that will actually *serve* community reports, not always
-        # `extraction`: `graph.report_call_class` can point that stage at another provider,
-        # and probing the wrong one reintroduces exactly the drift this probe exists to
-        # close — too lax if extraction accepts json_schema and the report provider
-        # refuses (the whole extraction pass is spent before the first report fails), too
-        # strict if extraction refuses it while the report provider accepts, which would
-        # refuse the local-extraction/cloud-reports split outright.
         _probe_call(
             conn,
             lambda: complete(
-                plan.report_call_class,
+                "extraction",
                 [{"role": "user", "content": "Summarise a one-entity community."}],
                 response_format=CommunityReportResponse,
             ),
-            f"the {plan.report_call_class} model rejected graphrag's structured-output request: "
-            "{exc}. Community reports — the summaries global search answers "
-            "from — are sent as `response_format: json_schema`, and a model that refuses it "
-            "cannot finish a graph build. Note this is a *stricter* capability than JSON "
-            'mode: providers that accept `{{"type": "json_object"}}` may still refuse '
-            f"`json_schema` (every DeepSeek model does). Switch {plan.report_call_class}.model to one "
-            "whose endpoint supports JSON-schema structured output, or point "
-            "graph.report_call_class at a call class whose provider does.",
+            "the extraction model rejected graphrag's structured-output request: {exc}. "
+            "Community reports are sent as `response_format: json_schema`, and a model "
+            "that refuses it cannot finish a graph build. Note this is a *stricter* "
+            'capability than JSON mode: providers that accept `{{"type": "json_object"}}` '
+            "may still refuse `json_schema` (every DeepSeek model does). Switch "
+            "extraction.model to one whose endpoint supports JSON-schema structured output.",
         )
         on_event(_PROBE_STEP, _PROBE_CALLS, _PROBE_CALLS)
     finally:
@@ -461,13 +423,7 @@ def _build_config(subj: Subject, plan: _BuildPlan) -> GraphRagConfig:
 
     Everything it needs comes off the plan rather than being read here, so the
     fingerprint recorded in the manifest is computed from the same resolution that
-    produced this config — see `_BuildPlan`.
-
-    `graph.report_call_class` (core/config.GraphSettings) can point community reports at
-    a second provider entirely. When it does, a SECOND completion model is registered
-    and `community_reports.completion_model_id` is pointed at it; left at its default
-    ("extraction"), exactly one completion model is registered, same as before this
-    setting existed."""
+    produced this config — see `_BuildPlan`."""
     graph_dir = subj.root_dir / "graph"
     budgets = prompt_budgets(plan.context_window, plan.gleanings)
 
@@ -476,17 +432,12 @@ def _build_config(subj: Subject, plan: _BuildPlan) -> GraphRagConfig:
         "max_input_length": budgets.community_max_input_length,
         "max_length": budgets.community_max_length,
     }
-    if plan.report_call_class != "extraction":
-        completion_models[REPORT_COMPLETION_MODEL_ID] = completion_model_config(
-            track_usage=True, call_class=plan.report_call_class
-        )
-        community_reports_kwargs["completion_model_id"] = REPORT_COMPLETION_MODEL_ID
 
     return GraphRagConfig(
         # graphrag defaults this to 25. Against a local runtime that is what exhausts the
         # shared KV cache the prompt budgets above were sized against — see
         # llm/graphrag_adapter.concurrent_requests.
-        concurrent_requests=concurrent_requests(*plan.providers),
+        concurrent_requests=concurrent_requests(plan.provider),
         extract_graph=ExtractGraphConfig(
             max_gleanings=budgets.max_gleanings,
             # A path, not text — graphrag's resolved_prompts() reads it off disk.
@@ -638,13 +589,12 @@ def _verify_build_output(
     if community_count and not report_count:
         raise GraphBuildError(
             f"none of the {community_count} community summaries could be generated, so "
-            f"global search would have nothing to answer from. Last error: "
+            f"the topic map would have nothing to build from. Last error: "
             f"{reports_counter.last_message or 'unknown'}."
             + _report_failure_hint(reports_counter.last_message)
-            + f" Community reports are the one stage that requires JSON mode — if your "
-            f"provider reports response_format as unavailable, switch {plan.report_call_class}.model "
-            f"to one that supports structured output, or point graph.report_call_class at a "
-            f"call class whose provider does"
+            + " Community reports are the one stage that requires JSON mode — if your "
+            "provider reports response_format as unavailable, switch extraction.model to "
+            "one that supports structured output"
         )
     if reports_counter.count:
         # A partial failure still costs the global arm those communities, and it is the
@@ -799,7 +749,6 @@ def _record_build(
     manifest.graphrag = Graphrag(
         version=_package_version("graphrag"),
         extraction_model=plan.provider.model,
-        report_model=plan.report_provider.model if plan.report_provider else None,
         corpus_hash=corpus_hash(store),
         # Same write as corpus_hash, so a refused build records neither.
         extraction_fingerprint=plan.fingerprint,
@@ -820,7 +769,7 @@ def _record_build(
             query="",
             outcome="built",
             arm="graph-build",
-            model=plan.model_label,
+            model=plan.provider.model,
             tokens=estimated_tokens if metered is None else metered.total_tokens,
             cost_usd=estimated_cost_usd if metered is None else metered.cost_usd,
         )

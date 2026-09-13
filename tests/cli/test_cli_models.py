@@ -27,9 +27,9 @@ def test_config_show_defaults_no_file(home):
 
 
 def test_config_set_provider_shows_masked_key(home):
-    assert runner.invoke(app, ["config", "set", "chat.base_url", "http://x"]).exit_code == 0
-    assert runner.invoke(app, ["config", "set", "chat.model", "qwen"]).exit_code == 0
-    assert runner.invoke(app, ["config", "set", "chat.key", "sk-secret"]).exit_code == 0
+    assert runner.invoke(app, ["config", "set", "extraction.base_url", "http://x"]).exit_code == 0
+    assert runner.invoke(app, ["config", "set", "extraction.model", "qwen"]).exit_code == 0
+    assert runner.invoke(app, ["config", "set", "extraction.key", "sk-secret"]).exit_code == 0
     result = runner.invoke(app, ["config"])
     assert "model=qwen" in result.output
     assert "***ret" in result.output  # last 3 of sk-secret, masked
@@ -37,7 +37,7 @@ def test_config_set_provider_shows_masked_key(home):
 
 
 def test_config_set_unknown_key_rejected(home):
-    result = runner.invoke(app, ["config", "set", "chat.nope", "x"])
+    result = runner.invoke(app, ["config", "set", "extraction.nope", "x"])
     assert result.exit_code == 1
     assert "unknown field" in result.output
 

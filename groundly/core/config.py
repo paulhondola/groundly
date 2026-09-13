@@ -2,10 +2,9 @@
 
 Two kinds of config live here:
 
-- **Providers**: one OpenAI-compatible endpoint per call class (chat/generation/
-  extraction/router). Read lazily and per-section (a half-edited section never
-  breaks unrelated calls); zero-key operation is first-class — a missing/unfilled
-  section is simply None, never an error, until a caller actually needs it.
+- **Providers**: the one OpenAI-compatible endpoint `groundly index --graph` uses
+  (`[providers.extraction]`). Read lazily and per-section; zero-key operation is
+  first-class — a missing section is None, never an error, until a caller needs it.
 - **Settings**: user-tunable operational knobs (ingestion/llm/retrieval) whose
   defaults are the constant values that used to be hardcoded. All defaulted, so a
   missing file yields working defaults and no providers.
@@ -19,26 +18,20 @@ NOT here: changing them is a full re-index migration, not a config tweak.
 template from the effective config — always valid TOML, always self-documenting.
 """
 
+import logging
 import tomllib
 from pathlib import Path
 
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from groundly.core.paths import groundly_home
 
-CALL_CLASSES = ("chat", "extraction", "router", "judge")
+logger = logging.getLogger(__name__)
+
+CALL_CLASSES = ("extraction",)
 
 _PROVIDER_COMMENTS = {
-    "chat": "ask pipeline generation",
-    "extraction": "graphrag entity extraction",
-    "router": "cheap query classifier",
-    # Its own class rather than a reuse of `chat`, for two reasons the grounding-fidelity
-    # experiment made concrete. The judge should be free to be a *stronger* model than the
-    # one being judged — sharing `chat` makes that impossible by construction. And a judge
-    # score is uncitable without its model attached (decision 28's retracted router
-    # figure), so "which model judged this" has to be a configured fact the results file
-    # can read back, not an inference from whichever section happened to be in use.
-    "judge": "grounding-fidelity faithfulness judge (eval only, never a runtime path)",
+    "extraction": "graphrag entity extraction + community reports (`index --graph` only)",
 }
 _PROVIDER_FIELDS = (
     "base_url",
@@ -162,25 +155,6 @@ class GraphSettings(BaseModel):
     # round-trip through `config set` as a Python repr and corrupt the file.
     entity_types: str = DEFAULT_ENTITY_TYPES
 
-    # Which provider builds community reports. Defaults to "extraction" so an unset
-    # value reproduces today's single-model build exactly (one completion model, no
-    # second metrics store). A course that wants a stronger/cheaper model for report
-    # summarization than for entity extraction points this at another call class —
-    # see llm/graphrag_adapter.completion_model_config and ingestion/graph._build_config.
-    # Validated against CALL_CLASSES here rather than at the build's read site, so a typo
-    # fails immediately instead of surfacing hours in when the community-reports stage
-    # finally runs. Note the blast radius is wider than "config time": load_settings() is
-    # on the search and index paths too, so a bad value raises there as well — same as
-    # context_window's ge=2048 already does.
-    report_call_class: str = "extraction"
-
-    @field_validator("report_call_class")
-    @classmethod
-    def _report_call_class_is_known(cls, v: str) -> str:
-        if v not in CALL_CLASSES:
-            raise ValueError(f"report_call_class must be one of {CALL_CLASSES}, got {v!r}")
-        return v
-
 
 class Settings(BaseModel):
     ingestion: IngestionSettings = IngestionSettings()
@@ -212,7 +186,15 @@ def config_path() -> Path:
 
 def _load_raw() -> dict:
     path = config_path()
-    return tomllib.loads(path.read_text()) if path.exists() else {}
+    data = tomllib.loads(path.read_text()) if path.exists() else {}
+    # Configs written before the single-provider cut carry retired sections. Ignored,
+    # never rejected: this file is the student's own deployed state.
+    retired = sorted(set(data.get("providers", {})) - set(CALL_CLASSES))
+    if retired:
+        logger.debug("config.toml: ignoring retired provider sections %s", retired)
+    if "report_call_class" in data.get("graph", {}):
+        logger.debug("config.toml: ignoring retired key graph.report_call_class")
+    return data
 
 
 def providers_raw() -> dict:
@@ -271,8 +253,9 @@ def _coerce(model: type[BaseModel], field: str, value: str, section: str):
 
 
 def set_key(dotted_key: str, value: str) -> None:
-    """Set one dotted key (`chat.model`, `chat.key`, `ingestion.timeout_seconds`, ...),
-    coerced+validated against its field type, then rewrite the documented file."""
+    """Set one dotted key (`extraction.model`, `extraction.key`,
+    `ingestion.timeout_seconds`, ...), coerced+validated against its field type, then
+    rewrite the documented file."""
     section, _, field = dotted_key.partition(".")
     if not field:
         raise ConfigKeyError(
@@ -291,10 +274,10 @@ def set_key(dotted_key: str, value: str) -> None:
         raise ConfigKeyError(f"unknown config section '{section}' — valid: {valid}")
 
     # `_coerce` only checks the field's *annotation*; whole-model validators (
-    # `report_call_class` against CALL_CLASSES, `context_window`'s ge=2048) fire here.
-    # Without this they escape as a raw pydantic traceback — worse than the generic
-    # error conventions.md already forbids, and on a command whose whole job is to
-    # reject bad input. Nothing has been written at this point, so the file is untouched.
+    # `context_window`'s ge=2048) fire here. Without this they escape as a raw pydantic
+    # traceback — worse than the generic error conventions.md already forbids, and on a
+    # command whose whole job is to reject bad input. Nothing has been written at this
+    # point, so the file is untouched.
     try:
         settings = _settings_from_raw(data)
     except ValidationError as exc:
@@ -332,8 +315,8 @@ def render_config_toml(providers: dict, settings: Settings) -> str:
         "# Groundly config — providers + operational settings.",
         "# Providers: one OpenAI-compatible endpoint per call class; all optional",
         "# (indexing and search work with no provider at all). Set values with e.g.:",
-        "#   groundly config set chat.base_url http://localhost:1234/v1",
-        "#   groundly config set chat.model <model>",
+        "#   groundly config set extraction.base_url http://localhost:1234/v1",
+        "#   groundly config set extraction.model <model>",
         "",
     ]
     for cls in CALL_CLASSES:
@@ -346,7 +329,7 @@ def render_config_toml(providers: dict, settings: Settings) -> str:
                     lines.append(f"{field} = {_toml_value(section[field])}")
         else:
             lines.append(f"# [providers.{cls}]  # {comment}")
-            if cls == "chat":
+            if cls == "extraction":
                 lines += [
                     '# base_url = "http://localhost:1234/v1"',
                     '# model    = "..."',
@@ -387,7 +370,6 @@ def render_config_toml(providers: dict, settings: Settings) -> str:
         f"context_window = {_toml_value(settings.graph.context_window)}   # usable context of your extraction model; graphrag's per-stage prompt budgets are scaled to fit it",
         f"gleanings = {_toml_value(settings.graph.gleanings)}   # extra entity-extraction passes per chunk (0-2); each one doubles extraction cost and mostly adds unconnected entities",
         f"entity_types = {_toml_value(settings.graph.entity_types)}   # comma-separated types entity extraction looks for; the defaults target course material",
-        f'report_call_class = {_toml_value(settings.graph.report_call_class)}   # which call class serves community reports; "extraction" keeps them on the extraction provider',
     ]
     if settings.graph.extraction_prompt:
         lines.append(

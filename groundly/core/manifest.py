@@ -29,13 +29,8 @@ class Embedding(BaseModel):
 class Graphrag(BaseModel):
     version: str | None = None
     extraction_model: str | None = None
-    # Only set when graph.report_call_class moves community reports off the extraction
-    # provider; None means reports were built by extraction_model. Recorded for the same
-    # reason extraction_model is (docs/architecture/data-model.md: a graph built by a
-    # different model is a different experimental condition) — community reports are what
-    # global search answers from, so a bundle that named only the extraction
-    # model would under-describe its own provenance. Optional and additive: old manifests
-    # parse unchanged, so this is not a format_version event.
+    # Legacy: builds before 2026-09 could run community reports on a second provider and
+    # recorded it here. Never written now; kept so those bundles' manifests still parse.
     report_model: str | None = None
     corpus_hash: str | None = None
     # sha256 over the extraction prompt text + entity types the graph was built with.

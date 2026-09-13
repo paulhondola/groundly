@@ -217,16 +217,18 @@ def _prices_for_model(store_id: str) -> ModelPrices | None:
     which is call-class-agnostic already.
     """
     bare_model = store_id.removeprefix("openai/")
-    for call_class in ("extraction", load_settings().graph.report_call_class):
-        cfg = load_provider(call_class)
-        if cfg is not None and cfg.model == bare_model:
-            if cfg.input_price_per_mtok is not None and cfg.output_price_per_mtok is not None:
-                return ModelPrices(
-                    cfg.input_price_per_mtok / 1_000_000,
-                    cfg.output_price_per_mtok / 1_000_000,
-                    "config.toml",
-                )
-            break
+    cfg = load_provider("extraction")
+    if (
+        cfg is not None
+        and cfg.model == bare_model
+        and cfg.input_price_per_mtok is not None
+        and cfg.output_price_per_mtok is not None
+    ):
+        return ModelPrices(
+            cfg.input_price_per_mtok / 1_000_000,
+            cfg.output_price_per_mtok / 1_000_000,
+            "config.toml",
+        )
     return _litellm_prices(bare_model)
 
 
@@ -250,13 +252,6 @@ class BuildEstimate:
     # `mistral/mistral-small-latest` at $0.06/$0.18 per Mtok; the alias resolves today to
     # Mistral Small 4 at $0.15/$0.60 — 2.5x and 3.3x low, silently.
     moving_alias: str | None
-    # The call class serving community reports, when it is not `extraction`. The range
-    # above prices the extraction pass only, which is a caveat when one provider does
-    # everything and a *hole* when two do: in the split this exists to enable — local
-    # extraction, cloud reports — every dollar the build spends is on this provider and
-    # none of it is in the figure above. Naming it is all that can honestly be done;
-    # sizing it would need the community count, which only exists after the build.
-    report_call_class: str | None = None
 
 
 def _max_output_tokens_per_call() -> int:
@@ -291,13 +286,9 @@ def estimate_cost(total_chars: int, chunk_count: int) -> BuildEstimate:
 
     cfg = load_provider("extraction")
     prices = extraction_prices()
-    # None on the default path: reports run on the same provider the range already
-    # prices, so there is no second bill to warn about.
-    configured = load_settings().graph.report_call_class
-    report_class = configured if configured != "extraction" else None
     alias = cfg.model if cfg is not None and cfg.model.endswith("-latest") else None
     if prices is None:
-        return BuildEstimate(input_tokens, max_output_tokens, None, None, None, alias, report_class)
+        return BuildEstimate(input_tokens, max_output_tokens, None, None, None, alias)
 
     low = input_tokens * prices.input_per_token
     return BuildEstimate(
@@ -307,5 +298,4 @@ def estimate_cost(total_chars: int, chunk_count: int) -> BuildEstimate:
         low + max_output_tokens * prices.output_per_token,
         prices.source,
         alias,
-        report_class,
     )

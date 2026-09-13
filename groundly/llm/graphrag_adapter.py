@@ -41,7 +41,6 @@ GROUNDLY_METRICS_STORE_TYPE = "groundly"
 # one silently broke the lookup in the other. Now the agreement is structural — there is
 # one definition and both import it.
 COMPLETION_MODEL_ID = "default_completion_model"
-REPORT_COMPLETION_MODEL_ID = "report_completion_model"
 EMBEDDING_MODEL_ID = "default_embedding_model"
 
 _BUNDLED_PROMPT = ("groundly", "prompts/extract_graph.txt")
@@ -153,12 +152,9 @@ def extraction_fingerprint(prompt_text: str, entity_types: list[str], gleanings:
 _service_tier_widened = False
 
 
-def completion_model_config(
-    track_usage: bool = False, call_class: str = "extraction"
-) -> ModelConfig:
-    """Build graphrag's ModelConfig from one of Groundly's provider sections
-    (`call_class`, default `extraction` — `graph.report_call_class` points community
-    reports at another one). Fails fast (via require_provider) — a *configured* provider
+def completion_model_config(track_usage: bool = False) -> ModelConfig:
+    """Build graphrag's ModelConfig from `[providers.extraction]`. Fails fast (via
+    require_provider) — a *configured* provider
     is always required, but not necessarily a real API key: graphrag's own ModelConfig
     validator rejects an empty api_key outright (unlike Groundly's own llm/chat.py, which
     just omits the Authorization header when `cfg.api_key` is empty), so a local/keyless
@@ -176,7 +172,7 @@ def completion_model_config(
     degrades), while nesting the same value under `extra_body` reaches the provider
     (93 -> 2 completion tokens on a local reasoning model). Omitted entirely when unset,
     so `call_args` keeps its `{}` default and today's behavior is unchanged."""
-    cfg = require_provider(call_class)
+    cfg = require_provider("extraction")
     extra = (
         {"call_args": {"extra_body": {"reasoning_effort": cfg.reasoning_effort}}}
         if cfg.reasoning_effort

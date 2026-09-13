@@ -55,7 +55,6 @@ def config(ctx: typer.Context) -> None:
     console.print(
         f"  graph.extraction_prompt   = {s.graph.extraction_prompt or '(bundled course-tuned)'}"
     )
-    console.print(f"  graph.report_call_class   = {s.graph.report_call_class}")
 
 
 @config_app.command(name="set")
