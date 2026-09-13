@@ -15,8 +15,6 @@ dependencies = [
 	"rich>=13",
 	"pydantic>=2.7",
 	"pydantic-settings>=2.3",
-	"fastapi>=0.111",
-	"uvicorn>=0.30",
 	"fastmcp>=2.0",
 	"sqlite-vec>=0.1",
 	"sentence-transformers==5.6.0",
@@ -24,7 +22,6 @@ dependencies = [
 	"transformers>=4.51,<5",        # FlagEmbedding 1.3.5 predates transformers 5.x (removed is_torch_fx_available)
 	"docling==2.113.0",             # includes bundled RapidOCR — OCR enabled
 	"rapidocr==3.9.1",              # load-bearing: docling's OCR engine, local/offline
-	"llama-index==0.14.23",
 	"graphrag==3.1.0",
 	"litellm==1.86.2",              # already transitive via graphrag; now the direct llm/ client
 	"genanki>=0.13",                # verified decks → .apkg
@@ -33,7 +30,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5", "memray>=1.14"]
-eval = ["ragas>=0.2"]
 
 [project.scripts]
 groundly = "groundly.cli:app"
