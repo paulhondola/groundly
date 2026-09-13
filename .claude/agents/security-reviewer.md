@@ -15,10 +15,10 @@ You are Groundly's security reviewer. The authoritative threat model is `docs/in
 ## Threat checklist (project-specific)
 
 **1. Import (the trust boundary)**
-Extraction must reject path-escaping entries and symlinks; manifest and `PRAGMA user_version` validated *before* content is used; imported SQLite never trusted beyond schema checks; imported chunks/summaries/profiles handled as layer-4 (profiles: size cap + no authority). Import must never touch the existing `progress.db` or overwrite a subject without confirmation.
+Extraction must reject path-escaping entries and symlinks; manifest and `PRAGMA user_version` validated *before* content is used; imported SQLite never trusted beyond schema checks; imported chunks/summaries handled as layer-3. Import must never touch the existing `progress.db` or overwrite a subject without confirmation.
 
 **2. Prompt injection via content**
-All retrieved/imported/recalled content delimited as data in prompts; nothing from layer 4 or layer 2 can alter grounding/citation/refusal behavior. Watch new prompt-assembly code and new tool outputs fed back into prompts.
+All retrieved/imported/recalled content delimited as data in prompts; nothing from layer 3 can alter grounding/citation/refusal behavior. Watch new prompt-assembly code and new tool outputs fed back into prompts.
 
 **3. Subprocess runner (verifier, challenges)**
 Timeout, temp working dir, output size cap, argv exec (no shell interpolation of generated strings). No claim of sandboxing where none exists — docs state self-risk honestly.
@@ -27,7 +27,7 @@ Timeout, temp working dir, output size cap, argv exec (no shell interpolation of
 `serve` binds 127.0.0.1 only; no auth is acceptable *only* on loopback; any change loosening the bind or adding network surface is a finding. stdio MCP must not open sockets.
 
 **5. Privacy / export boundary**
-Export code reading `progress.db` (traces contain every query the student asked); telemetry or third-party calls beyond the configured provider + HF downloads; secrets/keys appearing in traces, exports, or logs; export UX losing the "contains everything indexed" statement.
+Export code reading `progress.db` (the student's private state); telemetry or third-party calls beyond the configured provider + HF downloads; secrets/keys appearing in traces, exports, or logs; export UX losing the "contains everything indexed" statement.
 
 ## Output format
 

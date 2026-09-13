@@ -2,6 +2,10 @@
 
 Measured results, one finding per file, written by the `research-specialist` agent.
 
+[`experiments.md`](experiments.md) holds the protocols and results verbatim — the
+retrieval comparison, the grounding-fidelity experiment and the tool-surface measurement
+— moved here when the code that produced them left `main` (decision 34).
+
 **Format: Markdown (`tab-<slug>.md`).** These are working artifacts — they get reformatted
 into the thesis later, so they optimize for being read directly. Each file is a `#` title,
 one pipe table, a sentence or two saying what it shows, and a provenance block.

@@ -1,16 +1,10 @@
-"""Debug logging: one stderr handler on the ROOT logger, never a log file. Log
-lines can carry query text and chunk ids — layer-4 data — so keeping logs
-ephemeral on stderr means there is no new artifact for export code to reason
-about (.claude/rules/grounding-and-privacy.md).
+"""Debug logging: one stderr handler on the root logger, never a log file. Log lines can
+carry query text and chunk ids (layer-3 data), so no file exists for export code to
+reason about.
 
-Named `logs.py`, not `logging.py`, to avoid confusion with the stdlib module.
-
-Why the root logger and not `graphrag` directly: graphrag's own `init_loggers`
-clears handlers on the `graphrag`/`graphrag_llm` loggers before attaching its
-own, but never sets `propagate = False` — a handler on the root logger still
-receives every record they emit. Root's own level stays at its default
-(WARNING); only the loggers we name get `setLevel`, so third-party libraries
-(httpx, litellm) never get their DEBUG records created in the first place.
+The root logger, because graphrag's `init_loggers` clears handlers on its own loggers but
+leaves propagation on. Root stays at WARNING; only the named loggers get `setLevel`, so
+third-party DEBUG records are never created.
 """
 
 import logging

@@ -1,8 +1,7 @@
-"""Contract tests for the verifier gate (P6 slice 1). These pin the machine-readable
-contract both doors depend on: `verify_card` returns None iff the card passes, and
-every failure is a `Rejection` whose reason comes from REJECTION_REASONS. Future
-checks (answer key, distractors, code execution) extend `verify_card` behind the
-same contract."""
+"""Contract tests for the verifier gate: `verify_card` returns None iff the card passes,
+and every failure is a `Rejection` whose reason comes from REJECTION_REASONS. Future
+checks (answer key, distractors, code execution) extend `verify_card` behind the same
+contract."""
 
 from groundly.agents import verifier as verifier_mod
 from groundly.agents.verifier import (
@@ -93,19 +92,3 @@ def test_cited_chunk_outside_top_k_rejected(retrievable_subject, monkeypatch):
     assert isinstance(result, Rejection)
     assert result.reason == "not_answerable_from_chunks"
     assert "re-retriev" in result.detail
-
-
-def test_no_search_trace_written_by_verification(retrievable_subject):
-    # Verifier retrieval is internal machinery, not student activity — it must not
-    # pollute the traces table (kind='search' rows are the search tool's).
-    from groundly.core.progress import connect_progress
-
-    card = CardCandidate(front="What does deadlock need?", back="mutual exclusion", chunk_ids=[1])
-    verify_card(card, _store(retrievable_subject), embedder=_chunk1_embedder())
-
-    conn = connect_progress(subject_dir(retrievable_subject) / "progress.db")
-    try:
-        count = conn.execute("SELECT COUNT(*) FROM traces").fetchone()[0]
-    finally:
-        conn.close()
-    assert count == 0

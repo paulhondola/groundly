@@ -133,9 +133,9 @@ def test_export_import_roundtrip_preserves_data_and_resets_progress(tmp_path, mo
 
 
 def test_export_excludes_orphan_material_with_no_store_row(tmp_path, monkeypatch):
-    """A materials/ file with no `materials` row (e.g. copied just before a transient
-    embed failure, per decision 19) must NOT ship in the bundle — export ships what
-    store.db knows is indexed, not whatever files happen to sit in materials/."""
+    """A materials/ file with no `materials` row (e.g. copied just before a failed embed)
+    must NOT ship in the bundle: export ships what store.db knows is indexed, not whatever
+    files sit in materials/."""
     _use_home(monkeypatch, tmp_path / "a")
     init_subject("PDSS")
     _seed("PDSS")  # indexes lec.pdf (has a materials row)

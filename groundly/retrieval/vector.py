@@ -1,44 +1,25 @@
-"""Arm 1 (vector baseline): dense + learned-sparse + BM25, fused by reciprocal rank
-fusion, reranked by a cross-encoder (default ON) — and arm 3 (static hybrid), which
-fuses arm 2's local search into that same baseline. The `BaseRetriever` interface is
-the "four arms, one interface" gate — every arm returns `NodeWithScore` with the same
-metadata shape (retrieval/nodes.py, docs/architecture/retrieval.md).
-
-`search()` is the zero-key shared function CLI `search` (and the MCP `search` tool)
-call directly; it never requires a provider and always logs a `kind='search'` trace.
-"""
+"""The vector retriever: bge-m3 dense + learned sparse + BM25, fused by reciprocal rank
+fusion, then an optional cross-encoder rerank. `search()` is the zero-key shared function
+behind `groundly search` and the MCP `search` tool."""
 
 import logging
-import time
-
-from llama_index.core.callbacks import CallbackManager
-from llama_index.core.retrievers import BaseRetriever
-from llama_index.core.schema import NodeWithScore, QueryBundle
 
 from groundly.core.store import SubjectStore
-from groundly.retrieval.nodes import chunk_ids, node_from_row
+from groundly.retrieval.hits import Hit, hit_from_row
 
 logger = logging.getLogger(__name__)
 
 CHANNEL_K = 50  # candidates pulled per channel before fusion
 RRF_K = 60  # standard reciprocal-rank-fusion constant
 RERANK_POOL = 20  # fused candidates handed to the cross-encoder
-CONTEXT_K = 8  # final chunks assembled into the prompt
+CONTEXT_K = 8  # default number of hits returned
 
 
 def rrf(rankings: list[list[int]], k: int = RRF_K) -> list[tuple[int, float]]:
-    """Reciprocal rank fusion over already-ranked (best-first) id lists. Pure
-    function: no I/O, easy to unit-test independent of any store.
+    """Reciprocal rank fusion over best-first id lists. Pure function, no I/O.
 
-    Ties break by *how many rankings contributed*, then by id. An id at rank i in one
-    list scores exactly the same as a different id at rank i in another, and Python's
-    stable `sorted` then hands rank 1 to whichever list was passed first — so in
-    `hybrid-local` a weak graph ordering silently owned position 1 on every query
-    (measured on apd: hybrid put the first relevant chunk at rank 1 on 4/48 questions
-    against vector's 7/48). Agreement across channels is the honest tie-break: an id
-    both retrievers found beats one only a single retriever found. The final `doc_id`
-    key just makes the order deterministic instead of insertion-dependent.
-    """
+    Ties break by how many rankings contributed, then by id: otherwise a stable sort would
+    hand equal scores to whichever list was passed first."""
     scores: dict[int, float] = {}
     votes: dict[int, int] = {}
     for ranking in rankings:
@@ -48,12 +29,11 @@ def rrf(rankings: list[list[int]], k: int = RRF_K) -> list[tuple[int, float]]:
     return sorted(scores.items(), key=lambda kv: (kv[1], votes[kv[0]], -kv[0]), reverse=True)
 
 
-class VectorRetriever(BaseRetriever):
+class VectorRetriever:
     """dense + sparse + BM25 -> RRF -> optional cross-encoder rerank -> top context_k.
 
-    `embedder`/`reranker` default to the real (lazy-loaded) bge-m3 / bge-reranker-v2-m3
-    models; tests inject stubs. `self.path` records which stages ran, for trace logging.
-    """
+    `embedder`/`reranker` default to the lazily loaded bge-m3 / bge-reranker-v2-m3
+    models; tests inject stubs."""
 
     def __init__(
         self,
@@ -65,7 +45,6 @@ class VectorRetriever(BaseRetriever):
         rerank_pool: int = RERANK_POOL,
         context_k: int | None = None,
     ) -> None:
-        super().__init__(callback_manager=CallbackManager([]))
         # rerank/context_k default from config (retrieval.*); explicit args override.
         if rerank is None or context_k is None:
             from groundly.core.config import load_settings
@@ -80,7 +59,6 @@ class VectorRetriever(BaseRetriever):
         self.context_k = context_k
         self._embedder = embedder
         self._reranker = reranker
-        self.path: list[str] = []
 
     @property
     def embedder(self):
@@ -98,14 +76,13 @@ class VectorRetriever(BaseRetriever):
             self._reranker = BgeReranker()
         return self._reranker
 
-    def _retrieve(self, query_bundle: QueryBundle) -> list[NodeWithScore]:
-        query = query_bundle.query_str
+    def retrieve(self, query: str) -> list[Hit]:
         dense, sparse = self.embedder.encode([query])  # one pass feeds both channels
 
         dense_ids = self.store.dense_search(dense[0], self.channel_k)
         sparse_ids = self.store.sparse_search(sparse[0], self.channel_k)
         bm25_ids = self.store.bm25_search(query, self.channel_k)
-        path = ["dense", "sparse", "bm25", "rrf"]
+        stages = ["dense", "sparse", "bm25", "rrf"]
         logger.debug(
             "channel hits: dense=%d sparse=%d bm25=%d",
             len(dense_ids),
@@ -116,7 +93,6 @@ class VectorRetriever(BaseRetriever):
         fused = rrf([dense_ids, sparse_ids, bm25_ids])[: self.rerank_pool]
         logger.debug("fused pool size=%d rerank=%s", len(fused), self.rerank)
         if not fused:
-            self.path = path
             return []
 
         fused_ids = [doc_id for doc_id, _ in fused]
@@ -124,83 +100,22 @@ class VectorRetriever(BaseRetriever):
         details = {row["chunk_id"]: row for row in self.store.chunk_details(fused_ids)}
 
         if self.rerank:
-            path.append("rerank")
+            stages.append("rerank")
             pairs = [(query, details[cid]["text"]) for cid in fused_ids if cid in details]
             scores = self.reranker.compute_score(pairs)
             ranked = sorted(zip(fused_ids, scores), key=lambda cs: cs[1], reverse=True)
         else:
             ranked = [(cid, fused_scores[cid]) for cid in fused_ids]
 
-        self.path = path
-        nodes = []
+        hits = []
         for chunk_id, score in ranked[: self.context_k]:
             row = details.get(chunk_id)
             if row is None:  # removed between fusion and detail lookup — skip, don't crash
                 logger.debug("chunk %s vanished between fusion and detail lookup", chunk_id)
                 continue
-            nodes.append(node_from_row(row, score))
-        logger.debug(
-            "path=%s top=%s", path, [(n.node.metadata["chunk_id"], n.score) for n in nodes]
-        )
-        return nodes
-
-
-class HybridLocalRetriever(BaseRetriever):
-    """Arm 3 (static hybrid): graphrag local search RRF-fused with the vector baseline.
-
-    Groundly's default arm until decision 28, and a published thesis result — the
-    fusion dilutes the baseline's ranking on this corpus (MRR 0.28 against 0.35) while
-    adding a graph build. It stayed selectable: `vector` is only the *default*, and
-    `--arm hybrid-local` still runs this, because the comparison between the arms *is*
-    the contribution.
-
-    This lived as an `elif` branch inside `agents/ask.py` until it became a class. That
-    put the one arm the docs describe as sharing the `BaseRetriever` interface in the
-    agents layer, outside the interface it was supposed to demonstrate.
-
-    **Degradation is not handled here, and no longer anywhere** (decision 29).
-    `GraphNotBuiltError` propagates all the way out: this arm reports its own failure
-    rather than answering as the baseline under its own name. `ask` and `eval.runner`
-    preflight `Subject.graph_is_built()` so the refusal usually lands before this arm is
-    even constructed.
-    """
-
-    def __init__(
-        self,
-        store: SubjectStore,
-        subject: str,
-        embedder=None,
-        reranker=None,
-        rerank: bool | None = None,
-        context_k: int | None = None,
-    ) -> None:
-        super().__init__(callback_manager=CallbackManager([]))
-        self.subject = subject
-        self.store = store
-        self._vector = VectorRetriever(
-            store, embedder=embedder, reranker=reranker, rerank=rerank, context_k=context_k
-        )
-        self.path: list[str] = []
-
-    def _retrieve(self, query_bundle: QueryBundle) -> list[NodeWithScore]:
-        # Lazy, and load-bearing: this module is the zero-key `search` path that the MCP
-        # server and `groundly search` import, while retrieval/graph.py pulls pandas and
-        # the whole graphrag stack at *its* module load. A top-level import here would put
-        # that cost on every host handshake, to serve an arm no MCP tool can select —
-        # `--arm hybrid-local` is CLI-only (decision 29), and the CLI pays the import
-        # when it is asked for (.claude/rules/architecture.md: never load models/heavy
-        # deps at MCP spawn).
-        from groundly.retrieval.graph import GraphLocalRetriever
-
-        query = query_bundle.query_str
-        graph = GraphLocalRetriever(self.subject)
-        graph_nodes = graph.retrieve(query)
-        vector_nodes = self._vector.retrieve(query)
-
-        by_id = {n.node.metadata["chunk_id"]: n for n in graph_nodes + vector_nodes}
-        fused = rrf([chunk_ids(graph_nodes), chunk_ids(vector_nodes)])
-        self.path = graph.path + self._vector.path
-        return [by_id[cid] for cid, _ in fused if cid in by_id]
+            hits.append(hit_from_row(row, score))
+        logger.debug("stages=%s top=%s", stages, [(h.chunk_id, h.score) for h in hits])
+        return hits
 
 
 def search(
@@ -211,33 +126,13 @@ def search(
     rerank: bool | None = None,
     embedder=None,
     reranker=None,
-) -> list[NodeWithScore]:
-    """The raw retrieval path: query -> ranked chunks, no LLM call, no provider
-    needed. Shared by `groundly search` and the MCP `search` tool (P4)."""
-    from groundly.core.progress import connect_progress, record_trace
+) -> list[Hit]:
+    """The raw retrieval path: query -> ranked hits, no LLM call, no provider needed,
+    nothing written. Shared by `groundly search` and the MCP `search` tool."""
     from groundly.core.subject import Subject
 
-    subj = Subject(subject)
-    store = SubjectStore(subj.store_db_path)
+    store = SubjectStore(Subject(subject).store_db_path)
     retriever = VectorRetriever(
         store, embedder=embedder, reranker=reranker, rerank=rerank, context_k=k
     )
-    start = time.monotonic()
-    nodes = retriever.retrieve(query)
-    latency_ms = int((time.monotonic() - start) * 1000)
-
-    conn = connect_progress(subj.progress_db_path)
-    try:
-        record_trace(
-            conn,
-            kind="search",
-            query=query,
-            arm="vector",
-            path=retriever.path,
-            chunk_ids=chunk_ids(nodes),
-            outcome="results",
-            latency_ms=latency_ms,
-        )
-    finally:
-        conn.close()
-    return nodes
+    return retriever.retrieve(query)

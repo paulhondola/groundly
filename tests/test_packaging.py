@@ -1,10 +1,9 @@
 """Packaging assumptions that only break once installed.
 
-`groundly/prompts/extract_graph.txt` is the first non-Python file Groundly ships as
-package data. `[tool.hatch.build.targets.wheel] packages = ["groundly"]` is supposed to
-include it with no pyproject change — worth asserting rather than trusting, because a
-missing prompt file works perfectly from a source checkout and fails only for a user who
-installed the wheel.
+`groundly/prompts/extract_graph.txt` is non-Python package data that
+`[tool.hatch.build.targets.wheel] packages = ["groundly"]` should include with no
+pyproject change. Worth asserting: a missing prompt file works from a source checkout and
+fails only for a user who installed the wheel.
 
 @slow: builds a real wheel (a few seconds), so it is excluded from the default run.
 """

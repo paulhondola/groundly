@@ -1,12 +1,8 @@
-"""The verifier gate (P6 slice 1 design doc): the single check both the thin
-(`submit_cards`) and thick (`generate_deck`) doors run before anything lands in
-store.db. Nothing unverified enters the question bank
-(.claude/rules/grounding-and-privacy.md).
+"""The verifier gate: the single check `submit_cards` runs before anything lands in
+store.db. Nothing unverified enters the question bank.
 
-This slice implements the first two of the four canonical rejection reasons —
-citation resolution and answerability-by-re-retrieval. Answer-key / distractor /
-code-execution checks arrive with UC-10/13, added as further checks inside
-`verify_card` without changing its signature or the `Rejection` contract.
+Checks citation resolution and answerability by re-retrieval. Answer-key, distractor and
+code-execution checks (UC-10/UC-13) go inside `verify_card` behind the same contract.
 """
 
 from dataclasses import dataclass
@@ -56,8 +52,7 @@ def verify_card(card: CardCandidate, store: SubjectStore, *, embedder=None) -> R
         )
 
     retriever = VectorRetriever(store, embedder=embedder, rerank=False, context_k=VERIFY_TOP_K)
-    nodes = retriever.retrieve(card.front + "\n" + card.back)
-    retrieved_ids = {n.node.metadata["chunk_id"] for n in nodes}
+    retrieved_ids = {h.chunk_id for h in retriever.retrieve(card.front + "\n" + card.back)}
     if not (set(card.chunk_ids) & retrieved_ids):
         return Rejection(
             "not_answerable_from_chunks",

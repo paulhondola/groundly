@@ -32,8 +32,8 @@ def test_bge_m3_load_wraps_construction_failure_in_model_download_error(monkeypa
 
 def test_shared_embedder_is_a_process_singleton_used_by_vector_retriever_default(monkeypatch):
     """One resident bge-m3 model shared by every default production call site, not a
-    fresh instance per retriever/per call (performance fix: avoids ~1.15 GB of
-    concurrent duplicate models on ask()'s multi-hop path)."""
+    fresh instance per retriever or per call, so `search` and the verifier's re-retrieval
+    never hold duplicate GB-scale models in one process."""
     from groundly.retrieval.vector import VectorRetriever
 
     monkeypatch.setattr(embeddings_mod, "_shared", None)

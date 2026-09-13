@@ -4,7 +4,7 @@ import pytest
 
 from groundly.core.manifest import EMBEDDING_DIM
 from groundly.core.paths import subject_dir
-from groundly.core.store import SubjectStore, connect
+from groundly.core.store import SubjectStore
 from groundly.retrieval.vector import CONTEXT_K, VectorRetriever, rrf, search
 
 
@@ -68,28 +68,22 @@ def test_rrf_single_ranking_preserves_order():
 def test_vector_retriever_fuses_channels_and_ranks_relevant_chunk_first(retrievable_subject):
     store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
     retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False)
-    nodes = retriever.retrieve("deadlock")
-    ids = [n.node.metadata["chunk_id"] for n in nodes]
+    hits = retriever.retrieve("deadlock")
+    ids = [h.chunk_id for h in hits]
     assert ids[0] == 1  # dense=near, sparse=token 1 both point at chunk 1; bm25 too
     assert 2 not in ids[:2]  # chunk 2 ("semaphores") is off-topic on every channel
 
 
-def test_vector_retriever_node_metadata_and_text(retrievable_subject):
+def test_vector_retriever_returns_hits_with_citation_fields(retrievable_subject):
+    from groundly.retrieval.hits import Hit
+
     store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
     retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False)
-    nodes = retriever.retrieve("deadlock")
-    node = next(n for n in nodes if n.node.metadata["chunk_id"] == 1)
-    assert node.node.metadata["filename"] == "lec.pdf"
-    assert node.node.metadata["page"] == 1
-    assert node.node.metadata["heading_path"] == "Intro > Deadlocks"
-    assert "mutual exclusion" in node.node.get_content()
-
-
-def test_vector_retriever_path_without_rerank(retrievable_subject):
-    store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
-    retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False)
-    retriever.retrieve("deadlock")
-    assert retriever.path == ["dense", "sparse", "bm25", "rrf"]
+    hits = retriever.retrieve("deadlock")
+    hit = next(h for h in hits if h.chunk_id == 1)
+    assert isinstance(hit, Hit)
+    assert (hit.filename, hit.page, hit.heading_path) == ("lec.pdf", 1, "Intro > Deadlocks")
+    assert "mutual exclusion" in hit.text
 
 
 def test_vector_retriever_reranker_skipped_when_rerank_false(retrievable_subject):
@@ -115,9 +109,8 @@ def test_vector_retriever_reranks_when_enabled(retrievable_subject):
     retriever = VectorRetriever(
         store_obj, embedder=_near_embedder(), reranker=reranker, rerank=True
     )
-    nodes = retriever.retrieve("deadlock")
-    assert nodes[0].node.metadata["chunk_id"] == 2
-    assert retriever.path == ["dense", "sparse", "bm25", "rrf", "rerank"]
+    hits = retriever.retrieve("deadlock")
+    assert hits[0].chunk_id == 2
 
 
 def test_vector_retriever_empty_store_returns_no_nodes(subject):
@@ -129,42 +122,31 @@ def test_vector_retriever_empty_store_returns_no_nodes(subject):
 def test_vector_retriever_respects_context_k(retrievable_subject):
     store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
     retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False, context_k=1)
-    nodes = retriever.retrieve("deadlock")
-    assert len(nodes) == 1
+    hits = retriever.retrieve("deadlock")
+    assert len(hits) == 1
 
 
 # --- search() shared function ---------------------------------------------------------
 
 
-def test_search_returns_nodes_and_records_trace(retrievable_subject):
-    nodes = search(retrievable_subject, "deadlock", embedder=_near_embedder(), rerank=False)
-    assert len(nodes) <= CONTEXT_K
-    assert nodes
-    conn = connect(subject_dir(retrievable_subject) / "store.db")
-    conn.close()
+def test_search_returns_ranked_nodes_and_writes_no_trace(retrievable_subject):
+    """search is read-only: a query writes nothing to progress.db."""
     from groundly.core.progress import connect_progress
 
-    pconn = connect_progress(subject_dir(retrievable_subject) / "progress.db")
-    try:
-        row = pconn.execute("SELECT * FROM traces").fetchone()
-        assert row["kind"] == "search"
-        assert row["outcome"] == "results"
-        assert row["arm"] == "vector"
-        assert row["query"] == "deadlock"
-        import json
+    hits = search(retrievable_subject, "deadlock", embedder=_near_embedder(), rerank=False)
+    assert hits and len(hits) <= CONTEXT_K
 
-        assert json.loads(row["path"]) == ["dense", "sparse", "bm25", "rrf"]
-        assert json.loads(row["chunk_ids"])
-        assert row["latency_ms"] is not None
+    conn = connect_progress(subject_dir(retrievable_subject) / "progress.db")
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM traces").fetchone()[0] == 0
     finally:
-        pconn.close()
+        conn.close()
 
 
 def test_rrf_breaks_ties_by_cross_ranking_agreement():
     """Equal RRF scores must not be resolved by argument order. Both list A's rank-0 and
-    list B's rank-0 score 1/61; before the vote tie-break, stable `sorted` handed rank 1
-    to whichever list came first, which is how a weak graph ordering owned position 1 for
-    every hybrid-local query. Id 7 is found by both channels and must win."""
+    list B's rank-0 score 1/61, and a stable `sorted` would hand rank 1 to whichever list
+    came first. Id 7 is found by both channels and must win."""
     fused = rrf([[1, 7], [7, 2]], k=60)
     ids = [doc_id for doc_id, _ in fused]
     assert ids[0] == 7  # 1/61 + 1/62, strictly higher than either singleton

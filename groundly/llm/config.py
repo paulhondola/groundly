@@ -1,4 +1,4 @@
-"""Provider config lives in groundly.core.config now (parsed by a foundation both
+"""Provider config lives in groundly.core.config (parsed by a foundation both
 llm/ and ingestion/ can import). This module re-exports the provider surface so
 llm-layer callers keep naming a call class via `groundly.llm.config`."""
 

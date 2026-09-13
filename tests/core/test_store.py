@@ -83,7 +83,7 @@ def test_remove_material_leaves_no_rows_in_any_channel(db, tmp_path):
 
 def test_add_indexed_streams_vectors_from_lazy_iterable(db, tmp_path):
     """add_indexed consumes a one-shot (dense, sparse) generator aligned with chunks,
-    so a document's vectors need never be materialized as a list at once (findings 3+4+1)."""
+    so a document's vectors need never be materialized as a list at once."""
     from groundly.ingestion.extract import ChunkData
 
     store_obj = SubjectStore(tmp_path / "store.db")

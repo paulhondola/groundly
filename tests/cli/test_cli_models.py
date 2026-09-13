@@ -27,9 +27,9 @@ def test_config_show_defaults_no_file(home):
 
 
 def test_config_set_provider_shows_masked_key(home):
-    assert runner.invoke(app, ["config", "set", "chat.base_url", "http://x"]).exit_code == 0
-    assert runner.invoke(app, ["config", "set", "chat.model", "qwen"]).exit_code == 0
-    assert runner.invoke(app, ["config", "set", "chat.key", "sk-secret"]).exit_code == 0
+    assert runner.invoke(app, ["config", "set", "extraction.base_url", "http://x"]).exit_code == 0
+    assert runner.invoke(app, ["config", "set", "extraction.model", "qwen"]).exit_code == 0
+    assert runner.invoke(app, ["config", "set", "extraction.key", "sk-secret"]).exit_code == 0
     result = runner.invoke(app, ["config"])
     assert "model=qwen" in result.output
     assert "***ret" in result.output  # last 3 of sk-secret, masked
@@ -37,7 +37,7 @@ def test_config_set_provider_shows_masked_key(home):
 
 
 def test_config_set_unknown_key_rejected(home):
-    result = runner.invoke(app, ["config", "set", "chat.nope", "x"])
+    result = runner.invoke(app, ["config", "set", "extraction.nope", "x"])
     assert result.exit_code == 1
     assert "unknown field" in result.output
 
@@ -133,62 +133,3 @@ def test_models_uninstall_aborts_without_confirmation(monkeypatch):
     monkeypatch.setattr(embeddings, "remove_cached", must_not_remove)
     result = runner.invoke(app, ["models", "uninstall"], input="n\n")
     assert result.exit_code != 0
-
-
-def _configure_chat(home):
-    (home / "config.toml").write_text(
-        '[providers.chat]\nbase_url = "http://x"\nmodel = "m"\napi_key = "sk"\n'
-    )
-
-
-def _stub_probe(compliant, *, model="stub-model", tokens=37, cost_usd=0.0004):
-    from groundly.agents.probe import ProbeResult
-
-    def probe():
-        return ProbeResult(
-            compliant=compliant,
-            model=model,
-            answer="…",
-            tokens=tokens,
-            cost_usd=cost_usd,
-        )
-
-    return probe
-
-
-def test_config_check_reports_a_compliant_model_and_what_it_cost(home, monkeypatch):
-    """Cost is printed rather than traced: the verb is global and traces live in a
-    per-subject progress.db (agents/probe.py's module docstring)."""
-    _configure_chat(home)
-    monkeypatch.setattr(
-        "groundly.agents.probe.probe_citation_compliance", _stub_probe(True, model="qwen-3-235b")
-    )
-
-    result = runner.invoke(app, ["config", "check"])
-
-    assert result.exit_code == 0, result.output
-    assert "qwen-3-235b" in result.output
-    assert "37" in result.output  # tokens
-    assert "0.0004" in result.output  # cost
-
-
-def test_config_check_exits_nonzero_when_the_model_will_not_cite(home, monkeypatch):
-    """Non-zero because this is the diagnosis of a real failure — a student scripting
-    setup must be able to branch on it."""
-    _configure_chat(home)
-    monkeypatch.setattr(
-        "groundly.agents.probe.probe_citation_compliance", _stub_probe(False, model="gpt-oss-120b")
-    )
-
-    result = runner.invoke(app, ["config", "check"])
-
-    assert result.exit_code == 1
-    assert "gpt-oss-120b" in result.output
-    assert "answered without citing" in result.output  # the cause, not "probe failed"
-
-
-def test_config_check_without_a_chat_provider_names_the_missing_section(home):
-    result = runner.invoke(app, ["config", "check"])
-
-    assert result.exit_code == 1
-    assert "[providers.chat]" in result.output

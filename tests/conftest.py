@@ -57,10 +57,9 @@ def _fixed_console_width(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _reset_shared_embedder():
-    """`llm/embeddings.py`'s shared_embedder() is a process-level singleton (perf
-    fix: one resident bge-m3 model per process) — reset it around every test so one
-    test's stub (or a stray real load) never leaks into the next via the cached
-    module global."""
+    """`llm/embeddings.py`'s shared_embedder() is a process-level singleton; reset it
+    around every test so one test's stub (or a stray real load) never leaks into the
+    next."""
     import groundly.llm.embeddings as embeddings_mod
 
     embeddings_mod._shared = None
@@ -167,50 +166,6 @@ def stub_extractor(stub_extraction):
         return StubExtractor(ext)
 
     return _stub_extractor
-
-
-class StubChat:
-    """Scripted `ChatFn`: replies pop in call order (last reply repeats once exhausted),
-    every call is recorded as (call_class, messages) for assertion. StubEmbedder returns
-    identical vectors for every text, which can't exercise ranking — this stub can't
-    either, but reruns of the *same* stub_chat instance across router+generation calls
-    let a test script both classification and the final answer in one object."""
-
-    def __init__(
-        self,
-        replies="not covered by the course materials",
-        *,
-        model="stub-model",
-        tokens=10,
-        cost_usd=None,
-    ):
-        self.replies = [replies] if isinstance(replies, str) else list(replies)
-        self.calls: list[tuple[str, list[dict]]] = []
-        self.kwargs: list[dict] = []
-        self.model = model
-        self.tokens = tokens
-        self.cost_usd = cost_usd
-
-    def __call__(self, call_class, messages, **kwargs):
-        from groundly.llm.chat import ChatResult
-
-        self.calls.append((call_class, messages))
-        # `kwargs` absorbs the optional keyword arguments `complete()` accepts
-        # (`response_format`, `model`), and `model` is echoed back when given so a test can
-        # assert an override actually reached the client rather than being dropped.
-        self.kwargs.append(kwargs)
-        i = min(len(self.calls) - 1, len(self.replies) - 1)
-        return ChatResult(
-            text=self.replies[i],
-            tokens=self.tokens,
-            cost_usd=self.cost_usd,
-            model=kwargs.get("model") or self.model,
-        )
-
-
-@pytest.fixture
-def stub_chat():
-    return StubChat
 
 
 @pytest.fixture

@@ -15,7 +15,7 @@ def home(monkeypatch, tmp_path):
     monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
     (tmp_path / "home").mkdir()
     (tmp_path / "home" / "config.toml").write_text(
-        '[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "qwen2.5-7b"\n'
+        '[providers.extraction]\nbase_url = "http://localhost:1234/v1"\nmodel = "qwen2.5-7b"\n'
         'api_key = "sk-local"\ninput_price_per_mtok = 1.0\noutput_price_per_mtok = 2.0\n'
     )
     return tmp_path / "home"
@@ -51,7 +51,7 @@ def _stub_completion(monkeypatch, response=None, exc=None, capture=None):
 
 def test_complete_parses_text_and_tokens(monkeypatch, home):
     _stub_completion(monkeypatch, _response())
-    result = complete("chat", [{"role": "user", "content": "hi"}])
+    result = complete("extraction", [{"role": "user", "content": "hi"}])
     assert result.text == "A deadlock is [chunk 1]."
     assert result.tokens == 15
     assert result.model == "qwen2.5-7b"
@@ -59,7 +59,7 @@ def test_complete_parses_text_and_tokens(monkeypatch, home):
 
 def test_complete_computes_cost_when_prices_configured(monkeypatch, home):
     _stub_completion(monkeypatch, _response(prompt_tokens=1000, completion_tokens=1000))
-    result = complete("chat", [{"role": "user", "content": "hi"}])
+    result = complete("extraction", [{"role": "user", "content": "hi"}])
     # 1000 prompt tok * $1/Mtok + 1000 completion tok * $2/Mtok = 0.001 + 0.002
     assert result.cost_usd == pytest.approx(0.003)
 
@@ -74,25 +74,25 @@ def test_manual_price_wins_over_litellm_auto_cost(monkeypatch, home):
         "completion_cost",
         lambda **kw: (_ for _ in ()).throw(AssertionError("should not be called")),
     )
-    result = complete("chat", [{"role": "user", "content": "hi"}])
+    result = complete("extraction", [{"role": "user", "content": "hi"}])
     assert result.cost_usd == pytest.approx(0.003)
 
 
 def test_complete_auto_cost_for_mapped_model_without_manual_prices(monkeypatch, tmp_path, home):
     (home / "config.toml").write_text(
-        '[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "gpt-4o-mini"\n'
+        '[providers.extraction]\nbase_url = "http://localhost:1234/v1"\nmodel = "gpt-4o-mini"\n'
     )
     import litellm
 
     _stub_completion(monkeypatch, _response(model="gpt-4o-mini"))
     monkeypatch.setattr(litellm, "completion_cost", lambda **kw: 0.0042)
-    result = complete("chat", [{"role": "user", "content": "hi"}])
+    result = complete("extraction", [{"role": "user", "content": "hi"}])
     assert result.cost_usd == pytest.approx(0.0042)
 
 
 def test_complete_cost_none_for_unmapped_model(monkeypatch, tmp_path, home):
     (home / "config.toml").write_text(
-        '[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "m"\n'
+        '[providers.extraction]\nbase_url = "http://localhost:1234/v1"\nmodel = "m"\n'
     )
     import litellm
 
@@ -102,14 +102,14 @@ def test_complete_cost_none_for_unmapped_model(monkeypatch, tmp_path, home):
         raise Exception("This model isn't mapped yet")
 
     monkeypatch.setattr(litellm, "completion_cost", raise_unmapped)
-    result = complete("chat", [{"role": "user", "content": "hi"}])
+    result = complete("extraction", [{"role": "user", "content": "hi"}])
     assert result.cost_usd is None
 
 
 def test_complete_sends_api_key_and_model_and_base_url(monkeypatch, home):
     capture = {}
     _stub_completion(monkeypatch, _response(), capture=capture)
-    complete("chat", [{"role": "user", "content": "hi"}])
+    complete("extraction", [{"role": "user", "content": "hi"}])
     assert capture["api_key"] == "sk-local"
     assert capture["api_base"] == "http://localhost:1234/v1"
     assert capture["model"] == "openai/qwen2.5-7b"
@@ -121,29 +121,29 @@ def test_complete_nests_reasoning_effort_under_extra_body(monkeypatch, home):
     UnsupportedParamsError on every call instead of degrading — nesting under
     extra_body is what actually reaches the provider."""
     (home / "config.toml").write_text(
-        '[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "qwen2.5-7b"\n'
+        '[providers.extraction]\nbase_url = "http://localhost:1234/v1"\nmodel = "qwen2.5-7b"\n'
         'api_key = "sk-local"\nreasoning_effort = "low"\n'
     )
     capture = {}
     _stub_completion(monkeypatch, _response(), capture=capture)
-    complete("chat", [{"role": "user", "content": "hi"}])
+    complete("extraction", [{"role": "user", "content": "hi"}])
     assert capture["extra_body"] == {"reasoning_effort": "low"}
 
 
 def test_complete_omits_extra_body_when_reasoning_effort_unset(monkeypatch, home):
     capture = {}
     _stub_completion(monkeypatch, _response(), capture=capture)
-    complete("chat", [{"role": "user", "content": "hi"}])
+    complete("extraction", [{"role": "user", "content": "hi"}])
     assert "extra_body" not in capture
 
 
 def test_complete_keyless_provider_gets_placeholder_key(monkeypatch, tmp_path, home):
     (home / "config.toml").write_text(
-        '[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "m"\n'
+        '[providers.extraction]\nbase_url = "http://localhost:1234/v1"\nmodel = "m"\n'
     )
     capture = {}
     _stub_completion(monkeypatch, _response(), capture=capture)
-    complete("chat", [{"role": "user", "content": "hi"}])
+    complete("extraction", [{"role": "user", "content": "hi"}])
     assert capture["api_key"] == "not-needed"
 
 
@@ -151,12 +151,12 @@ def test_complete_passes_split_timeout_from_settings(monkeypatch, tmp_path, home
     # 10s connect (a dead host fails fast) + configurable read (local models are
     # slow to first token) — litellm passes httpx.Timeout through unchanged.
     (home / "config.toml").write_text(
-        '[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "m"\n'
+        '[providers.extraction]\nbase_url = "http://localhost:1234/v1"\nmodel = "m"\n'
         "\n[llm]\ntimeout_seconds = 123.0\n"
     )
     capture = {}
     _stub_completion(monkeypatch, _response(), capture=capture)
-    complete("chat", [{"role": "user", "content": "hi"}])
+    complete("extraction", [{"role": "user", "content": "hi"}])
     timeout = capture["timeout"]
     assert isinstance(timeout, httpx.Timeout)
     assert timeout.read == 123.0
@@ -170,71 +170,23 @@ def test_complete_unreachable_names_cause(monkeypatch, home):
         monkeypatch, exc=openai.APIConnectionError(request=None, message="connection refused")
     )
     with pytest.raises(ChatUnreachableError, match="unreachable"):
-        complete("chat", [{"role": "user", "content": "hi"}])
+        complete("extraction", [{"role": "user", "content": "hi"}])
 
 
 def test_temperature_is_pinned_to_zero_by_default(monkeypatch, home):
-    """Unset temperature means the provider's default (~1.0). Measured on gpt-oss-120b:
-    one unchanged router question returned three different labels across 10 calls, and
-    whole-gold-set router accuracy swung 39.6% -> 58.3% between two identical runs. Any
-    published number that passes through a model is a draw from a distribution until this
-    is pinned, so the default is 0.0 and sampling must be opted into per call class."""
+    """Unset temperature would mean the provider's default (~1.0), making every call a draw
+    from a distribution, so the default is 0.0 and sampling is opted into per call class."""
     capture = _stub_completion(monkeypatch, capture={})
-    complete("chat", [{"role": "user", "content": "hi"}])
+    complete("extraction", [{"role": "user", "content": "hi"}])
     assert capture["temperature"] == 0.0
 
 
 def test_temperature_can_be_opted_out_per_call_class(monkeypatch, home):
-    """Deck generation may legitimately want variety; a classifier never does."""
+    """A temperature set in config.toml overrides the 0.0 default."""
     (home / "config.toml").write_text(
-        '[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "qwen2.5-7b"\n'
+        '[providers.extraction]\nbase_url = "http://localhost:1234/v1"\nmodel = "qwen2.5-7b"\n'
         'api_key = "sk-local"\ntemperature = 0.8\n'
     )
     capture = _stub_completion(monkeypatch, capture={})
-    complete("chat", [{"role": "user", "content": "hi"}])
+    complete("extraction", [{"role": "user", "content": "hi"}])
     assert capture["temperature"] == 0.8
-
-
-def test_model_override_replaces_the_configured_model(monkeypatch, home):
-    """The grounding-fidelity sensitivity run: the enforced path has to be re-runnable on
-    the host's model class, or "enforced grounding lost" cannot be told apart from "the
-    host's model is stronger"."""
-    capture = {}
-    _stub_completion(monkeypatch, _response(), capture=capture)
-    complete("chat", [{"role": "user", "content": "hi"}], model="Qwen/Qwen3-235B")
-    assert capture["model"] == "openai/Qwen/Qwen3-235B"
-    # Same section's endpoint and key: only the model moves.
-    assert capture["api_base"] == "http://localhost:1234/v1"
-    assert capture["api_key"] == "sk-local"
-
-
-def test_an_overridden_model_does_not_inherit_reasoning_effort(monkeypatch, home):
-    """**Measured, and it fails silently.** `reasoning_effort` is model-specific by its own
-    definition, and `[providers.chat]` carries `"none"` for gpt-oss-120b. Sending that to
-    `Qwen/Qwen3-235B-A22B-Instruct-2507` on DeepInfra returns HTTP 200 with a body of
-    "\\n" — an empty answer, not an error. The sensitivity run built on it would have
-    scored every enforced answer as a citation failure and concluded that enforcement
-    collapses on Qwen, when the parameter had muted the model."""
-    (home / "config.toml").write_text(
-        '[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "gpt-oss-120b"\n'
-        'api_key = "sk-local"\nreasoning_effort = "none"\ntemperature = 0.0\n'
-    )
-    capture = {}
-    _stub_completion(monkeypatch, _response(), capture=capture)
-    complete("chat", [{"role": "user", "content": "hi"}], model="Qwen/Qwen3-235B")
-    assert "extra_body" not in capture
-    # temperature is NOT dropped: it means the same thing on every model, and dropping it
-    # would unpin sampling — the one thing decision 28 retracted a number over.
-    assert capture["temperature"] == 0.0
-
-
-def test_the_configured_model_still_gets_its_reasoning_effort(monkeypatch, home):
-    """The guard above must not disable the setting for ordinary calls."""
-    (home / "config.toml").write_text(
-        '[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "gpt-oss-120b"\n'
-        'api_key = "sk-local"\nreasoning_effort = "none"\n'
-    )
-    capture = {}
-    _stub_completion(monkeypatch, _response(), capture=capture)
-    complete("chat", [{"role": "user", "content": "hi"}])
-    assert capture["extra_body"] == {"reasoning_effort": "none"}

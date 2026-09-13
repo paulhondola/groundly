@@ -1,12 +1,9 @@
-"""Extraction worker — runs as `python -m groundly.ingestion.extract_worker <in> <out.json> [ocr_lang]`.
+"""Extraction worker: `python -m groundly.ingestion.extract_worker <in> <out.json> [ocr_lang]`.
 
-Always a child process: a parser crash on a hostile/broken file kills this process,
-not the indexing run (UC-01 A2, security.md §3). OCR runs via docling's bundled
-RapidOCR (local, offline, zero-key) for scanned/bitmap PDF content; a document with
-no readable text even after OCR exits with EXIT_NO_TEXT so the parent reports the
-specific cause. A model that can't be loaded (uncached + offline, HF rate-limit,
-missing dep) exits with EXIT_MODEL_UNAVAILABLE — an environment failure, retryable,
-never a bad document.
+Always a child process, so a parser crash on a hostile or broken file kills only this
+process, not the indexing run (UC-01 A2). OCR uses docling's bundled RapidOCR. Exits
+EXIT_NO_TEXT when nothing is readable even after OCR, and EXIT_MODEL_UNAVAILABLE when a
+model cannot load: an environment failure, retryable, never a bad document.
 
 Output JSON: {"pages": N|null, "chunks": [{"text", "heading_path", "page", "token_count"}]}
 """
@@ -19,17 +16,15 @@ from pathlib import Path
 
 from groundly.ingestion.formats import DOCLING_FORMATS, DOCLING_SUFFIXES, IMAGE_SUFFIXES
 
-# silence the XLMRobertaTokenizerFast "__call__ is faster" advisory that
-# HybridChunker's pad() calls trigger in this worker process. Must be the env var,
-# not logging.setLevel: transformers resets its root logger level on first import,
-# clobbering any level set before the (lazy) import; the env var is read per call.
+# Silence the fast-tokenizer advisory HybridChunker triggers. The env var, not
+# logging.setLevel: transformers resets its logger level on first (lazy) import.
 os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
 
 EXIT_NO_TEXT = 3
 EXIT_MODEL_UNAVAILABLE = 4
 EXIT_INPUT_TOO_LARGE = 5
-# ~100 MP (a 10000×10000 raster): course screenshots/photos/scans sit far below. Bounds
-# decompression-bomb memory before docling rasterizes an image (security.md §threat-model).
+# ~100 MP (10000×10000), far above any course image: bounds decompression-bomb memory
+# before docling rasterizes an image.
 MAX_IMAGE_PIXELS = 100_000_000
 
 
@@ -53,11 +48,9 @@ def _model_step(fn):
 
 
 def _first_frame(path: Path) -> Path:
-    """Standalone images are single-page by contract (page-1 attribution). A multi-frame
-    raster (multi-page TIFF, animated WEBP) would otherwise expand to N docling pages that
-    HybridChunker merges into one chunk carrying only the *first* page number — a citation
-    resolving to the wrong page. Index frame 0 only; a multi-page scan belongs in a PDF.
-    Single-frame images (the overwhelming case) pass straight through."""
+    """Frame 0 of a standalone image, after the pixel cap. A multi-frame raster would become
+    N docling pages merged into chunks cited to page 1, so only the first frame is indexed;
+    a multi-page scan belongs in a PDF."""
     from PIL import Image, ImageSequence
 
     img = Image.open(path)  # lazy: reads header (size) without decoding pixels
@@ -91,17 +84,11 @@ def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
     input_format = InputFormat(DOCLING_FORMATS[path.suffix.lower()])
     if path.suffix.lower() in IMAGE_SUFFIXES:
         path = _first_frame(path)
-    # explicit, not inherited: do_ocr=True runs OCR on scanned/bitmap PDF content
-    # The engine is pinned to RapidOCR/onnxruntime — docling's
-    # "auto" would silently switch engines (ocrmac, easyocr with runtime model
-    # downloads) if one ever appears in the environment. A non-default ocr_lang
-    # (decision 15) is passed straight through as Rec.lang_type via rapidocr_params
-    # (applied last): docling's own lang mapping collapses ISO codes to the
-    # PP-OCRv4-era "latin" model group, which rapidocr 3.9's default PP-OCRv6
-    # multilingual rec model rejects — while accepting the ISO code itself. Any model
-    # fetch this triggers is sha256-pinned (modelscope.cn) and happens inside
-    # initialize_pipeline; a fetch failure exits EXIT_MODEL_UNAVAILABLE, never a
-    # document failure.
+    # OCR on explicitly, with the engine pinned to RapidOCR/onnxruntime: docling's "auto"
+    # would switch engines if another appeared in the environment. A non-default ocr_lang
+    # (decision 15) is also passed as Rec.lang_type, because docling maps ISO codes to a
+    # "latin" model group that rapidocr's default multilingual rec model rejects. Any model
+    # fetch is sha256-pinned and happens in initialize_pipeline (EXIT_MODEL_UNAVAILABLE).
     ocr_options = (
         RapidOcrOptions(
             backend="onnxruntime",
@@ -112,10 +99,8 @@ def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
         else RapidOcrOptions(backend="onnxruntime")
     )
     pipeline_options = PdfPipelineOptions(do_ocr=True, ocr_options=ocr_options)
-    # IMAGE gets the same options so standalone images OCR with the pinned RapidOCR
-    # engine — without this, docling's auto OCR selection picks a *different* engine
-    # (ocrmac on macOS, easyocr elsewhere with runtime downloads) than the decision-14
-    # interchange pin, exactly the silent switch the pinning above exists to prevent.
+    # IMAGE needs the same options, or docling's auto OCR picks a different engine (ocrmac,
+    # easyocr) than the pinned RapidOCR (decision 14).
     converter = DocumentConverter(
         format_options={
             InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
@@ -151,10 +136,8 @@ def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
         )
 
     if not chunks:
-        # HybridChunker drops docs whose only content is headings (a title-only slide or
-        # page): OCR *did* read the text, so keep it as one chunk rather than exiting
-        # EXIT_NO_TEXT with a "found nothing" message that isn't true. Only fires when the
-        # chunker produced nothing — a doc with body text never reaches here.
+        # HybridChunker drops a doc whose only content is headings (a title-only slide), though
+        # OCR read its text: keep that as one chunk rather than exit with a false "found nothing".
         salvaged = [t for t in doc.texts if t.text and t.text.strip()]
         if salvaged:
             text = "\n".join(t.text.strip() for t in salvaged)

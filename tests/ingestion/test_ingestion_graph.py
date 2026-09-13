@@ -1,6 +1,5 @@
 """groundly/ingestion/graph.py: the graphrag batch builder. `build_index` is always
-monkeypatched here — no test ever runs a real graphrag pipeline or hits a real model
-(matches the discipline around complete/classify/extractors/embedders elsewhere)."""
+monkeypatched here; no test runs a real graphrag pipeline or hits a real model."""
 
 import logging
 from pathlib import Path
@@ -35,18 +34,11 @@ def home(monkeypatch, tmp_path):
 
 @pytest.fixture(autouse=True)
 def stub_probe(monkeypatch):
-    """build_graph probes the provider before running the pipeline — a real extraction
-    prompt plus a structured-output capability call. These tests point at an unreachable
-    fake provider, so stub it; probe-specific tests override this with their own fake.
-
-    **kwargs absorbs response_format=CommunityReportResponse (the second call). Without
-    this fixture the probe reaches the network, which is how `http://x` connection errors
-    show up in tests that look unrelated.
-
-    loaded_context_length is stubbed for the same reason and is easy to miss: it is a
-    plain httpx.get, so it never goes through `complete`, and a test whose base_url points
-    at localhost reaches a *real* LM Studio on the developer's machine — measured, it
-    added ~6s per test and made the result depend on which model happened to be loaded."""
+    """build_graph probes the provider (an extraction prompt, then a structured-output call)
+    before running the pipeline, and these tests point at an unreachable fake provider, so
+    stub it; probe-specific tests override this. **kwargs absorbs the second call's
+    response_format. loaded_context_length is stubbed too: it is a plain httpx.get, so a
+    localhost base_url would reach a real LM Studio on the developer's machine."""
     from groundly.llm.chat import ChatResult
 
     monkeypatch.setattr(
@@ -196,8 +188,7 @@ def test_graph_is_stale_true_when_graph_dir_deleted_externally(subj, store):
 
 def test_graph_is_stale_when_entity_types_change(subj, store, home):
     """The load-bearing case: the corpus is untouched, but the graph was built looking
-    for different things. Without the fingerprint this returned None and every later
-    query answered from a graph built under different framing."""
+    for different things. Without the fingerprint it would pass as current."""
     _add_material(store, "a.pdf", "a" * 64)
     (subj.root_dir / "graph").mkdir()
     _record_build(subj, store)
@@ -210,11 +201,8 @@ def test_graph_is_stale_when_entity_types_change(subj, store, home):
 
 
 def test_graph_is_stale_when_gleanings_change(subj, store, home):
-    """The case that motivated splitting `graph.gleanings` out of `graph.context_window`.
-    Two apd builds differed only in this — 2,685 entities against 6,184, and 4.1% against
-    15.9% isolated — while every recorded field said the model was the only difference.
-    A build that runs a second extraction call per chunk is a different build, and the
-    fingerprint has to say so."""
+    """A build that runs a second extraction call per chunk is a different build, so a
+    changed `graph.gleanings` must make the graph stale even when nothing else changed."""
     _add_material(store, "a.pdf", "a" * 64)
     (subj.root_dir / "graph").mkdir()
     _record_build(subj, store)
@@ -307,9 +295,7 @@ def test_build_graph_feeds_input_documents_and_records_manifest(subj, store, hom
 
 def test_build_graph_traces_every_llm_call_it_makes(subj, store, home, monkeypatch):
     """architecture.md: every LLM call records tokens + cost. The probe makes *two* real
-    billable calls (extraction prompt, then JSON-mode capability), so there must be a
-    trace row for each — an earlier version discarded the second call's result, and the
-    test that asserted a single probe row is what pinned that bug in place."""
+    billable calls (extraction prompt, then JSON-mode capability), so each gets a row."""
     from groundly.core.progress import connect_progress
 
     _configure_extraction(home)
@@ -342,10 +328,8 @@ def _build_with_metrics(subj, store, monkeypatch, **metrics):
     """Drive graphrag's *real* metrics path: build the completion model from the config
     build_graph handed to build_index, then feed its store the usage a run would.
 
-    Deliberately not a fabricated file. graphrag_llm only ever *writes* its metrics from
-    an `atexit` hook, so a test that stubbed the output would have passed against code
-    that can never fire in production — which is exactly what happened to the first
-    version of this feature."""
+    Not a fabricated file: graphrag_llm writes its metrics only from an `atexit` hook, so a
+    test that stubbed the output would pass against code that never fires in production."""
     from graphrag_llm.completion.completion_factory import create_completion
 
     async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
@@ -380,9 +364,8 @@ def _build_trace(subj):
 
 
 def test_build_graph_traces_metered_usage_not_the_estimate(subj, store, home, monkeypatch):
-    """The trace used to store the pre-build heuristic as if it were metered. graphrag
-    swallows its own LLM calls, but graphrag_llm aggregates their usage in a store this
-    process can read — so the number recorded is what was spent."""
+    """The trace records what was spent, not the pre-build estimate: graphrag's calls
+    bypass llm/, but graphrag_llm aggregates their usage in a store this process can read."""
     (home / "config.toml").write_text(
         '[providers.extraction]\nbase_url = "http://x"\nmodel = "gpt-4o-mini"\n'
         'api_key = "sk-secret"\ninput_price_per_mtok = 1.0\noutput_price_per_mtok = 2.0\n'
@@ -400,10 +383,9 @@ def test_build_graph_traces_metered_usage_not_the_estimate(subj, store, home, mo
 
 
 def test_build_graph_metered_cost_excludes_cache_hits(subj, store, home, monkeypatch):
-    """Cached responses are counted in graphrag's token totals but were never paid for,
-    and decision 21 deliberately keeps `cache/` across a failed rebuild — so retrying
-    against a warm cache is the normal path, not an edge case. Tokens stay as metered;
-    only the cost is scaled to the responses that actually reached the provider."""
+    """Cached responses count in graphrag's token totals but were never paid for, and a
+    failed rebuild keeps `cache/`, so retrying against a warm cache is the normal path.
+    Tokens stay as metered; only the cost is scaled to responses that reached the provider."""
     (home / "config.toml").write_text(
         '[providers.extraction]\nbase_url = "http://x"\nmodel = "gpt-4o-mini"\n'
         'api_key = "sk-secret"\ninput_price_per_mtok = 1.0\noutput_price_per_mtok = 2.0\n'
@@ -456,32 +438,8 @@ def test_build_graph_does_not_inherit_a_previous_builds_usage(subj, store, home,
     assert _build_trace(subj)["tokens"] == 123
 
 
-# --- report_call_class: a second completion model for community reports ----------------
-
-
-def _configure_extraction_and_chat(
-    home, *, extraction_model="gpt-4o-mini", chat_model="gpt-4o", priced=False
-):
-    """A second [providers.chat] section next to the usual [providers.extraction], plus
-    graph.report_call_class = "chat" — what every report_call_class test needs."""
-    extraction_prices = (
-        "input_price_per_mtok = 1.0\noutput_price_per_mtok = 2.0\n" if priced else ""
-    )
-    chat_prices = "input_price_per_mtok = 3.0\noutput_price_per_mtok = 4.0\n" if priced else ""
-    (home / "config.toml").write_text(
-        f'[providers.extraction]\nbase_url = "http://x"\nmodel = "{extraction_model}"\n'
-        f'api_key = "sk-secret"\n{extraction_prices}'
-        f'\n[providers.chat]\nbase_url = "http://y"\nmodel = "{chat_model}"\n'
-        f'api_key = "sk-chat"\n{chat_prices}'
-        '\n[graph]\nreport_call_class = "chat"\n'
-    )
-
-
-def test_default_report_call_class_registers_exactly_one_completion_model(
-    subj, store, home, monkeypatch
-):
-    """report_call_class defaults to "extraction" — this must reproduce today's build
-    exactly: one completion model, no second metrics store."""
+def test_a_build_registers_exactly_one_completion_model(subj, store, home, monkeypatch):
+    """One provider serves the whole build: one completion model, one metrics store."""
     _configure_extraction(home)
     _add_material(store, "a.pdf", "a" * 64)
 
@@ -498,93 +456,6 @@ def test_default_report_call_class_registers_exactly_one_completion_model(
     config = captured["config"]
     assert list(config.completion_models.keys()) == ["default_completion_model"]
     assert config.community_reports.completion_model_id == "default_completion_model"
-
-
-def test_report_call_class_chat_registers_a_second_completion_model(subj, store, home, monkeypatch):
-    """report_call_class="chat" must register a SECOND completion model built from
-    [providers.chat] and point community_reports at it — the extraction model (and its
-    own completion_models entry) is untouched."""
-    _configure_extraction_and_chat(home)
-    _add_material(store, "a.pdf", "a" * 64)
-
-    captured = {}
-
-    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
-        _write_entities(subj)
-        captured["config"] = config
-        return []
-
-    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
-    build_graph(subj, store)
-
-    config = captured["config"]
-    assert set(config.completion_models) == {
-        "default_completion_model",
-        "report_completion_model",
-    }
-    assert config.completion_models["default_completion_model"].model == "gpt-4o-mini"
-    assert config.completion_models["report_completion_model"].model == "gpt-4o"
-    assert config.community_reports.completion_model_id == "report_completion_model"
-
-
-def test_report_call_class_outside_call_classes_is_rejected_at_config_load(home):
-    """A typo here would otherwise surface hours into a build, when the community
-    reports stage finally runs — GraphSettings' pydantic validator turns it into a
-    config-time failure instead."""
-    from pydantic import ValidationError
-
-    from groundly.core.config import load_settings
-
-    (home / "config.toml").write_text('[graph]\nreport_call_class = "bogus"\n')
-    with pytest.raises(ValidationError):
-        load_settings()
-
-
-def test_metered_usage_sums_two_stores_and_prices_each_by_its_own_model(
-    subj, store, home, monkeypatch
-):
-    """graphrag caches metrics stores as singletons keyed on hashed init args including
-    the model id (graphrag_llm/completion/completion_factory.py, graphrag_common's
-    Factory.create), so report_call_class's second completion model meters into a
-    SECOND store. Before this fix, metered_usage() read only the most recently created
-    store — silently dropping everything the report model spent, or worse, pricing it as
-    if it were the extraction model. This is the failure the split introduces and the one
-    nothing else here covers."""
-    from graphrag_llm.completion.completion_factory import create_completion
-
-    _configure_extraction_and_chat(home, priced=True)
-    _add_material(store, "a.pdf", "a" * 64)
-
-    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
-        _write_entities(subj)
-        extraction = create_completion(
-            config.get_completion_model_config("default_completion_model")
-        )
-        extraction.metrics_store.update_metrics(
-            metrics={
-                "prompt_tokens": 1000,
-                "completion_tokens": 4000,
-                "responses_with_tokens": 100,
-            }
-        )
-        report = create_completion(config.get_completion_model_config("report_completion_model"))
-        report.metrics_store.update_metrics(
-            metrics={
-                "prompt_tokens": 500,
-                "completion_tokens": 200,
-                "responses_with_tokens": 50,
-            }
-        )
-        return []
-
-    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
-    result = build_graph(subj, store, estimated_tokens=123, estimated_cost_usd=0.0045)
-
-    assert (result.prompt_tokens, result.completion_tokens) == (1500, 4200)
-    # extraction priced at $1/$2 per Mtok, chat at $3/$4 — summing tokens first and
-    # pricing once at either rate would give a different (wrong) number than this.
-    expected_cost = (1000 * 1e-6 + 4000 * 2e-6) + (500 * 3e-6 + 200 * 4e-6)
-    assert result.cost_usd == pytest.approx(expected_cost)
 
 
 def test_build_graph_wraps_failure_in_graph_build_error(subj, store, home, monkeypatch):
@@ -663,10 +534,8 @@ def test_build_graph_adapter_translates_lifecycle_into_on_event(subj, store, hom
 
 
 def test_build_graph_reports_progress_for_the_probe(subj, store, home, monkeypatch):
-    """The probe is two real network calls and runs before graphrag's pipeline emits
-    anything, so it was the longest stretch of the build with no progress at all — the
-    bar sat at "building graph…" and an unknown total while the model was being called.
-    It reports its own phase now, with a total, so nothing renders as `0/?`."""
+    """The probe is two real network calls that run before graphrag's pipeline emits
+    anything, so it reports its own phase with a total rather than rendering as `0/?`."""
     _configure_extraction(home)
     _add_material(store, "a.pdf", "a" * 64)
 
@@ -763,9 +632,8 @@ def test_build_config_scales_graphrag_budgets_to_the_configured_context_window(
 
 def test_build_config_serializes_calls_against_a_local_runtime(subj, store, home, monkeypatch):
     """The budgets above are per *request*; a llama.cpp-family server caps
-    `in-flight x prompt` against one shared KV cache. graphrag's default of 25 in flight
-    is what overran it — measured 2026-08-01, 4 slots x ~2,300-token report prompts
-    against an 8192 cache, 8 of 11 reports lost."""
+    `in-flight x prompt` against one shared KV cache, which graphrag's default of 25 in
+    flight overruns."""
     (home / "config.toml").write_text(
         '[providers.extraction]\nbase_url = "http://localhost:1234/v1"\n'
         'model = "gemma-4-12b-qat"\napi_key = ""\n'
@@ -804,32 +672,6 @@ def test_build_config_leaves_a_remote_provider_at_graphrags_default(subj, store,
     assert captured["config"].concurrent_requests == 25
 
 
-def test_build_config_serializes_when_only_the_report_provider_is_local(
-    subj, store, home, monkeypatch
-):
-    """graphrag's concurrency setting is global, so the local half of a split build binds
-    the whole thing — the report provider is reached through graph.report_call_class and
-    would otherwise be invisible to this check."""
-    (home / "config.toml").write_text(
-        '[providers.extraction]\nbase_url = "http://x"\nmodel = "gpt-4o-mini"\napi_key = "sk-s"\n'
-        '\n[providers.chat]\nbase_url = "http://localhost:1234/v1"\nmodel = "gemma"\napi_key = ""\n'
-        '\n[graph]\nreport_call_class = "chat"\n'
-    )
-    _add_material(store, "a.pdf", "a" * 64)
-
-    captured = {}
-
-    async def fake_build_index(config, input_documents=None, callbacks=None, verbose=False):
-        _write_entities(subj)
-        captured["config"] = config
-        return []
-
-    monkeypatch.setattr("groundly.ingestion.graph.build_index", fake_build_index)
-    build_graph(subj, store)
-
-    assert captured["config"].concurrent_requests == 1
-
-
 # --- the preflight probe ----------------------------------------------------------------
 
 
@@ -864,10 +706,9 @@ def test_probe_failure_names_the_cause_and_never_starts_the_pipeline(
 
 
 def test_probe_checks_structured_output_separately_and_says_so(subj, store, home, monkeypatch):
-    """A provider can answer plain completions and still reject response_format — every
-    DeepSeek model does. The message must name structured output, not context size: an
-    earlier version reused the extraction-prompt wording and misdirected a real user to
-    check their context window."""
+    """A provider can answer plain completions and still reject response_format (every
+    DeepSeek model does). The message must name structured output, not context size, or
+    it sends the student to check the wrong setting."""
     from groundly.llm.chat import ChatResult, ChatUnreachableError
 
     _configure_extraction(home)
@@ -892,15 +733,10 @@ def test_probe_checks_structured_output_separately_and_says_so(subj, store, home
 
 def test_probe_sends_graphrags_own_response_model(subj, store, home, monkeypatch):
     """The probe must pass the *same object* community_reports_extractor passes, so litellm
-    derives the same wire request for both and the probe cannot test a shape the build never
-    sends. A hand-written `{"type": "json_object"}` stood here and was wrong in both
-    directions at once (2026-07-26): DeepSeek accepts json_object and refuses the json_schema
-    litellm derives from the model class, so a doomed build ran a full extraction pass; LM
-    Studio refuses json_object and requires json_schema, so a local model that builds graphs
-    fine would have been refused before starting.
-
-    Asserting on the class itself, not on a dict shaped like it, is the point — a copy of
-    the shape is exactly what drifts when graphrag changes its response model."""
+    derives the same wire request for both. A hand-written `{"type": "json_object"}` is
+    wrong in both directions: DeepSeek accepts json_object but refuses json_schema, and LM
+    Studio the reverse. Asserting on the class itself, not a dict shaped like it, is what
+    catches graphrag changing its response model."""
     from graphrag.index.operations.summarize_communities.community_reports_extractor import (
         CommunityReportResponse,
     )
@@ -924,39 +760,6 @@ def test_probe_sends_graphrags_own_response_model(subj, store, home, monkeypatch
         build_graph(subj, store)
 
     assert formats[1] is CommunityReportResponse
-
-
-def test_structured_output_probe_targets_the_report_call_class(subj, store, home, monkeypatch):
-    """The probe exists to check that whoever builds community reports accepts
-    json_schema. `graph.report_call_class` moves that stage to another provider, so a
-    probe hardcoded to "extraction" tests the wrong one — and is wrong in both directions
-    at once, the same way the json_object shortcut was: too lax when extraction accepts
-    json_schema and the report provider refuses (the whole extraction pass is spent before
-    the first report fails), too strict when extraction refuses it and the report provider
-    accepts, which would refuse the local-extraction/cloud-reports split this setting
-    exists to enable."""
-    from groundly.llm.chat import ChatResult
-
-    _configure_extraction_and_chat(home)
-    set_key("graph.report_call_class", "chat")
-    _add_material(store, "a.pdf", "a" * 64)
-
-    call_classes = []
-
-    def fake_complete(call_class, messages, *, response_format=None):
-        call_classes.append((call_class, response_format))
-        return ChatResult(text="ok", tokens=1, cost_usd=None, model="stub")
-
-    monkeypatch.setattr("groundly.llm.chat.complete", fake_complete)
-
-    with pytest.raises(GraphBuildError):
-        build_graph(subj, store)
-
-    # First probe call is the plain-completion reachability check against extraction;
-    # the structured-output one must follow the report stage to "chat".
-    assert call_classes[0][0] == "extraction"
-    assert call_classes[1][0] == "chat"
-    assert call_classes[1][1] is not None
 
 
 def test_probe_contains_unexpected_exceptions_as_named_errors(subj, store, home, monkeypatch):
@@ -1053,9 +856,8 @@ def test_a_few_swallowed_failures_complete_the_build_and_are_reported(
 
 def test_one_failed_chunk_counts_once_not_twice(subj, store, home, monkeypatch):
     """graphrag emits TWO ERROR records per failed text unit under the same package
-    logger — graph_extractor's `logger.exception` and extract_graph's `on_error` lambda.
-    Counting both halves the effective threshold and can report more failures than there
-    are chunks (verified on a real run: 252 records from each logger)."""
+    logger (graph_extractor's `logger.exception` and extract_graph's `on_error`). Counting
+    both halves the effective threshold and can report more failures than there are chunks."""
     _configure_extraction(home)
     _add_chunks(store, 100)
 
@@ -1111,13 +913,10 @@ def test_zero_row_entities_parquet_refuses(subj, store, home, monkeypatch):
         build_graph(subj, store)
 
 
-def test_refused_build_is_not_served_by_the_query_path(subj, store, home, monkeypatch):
+def test_refused_build_is_not_reported_as_built(subj, store, home, monkeypatch):
     """The gate refuses to *record* the build but leaves partial parquet on disk so
-    graphrag's LLM cache survives the retry. Retrieval must therefore gate on the
-    manifest, not the directory — otherwise a graph missing most of the corpus is still
-    answered from, which is the grounding violation the gate exists to prevent."""
-    from groundly.retrieval.graph import GraphLocalRetriever, GraphNotBuiltError
-
+    graphrag's LLM cache survives the retry. Readers must therefore gate on the manifest,
+    not the directory, or a graph missing most of the corpus is reported as built."""
     _configure_extraction(home)
     _add_chunks(store, 20)
 
@@ -1133,8 +932,7 @@ def test_refused_build_is_not_served_by_the_query_path(subj, store, home, monkey
         build_graph(subj, store)
 
     assert (subj.root_dir / "graph" / "entities.parquet").exists()  # left for the retry
-    with pytest.raises(GraphNotBuiltError):
-        GraphLocalRetriever(subject=subj.name).retrieve("anything")
+    assert not subj.graph_is_built()  # the manifest decides, not the directory
 
 
 # --- community reports: the second swallowed-failure stage ------------------------------
@@ -1187,10 +985,9 @@ _REAL_CAPACITY_400 = (
 
 
 def test_report_failure_hint_names_concurrency_on_a_capacity_error(subj, store, home, monkeypatch):
-    """The zero-reports message blamed JSON mode, which is right for a provider that
-    refuses the request and wrong for one that ran out of room — it sent a real
-    investigation at graph.context_window while the actual cause was 4 slots sharing an
-    8192 cache. Uses the verbatim error text from that build (2026-08-01)."""
+    """JSON-mode advice alone is right for a provider that refuses the request and wrong
+    for one that ran out of room (parallel slots sharing one cache). Uses a local runtime's
+    verbatim error text."""
     _configure_extraction(home)
     _add_material(store, "a.pdf", "a" * 64)
 
@@ -1229,9 +1026,8 @@ def test_report_failure_hint_stays_quiet_on_a_structured_output_refusal(
 
 
 def test_partial_report_failures_carry_the_hint_too(subj, store, home, monkeypatch, caplog):
-    """Capacity exhaustion usually shows up as a *partial* loss — the build that prompted
-    this kept 3 of 11 reports and returned success — so the warning path needs the hint
-    as much as the refusal path does."""
+    """Capacity exhaustion usually shows up as a *partial* loss that still returns success,
+    so the warning path needs the hint as much as the refusal path does."""
     _configure_extraction(home)
     _add_material(store, "a.pdf", "a" * 64)
 
@@ -1256,8 +1052,7 @@ def test_probe_warns_when_the_loaded_context_is_smaller_than_configured(
     subj, store, home, monkeypatch, caplog
 ):
     """graph.context_window is asserted, never measured: every prompt budget is carved
-    from it, so a model reloaded at a smaller window invalidates all of them at once.
-    Observed 2026-08-01 — config said 12288, LM Studio was serving 8192."""
+    from it, so a model reloaded at a smaller window invalidates all of them at once."""
     _configure_extraction(home)
     (home / "config.toml").write_text(
         (home / "config.toml").read_text() + "\n[graph]\ncontext_window = 12288\n"
@@ -1317,9 +1112,9 @@ def test_loaded_context_length_never_raises_on_a_non_lm_studio_endpoint(home):
 
 
 def test_stale_artifacts_cannot_satisfy_the_gates(subj, store, home, monkeypatch):
-    """graphrag writes into an existing graph/ without clearing it, so before the reset a
-    second build that produced nothing and logged no failures inherited build 1's
-    entities.parquet, passed every gate, and was stamped as current for the NEW corpus."""
+    """graphrag writes into an existing graph/ without clearing it, so without the reset a
+    second build that produced nothing and logged no failures would inherit build 1's
+    entities.parquet, pass every gate, and be stamped as current for the NEW corpus."""
     _configure_extraction(home)
     _add_material(store, "a.pdf", "a" * 64)
 
@@ -1341,8 +1136,8 @@ def test_stale_artifacts_cannot_satisfy_the_gates(subj, store, home, monkeypatch
     with pytest.raises(GraphBuildError, match="no entities"):
         build_graph(subj, store)
 
-    # and the manifest no longer claims a graph, so the query path says "not built"
-    # instead of hunting for parquet that was just deleted
+    # and the manifest no longer claims a graph, so readers say "not built" instead of
+    # looking for parquet that was just deleted
     assert subj.load_manifest().graphrag.corpus_hash is None
 
 
@@ -1487,9 +1282,9 @@ def test_refused_build_records_neither_hash_nor_fingerprint(subj, store, home, m
 def test_probe_sends_the_bundled_prompt_formatted_as_graphrag_formats_it(
     subj, store, home, monkeypatch
 ):
-    """Regression: the probe must exercise the same prompt the build sends, with the
-    same substitutions. It used to pass `tuple_delimiter` &c, which graphrag does not —
-    making the probe laxer than the build it exists to predict."""
+    """The probe must exercise the same prompt the build sends, with the same
+    substitutions: extra keys like `tuple_delimiter`, which graphrag does not pass, would
+    make the probe laxer than the build it exists to predict."""
     _configure_extraction(home)
     _add_material(store, "a.pdf", "a" * 64)
 

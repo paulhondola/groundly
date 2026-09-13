@@ -1,18 +1,9 @@
-"""Chat completion client: litellm.completion() against any OpenAI-compatible
-endpoint (LM Studio, Ollama, cloud providers) — see .claude/rules/architecture.md:
-LLM clients constructed only in llm/. Every call resolves its provider from
-groundly.llm.config, so callers only ever name a call class.
-
-litellm import stays lazy (inside complete()): cold import costs ~2.5s and must
-never happen at MCP spawn time. The env vars litellm reads at *its* import —
-LITELLM_LOCAL_MODEL_COST_MAP (unset, its __init__ fetches the price map from GitHub,
-violating the privacy rule in .claude/rules/grounding-and-privacy.md) and LITELLM_LOG
-— are set in groundly/__init__.py, not here: callers reach litellm transitively via
-graphrag before this module's body ever runs, so setting them here was a no-op on
-exactly those paths."""
+"""Chat completion via litellm against any OpenAI-compatible endpoint; callers name a call
+class and the provider resolves from config. litellm is imported inside complete(): its
+multi-second cold import must never run at MCP spawn. The env vars it reads at import are
+set in groundly/__init__.py."""
 
 from dataclasses import dataclass
-from typing import Protocol
 from urllib.parse import urlparse, urlunparse
 
 import httpx
@@ -30,33 +21,17 @@ class ChatResult:
     model: str
 
 
-class ChatFn(Protocol):
-    def __call__(self, call_class: str, messages: list[dict]) -> ChatResult: ...
-
-
 class ChatUnreachableError(Exception):
-    """The configured chat provider could not be reached (network/HTTP error)."""
+    """The configured provider could not be reached, or refused the request."""
 
 
 def loaded_context_length(call_class: str) -> int | None:
-    """The context length the provider *actually* loaded its model with, or None if it
-    does not say. Best-effort and never raises.
+    """The context length the provider actually loaded its model with, or None if it does
+    not say. Never raises: a build must not fail over an unrelated HTTP hiccup.
 
-    `graph.context_window` is a number Groundly asserts, not one it measures: every
-    prompt budget is carved from it and nothing checks it against the endpoint, so a
-    model reloaded at a smaller window silently invalidates the whole sizing. Observed
-    2026-08-01 — config said 12288, LM Studio was serving 8192 after a reload.
-
-    LM Studio is the only endpoint asked, via its own REST API (`GET /api/v0/models`,
-    `loaded_context_length`); the OpenAI-compatible surface has no equivalent field and
-    Ollama's context is server-side only. That makes this an unusually literal reading of
-    "never hardcode a provider" (.claude/rules/architecture.md): the rule protects the
-    *call* path, where a hardcoded provider would make some endpoints unusable. Nothing
-    here reaches an LLM or gates a build — a server that 404s, times out, or answers a
-    shape this does not recognise returns None and the build proceeds exactly as before.
-
-    Deliberately not raising on *anything*: this is a diagnostic, and the one failure mode
-    worse than missing the drift is refusing a build over an unrelated HTTP hiccup."""
+    `graph.context_window` is asserted, not measured, so a model loaded smaller silently
+    invalidates every prompt budget. Only LM Studio's REST API (`GET /api/v0/models`)
+    reports it; nothing here reaches an LLM, and any other endpoint yields None."""
     cfg = require_provider(call_class)
     # base_url is the OpenAI surface (…/v1); the REST API is a sibling at the origin.
     origin = urlunparse(urlparse(cfg.base_url)._replace(path="", query="", fragment=""))
@@ -77,29 +52,10 @@ def complete(
     messages: list[dict],
     *,
     response_format: object | None = None,
-    model: str | None = None,
 ) -> ChatResult:
-    """`model` overrides the call class's configured model for this call only, against the
-    same `base_url` and key. It exists for one measurement: the grounding-fidelity
-    experiment compares an enforced `ask` against a host running a different model, and
-    without a way to re-run the enforced path on a *comparable* model the result cannot be
-    told apart from "the host's model is stronger".
-
-    It does not weaken the provider boundary — the client is still constructed here, from
-    the same configured section, and the model that actually ran is recorded in the trace
-    rather than assumed.
-
-    **An overridden model does not inherit the configured model's `reasoning_effort`**, and
-    that is load-bearing rather than tidy. The value is model-specific by its own
-    definition ("none" is what Ollama honours, OpenAI's o-series takes low/medium/high),
-    so carrying it across a model swap sends one model's tuning to another. Measured on
-    DeepInfra: `[providers.chat]` sets `reasoning_effort = "none"` for gpt-oss-120b, and
-    the same request against `Qwen/Qwen3-235B-A22B-Instruct-2507` returns **HTTP 200 with
-    a body of `"\\n"`** — an empty answer, not an error. The sensitivity run built on it
-    would have scored every enforced answer as a citation failure and reported that
-    enforcement collapses on Qwen, when the parameter had silently muted the model.
-    `temperature` is *not* dropped: it means the same thing on every model, and dropping
-    it would unpin sampling, which is the one thing decision 28 retracted a number over."""
+    """One completion through `[providers.<call_class>]`. `response_format` requests
+    structured output — the graph build's probe passes graphrag's own response model, so
+    the probe can never test a shape the build does not send."""
     import litellm
     import openai
 
@@ -110,33 +66,18 @@ def complete(
     litellm.suppress_debug_info = True
 
     cfg = require_provider(call_class)
-    # Structured output is a provider *capability*, not universally available on
-    # OpenAI-compatible endpoints — and the accepted shape differs per endpoint, in both
-    # directions: DeepSeek takes `{"type": "json_object"}` and refuses `json_schema`,
-    # LM Studio refuses `json_object` and demands `json_schema`. So this takes the
-    # response_format the caller actually needs rather than a bool naming one shape: the
-    # graph build's probe hands over graphrag's own response model, which litellm converts
-    # into the same wire request the build sends, so the probe can never test a shape the
-    # build never sends (ingestion/graph.py's _probe_extraction).
-    #
-    # enable_json_schema_validation is graphrag_llm's global — lite_llm_completion.py sets
-    # it True at import, and graphrag is imported well before the probe runs — and it makes
-    # litellm validate the *response* against the schema client-side and raise. Off here:
-    # this call asks whether the provider accepts the request, and how well a model fills
-    # the schema is the build's problem, not a reason to refuse to start it.
+    # The caller's own response_format, not a JSON-mode flag: endpoints accept different
+    # shapes. Client-side schema validation (turned on globally by graphrag_llm's import) is
+    # off, because this asks whether the provider accepts the request, not how well the
+    # model fills the schema.
     extra = (
         {"response_format": response_format, "enable_json_schema_validation": False}
         if response_format is not None
         else {}
     )
-    # Nested under extra_body, never passed flat: litellm's drop_params is False, so a
-    # flat reasoning_effort kwarg raises UnsupportedParamsError on every call instead of
-    # degrading (measured — see llm/graphrag_adapter.completion_model_config, which nests
-    # the same way so the setting means the same thing on every call class).
-    # Skipped entirely when the caller overrode the model — see the docstring: the value
-    # belongs to the configured model, and on a different one it can silently mute the
-    # reply rather than error.
-    if cfg.reasoning_effort and model is None:
+    # Under extra_body, never flat: litellm's drop_params is False, so a flat kwarg raises
+    # UnsupportedParamsError on every call.
+    if cfg.reasoning_effort:
         extra["extra_body"] = {"reasoning_effort": cfg.reasoning_effort}
     # Flat, unlike reasoning_effort: temperature is a first-class OpenAI parameter every
     # compatible endpoint accepts, so litellm maps it rather than rejecting it.
@@ -144,7 +85,7 @@ def complete(
         extra["temperature"] = cfg.temperature
     try:
         response = litellm.completion(
-            model=f"openai/{model or cfg.model}",
+            model=f"openai/{cfg.model}",
             messages=messages,
             api_base=cfg.base_url,
             api_key=cfg.api_key or _LOCAL_PLACEHOLDER_KEY,
@@ -155,18 +96,14 @@ def complete(
             timeout=httpx.Timeout(10.0, read=load_settings().llm.timeout_seconds),
         )
     except openai.APIStatusError as exc:
-        # The server answered and refused (400 context overflow, 401 bad key, 429).
-        # Checked before APIError below, which it subclasses: calling a rejected
-        # request "unreachable" sends people to debug their network instead of the
-        # actual cause (conventions.md — name the cause specifically).
+        # The server answered and refused (400, 401, 429). Checked before its base class
+        # APIError, so a rejection is never reported as a network problem.
         raise ChatUnreachableError(
             f"[providers.{call_class}] at {cfg.base_url} rejected the request "
             f"(HTTP {getattr(exc, 'status_code', '?')}): {exc}"
         ) from exc
     except openai.APIError as exc:
-        # Every remaining litellm exception raised by completion() (connection
-        # failures, timeouts) subclasses openai.APIError — the tightest common base
-        # covering the rest of this call's failure surface.
+        # Every remaining completion() failure (connection, timeout) subclasses APIError.
         raise ChatUnreachableError(
             f"[providers.{call_class}] at {cfg.base_url} is unreachable: {exc}"
         ) from exc

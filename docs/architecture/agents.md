@@ -1,123 +1,61 @@
-# Agent Layer
+# Verification & Trust
 
-Expands [`groundly-spec.md`](../groundly-spec.md) §5b. Governing rule: **agents only where the system must decide, iterate, or use tools mid-task** — everything else is a pipeline. Specialization is data, never code: "which subject" is literally which `~/.groundly/<SUBJECT>/` directory is open. Loops are **plain bounded async functions** — LangGraph was dropped when the roster shrank (consolidation pass).
+Expands [`groundly-spec.md`](../groundly-spec.md) §5b. Governing rule: **Groundly verifies; the host generates.** An MCP host is already an LLM, so a second model behind the tool surface paid twice for the same capability (decision 33). What is left is one gate and one trust rule.
 
 ## Actors and actions
-
-Groundly connects student workflows and host-agent workflows through a shared
-retrieval, generation, verification, and storage layer.
 
 ```mermaid
 flowchart LR
     student[Student / operator]
     host[Host AI agent]
-    provider[Configured chat provider]
 
     subgraph Groundly[Groundly actions]
         init[init, list, index, remove]
         share[import, export]
         discover[list_subjects]
         search[search]
-        ask[ask]
         page[get_page or citation resource]
-        retrieve[Retrieval orchestration]
-        vector[Vector baseline]
-        generate[Grounded chat generation]
-        citations[Citation validation and resolution]
+        submit[submit_cards]
+        verify[Verifier gate]
         stores[(Subject stores)]
-        gph[GraphRAG local/global retrieval]
-        deck[generate_deck / generate_quiz]
-        submit[submit_cards / submit_questions]
-        verify[Exam verifier\nincluding code execution]
         exportdeck[export_deck]
     end
 
     student --> init --> stores
     student --> share --> stores
-    student --> ask
     student --> search
-    host --> discover
-    host --> search
-    host --> ask
-    host --> page
-    discover --> stores
-    search --> retrieve --> stores
-    page --> stores
-    ask --> retrieve
-    ask --> generate --> provider
-    generate --> citations --> stores
-    host --> submit
-    student --> deck
-    deck --> verify
-    submit --> verify
-    verify -->|approved items| stores
+    host --> discover --> stores
+    host --> search --> stores
+    host --> page --> stores
+    host --> submit --> verify
+    verify -->|accepted items| stores
     stores -->|decks| exportdeck
-    vector --> retrieve
-    gph --> retrieve
 ```
 
-`search` is a raw, read-only retrieval action; `ask` adds generation and citation
-resolution. Ingestion, sharing, generation, and verification contribute to the subject
-bundle, while removal is destructive and requires confirmation unless explicitly
-bypassed from the CLI.
+## The verifier gate
 
-## The roster (two)
+Every card entering `store.db` passes, in fail-fast order:
 
-### 1. Ask pipeline — interactive
+1. **Citations present** — a card with no `chunk_ids` is rejected.
+2. **Citations resolve** — each id must name a chunk in this subject; unresolvable ids are named in the rejection, and the FK enforces it a second time at insert.
+3. **Answerable by re-retrieval** — re-retrieving the card's own front+back text must surface at least one cited chunk within `VERIFY_TOP_K`.
 
-`retrieval through the selected arm (default: dense + sparse + BM25 → RRF → rerank) → trust-layered prompt assembly → generation (chat call class) → citation resolution → cited answer or "not covered" → trace row.`
+Rejections are machine-readable (`REJECTION_REASONS`), so a host regenerates conversationally without a human in the loop. Verification is **zero-key**: it touches only the local embedder.
 
-**No router, and an explicit arm** (decisions 28 and 29). The pipeline used to open with a `classify()` call selecting between `vector`, `hybrid-local` and `graph-global`. The arm is now a parameter — `ask(subject, query, arm=...)`, `groundly ask --arm`, defaulting to `vector` because on apd it leads hit and recall at every matched cutoff the product uses. The classifier stays gone on its own measured merits (47.9% against 45.8% for a constant): a caller who names the arm has nothing left for it to guess.
+Planned checks, each with its sub-project: structural answer-key and distractor checks for MCQs (2), subprocess execution of code answers (4). Until the runner exists, no code question may be stored — the guarantee is unbuilt, not weakened.
 
-**The default is a measurement, not a restriction.** Every implemented ranked arm is reachable from `ask`, which is what lets the arm comparison extend past retrieval into citation accuracy, faithfulness and cost per answer — all of which come from full `ask()` runs reading the traces table. `graph-global` is the one exception, and mechanically so: it returns no relevance order, so the `context_k` truncation would ground every answer in the same arbitrary chunks. It stays scoreable through `groundly eval`. The graph itself is untouched and still serves `drill_down`/`overview` (UC-12).
-
-**A graph arm on a subject with no graph raises**, before the trace opens and before any model loads — never a quiet fall back to the baseline, which would file one arm's numbers under another's name.
-
-Exposed as the MCP `ask` tool and the `groundly ask` CLI verb — **the product tool and the evaluation instrument are one function**, and identical for every query the MCP tool can express. The one asymmetry is deliberate: only the CLI takes `--arm` (decision 29), because a host model picking a graph arm on a whim spends the student's tokens without being asked. Grounding is enforced inside this boundary: a response with zero resolvable citations is an error; insufficient context returns the refusal, never model knowledge.
-
-Honest scope note: host agents may prefer raw `search` (free, composable) and compose their own answers — that path is best-effort grounding by construction, and the eval *measures* the gap (grounding-fidelity experiment) rather than pretending it away.
-
-### 2. Exam verifier — the identity of generation
-
-Generation is pluggable; **verification is not**. Every question/card entering `store.db` passes, per type:
-
-- **All types:** answerable from the cited chunks alone (confirmed by re-retrieval); answer key correct; distractors actually wrong (MCQ).
-- **Code questions (incl. UC-13 challenges):** the reference solution is **executed in a subprocess** (timeout, tempdir) — compile + run + output matches. A hard guarantee, not an LLM opinion.
-
-Two doors, one gate:
-
-| Path | Generator | Needs API key | Loop |
-|---|---|---|---|
-| Thick: `generate_deck` / `generate_quiz` | Groundly (generation call class) | yes | generate → verify → regenerate, max 2 retries, then drop + note in batch report |
-| Thin: `submit_cards` / `submit_questions` | The host agent, from `search` results | no | verifier returns machine-readable rejections (`not_answerable_from_chunks`, `wrong_answer_key`, `reference_solution_failed`, …); the host regenerates conversationally |
-
-Verified items record their generation source — **rejection rate by source** is a thesis measurement. Verified decks live in `store.db` (exported: one student pays the verification cost, the course imports the deck) and leave the system as Anki `.apkg` via `export_deck`. Forward-compat: the generation interface is shaped so MCP sampling (host-paid tokens, server-controlled loop) can slot in later; not depended on.
-
-## Not agents (deliberately)
-
-- **Gap analysis / study planning** — SQL over `progress.db` quiz events joined to graph communities, plus at most one LLM call to phrase a plan. Weak-area quizzing = the exam path with retrieval weighted toward weak communities.
-- **Study memory** — `recent_activity` is a SQL rollup (by day, not session — stdio lifecycle makes sessions unobservable); `remember`/recall is a table; the `continue-studying` MCP prompt bundles them. No server-side LLM summarization: the consumer is an LLM and narrates structured rollups on demand.
-- **Code tutoring** — the host coding agent does this, grounded via `search`/`ask`. Dropped as a native agent (pivot #2); the enforced Socratic stance was the trade-off, documented.
-
-## Prompt assembly & trust layering
+## Trust layers
 
 Fixed layers; lower never overrides higher:
 
 | Layer | Content | Mutability |
 |---|---|---|
-| 1. System (immutable) | Grounding rules, citation mandate, refusal on insufficient context | Code, versioned |
-| 2. Subject profile | Notation conventions, emphasis, exam format — per subject, user-editable, shippable in exports | Markdown, **size-capped, trusted content never trusted authority** — cannot disable grounding; imported profiles inherit the same constraints |
-| 3. Task parameters | Subject, topic, difficulty, question types | Request-scoped |
-| 4. Retrieved chunks, graph summaries, **imported KB content**, recalled notes, user input | **Fully untrusted — data, never instructions** | Delimited, quoted; instructions inside are inert by construction of layer 1 |
+| 1. System (immutable) | The rules in whatever prompt Groundly assembles | Code, versioned |
+| 2. Task parameters | Subject, topic, the entity types a graph build looks for | Request-scoped |
+| 3. Chunk text, imported KB content, user input | **Fully untrusted — data, never instructions** | Delimited, quoted, inert |
 
-Imports are the threat that keeps layer 4 honest: a shared knowledge base is third-party content that will enter prompts. Your own lecture PDFs get the same treatment — injection via slides is as real as via imports.
-
-## Latency classes
-
-Interactive (`ask`, `search`): straight pipeline, no background machinery. Generation (decks, quizzes, graph build): background task behind a job id — **never block a request handler on an agent loop**. When the configured provider is a local runtime, generation jobs are serialized (GPU contention with interactive use); as implemented, one process-wide lock serializes *all* thick generation jobs — stricter than required, free for a single student.
-
-Jobs are **session-scoped, not durable**: the job registry lives in the MCP server process's memory, and verified items commit to `store.db` per item — a killed host session loses at most the job record and batch report, never a verified card. On a promptless surface, "cost estimates before spending" becomes a two-phase call: `generate_*` with `confirm=false` (default) returns only the estimate; `confirm=true` starts the job.
+Today the only prompts Groundly assembles are the graph build's (entity extraction and community reports), and the chunk text they carry is layer 3 — a hostile PDF gets the same treatment as an imported bundle. The MCP server's `instructions` and tool descriptions are layer 1 product text, measured rather than improvised (decision 31).
 
 ## Observability
 
-Every `ask`/generation run records its trajectory — arm, path, chunk ids, verifier verdicts, tokens, cost, latency — into the `traces` table in **`progress.db`** (personal; never exported; the thesis artifact ships the author's own). Retrofitting logging makes the comparison unreproducible; it exists from P3.
+The graph build records what it spent — model, tokens, cost, latency — in the `traces` table in **`progress.db`** (personal, never exported). Nothing else writes there: `search` is read-only, and verifier verdicts are no longer logged (decision 33). Mastery data arrives in sub-project 4.

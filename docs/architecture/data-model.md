@@ -26,19 +26,15 @@ The storage backbone for [`overview.md`](overview.md). SQLite (WAL) per subject;
 | vectors | sqlite-vec virtual table, bge-m3 dense (1024-d) | exact KNN (brute force — an upgrade over approximate HNSW) |
 | sparse_terms | inverted index of bge-m3 learned sparse weights | same forward pass as dense |
 | chunks_fts | FTS5 index over chunk text | BM25 channel |
-| questions / decks | verified items only: body, answer key, distractors, cited chunk ids, verify status, generation source (`server`/`host`) | generation source feeds the rejection-rate experiment |
-| subject_profile | markdown, size-capped | trust layer 2; shippable |
+| questions / decks | verified items only: body, answer key, distractors, cited chunk ids, verify status, generation source (`server`/`host`) | generation source recorded |
 
 ## progress.db (never exported)
 
 | Table | Contents |
 |---|---|
-| quiz_events | question FK, correctness, timestamp — feeds mastery |
-| notes | host-written `remember()` notes (layer-4 data on recall) |
-| traces | per query: arm, router label, retrieved chunk ids, tokens, latency, cost |
-| verifications | one row per verifier verdict: generation source, rejection reason (NULL = accepted), timestamp — the rejection-rate-by-source measurement |
+| traces | the graph build's spend: its preflight probes and the build itself — model, tokens, cost |
 
-Traces contain every question the student ever asked — which is exactly why they live here and not in the exported file. Mastery per graph community = `quiz_events` joined to the graph's Leiden communities; recomputable, not stored.
+Sub-project 4 adds quiz results and the Anki review snapshot here. `search` writes nothing: every query the student asks used to land in this file, and nothing read those rows. Mastery (sub-project 4) will join quiz results and Anki review history to the topic map and the heading tree; recomputable, not stored.
 
 ## manifest.json — the interchange contract
 
@@ -49,7 +45,6 @@ Traces contain every question the student ever asked — which is exactly why th
   "embedding": { "model": "BAAI/bge-m3", "hf_revision": "<pin>", "dim": 1024,
                   "dtype": "float16", "normalized": true },
   "graphrag":  { "version": "<exact pin>", "extraction_model": "<model used>",
-                  "report_model": "<model used, only if != extraction_model>",
                   "corpus_hash": "<sha256 of the indexed corpus>",
                   "extraction_fingerprint": "<sha256 of extraction prompt + entity types>" },
   "chunking":  { "strategy": "docling-hybrid", "max_tokens": 512, "overlap": 0 },
@@ -59,13 +54,13 @@ Traces contain every question the student ever asked — which is exactly why th
 }
 ```
 
-Semantics: vectors transfer **as-is only on exact embedding match** (model + revision + dim + dtype + normalization) — the global bge-m3 pin makes this the default. Mismatch → re-embed from chunk text (which is why chunk text always ships). The graph is text-only parquet — model-independent, always portable — but `extraction_model` is recorded because an imported graph built by a different model is a different experimental condition. `report_model` records the same thing for the community-report stage when `graph.report_call_class` moves it to a different provider — those summaries are what global search and `overview` answer from, so naming only the extraction model would under-describe the bundle's own provenance. It is absent (or null) on the default path, where reports were built by `extraction_model`; being optional and additive, it is not a `format_version` event. `ocr.lang` records the subject's OCR language set via `groundly index --ocr-lang` (`[]` = bundled default model set); it is part of the interchange contract because it shapes extracted chunk text — a re-index with a different lang is a different corpus (decision 15).
+Semantics: vectors transfer **as-is only on exact embedding match** (model + revision + dim + dtype + normalization) — the global bge-m3 pin makes this the default. Mismatch → re-embed from chunk text (which is why chunk text always ships). The graph is text-only parquet — model-independent, always portable — but `extraction_model` is recorded because an imported graph built by a different model is a different experimental condition. `report_model` appears only in bundles built before 2026-09, when community reports could run on a second provider; it still parses and is ignored. It is absent (or null) on the default path, where reports were built by `extraction_model`; being optional and additive, it is not a `format_version` event. `ocr.lang` records the subject's OCR language set via `groundly index --ocr-lang` (`[]` = bundled default model set); it is part of the interchange contract because it shapes extracted chunk text — a re-index with a different lang is a different corpus (decision 15).
 
 ## Export / import
 
 - **Export** = zip the subject dir **minus `progress.db`** → `PDSS.groundly`. Original files included by default (importer's citations must open the right page); `--no-materials` to shrink. The export UX states plainly: "this bundle contains everything indexed in this subject."
 - **Import** = validate manifest → zip-slip-safe extraction → fresh empty `progress.db`. Name collision → import-as-new-name or replace-with-confirm. **No merge in v1**; honest merge = import the materials and re-index the union.
-- Imported chunks, summaries, and profiles are **untrusted layer-4 content** (subject profiles additionally size-capped, no authority).
+- Imported chunks and summaries are **untrusted layer-3 content**.
 
 ## Integrity rules as constraints, not app code
 

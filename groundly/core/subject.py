@@ -58,20 +58,13 @@ class Subject:
         return True
 
     def graph_is_built(self) -> bool:
-        """A *recorded* graph, not merely a directory. A refused or interrupted build
-        deliberately leaves partial parquet behind so the retry keeps graphrag's paid-for
-        cache (decision 21); only `corpus_hash` is written by a build that passed every
-        gate, so it is the honest record of "there is a graph here".
+        """A *recorded* graph, not merely a directory. A refused or interrupted build leaves
+        partial parquet behind so a retry keeps graphrag's paid-for cache; only a build that
+        passed every gate writes `corpus_hash`.
 
-        The `and` order is load-bearing: it short-circuits before `load_manifest()`, so a
-        subject that was never initialized answers False instead of raising
-        FileNotFoundError from inside the manifest read. `core/graph_html.py` orders its
-        own check that way for the same reason.
-
-        Narrower checks deliberately do *not* call this. `ingestion/graph.py`'s build
-        gates and `cli/subjects.py` ask whether a hash is *recorded*, ignoring the
-        directory — `graph_is_stale` is what reports a directory that went missing, and
-        folding the directory term in here would make that branch unreachable.
+        The `and` order short-circuits before `load_manifest()`, so an uninitialized subject
+        answers False rather than raising. The build gates and `cli/subjects.py` check only
+        the hash, so `graph_is_stale` can still report a missing directory.
         """
         return (
             self.root_dir / "graph"

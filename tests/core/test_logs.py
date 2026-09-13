@@ -130,15 +130,11 @@ def test_propagation_survives_graphrag_handler_clear_and_suppresses_httpx(monkey
 def test_litellm_env_defaults_land_before_litellm_is_imported():
     """A subprocess, because the regression is *ordering*, not the values.
 
-    litellm reads LITELLM_LOCAL_MODEL_COST_MAP and LITELLM_LOG at its own import. The
-    graph modules do `from graphrag.api... import ...` at the top, which pulls
-    graphrag -> graphrag_llm -> litellm before their own body runs — so a setdefault in
-    llm/ was a no-op on exactly those paths, and litellm both warned about absent
-    botocore and (for the cost map) would fetch its price map from GitHub, which the
-    privacy rule forbids. Only groundly/__init__.py runs early enough.
-
-    Asserting the env values in-process would pass even after a regression, since the
-    var still ends up set — just too late to matter."""
+    litellm reads LITELLM_LOCAL_MODEL_COST_MAP and LITELLM_LOG at its own import, which
+    the graph modules trigger through graphrag before any llm/ body runs, so only
+    groundly/__init__.py is early enough; set any later, litellm fetches its price map from
+    GitHub (forbidden by the privacy rule) and warns about absent botocore. An in-process
+    check would pass after a regression, since the var still ends up set, just too late."""
     import os
     import subprocess
     import sys

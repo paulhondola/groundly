@@ -1,7 +1,6 @@
-"""Verified decks -> Anki .apkg via genanki (P6 slice 1; decision 6: Anki owns daily
-review, Groundly owns verified generation). Citations render on the card back — the
-UC-11 acceptance criterion. Ids are deterministic (sha-derived deck id, guid_for note
-guids) so a re-export updates the deck in Anki instead of duplicating it."""
+"""Verified decks -> Anki .apkg via genanki (decision 6): Anki owns review, Groundly owns
+verification. Citations render on the card back (UC-11). Deterministic deck ids and note
+guids make a re-export update the deck in Anki instead of duplicating it."""
 
 import hashlib
 from pathlib import Path

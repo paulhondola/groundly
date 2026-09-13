@@ -6,9 +6,7 @@ directory (subjects live under `~/.groundly/`).
 
 **Prerequisites:** Groundly installed so `groundly` is on your `PATH`, and at
 least one indexed subject (`groundly init <SUBJECT> && groundly index
-<SUBJECT> <files...>`). No API key is needed for `search`/`get_page`; `ask`
-needs a configured chat provider — see [lm-studio.md](lm-studio.md) for the
-local zero-key option.
+<SUBJECT> <files...>`). No API key is needed for anything the host can call.
 
 ## Claude Code
 
@@ -31,7 +29,7 @@ setup:
 }
 ```
 
-Verify with `/mcp` inside Claude Code — `groundly` should list four tools.
+Verify with `/mcp` inside Claude Code — `groundly` should list six tools.
 
 ## Codex
 
@@ -82,10 +80,12 @@ stop it.
 
 | Tool | What it does | Needs a provider? |
 |---|---|---|
-| `list_subjects` | subjects with material/page/chunk counts | no |
-| `search` | top-k ranked chunks; the host composes the answer (grounding not enforced) | no |
-| `ask` | enforced grounded answer with citations; refuses when the materials don't cover it | yes (chat) |
+| `list_subjects` | subjects with material/page/chunk counts, and whether a graph is built | no |
+| `search` | top-k ranked chunks with citations; the host composes the answer | no |
 | `get_page` | verbatim chunks for one page of one material — opens what a citation points to | no |
+| `submit_cards` | verifies host-written flashcards and stores the ones that pass | no |
+| `list_decks` | decks with card counts | no |
+| `export_deck` | writes a verified deck as an Anki `.apkg` | no |
 
 Citations carry URIs like `groundly://<subject>/<file>#page=N`; the same
 document is readable as an MCP resource (`groundly://<subject>/<file>`,
@@ -96,7 +96,7 @@ Try it:
 
 > Using groundly, what subjects do I have indexed?
 >
-> Ask groundly's OS subject what causes a deadlock, then open the page it cites.
+> Using groundly, search my OS subject for what causes a deadlock, then open the page it cites.
 
 If the host reports the server as failed to start, run `groundly mcp` in a
 terminal yourself — import/config errors print there. (It waiting silently on

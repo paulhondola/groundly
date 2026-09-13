@@ -1,9 +1,8 @@
-"""Parent side of extraction: spawn the worker, enforce a wall-clock timeout,
-map failures to specific user-facing causes (conventions: never generic errors).
+"""Parent side of extraction: spawn the worker and map its failures to specific causes.
 
-security.md §3 controls: argv exec (no shell), temp working directory, wall-clock
-timeout, output size cap — the worker's stdout is discarded, stderr goes to a file
-on disk (never an in-memory buffer) and only its tail is ever read."""
+Subprocess controls: argv exec (no shell), temp working directory, wall-clock timeout,
+output size cap. Worker stdout is discarded; stderr goes to a file on disk, never an
+in-memory buffer, and only its tail is read."""
 
 import json
 import os

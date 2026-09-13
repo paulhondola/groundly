@@ -8,11 +8,9 @@ runner = CliRunner()
 
 
 def test_mcp_verb_registered_and_runs_the_server(monkeypatch):
-    # patch the class, not the module-level `mcp` instance: `run` is inherited from
-    # fastmcp's TransportMixin, so monkeypatch's undo cannot remove an instance-level
-    # patch — it writes the original back into `mcp.__dict__`, where it shadows the
-    # *class* patch test_mcp_server.py's serve test relies on, and `groundly serve`
-    # then boots a real HTTP server and blocks the whole suite forever.
+    # Patch the class, not the `mcp` instance: `run` comes from a fastmcp mixin, so undoing an
+    # instance patch writes it into `mcp.__dict__`, shadowing the class patch the serve test
+    # relies on, and `groundly serve` then boots a real server that blocks the suite forever.
     from fastmcp import FastMCP
 
     calls = []
