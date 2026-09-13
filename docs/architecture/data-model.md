@@ -26,14 +26,13 @@ The storage backbone for [`overview.md`](overview.md). SQLite (WAL) per subject;
 | vectors | sqlite-vec virtual table, bge-m3 dense (1024-d) | exact KNN (brute force — an upgrade over approximate HNSW) |
 | sparse_terms | inverted index of bge-m3 learned sparse weights | same forward pass as dense |
 | chunks_fts | FTS5 index over chunk text | BM25 channel |
-| questions / decks | verified items only: body, answer key, distractors, cited chunk ids, verify status, generation source (`server`/`host`) | generation source feeds the rejection-rate experiment |
-| subject_profile | markdown, size-capped | trust layer 2; shippable |
+| questions / decks | verified items only: body, answer key, distractors, cited chunk ids, verify status, generation source (`server`/`host`) | generation source recorded |
 
 ## progress.db (never exported)
 
 | Table | Contents |
 |---|---|
-| traces | one row per graph build: model, tokens, cost, latency |
+| traces | the graph build's spend: its preflight probes and the build itself — model, tokens, cost |
 
 Sub-project 4 adds quiz results and the Anki review snapshot here. `search` writes nothing: every query the student asks used to land in this file, and nothing read those rows. Mastery (sub-project 4) will join quiz results and Anki review history to the topic map and the heading tree; recomputable, not stored.
 
@@ -61,7 +60,7 @@ Semantics: vectors transfer **as-is only on exact embedding match** (model + rev
 
 - **Export** = zip the subject dir **minus `progress.db`** → `PDSS.groundly`. Original files included by default (importer's citations must open the right page); `--no-materials` to shrink. The export UX states plainly: "this bundle contains everything indexed in this subject."
 - **Import** = validate manifest → zip-slip-safe extraction → fresh empty `progress.db`. Name collision → import-as-new-name or replace-with-confirm. **No merge in v1**; honest merge = import the materials and re-index the union.
-- Imported chunks, summaries, and profiles are **untrusted layer-4 content** (subject profiles additionally size-capped, no authority).
+- Imported chunks and summaries are **untrusted layer-3 content**.
 
 ## Integrity rules as constraints, not app code
 

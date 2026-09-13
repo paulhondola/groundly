@@ -9,12 +9,12 @@ A `.groundly` bundle is third-party content that will enter the student's prompt
 **Controls:**
 - **Zip-slip protection**: extraction rejects entries escaping the target directory (no absolute paths, no `..`); symlinks not extracted.
 - **Manifest validation before anything is read**: format version supported, counts sane; unknown schema versions refused (`PRAGMA user_version` check on the imported store.db).
-- **Imported chunks, graph summaries, and subject profiles are layer-4 data** — delimited, quoted, never instructions ([`../architecture/agents.md`](../architecture/agents.md)). Imported subject profiles additionally inherit the layer-2 caps: size-capped, cannot alter grounding rules.
+- **Imported chunks and graph summaries are layer-3 data** — delimited, quoted, never instructions ([`../architecture/agents.md`](../architecture/agents.md)).
 - Imported SQLite files are opened with the same schema checks as native ones; no code paths execute content from the bundle.
 
 ## 2. Prompt injection via documents
 
-The student's *own* lecture PDFs are as capable of carrying "ignore previous instructions" as an import. All retrieved content — chunks, summaries, recalled `remember()` notes — is layer-4: instructions inside it are inert by construction of the immutable system layer. A profile or note can never disable citations or the refusal path.
+The student's *own* lecture PDFs are as capable of carrying "ignore previous instructions" as an import. All retrieved content — chunks and summaries — is layer 3: instructions inside it are inert by construction of the immutable system layer.
 
 ## 3. Subprocess execution (verifier + coding challenges)
 
