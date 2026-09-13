@@ -8,7 +8,6 @@ happen at MCP spawn time. The env vars litellm reads at *its* import are set in
 groundly/__init__.py, because callers reach litellm via graphrag before this module runs."""
 
 from dataclasses import dataclass
-from typing import Protocol
 from urllib.parse import urlparse, urlunparse
 
 import httpx
@@ -24,10 +23,6 @@ class ChatResult:
     tokens: int
     cost_usd: float | None
     model: str
-
-
-class ChatFn(Protocol):
-    def __call__(self, call_class: str, messages: list[dict]) -> ChatResult: ...
 
 
 class ChatUnreachableError(Exception):

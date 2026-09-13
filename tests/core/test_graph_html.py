@@ -10,7 +10,7 @@ away — each half is a different join key):
   - communities.entity_ids holds entity UUIDs, matching entities.id
   - relationships.source/.target hold entity TITLES, matching entities.title
   - text_units.document_id holds the Groundly chunk_id as a STRING, joining to store.db's
-    chunks.id — the same join groundly/retrieval/graph.py's _nodes_from_chunk_ids uses.
+    chunks.id — the same join groundly/core/graph_html.py's _entity_citations uses.
 """
 
 import base64
@@ -229,9 +229,8 @@ def _write_graph(
     _frame(text_units or [], _TEXT_UNIT_COLUMNS).to_parquet(graph_dir / "text_units.parquet")
     _frame(documents or [], _DOCUMENT_COLUMNS).to_parquet(graph_dir / "documents.parquet")
 
-    # A completed build stamps the manifest; the retrieval arms (groundly/retrieval/graph.py)
-    # gate on this rather than directory presence, and there is every reason to expect the
-    # visualizer to follow the same "is there really a usable graph here" convention.
+    # A completed build stamps the manifest; graph_html.py's own export gate checks
+    # corpus_hash rather than directory presence, so fixtures must stamp it too.
     manifest = subj.load_manifest()
     manifest.graphrag.corpus_hash = "stamped-for-test"
     subj.save_manifest(manifest)

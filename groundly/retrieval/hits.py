@@ -1,6 +1,7 @@
 """The one shape retrieval returns: a chunk plus the citation fields every consumer
-reads. Citation resolution, prompt-free tool payloads and the verifier all read these
-names, so they are defined once here rather than by convention at each constructor."""
+reads. `mcp/server.py`'s `search` payload, `cli/search.py` and `agents/verifier.py` all
+read these names, so they are defined once here rather than by convention at each
+constructor."""
 
 from dataclasses import dataclass
 

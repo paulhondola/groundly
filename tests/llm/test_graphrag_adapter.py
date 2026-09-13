@@ -340,9 +340,9 @@ def test_concurrent_requests_leaves_a_remote_provider_at_graphrags_default(base_
 
 
 def test_concurrent_requests_is_pessimistic_across_providers():
-    """graphrag has ONE global concurrency setting covering every stage, so a local
-    extraction provider binds the whole build even when graph.report_call_class points
-    community reports at a cloud model."""
+    """graphrag has ONE global concurrency setting covering every stage, so if any
+    provider passed in is local, the whole build serializes — argument order doesn't
+    matter."""
     local = ProviderConfig(base_url="http://localhost:1234/v1", model="m")
     remote = ProviderConfig(base_url="https://api.openai.com/v1", model="m")
 

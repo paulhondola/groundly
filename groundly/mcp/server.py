@@ -198,11 +198,10 @@ def get_page(subject: str, filename: str, page: int) -> list[dict]:
 @mcp.resource("groundly://{subject}/{filename}")
 def document(subject: str, filename: str) -> dict[str, list[dict]]:
     """A material's verbatim chunks grouped by page — never raw file bytes, never
-    summaries. Empirically (see docs/superpowers/specs/2026-07-18-mcp-skeleton-design.md),
-    FastMCP does not split the `#page=N` citation fragment out as a separate handler
-    argument: it arrives concatenated onto `filename` (e.g. "lec.pdf#page=2"), so we
-    parse it back out here and narrow to just that page when present; `get_page` is
-    the precise tool either way and is what the gate demo uses."""
+    summaries. Empirically, FastMCP does not split the `#page=N` citation fragment out
+    as a separate handler argument: it arrives concatenated onto `filename` (e.g.
+    "lec.pdf#page=2"), so we parse it back out here and narrow to just that page when
+    present; `get_page` is the precise tool either way."""
     from groundly.core.store import SubjectStore
 
     page: int | None = None

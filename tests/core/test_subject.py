@@ -3,8 +3,8 @@ must agree on.
 
 `graph_is_built()` replaced a two-term check that was written out in several places in
 slightly different shapes. These tests pin the two terms and the states between them,
-because the failure they guard against is silent: a graph arm answering from a build
-that never finished, under that arm's name.
+because the failure they guard against is silent: `list_subjects` reporting a graph as
+built, or `export-graph` rendering one, from a build that never finished.
 """
 
 from groundly.core.subject import Subject

@@ -489,7 +489,7 @@ def test_index_after_a_failed_build_does_not_offer_a_graph_without_the_flag(
     """A first build is opt-in via --graph. A failed one leaves `graph/` on disk with no
     recorded corpus_hash, and keying off the *directory* read that as a stale graph — so
     every later plain `groundly index` prompted to "rebuild" a graph that never existed.
-    The rest of the tree already gates on the manifest (mcp/server.py, _require_graph)."""
+    The rest of the tree already gates on the manifest (mcp/server.py's graph_is_built())."""
     runner.invoke(app, ["init", "PDSS"])
     sdir = subject_dir("PDSS")
     _seed_material(sdir, "a.pdf", "a" * 64)

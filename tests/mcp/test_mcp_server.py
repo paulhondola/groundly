@@ -23,8 +23,8 @@ class _NearEmbedder:
 
 class _PassthroughReranker:
     """Preserves the fused (best-first) order instead of exercising real rerank math —
-    MCP's `search`/`ask` tools don't expose a `--no-rerank` escape hatch (design table),
-    so tests stub the reranker the same way test_cli_ask.py stubs the embedder."""
+    MCP's `search` tool doesn't expose a `--no-rerank` escape hatch like the CLI verb
+    does, so tests stub the reranker directly."""
 
     def compute_score(self, pairs):
         return list(range(len(pairs), 0, -1))
@@ -127,6 +127,8 @@ async def test_the_tool_surface_is_exactly_these_seven_entries():
     async with Client(mcp) as client:
         tools = {t.name for t in await client.list_tools()}
         templates = {t.uriTemplate for t in await client.list_resource_templates()}
+        resources = await client.list_resources()
+        prompts = await client.list_prompts()
     assert tools == {
         "list_subjects",
         "search",
@@ -136,6 +138,8 @@ async def test_the_tool_surface_is_exactly_these_seven_entries():
         "export_deck",
     }
     assert templates == {"groundly://{subject}/{filename}"}
+    assert resources == []
+    assert prompts == []
 
 
 # --- list_subjects ----------------------------------------------------------------
@@ -189,7 +193,7 @@ async def test_search_unknown_subject_errors(subject_free_home):
 
 
 async def test_search_works_with_no_provider_configured(retrievable_subject):
-    # zero-key: search never requires [providers.chat] at all
+    # zero-key: search never requires [providers.extraction] at all
     async with Client(mcp) as client:
         result = await client.call_tool("search", {"subject": "TEST", "query": "deadlock"})
     assert result.data
