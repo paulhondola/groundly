@@ -1,0 +1,197 @@
+"""Shared fixtures for the ingestion pipeline/worker tests. Pytest auto-discovers
+fixtures defined here for every test module in this directory — test modules
+request them by parameter name, they never import from this file."""
+
+from pathlib import Path
+
+import pytest
+
+from groundly.core import store
+from groundly.core.manifest import EMBEDDING_DIM
+from groundly.core.paths import subject_dir
+from groundly.core.subject import Subject
+
+
+def init_subject(name: str) -> tuple[Path, bool]:
+    subject = Subject(name)
+    return subject.root_dir, subject.initialize()
+
+
+class StubEmbedder:
+    def __init__(self, fail_on: str | None = None):
+        self.encoded: list[str] = []
+        self.fail_on = fail_on
+
+    def encode(self, texts):
+        for t in texts:
+            if self.fail_on and self.fail_on in t:
+                raise RuntimeError("stub embedder failure")
+        self.encoded.extend(texts)
+        return [[0.1] * EMBEDDING_DIM for _ in texts], [{1: 0.5} for _ in texts]
+
+    def encode_stream(self, texts, batch_size=64):
+        for t in texts:
+            if self.fail_on and self.fail_on in t:
+                raise RuntimeError("stub embedder failure")
+            self.encoded.append(t)
+            yield [0.1] * EMBEDDING_DIM, {1: 0.5}
+
+
+@pytest.fixture
+def stub_embedder():
+    return StubEmbedder
+
+
+@pytest.fixture(autouse=True)
+def _fixed_console_width(monkeypatch):
+    """The CLI's rich console wraps to the terminal it was built for — and `Console()`
+    freezes that width at construction, i.e. when `groundly.cli.app` is first imported,
+    so setting COLUMNS from a fixture is too late. Unpinned, a long path or phrase in
+    CliRunner output wraps mid-word (`PDSS_PARTIAL` arriving as "P\\nDSS_PARTIAL") and
+    content assertions pass or fail depending on how wide the developer's terminal
+    happens to be. Pin it wide enough that nothing wraps; no test asserts on wrapping."""
+    from groundly.cli.app import console
+
+    monkeypatch.setattr(console, "width", 1000)
+
+
+@pytest.fixture(autouse=True)
+def _reset_shared_embedder():
+    """`llm/embeddings.py`'s shared_embedder() is a process-level singleton; reset it
+    around every test so one test's stub (or a stray real load) never leaks into the
+    next."""
+    import groundly.llm.embeddings as embeddings_mod
+
+    embeddings_mod._shared = None
+    yield
+    embeddings_mod._shared = None
+
+
+@pytest.fixture(autouse=True)
+def _no_native_module_eviction():
+    """Blame the test that evicts a native extension from `sys.modules`, not its victims.
+    Popping `torch` does not unload torch's C++ side — it only makes the next real import
+    re-run `torch/__init__.py`, which dies re-registering a process-global TORCH_LIBRARY
+    namespace. The victim is whichever later test loads a model for real, in some other
+    file, so the suite goes red or green purely by file ordering. Probe import cost in a
+    subprocess instead (tests/mcp/test_mcp_server.py)."""
+    import sys
+
+    loaded = {"torch", "FlagEmbedding", "sentence_transformers"} & sys.modules.keys()
+    yield
+    evicted = loaded - sys.modules.keys()
+    assert not evicted, (
+        f"{sorted(evicted)} evicted from sys.modules — re-importing a native extension "
+        "in-process is fatal for every later test that loads a model; use a subprocess"
+    )
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_runtest_teardown(item):
+    """`groundly.mcp.server.mcp` is one FastMCP instance shared by the whole session, and
+    its `run` comes from a mixin. `monkeypatch.setattr("...mcp.run", ...)` therefore cannot
+    be undone — the undo writes the original into `mcp.__dict__`, where it outlives the test
+    and shadows the *class* patch the `groundly serve` test relies on. That test then boots
+    a real HTTP server inside CliRunner and blocks forever. Patch the class instead.
+
+    A trylast hook rather than a fixture: fixture teardown runs before `monkeypatch` undoes
+    itself, so a fixture would clean the attribute just before the undo put it back."""
+    import sys
+
+    module = sys.modules.get("groundly.mcp.server")
+    if module is None:
+        return
+    leaked = {"run", "run_async"} & vars(module.mcp).keys()
+    for name in leaked:
+        # repair before reporting: failing the culprit does not remove the leak, and a live
+        # one still makes the serve test boot a real server and hang the run forever.
+        delattr(module.mcp, name)
+    assert not leaked, (
+        f"{item.nodeid} leaked {sorted(leaked)} onto the shared mcp instance — patch the "
+        "FastMCP class, not the instance, or a later test starts a real server and hangs"
+    )
+
+
+@pytest.fixture
+def subject(monkeypatch, tmp_path):
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    init_subject("TEST")
+    return "TEST"
+
+
+@pytest.fixture
+def course(tmp_path):
+    d = tmp_path / "course"
+    d.mkdir()
+    (d / "notes.txt").write_text("Deadlock needs mutual exclusion and circular wait to occur.")
+    (d / "readme.md").write_text("# Deadlock\n\n## Conditions\n\nFour conditions must hold.\n")
+    return d
+
+
+@pytest.fixture
+def connect():
+    def _connect(subject):
+        return store.connect(subject_dir(subject) / "store.db")
+
+    return _connect
+
+
+@pytest.fixture
+def stub_extraction():
+    def _stub_extraction():
+        from groundly.ingestion.extract import ChunkData, Extraction
+
+        return Extraction(pages=None, chunks=[ChunkData("stub text", None, None, 2)])
+
+    return _stub_extraction
+
+
+class StubExtractor:
+    def __init__(self, extraction):
+        self.extraction = extraction
+        self.seen_paths = []
+        self.seen_langs = []
+
+    def extract(self, path, ocr_lang=None):
+        self.seen_paths.append(path)
+        self.seen_langs.append(ocr_lang)
+        return self.extraction
+
+
+@pytest.fixture
+def stub_extractor(stub_extraction):
+    def _stub_extractor(extraction=None):
+        ext = extraction or stub_extraction()
+        return StubExtractor(ext)
+
+    return _stub_extractor
+
+
+@pytest.fixture
+def retrievable_subject(monkeypatch, tmp_path):
+    """An initialized subject with hand-built orthogonal dense vectors and distinct
+    sparse weights across 3 chunks, so retrieval ranking is actually exercised
+    (StubEmbedder above returns identical vectors for every text — useless for this)."""
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    init_subject("TEST")
+
+    from groundly.core.store import SubjectStore
+    from groundly.ingestion.extract import ChunkData
+
+    chunks = [
+        ChunkData("deadlock needs mutual exclusion to occur", "Intro > Deadlocks", 1, 10),
+        ChunkData("semaphores and mutexes for synchronization", "Intro > Sync", 2, 10),
+        ChunkData("deadlock deadlock deadlock circular wait condition", "Intro > Deadlocks", 3, 10),
+    ]
+    dense = [
+        [1.0, 0.0] + [0.0] * (EMBEDDING_DIM - 2),
+        [0.0, 1.0] + [0.0] * (EMBEDDING_DIM - 2),
+        [0.9, 0.1] + [0.0] * (EMBEDDING_DIM - 2),
+    ]
+    sparse = [{1: 0.9, 2: 0.1}, {3: 0.9}, {1: 0.4}]
+    SubjectStore(subject_dir("TEST") / "store.db").add_indexed(
+        "lec.pdf", "a" * 64, 3, chunks, zip(dense, sparse)
+    )
+    return "TEST"

@@ -1,0 +1,160 @@
+"""groundly/retrieval/vector.py: rrf() math, VectorRetriever fusion/rerank, search()."""
+
+import pytest
+
+from groundly.core.manifest import EMBEDDING_DIM
+from groundly.core.paths import subject_dir
+from groundly.core.store import SubjectStore
+from groundly.retrieval.vector import CONTEXT_K, VectorRetriever, rrf, search
+
+
+class QueryEmbedder:
+    """Returns a fixed dense/sparse pair for any query text (one encode() call)."""
+
+    def __init__(self, dense, sparse):
+        self.dense = dense
+        self.sparse = sparse
+        self.calls = 0
+
+    def encode(self, texts):
+        self.calls += 1
+        return [self.dense for _ in texts], [self.sparse for _ in texts]
+
+
+class StubReranker:
+    def __init__(self, scores=None, fail=False):
+        self.scores = scores
+        self.fail = fail
+        self.pairs = None
+
+    def compute_score(self, pairs):
+        if self.fail:
+            raise AssertionError("reranker must not be called when rerank=False")
+        self.pairs = pairs
+        return self.scores if self.scores is not None else [0.0] * len(pairs)
+
+
+def _near_embedder():
+    return QueryEmbedder([1.0, 0.0] + [0.0] * (EMBEDDING_DIM - 2), {1: 1.0})
+
+
+# --- rrf() pure math ----------------------------------------------------------------
+
+
+def test_rrf_fuses_multiple_rankings_by_reciprocal_rank():
+    fused = rrf([[1, 2, 3], [2, 1, 3]], k=60)
+    ids = [doc_id for doc_id, _ in fused]
+    assert ids[0] in (1, 2)  # 1 and 2 both appear at rank 0/1 across lists — tied for top
+    assert set(ids) == {1, 2, 3}
+    # exact score check for id 1: rank 0 in list A (1/61) + rank 1 in list B (1/62)
+    scores = dict(fused)
+    assert scores[1] == pytest.approx(1 / 61 + 1 / 62)
+    assert scores[3] == pytest.approx(1 / 63 + 1 / 63)
+
+
+def test_rrf_empty_rankings_returns_empty():
+    assert rrf([]) == []
+    assert rrf([[], []]) == []
+
+
+def test_rrf_single_ranking_preserves_order():
+    fused = rrf([[5, 1, 9]])
+    assert [doc_id for doc_id, _ in fused] == [5, 1, 9]
+
+
+# --- VectorRetriever ------------------------------------------------------------------
+
+
+def test_vector_retriever_fuses_channels_and_ranks_relevant_chunk_first(retrievable_subject):
+    store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
+    retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False)
+    hits = retriever.retrieve("deadlock")
+    ids = [h.chunk_id for h in hits]
+    assert ids[0] == 1  # dense=near, sparse=token 1 both point at chunk 1; bm25 too
+    assert 2 not in ids[:2]  # chunk 2 ("semaphores") is off-topic on every channel
+
+
+def test_vector_retriever_returns_hits_with_citation_fields(retrievable_subject):
+    from groundly.retrieval.hits import Hit
+
+    store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
+    retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False)
+    hits = retriever.retrieve("deadlock")
+    hit = next(h for h in hits if h.chunk_id == 1)
+    assert isinstance(hit, Hit)
+    assert (hit.filename, hit.page, hit.heading_path) == ("lec.pdf", 1, "Intro > Deadlocks")
+    assert "mutual exclusion" in hit.text
+
+
+def test_vector_retriever_reranker_skipped_when_rerank_false(retrievable_subject):
+    store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
+    reranker = StubReranker(fail=True)
+    retriever = VectorRetriever(
+        store_obj, embedder=_near_embedder(), reranker=reranker, rerank=False
+    )
+    retriever.retrieve("deadlock")  # must not raise — reranker.compute_score never called
+
+
+def test_vector_retriever_reranks_when_enabled(retrievable_subject):
+    store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
+    # invert the fused order: chunk 2 ("semaphores") scores highest under the reranker
+    reranker = StubReranker(scores=None)
+
+    def scored(pairs):
+        reranker.pairs = pairs
+        # pairs are (query, chunk_text); score chunk 2's text highest
+        return [1.0 if "semaphores" in text else 0.0 for _, text in pairs]
+
+    reranker.compute_score = scored
+    retriever = VectorRetriever(
+        store_obj, embedder=_near_embedder(), reranker=reranker, rerank=True
+    )
+    hits = retriever.retrieve("deadlock")
+    assert hits[0].chunk_id == 2
+
+
+def test_vector_retriever_empty_store_returns_no_nodes(subject):
+    store_obj = SubjectStore(subject_dir(subject) / "store.db")
+    retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False)
+    assert retriever.retrieve("anything") == []
+
+
+def test_vector_retriever_respects_context_k(retrievable_subject):
+    store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
+    retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False, context_k=1)
+    hits = retriever.retrieve("deadlock")
+    assert len(hits) == 1
+
+
+# --- search() shared function ---------------------------------------------------------
+
+
+def test_search_returns_ranked_nodes_and_writes_nothing_to_progress(retrievable_subject):
+    """search is read-only: a query writes nothing to progress.db."""
+    db = subject_dir(retrievable_subject) / "progress.db"
+    before = db.read_bytes()
+
+    hits = search(retrievable_subject, "deadlock", embedder=_near_embedder(), rerank=False)
+    assert hits and len(hits) <= CONTEXT_K
+
+    assert db.read_bytes() == before
+
+
+def test_rrf_breaks_ties_by_cross_ranking_agreement():
+    """Equal RRF scores must not be resolved by argument order. Both list A's rank-0 and
+    list B's rank-0 score 1/61, and a stable `sorted` would hand rank 1 to whichever list
+    came first. Id 7 is found by both channels and must win."""
+    fused = rrf([[1, 7], [7, 2]], k=60)
+    ids = [doc_id for doc_id, _ in fused]
+    assert ids[0] == 7  # 1/61 + 1/62, strictly higher than either singleton
+    # 1 and 2 are exactly tied at 1/61 each; order must be deterministic, not positional
+    assert set(ids[1:]) == {1, 2}
+    assert rrf([[1, 7], [7, 2]], k=60) == rrf([[1, 7], [7, 2]], k=60)
+
+
+def test_rrf_tie_break_is_independent_of_argument_order():
+    """The same two rankings swapped must produce the same fused order — that is the
+    whole point of not letting `sorted`'s stability decide."""
+    a = [doc_id for doc_id, _ in rrf([[3], [4]], k=60)]
+    b = [doc_id for doc_id, _ in rrf([[4], [3]], k=60)]
+    assert a == b
