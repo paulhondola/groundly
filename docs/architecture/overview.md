@@ -8,8 +8,8 @@ There is no server to deploy. The product is a local **core library** with two c
 
 ```
 groundly/
-├── cli/         # typer verbs: init, index, list, remove, search, import, export,
-│             #   config, models, mcp, serve
+├── cli/         # typer verbs: index, list, remove, drop, search, import, export,
+│             #   config, models, mcp (stdio, or --http)
 ├── mcp/         # FastMCP tool definitions over the core (stdio + streamable HTTP)
 ├── agents/      # the verifier gate — nothing unverified enters store.db
 ├── retrieval/   # dense + sparse + BM25, RRF fusion, cross-encoder rerank

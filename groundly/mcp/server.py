@@ -119,8 +119,9 @@ def get_page(uri: str) -> list[dict]:
     """Open what a search citation points to: pass a result's `uri` verbatim (e.g.
     `groundly://<subject>/<file>#page=N`) to read every chunk on that page, in order —
     use it when a hit needs its surrounding context before you answer. A uri without
-    `#page` (plain-text materials) returns the whole material. Verbatim chunk text only,
-    never file bytes or summaries; empty list if nothing is indexed there."""
+    `#page` (plain-text materials) returns the whole material. To read a neighbouring
+    page, change the `N` in `#page=N`; an empty list means you are past the end.
+    Verbatim chunk text only, never file bytes or summaries."""
     from groundly.core.store import SubjectStore
 
     subject, filename, page = _parse_citation_uri(uri)

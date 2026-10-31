@@ -20,7 +20,7 @@
 - **The server's `instructions` state the norm; tool descriptions say which tool. Never rank one tool above another server-wide.** Measured (decision 31): instructions ending "`ask` returns an enforced, cited answer; `search` returns raw chunks for you to compose from" took a `search`-only host to **4/48** questions retrieved; deleting that one clause took it to **29/48** (Fisher p=8.3e-08). A tool preferred server-wide is invisible to whoever allowlists a subset later.
 - The surface is pinned by `tests/mcp/test_mcp_server.py::test_the_tool_surface_is_exactly_these_four_entries` — adding or removing a tool is a deliberate change, not a side effect.
 - Citations are `groundly://<subject>/<file>#page=N` URIs: `get_page(uri)` opens the cited page, and the URI read as an MCP resource returns the whole document (a fragment is not part of a resource's identity).
-- CLI verbs are batch lifecycle only (init/index/list/remove/search/import/export/config/models/mcp/serve); anything conversational belongs to the host agent. No TUI.
+- CLI verbs are batch lifecycle only (index/list/remove/drop/search/import/export/config/models/mcp); `serve` is reserved for the topic-tree page; `-y/--yes` is the one way to skip a prompt; anything conversational belongs to the host agent. No TUI.
 - Long operations report per-file/per-item progress.
 - User-facing failure messages name the cause specifically ("no readable text — OCR found nothing to extract"), never generic errors.
 
