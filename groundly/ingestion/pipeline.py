@@ -136,6 +136,7 @@ class IngestionPipeline:
 
         results: list[FileResult] = []
         known = self.store.hash_status()
+        retried: set[str] = set()  # retry each content once; a same-content sibling skips
         files = _iter_files(paths)
         self.on_discovered(len(files))
         for path in files:
@@ -168,7 +169,8 @@ class IngestionPipeline:
                 # terminal per UC-01 (a slow OCR timeout must not repeat every run) unless
                 # the student asks; the old row goes first because sha256 is UNIQUE
                 materials = self.store.find_materials(sha)
-                if retry_failed:
+                if retry_failed and sha not in retried:
+                    retried.add(sha)
                     for row in materials:
                         self.store.remove_material(row["id"])
                     del known[sha]

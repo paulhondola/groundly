@@ -297,7 +297,7 @@ async def test_http_transport_serves_the_same_tools(retrievable_subject):
 
     import uvicorn
 
-    app = mcp.http_app(host_origin_protection="auto")  # mirror cli/serve.py's kwargs
+    app = mcp.http_app(host_origin_protection="auto")  # mirror cli/mcp.py's --http kwargs
     config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning")
     server = uvicorn.Server(config)
     sock = config.bind_socket()  # ephemeral port, bound before the thread starts

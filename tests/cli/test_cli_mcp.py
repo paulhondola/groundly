@@ -44,7 +44,8 @@ def test_mcp_port_without_http_is_an_error(monkeypatch):
     monkeypatch.setattr(FastMCP, "run", lambda self, **kw: calls.append(kw))
     result = runner.invoke(app, ["mcp", "--port", "5150"])
     assert result.exit_code == 1
-    assert "--port requires --http" in result.output
+    assert "--port requires --http" in result.stderr
+    assert result.stdout == ""  # stdout is the stdio MCP stream
     assert calls == []
 
 
