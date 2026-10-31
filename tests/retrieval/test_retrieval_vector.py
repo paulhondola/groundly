@@ -5,7 +5,7 @@ import pytest
 from groundly.core.manifest import EMBEDDING_DIM
 from groundly.core.paths import subject_dir
 from groundly.core.store import SubjectStore
-from groundly.retrieval.vector import CONTEXT_K, VectorRetriever, rrf, search
+from groundly.retrieval.vector import TOP_K, VectorRetriever, rrf, search
 
 
 class QueryEmbedder:
@@ -119,9 +119,9 @@ def test_vector_retriever_empty_store_returns_no_nodes(subject):
     assert retriever.retrieve("anything") == []
 
 
-def test_vector_retriever_respects_context_k(retrievable_subject):
+def test_vector_retriever_respects_top_k(retrievable_subject):
     store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
-    retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False, context_k=1)
+    retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False, top_k=1)
     hits = retriever.retrieve("deadlock")
     assert len(hits) == 1
 
@@ -135,7 +135,7 @@ def test_search_returns_ranked_nodes_and_writes_nothing_to_progress(retrievable_
     before = db.read_bytes()
 
     hits = search(retrievable_subject, "deadlock", embedder=_near_embedder(), rerank=False)
-    assert hits and len(hits) <= CONTEXT_K
+    assert hits and len(hits) <= TOP_K
 
     assert db.read_bytes() == before
 

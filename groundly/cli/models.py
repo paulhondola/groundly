@@ -24,7 +24,7 @@ def config(ctx: typer.Context) -> None:
         f"  ingestion.max_file_size_mb = "
         f"{s.ingestion.max_file_size_mb if s.ingestion.max_file_size_mb else '(unlimited)'}"
     )
-    console.print(f"  retrieval.context_k        = {s.retrieval.context_k}")
+    console.print(f"  retrieval.top_k            = {s.retrieval.top_k}")
     console.print(f"  retrieval.rerank           = {s.retrieval.rerank}")
 
 
@@ -32,7 +32,7 @@ def config(ctx: typer.Context) -> None:
 def config_set(
     key: Annotated[
         str,
-        typer.Argument(help="Dotted key, e.g. ingestion.timeout_seconds or retrieval.context_k."),
+        typer.Argument(help="Dotted key, e.g. ingestion.timeout_seconds or retrieval.top_k."),
     ],
     value: Annotated[str, typer.Argument(help="Value to set.")],
 ) -> None:

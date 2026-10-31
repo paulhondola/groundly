@@ -15,7 +15,7 @@ def search(
     query: Annotated[str, typer.Argument(help="Search query.")],
     k: Annotated[
         int | None,
-        typer.Option("-k", help="Number of chunks to return (default: retrieval.context_k)."),
+        typer.Option("-k", help="Number of chunks to return (default: retrieval.top_k)."),
     ] = None,
     rerank: Annotated[
         bool | None,

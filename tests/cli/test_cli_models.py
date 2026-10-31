@@ -22,13 +22,13 @@ def test_config_show_defaults_no_file(home):
     result = runner.invoke(app, ["config"])
     assert result.exit_code == 0, result.output
     assert "config.toml" in result.output
-    assert "context_k" in result.output  # settings shown
+    assert "top_k" in result.output  # settings shown
 
 
 def test_config_set_then_show(home):
-    assert runner.invoke(app, ["config", "set", "retrieval.context_k", "12"]).exit_code == 0
+    assert runner.invoke(app, ["config", "set", "retrieval.top_k", "12"]).exit_code == 0
     result = runner.invoke(app, ["config"])
-    assert "retrieval.context_k        = 12" in result.output
+    assert "retrieval.top_k            = 12" in result.output
 
 
 def test_config_set_unknown_key_rejected(home):

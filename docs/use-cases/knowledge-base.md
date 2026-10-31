@@ -38,7 +38,7 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: the **student**
 
 **Main flow**
 
-1. `search(subject, query, k=None)` → three-channel retrieval (bge-m3 dense + learned sparse + FTS5/BM25), RRF fusion, cross-encoder rerank (default ON), truncated to `retrieval.context_k`.
+1. `search(subject, query, k=None)` → three-channel retrieval (bge-m3 dense + learned sparse + FTS5/BM25), RRF fusion, cross-encoder rerank (default ON), truncated to `retrieval.top_k`.
 2. Each hit returns verbatim text plus `chunk_id`, `filename`, `page`, `heading_path` and a `groundly://` URI.
 3. The host composes the answer and cites the chunks it used. Grounding here is **best-effort by construction** — the server's `instructions` and the tool description carry the norm (decision 31); the enforced-pipeline alternative was measured and removed (decision 33).
 4. `get_page(uri)` takes a hit's `uri` verbatim and opens exactly what it points to — that page, or the whole material when the URI has no `#page` (plain-text materials). Read as an MCP resource, the same URI returns the whole document grouped by page.

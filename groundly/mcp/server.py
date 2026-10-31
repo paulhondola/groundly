@@ -74,7 +74,7 @@ def search(subject: str, query: str, k: int | None = None) -> list[dict]:
     examples are what the student is graded on, and they differ from the textbook
     treatment. Returns ranked verbatim chunks, each with filename, page and a
     `groundly://` uri you can cite or open with `get_page`. Omit `k` to use the configured
-    default (`retrieval.context_k`); pass it only to override. No LLM call, no provider
+    default (`retrieval.top_k`); pass it only to override. No LLM call, no provider
     needed — you compose the answer from what comes back, so cite the chunks you used."""
     from groundly.llm.embeddings import ModelDownloadError
     from groundly.retrieval.vector import search as search_fn
