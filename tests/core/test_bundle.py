@@ -260,7 +260,7 @@ def test_hostile_import_leaves_existing_subject_untouched(tmp_path, monkeypatch)
     original_material = (subject_dir("PDSS") / "materials" / "lec.pdf").read_bytes()
 
     hostile = _zip_with_entry(tmp_path / "hostile.groundly", "../evil.txt")
-    result = runner.invoke(app, ["import", str(hostile), "--as", "PDSS", "--force"])
+    result = runner.invoke(app, ["import", str(hostile), "--as", "PDSS", "--yes"])
     assert result.exit_code != 0
     assert "../evil.txt" in result.output
     assert progress_path.read_bytes() == original_progress
@@ -288,7 +288,7 @@ def test_export_never_reads_progress_db_and_bundle_module_never_names_it(tmp_pat
 # --- AC4: no silent overwrite ------------------------------------------------------
 
 
-def test_import_collision_without_force_aborts_and_leaves_original(tmp_path, monkeypatch):
+def test_import_collision_without_yes_aborts_and_leaves_original(tmp_path, monkeypatch):
     _use_home(monkeypatch, tmp_path / "a")
     init_subject("PDSS")
     _seed("PDSS", filename="original.pdf")
@@ -301,7 +301,7 @@ def test_import_collision_without_force_aborts_and_leaves_original(tmp_path, mon
     assert (subject_dir("PDSS") / "materials" / "original.pdf").read_bytes() == original
 
 
-def test_import_force_replaces_existing_subject(tmp_path, monkeypatch):
+def test_import_yes_replaces_existing_subject(tmp_path, monkeypatch):
     _use_home(monkeypatch, tmp_path / "a")
     init_subject("PDSS")
     _seed("PDSS", filename="original.pdf")
@@ -310,7 +310,7 @@ def test_import_force_replaces_existing_subject(tmp_path, monkeypatch):
 
     (subject_dir("PDSS") / "materials" / "extra.pdf").write_text("stray")  # mutate the live copy
 
-    result = runner.invoke(app, ["import", str(bundle_path), "--force"])
+    result = runner.invoke(app, ["import", str(bundle_path), "--yes"])
     assert result.exit_code == 0, result.output
     assert not (subject_dir("PDSS") / "materials" / "extra.pdf").exists()
     assert (subject_dir("PDSS") / "materials" / "original.pdf").exists()
@@ -415,3 +415,35 @@ def test_export_no_materials_excludes_originals(tmp_path, monkeypatch):
     subj2 = Subject("PDSS2")
     assert subj2.materials_dir.exists()
     assert list(subj2.materials_dir.iterdir()) == []
+
+
+def test_import_yes_skips_pin_mismatch_prompt(tmp_path, monkeypatch, stub_embedder):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed("PDSS")
+    bundle_path = tmp_path / "PDSS.groundly"
+    runner.invoke(app, ["export", "PDSS", "-o", str(bundle_path)])
+    _rewrite_zip_manifest(bundle_path, hf_revision="stale-revision")
+
+    monkeypatch.setattr("groundly.llm.embeddings.BgeM3Embedder", stub_embedder)
+    result = runner.invoke(app, ["import", str(bundle_path), "--as", "PDSS_B", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert Subject("PDSS_B").load_manifest().embedding.hf_revision == HF_REVISION
+
+
+def test_import_replace_prompt_names_progress_not_notes(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed("PDSS")
+    bundle_path = tmp_path / "PDSS.groundly"
+    runner.invoke(app, ["export", "PDSS", "-o", str(bundle_path)])
+    result = runner.invoke(app, ["import", str(bundle_path)], input="n\n")
+    assert "progress" in result.output
+    assert "notes" not in result.output
+
+
+def test_import_force_flag_is_gone(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    bundle_path = tmp_path / "PDSS.groundly"
+    bundle_path.write_bytes(b"")
+    assert runner.invoke(app, ["import", str(bundle_path), "--force"]).exit_code == 2
