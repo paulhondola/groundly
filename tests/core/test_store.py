@@ -266,3 +266,46 @@ def test_removed_material_vanishes_from_all_search_channels(db, tmp_path, ranked
     assert store_obj.sparse_search({1: 1.0}, k=10) == []
     assert store_obj.bm25_search("deadlock", k=10) == []
     assert store_obj.chunk_details([ranked["near"], ranked["far"], ranked["mid"]]) == []
+
+
+@pytest.fixture
+def two_materials(db, ranked):
+    """`ranked`'s lec.pdf plus other.pdf, whose single chunk is the best match on every
+    channel — so an unscoped top-1 always lands outside lec.pdf."""
+    with db:
+        other_id = db.execute(
+            "INSERT INTO materials (filename, sha256, status, pages) "
+            "VALUES ('other.pdf', ?, 'indexed', 1)",
+            ("b" * 64,),
+        ).lastrowid
+        other = _add_chunk(
+            db,
+            other_id,
+            "deadlock deadlock deadlock deadlock",
+            [1.0] + [0.0] * (EMBEDDING_DIM - 1),
+            {1: 1.0},
+        )
+    return {**ranked, "lec_id": ranked["material_id"], "other": other}
+
+
+def test_scoped_channels_return_only_that_material(db, tmp_path, two_materials):
+    s = SubjectStore(tmp_path / "store.db")
+    mid = two_materials["lec_id"]
+    lec_chunks = {two_materials["near"], two_materials["far"], two_materials["mid"]}
+    q = [1.0] + [0.0] * (EMBEDDING_DIM - 1)
+    assert set(s.dense_search(q, k=10, material_id=mid)) <= lec_chunks
+    assert s.dense_search(q, k=10, material_id=mid)[0] == two_materials["near"]
+    assert set(s.sparse_search({1: 1.0}, k=10, material_id=mid)) <= lec_chunks
+    assert set(s.bm25_search("deadlock", k=10, material_id=mid)) <= lec_chunks
+
+
+def test_scoped_dense_reaches_material_outside_global_top_k(db, tmp_path, two_materials):
+    s = SubjectStore(tmp_path / "store.db")
+    q = [1.0] + [0.0] * (EMBEDDING_DIM - 1)
+    assert s.dense_search(q, k=1) == [two_materials["other"]]
+    assert s.dense_search(q, k=1, material_id=two_materials["lec_id"]) == [two_materials["near"]]
+
+
+def test_unscoped_channels_unchanged(db, tmp_path, two_materials):
+    s = SubjectStore(tmp_path / "store.db")
+    assert two_materials["other"] in s.bm25_search("deadlock", k=10)
