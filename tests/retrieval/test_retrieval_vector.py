@@ -158,3 +158,26 @@ def test_rrf_tie_break_is_independent_of_argument_order():
     a = [doc_id for doc_id, _ in rrf([[3], [4]], k=60)]
     b = [doc_id for doc_id, _ in rrf([[4], [3]], k=60)]
     assert a == b
+
+
+def _add_other_material(subject):
+    """other.pdf: one chunk that beats lec.pdf on every channel for a 'deadlock' query."""
+    from groundly.ingestion.extract import ChunkData
+
+    store_obj = SubjectStore(subject_dir(subject) / "store.db")
+    store_obj.add_indexed(
+        "other.pdf",
+        "b" * 64,
+        1,
+        [ChunkData("deadlock deadlock deadlock deadlock", "Other", 1, 10)],
+        iter([([1.0, 0.0] + [0.0] * (EMBEDDING_DIM - 2), {1: 1.0})]),
+    )
+    return store_obj
+
+
+def test_retrieve_scoped_returns_only_that_material(retrievable_subject):
+    store_obj = _add_other_material(retrievable_subject)
+    lec_id = store_obj.find_materials("lec.pdf")[0]["id"]
+    retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False, top_k=10)
+    hits = retriever.retrieve("deadlock", material_id=lec_id)
+    assert hits and {h.filename for h in hits} == {"lec.pdf"}

@@ -17,6 +17,12 @@ def search(
         int | None,
         typer.Option("-k", help="Number of chunks to return (default: retrieval.top_k)."),
     ] = None,
+    material: Annotated[
+        str | None,
+        typer.Option(
+            "-m", "--material", help="Limit the search to one material (filename or sha256 prefix)."
+        ),
+    ] = None,
     rerank: Annotated[
         bool | None,
         typer.Option(
@@ -42,9 +48,19 @@ def search(
         _fail(str(exc))
 
     subj = _subject_checked(subject)
-    _store_checked(subj)
+    store_obj = _store_checked(subj)
+    material_id = None
+    if material is not None:
+        # only indexed rows are searchable; a failed row may share the filename
+        matches = [m for m in store_obj.find_materials(material) if m["status"] == "indexed"]
+        if not matches:
+            _fail(f"no material {material!r} in {subject} — see: groundly list {subject}")
+        if len(matches) > 1:
+            candidates = ", ".join(f"{m['filename']} ({m['sha256'][:8]})" for m in matches)
+            _fail(f"{material!r} is ambiguous — candidates: {candidates}; use a sha256 prefix")
+        material_id = matches[0]["id"]
     try:
-        hits = search_fn(subject, query, k=k, rerank=rerank)
+        hits = search_fn(subject, query, k=k, rerank=rerank, material_id=material_id)
     except ModelDownloadError as exc:
         _fail(str(exc))
     if not hits:

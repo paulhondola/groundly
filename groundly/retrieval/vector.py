@@ -76,12 +76,13 @@ class VectorRetriever:
             self._reranker = BgeReranker()
         return self._reranker
 
-    def retrieve(self, query: str) -> list[Hit]:
+    def retrieve(self, query: str, material_id: int | None = None) -> list[Hit]:
+        """Ranked hits for `query`; `material_id` scopes every channel to one material."""
         dense, sparse = self.embedder.encode([query])  # one pass feeds both channels
 
-        dense_ids = self.store.dense_search(dense[0], self.channel_k)
-        sparse_ids = self.store.sparse_search(sparse[0], self.channel_k)
-        bm25_ids = self.store.bm25_search(query, self.channel_k)
+        dense_ids = self.store.dense_search(dense[0], self.channel_k, material_id)
+        sparse_ids = self.store.sparse_search(sparse[0], self.channel_k, material_id)
+        bm25_ids = self.store.bm25_search(query, self.channel_k, material_id)
         stages = ["dense", "sparse", "bm25", "rrf"]
         logger.debug(
             "channel hits: dense=%d sparse=%d bm25=%d",
@@ -124,6 +125,7 @@ def search(
     *,
     k: int | None = None,
     rerank: bool | None = None,
+    material_id: int | None = None,
     embedder=None,
     reranker=None,
 ) -> list[Hit]:
@@ -133,4 +135,4 @@ def search(
 
     store = SubjectStore(Subject(subject).store_db_path)
     retriever = VectorRetriever(store, embedder=embedder, reranker=reranker, rerank=rerank, top_k=k)
-    return retriever.retrieve(query)
+    return retriever.retrieve(query, material_id=material_id)
