@@ -91,7 +91,7 @@ def pytest_runtest_teardown(item):
     """`groundly.mcp.server.mcp` is one FastMCP instance shared by the whole session, and
     its `run` comes from a mixin. `monkeypatch.setattr("...mcp.run", ...)` therefore cannot
     be undone — the undo writes the original into `mcp.__dict__`, where it outlives the test
-    and shadows the *class* patch the `groundly serve` test relies on. That test then boots
+    and shadows the *class* patch the `groundly mcp --http` test relies on. That test then boots
     a real HTTP server inside CliRunner and blocks forever. Patch the class instead.
 
     A trylast hook rather than a fixture: fixture teardown runs before `monkeypatch` undoes
@@ -104,7 +104,7 @@ def pytest_runtest_teardown(item):
     leaked = {"run", "run_async"} & vars(module.mcp).keys()
     for name in leaked:
         # repair before reporting: failing the culprit does not remove the leak, and a live
-        # one still makes the serve test boot a real server and hang the run forever.
+        # one still makes the mcp --http test boot a real server and hang the run forever.
         delattr(module.mcp, name)
     assert not leaked, (
         f"{item.nodeid} leaked {sorted(leaked)} onto the shared mcp instance — patch the "

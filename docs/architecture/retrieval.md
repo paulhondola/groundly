@@ -6,7 +6,7 @@ results are kept outside the repo, and the code is at tag `thesis-experiments-20
 
 ## The pipeline
 
-`query → dense + sparse + BM25 → RRF → cross-encoder rerank → top context_k hits`
+`query → dense + sparse + BM25 → RRF → cross-encoder rerank → top_k hits`
 
 `search` (MCP tool and `groundly search`) returns those hits verbatim, each carrying
 `chunk_id`, `filename`, `page`, `heading_path` and a `groundly://` URI. There is no
@@ -40,5 +40,5 @@ Only verbatim chunks are citation targets; anything that summarizes has no page.
 
 ## Knobs
 
-`retrieval.context_k` (default 8) and `retrieval.rerank` (default true) in
+`retrieval.top_k` (default 8) and `retrieval.rerank` (default true) in
 `~/.groundly/config.toml`.

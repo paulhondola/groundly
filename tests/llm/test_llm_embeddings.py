@@ -45,5 +45,5 @@ def test_shared_embedder_is_a_process_singleton_used_by_vector_retriever_default
     assert first is second is fake_instance
 
     store = SubjectStore(Path("/nonexistent/store.db"))
-    retriever = VectorRetriever(store, rerank=False, context_k=1)
+    retriever = VectorRetriever(store, rerank=False, top_k=1)
     assert retriever.embedder is fake_instance

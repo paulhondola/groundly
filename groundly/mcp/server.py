@@ -74,7 +74,7 @@ def search(subject: str, query: str, k: int | None = None) -> list[dict]:
     examples are what the student is graded on, and they differ from the textbook
     treatment. Returns ranked verbatim chunks, each with filename, page and a
     `groundly://` uri you can cite or open with `get_page`. Omit `k` to use the configured
-    default (`retrieval.context_k`); pass it only to override. No LLM call, no provider
+    default (`retrieval.top_k`); pass it only to override. No LLM call, no provider
     needed — you compose the answer from what comes back, so cite the chunks you used."""
     from groundly.llm.embeddings import ModelDownloadError
     from groundly.retrieval.vector import search as search_fn
@@ -119,8 +119,9 @@ def get_page(uri: str) -> list[dict]:
     """Open what a search citation points to: pass a result's `uri` verbatim (e.g.
     `groundly://<subject>/<file>#page=N`) to read every chunk on that page, in order —
     use it when a hit needs its surrounding context before you answer. A uri without
-    `#page` (plain-text materials) returns the whole material. Verbatim chunk text only,
-    never file bytes or summaries; empty list if nothing is indexed there."""
+    `#page` (plain-text materials) returns the whole material. To read a neighbouring
+    page, change the `N` in `#page=N`; an empty list means you are past the end.
+    Verbatim chunk text only, never file bytes or summaries."""
     from groundly.core.store import SubjectStore
 
     subject, filename, page = _parse_citation_uri(uri)

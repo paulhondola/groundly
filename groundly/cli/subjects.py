@@ -1,4 +1,4 @@
-"""Subject lifecycle verbs: init, index, list, remove."""
+"""Subject lifecycle verbs: index, list, remove, drop."""
 
 from pathlib import Path
 from typing import Annotated
@@ -12,26 +12,8 @@ from groundly.cli.app import _fail, _store_checked, _subject_checked, app, conso
 
 
 @app.command()
-def init(
-    subject: Annotated[str, typer.Argument(help="Subject name; becomes ~/.groundly/<SUBJECT>/.")],
-) -> None:
-    """Create a subject: manifest.json, materials/, store.db, progress.db."""
-    from groundly.core.subject import Subject
-
-    try:
-        subj = Subject(subject)
-        created = subj.initialize()
-    except ValueError as exc:
-        _fail(str(exc))
-    if created:
-        console.print(f"Initialized [bold]{subject}[/bold] at {subj.root_dir}")
-    else:
-        console.print(f"[bold]{subject}[/bold] already initialized at {subj.root_dir}")
-
-
-@app.command()
 def index(
-    subject: Annotated[str, typer.Argument(help="Subject to index into (must be initialized).")],
+    subject: Annotated[str, typer.Argument(help="Subject to index into (created on first run).")],
     paths: Annotated[list[Path], typer.Argument(help="Files or directories to index.")],
     ocr_lang: Annotated[
         str | None,
@@ -41,6 +23,10 @@ def index(
             "persisted in the manifest.",
         ),
     ] = None,
+    retry_failed: Annotated[
+        bool,
+        typer.Option("--retry-failed", help="Re-extract files that failed on an earlier run."),
+    ] = False,
     debug: Annotated[
         bool,
         typer.Option(
@@ -63,25 +49,30 @@ def index(
         subj = Subject(subject)
     except ValueError as exc:  # bad subject name — same cause pipeline would name
         _fail(str(exc))
-    if subj.exists():
-        manifest = subj.load_manifest()
-        recorded = manifest.ocr.lang[0] if manifest.ocr.lang else None
-        if ocr_lang and recorded and ocr_lang != recorded:
-            # The recorded lang shaped every OCR'd chunk already stored, so changing it would
-            # mix corpora (decision 15). With nothing indexed there is nothing to mix, which
-            # lets a mistyped lang (it stores no rows) be corrected.
-            if manifest.counts.materials > 0:
-                _fail(
-                    f"OCR language already set to {recorded!r} for this subject; changing it "
-                    "requires re-indexing (remove and re-index scanned materials)"
-                )
-            manifest.ocr.lang = [ocr_lang]
-            subj.save_manifest(manifest)
-        elif ocr_lang and not recorded:
-            manifest.ocr.lang = [ocr_lang]
-            subj.save_manifest(manifest)
-        elif not ocr_lang:
-            ocr_lang = recorded
+    # Check paths before creating the subject: a typo must not leave an empty one behind.
+    missing = [str(p) for p in paths if not p.exists()]
+    if missing:
+        _fail(f"path not found: {', '.join(missing)}")
+    if not subj.exists():
+        subj.initialize()
+    manifest = subj.load_manifest()
+    recorded = manifest.ocr.lang[0] if manifest.ocr.lang else None
+    if ocr_lang and recorded and ocr_lang != recorded:
+        # The recorded lang shaped every OCR'd chunk already stored, so changing it would
+        # mix corpora (decision 15). With nothing indexed there is nothing to mix, which
+        # lets a mistyped lang (it stores no rows) be corrected.
+        if manifest.counts.materials > 0:
+            _fail(
+                f"OCR language already set to {recorded!r} for this subject; changing it "
+                "requires re-indexing (remove and re-index scanned materials)"
+            )
+        manifest.ocr.lang = [ocr_lang]
+        subj.save_manifest(manifest)
+    elif ocr_lang and not recorded:
+        manifest.ocr.lang = [ocr_lang]
+        subj.save_manifest(manifest)
+    elif not ocr_lang:
+        ocr_lang = recorded
 
     labels = {
         Status.INDEXED: "[green]indexed[/green]",
@@ -114,7 +105,12 @@ def index(
 
         try:
             results = pipeline.index_paths(
-                subject, paths, on_event=on_event, on_discovered=on_discovered, ocr_lang=ocr_lang
+                subject,
+                paths,
+                on_event=on_event,
+                on_discovered=on_discovered,
+                ocr_lang=ocr_lang,
+                retry_failed=retry_failed,
             )
         except (RuntimeError, ValueError) as exc:
             _fail(str(exc))
@@ -149,7 +145,9 @@ def list_(
     from groundly.core.subject import Subject
 
     if subject is None:
-        table = Table("subject", "materials", "chunks")
+        from groundly.core.store import SubjectStore
+
+        table = Table("subject", "materials", "pages", "chunks", "ocr")
         for name in discover_subjects():
             try:
                 subj = Subject(name)
@@ -158,17 +156,29 @@ def list_(
                 # one damaged subject must not take down the whole listing
                 console.print(f"[red]Warning:[/red] {name}: manifest.json is corrupt — skipping")
                 continue
-            table.add_row(name, str(manifest.counts.materials), str(manifest.counts.chunks))
+            try:  # the manifest keeps no page count; a broken store shows "—", not a crash
+                rows = SubjectStore(subj.store_db_path).list_materials()
+                pages = str(sum(r["pages"] or 0 for r in rows if r["status"] == "indexed"))
+            except (RuntimeError, sqlite3.Error):
+                pages = "—"
+            table.add_row(
+                name,
+                str(manifest.counts.materials),
+                pages,
+                str(manifest.counts.chunks),
+                manifest.ocr.lang[0] if manifest.ocr.lang else "—",
+            )
         console.print(table)
         return
 
     subj = _subject_checked(subject)
     store_obj = _store_checked(subj)
     try:
-        table = Table("material", "status", "pages", "chunks", "detail")
+        table = Table("material", "sha256", "status", "pages", "chunks", "detail")
         for row in store_obj.list_materials():
             table.add_row(
                 escape(row["filename"]),
+                row["sha256"][:8],
                 row["status"],
                 str(row["pages"] or "—"),
                 str(row["chunk_count"]),
@@ -181,62 +191,69 @@ def list_(
 
 @app.command()
 def remove(
-    subject: Annotated[str, typer.Argument(help="Subject the material belongs to.")],
+    subject: Annotated[str, typer.Argument(help="Subject the materials belong to.")],
     material: Annotated[
-        str | None,
+        list[str],
         typer.Argument(
-            help="Material filename (or sha256 prefix) as shown by `groundly list`; "
-            "omit to remove the whole subject."
+            help="One or more material filenames (or sha256 prefixes) as shown by `groundly list`."
         ),
-    ] = None,
+    ],
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
 ) -> None:
-    """Remove a material and all its indexed data, or a whole subject if no material given."""
+    """Remove materials and all their indexed data. Every name is resolved before anything
+    is deleted; to delete a whole subject, use `groundly drop`."""
     import sqlite3
 
     from groundly.core.manifest import sync_counts
 
     subj = _subject_checked(subject)
-
-    if material is None:
-        import shutil
-
-        if not yes:
-            typer.confirm(
-                f"Remove subject {subject} and ALL its data (materials, index, progress, notes)?",
-                abort=True,
-            )
-        shutil.rmtree(subj.root_dir)
-        console.print(f"Removed subject [bold]{subject}[/bold]")
-        return
-
     store_obj = _store_checked(subj)
     try:
-        matches = store_obj.find_materials(material)
-        if not matches:
-            _fail(f"no material {material!r} in {subject} — see: groundly list {subject}")
-        if len(matches) > 1:
-            candidates = ", ".join(f"{m['filename']} ({m['sha256'][:8]})" for m in matches)
-            _fail(f"{material!r} is ambiguous — candidates: {candidates}; use a sha256 prefix")
-        target = matches[0]
+        targets = {}  # row id -> row: a material named twice is removed once
+        for ident in material:
+            matches = store_obj.find_materials(ident)
+            if not matches:
+                _fail(f"no material {ident!r} in {subject} — see: groundly list {subject}")
+            if len(matches) > 1:
+                candidates = ", ".join(f"{m['filename']} ({m['sha256'][:8]})" for m in matches)
+                _fail(f"{ident!r} is ambiguous — candidates: {candidates}; use a sha256 prefix")
+            targets[matches[0]["id"]] = matches[0]
         if not yes:
+            names = ", ".join(t["filename"] for t in targets.values())
             typer.confirm(
-                f"Remove {target['filename']} and all its indexed data from {subject}?",
-                abort=True,
+                f"Remove {len(targets)} material(s) from {subject}? ({names})", abort=True
             )
-        store_obj.remove_material(target["id"])
+        for target in targets.values():
+            store_obj.remove_material(target["id"])
+            if target["status"] == "indexed":
+                # failed rows never got a copy in materials/, and their original filename
+                # (no collision suffix) can shadow a different indexed material's file
+                stored = subj.materials_dir / target["filename"]
+                if stored.exists():
+                    stored.unlink()
+            console.print(f"Removed [bold]{escape(target['filename'])}[/bold] from {subject}")
         conn = store_obj.connect()
         try:
             sync_counts(conn, subj.manifest_path)
         finally:
             conn.close()
-
-        if target["status"] == "indexed":
-            # failed rows never got a copy in materials/, and their original filename
-            # (no collision suffix) can shadow a different indexed material's file
-            stored = subj.materials_dir / target["filename"]
-            if stored.exists():
-                stored.unlink()
-        console.print(f"Removed [bold]{escape(target['filename'])}[/bold] from {subject}")
     except sqlite3.OperationalError as exc:
         _fail(f"store.db is corrupt or incomplete: {exc}")
+
+
+@app.command()
+def drop(
+    subject: Annotated[str, typer.Argument(help="Subject to delete entirely.")],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
+) -> None:
+    """Delete a whole subject: its materials, index and private progress."""
+    import shutil
+
+    subj = _subject_checked(subject)
+    if not yes:
+        typer.confirm(
+            f"Drop subject '{subject}' and ALL its data (materials, index, progress)?",
+            abort=True,
+        )
+    shutil.rmtree(subj.root_dir)
+    console.print(f"Dropped subject [bold]{subject}[/bold]")

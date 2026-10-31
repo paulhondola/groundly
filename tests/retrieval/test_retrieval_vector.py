@@ -5,7 +5,7 @@ import pytest
 from groundly.core.manifest import EMBEDDING_DIM
 from groundly.core.paths import subject_dir
 from groundly.core.store import SubjectStore
-from groundly.retrieval.vector import CONTEXT_K, VectorRetriever, rrf, search
+from groundly.retrieval.vector import TOP_K, VectorRetriever, rrf, search
 
 
 class QueryEmbedder:
@@ -119,9 +119,9 @@ def test_vector_retriever_empty_store_returns_no_nodes(subject):
     assert retriever.retrieve("anything") == []
 
 
-def test_vector_retriever_respects_context_k(retrievable_subject):
+def test_vector_retriever_respects_top_k(retrievable_subject):
     store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
-    retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False, context_k=1)
+    retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False, top_k=1)
     hits = retriever.retrieve("deadlock")
     assert len(hits) == 1
 
@@ -135,7 +135,7 @@ def test_search_returns_ranked_nodes_and_writes_nothing_to_progress(retrievable_
     before = db.read_bytes()
 
     hits = search(retrievable_subject, "deadlock", embedder=_near_embedder(), rerank=False)
-    assert hits and len(hits) <= CONTEXT_K
+    assert hits and len(hits) <= TOP_K
 
     assert db.read_bytes() == before
 
@@ -158,3 +158,26 @@ def test_rrf_tie_break_is_independent_of_argument_order():
     a = [doc_id for doc_id, _ in rrf([[3], [4]], k=60)]
     b = [doc_id for doc_id, _ in rrf([[4], [3]], k=60)]
     assert a == b
+
+
+def _add_other_material(subject):
+    """other.pdf: one chunk that beats lec.pdf on every channel for a 'deadlock' query."""
+    from groundly.ingestion.extract import ChunkData
+
+    store_obj = SubjectStore(subject_dir(subject) / "store.db")
+    store_obj.add_indexed(
+        "other.pdf",
+        "b" * 64,
+        1,
+        [ChunkData("deadlock deadlock deadlock deadlock", "Other", 1, 10)],
+        iter([([1.0, 0.0] + [0.0] * (EMBEDDING_DIM - 2), {1: 1.0})]),
+    )
+    return store_obj
+
+
+def test_retrieve_scoped_returns_only_that_material(retrievable_subject):
+    store_obj = _add_other_material(retrievable_subject)
+    lec_id = store_obj.find_materials("lec.pdf")[0]["id"]
+    retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False, top_k=10)
+    hits = retriever.retrieve("deadlock", material_id=lec_id)
+    assert hits and {h.filename for h in hits} == {"lec.pdf"}

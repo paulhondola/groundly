@@ -52,7 +52,7 @@ def verify_card(card: CardCandidate, store: SubjectStore, *, embedder=None) -> R
             "cite only chunk_id values returned by search",
         )
 
-    retriever = VectorRetriever(store, embedder=embedder, rerank=False, context_k=VERIFY_TOP_K)
+    retriever = VectorRetriever(store, embedder=embedder, rerank=False, top_k=VERIFY_TOP_K)
     retrieved_ids = {h.chunk_id for h in retriever.retrieve(card.front + "\n" + card.back)}
     if not (set(card.chunk_ids) & retrieved_ids):
         return Rejection(

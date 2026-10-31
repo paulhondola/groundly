@@ -7,7 +7,7 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: the **student**
 ## UC-01 — Index materials
 
 **Actor:** student (CLI).
-**Preconditions:** subject initialized (`groundly init <SUBJECT>`); files are PDF/DOCX/PPTX/MD/HTML/LaTeX/AsciiDoc/CSV/XLSX/EPUB/TXT/source or a standalone raster image (PNG/JPG/JPEG/TIF/TIFF/BMP/WEBP) (a text layer is no longer required — scanned PDFs and images are allowed, OCR'd on extraction; decision 17).
+**Preconditions:** none for the subject — `groundly index <SUBJECT> <paths>` creates it on first run, after checking every path exists; files are PDF/DOCX/PPTX/MD/HTML/LaTeX/AsciiDoc/CSV/XLSX/EPUB/TXT/source or a standalone raster image (PNG/JPG/JPEG/TIF/TIFF/BMP/WEBP) (a text layer is no longer required — scanned PDFs and images are allowed, OCR'd on extraction; decision 17).
 
 **Main flow**
 
@@ -21,6 +21,7 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: the **student**
 - **A2 — Parser crash on a hostile/broken file:** subprocess dies → that file is `extraction_failed`; the run continues.
 - **A3 — Duplicate (same hash, same subject):** skipped, reported as duplicate.
 - **A4 — Ctrl-C mid-run:** per-file transactions mean at most the in-flight file is lost; re-run resumes.
+- **A5 — Retrying a failure:** later runs skip an `extraction_failed` file (a slow OCR timeout must not repeat every run) and say so; `groundly index --retry-failed` re-extracts it, e.g. after raising `ingestion.timeout_seconds`.
 
 **Acceptance criteria**
 
@@ -38,7 +39,7 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: the **student**
 
 **Main flow**
 
-1. `search(subject, query, k=None)` → three-channel retrieval (bge-m3 dense + learned sparse + FTS5/BM25), RRF fusion, cross-encoder rerank (default ON), truncated to `retrieval.context_k`.
+1. `search(subject, query, k=None)` → three-channel retrieval (bge-m3 dense + learned sparse + FTS5/BM25), RRF fusion, cross-encoder rerank (default ON), truncated to `retrieval.top_k`.
 2. Each hit returns verbatim text plus `chunk_id`, `filename`, `page`, `heading_path` and a `groundly://` URI.
 3. The host composes the answer and cites the chunks it used. Grounding here is **best-effort by construction** — the server's `instructions` and the tool description carry the norm (decision 31); the enforced-pipeline alternative was measured and removed (decision 33).
 4. `get_page(uri)` takes a hit's `uri` verbatim and opens exactly what it points to — that page, or the whole material when the URI has no `#page` (plain-text materials). Read as an MCP resource, the same URI returns the whole document grouped by page.

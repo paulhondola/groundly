@@ -27,7 +27,7 @@ def test_settings_default_when_no_file():
     assert s.ingestion.timeout_seconds == 300
     assert s.ingestion.max_image_pixels == 100_000_000
     assert s.ingestion.max_file_size_mb is None  # unlimited by default
-    assert s.retrieval.context_k == 8
+    assert s.retrieval.top_k == 8
     assert s.retrieval.rerank is True
 
 
@@ -55,10 +55,10 @@ def test_set_max_file_size(home):
 
 
 def test_set_preserves_other_sections(home):
-    set_key("retrieval.context_k", "12")
+    set_key("retrieval.top_k", "12")
     set_key("ingestion.timeout_seconds", "700")
     # the whole file is regenerated, so a section the writer forgets is lost on the next set
-    assert load_settings().retrieval.context_k == 12
+    assert load_settings().retrieval.top_k == 12
     assert load_settings().ingestion.timeout_seconds == 700
 
 
@@ -106,11 +106,44 @@ def test_config_with_retired_sections_still_loads(home):
         '[providers.extraction]\nbase_url = "http://e"\nmodel = "e"\napi_key = "sk-secret"\n'
         "[llm]\ntimeout_seconds = 60\n"
         "[graph]\ncontext_window = 8192\n"
-        "[retrieval]\ncontext_k = 5\n"
+        "[retrieval]\ntop_k = 5\n"
     )
-    assert load_settings().retrieval.context_k == 5
+    assert load_settings().retrieval.top_k == 5
 
     set_key("ingestion.timeout_seconds", "700")  # whole-file rewrite sheds them, key included
     text = (home / "config.toml").read_text()
     assert "providers" not in text and "[graph]" not in text and "sk-secret" not in text
-    assert load_settings().retrieval.context_k == 5
+    assert load_settings().retrieval.top_k == 5
+
+
+def test_set_top_k(home):
+    set_key("retrieval.top_k", "12")
+    assert load_settings().retrieval.top_k == 12
+
+
+def test_legacy_context_k_is_ignored(home):
+    config_path().write_text("[retrieval]\ncontext_k = 3\n")
+    assert load_settings().retrieval.top_k == 8
+
+
+@pytest.mark.parametrize("value", ["none", "None", "NULL"])
+def test_none_unsets_nullable_field(home, value):
+    set_key("ingestion.max_file_size_mb", "50")
+    set_key("ingestion.max_file_size_mb", value)
+    assert load_settings().ingestion.max_file_size_mb is None
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "phrase"),
+    [
+        ("retrieval.top_k", "lots", "expected an integer"),
+        ("retrieval.rerank", "maybe", "expected true or false"),
+        ("ingestion.timeout_seconds", "soon", "expected a number"),
+        ("ingestion.max_file_size_mb", "big", "expected a number or 'none'"),
+    ],
+)
+def test_bad_value_error_is_plain_language(home, key, value, phrase):
+    with pytest.raises(ConfigKeyError) as exc:
+        set_key(key, value)
+    assert phrase in str(exc.value)
+    assert "|" not in str(exc.value) and "<class" not in str(exc.value)

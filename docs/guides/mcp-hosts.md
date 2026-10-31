@@ -5,8 +5,8 @@ killed) by the host — no daemon to manage. It works from any working
 directory (subjects live under `~/.groundly/`).
 
 **Prerequisites:** Groundly installed so `groundly` is on your `PATH`, and at
-least one indexed subject (`groundly init <SUBJECT> && groundly index
-<SUBJECT> <files...>`). No API key is needed for anything the host can call.
+least one indexed subject (`groundly index <SUBJECT> <files...>` creates and
+indexes it). No API key is needed for anything the host can call.
 
 ## Claude Code
 
@@ -29,7 +29,7 @@ setup:
 }
 ```
 
-Verify with `/mcp` inside Claude Code — `groundly` should list six tools.
+Verify with `/mcp` inside Claude Code — `groundly` should list three tools (`list_subjects`, `search`, `get_page`).
 
 ## Codex
 
@@ -44,14 +44,14 @@ args = ["mcp"]
 (Newer Codex CLI versions also accept `codex mcp add groundly -- groundly
 mcp`.)
 
-## HTTP transport (`groundly serve`)
+## HTTP transport (`groundly mcp --http`)
 
 For hosts that connect to a URL instead of spawning a stdio subprocess, run
 the same server over Streamable HTTP:
 
 ```sh
-groundly serve            # binds http://127.0.0.1:8000/mcp
-groundly serve --port 9000
+groundly mcp --http              # binds http://127.0.0.1:8000/mcp
+groundly mcp --http --port 9000
 ```
 
 It binds 127.0.0.1 only. Point the host at the URL:
