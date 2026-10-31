@@ -74,15 +74,15 @@ def ensure_downloaded(
     return Path(local)
 
 
-def remove_cached() -> bool:
-    """Delete bge-m3 from the local Hugging Face cache. Returns True if anything was removed."""
+def remove_cached(model: str = EMBEDDING_MODEL) -> bool:
+    """Delete `model` from the local Hugging Face cache. Returns True if anything was removed."""
     import shutil
 
     from huggingface_hub import scan_cache_dir
 
     removed = False
     for repo in scan_cache_dir().repos:
-        if repo.repo_id == EMBEDDING_MODEL:
+        if repo.repo_id == model:
             shutil.rmtree(repo.repo_path, ignore_errors=True)
             removed = True
     return removed

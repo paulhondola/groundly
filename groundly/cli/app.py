@@ -16,7 +16,7 @@ app = typer.Typer(
 config_app = typer.Typer()
 app.add_typer(config_app, name="config")
 
-models_app = typer.Typer(no_args_is_help=True)
+models_app = typer.Typer()
 app.add_typer(models_app, name="models")
 
 

@@ -6,7 +6,9 @@ import pytest
 from typer.testing import CliRunner
 
 from groundly.cli import app
+from groundly.core.manifest import EMBEDDING_MODEL
 from groundly.llm import embeddings
+from groundly.llm.rerank import RERANKER_MODEL
 
 runner = CliRunner()
 
@@ -92,39 +94,58 @@ def test_models_install_download_failure_names_cause_not_traceback(monkeypatch):
     assert "failed to download" in result.output
 
 
+def _cached(*models):
+    """A cached_snapshot stub: only `models` are in the cache."""
+    return lambda model=EMBEDDING_MODEL, revision=None: (
+        Path(f"/fake/{model}") if model in models else None
+    )
+
+
+def _record_removals(monkeypatch):
+    removed = []
+    monkeypatch.setattr(embeddings, "remove_cached", lambda model: removed.append(model) or True)
+    return removed
+
+
+def test_models_bare_shows_cache_status(monkeypatch):
+    monkeypatch.setattr(embeddings, "cached_snapshot", _cached(EMBEDDING_MODEL))
+    result = runner.invoke(app, ["models"])
+    assert result.exit_code == 0, result.output
+    lines = result.output.splitlines()
+    assert any(
+        EMBEDDING_MODEL in line and "not cached" not in line and "cached" in line for line in lines
+    )
+    assert any(RERANKER_MODEL in line and "not cached" in line for line in lines)
+
+
 def test_models_uninstall_not_cached_is_a_noop(monkeypatch):
-    monkeypatch.setattr(embeddings, "cached_snapshot", lambda: None)
-
-    def must_not_remove():
-        raise AssertionError("must not remove when nothing is cached")
-
-    monkeypatch.setattr(embeddings, "remove_cached", must_not_remove)
+    monkeypatch.setattr(embeddings, "cached_snapshot", _cached())
+    removed = _record_removals(monkeypatch)
     result = runner.invoke(app, ["models", "uninstall"])
     assert result.exit_code == 0, result.output
-    assert "not cached" in result.output
+    assert "nothing to do" in result.output
+    assert removed == []
 
 
-def test_models_uninstall_removes_with_confirmation(monkeypatch):
-    monkeypatch.setattr(embeddings, "cached_snapshot", lambda: Path("/fake/cached"))
-    calls = {"n": 0}
-
-    def fake_remove():
-        calls["n"] += 1
-        return True
-
-    monkeypatch.setattr(embeddings, "remove_cached", fake_remove)
+def test_models_uninstall_removes_both(monkeypatch):
+    monkeypatch.setattr(embeddings, "cached_snapshot", _cached(EMBEDDING_MODEL, RERANKER_MODEL))
+    removed = _record_removals(monkeypatch)
     result = runner.invoke(app, ["models", "uninstall", "--yes"])
     assert result.exit_code == 0, result.output
-    assert calls["n"] == 1
-    assert "removed" in result.output
+    assert removed == [EMBEDDING_MODEL, RERANKER_MODEL]
+
+
+def test_models_uninstall_skips_the_one_not_cached(monkeypatch):
+    monkeypatch.setattr(embeddings, "cached_snapshot", _cached(RERANKER_MODEL))
+    removed = _record_removals(monkeypatch)
+    result = runner.invoke(app, ["models", "uninstall", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert removed == [RERANKER_MODEL]
 
 
 def test_models_uninstall_aborts_without_confirmation(monkeypatch):
-    monkeypatch.setattr(embeddings, "cached_snapshot", lambda: Path("/fake/cached"))
-
-    def must_not_remove():
-        raise AssertionError("must not remove without confirmation")
-
-    monkeypatch.setattr(embeddings, "remove_cached", must_not_remove)
+    monkeypatch.setattr(embeddings, "cached_snapshot", _cached(EMBEDDING_MODEL))
+    removed = _record_removals(monkeypatch)
     result = runner.invoke(app, ["models", "uninstall"], input="n\n")
     assert result.exit_code != 0
+    assert removed == []

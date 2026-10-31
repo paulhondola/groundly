@@ -46,6 +46,27 @@ def config_set(
     console.print(f"set {key}")
 
 
+def _models() -> list[tuple[str, str]]:
+    """(model, pinned revision) for everything `models` manages."""
+    from groundly.core.manifest import EMBEDDING_MODEL
+    from groundly.llm.embeddings import HF_REVISION
+    from groundly.llm.rerank import RERANKER_HF_REVISION, RERANKER_MODEL
+
+    return [(EMBEDDING_MODEL, HF_REVISION), (RERANKER_MODEL, RERANKER_HF_REVISION)]
+
+
+@models_app.callback(invoke_without_command=True)
+def models(ctx: typer.Context) -> None:
+    """Show whether each model is in the local Hugging Face cache (loads no weights)."""
+    if ctx.invoked_subcommand is not None:
+        return
+    from groundly.llm import embeddings
+
+    for model, revision in _models():
+        status = "cached" if embeddings.cached_snapshot(model, revision) else "not cached"
+        console.print(f"  {model}  {status}")
+
+
 @models_app.command()
 def install(
     force: Annotated[
@@ -79,16 +100,19 @@ def install(
 def uninstall(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
 ) -> None:
-    """Remove the bge-m3 embedding model from the local Hugging Face cache."""
-    from groundly.core.manifest import EMBEDDING_MODEL
+    """Remove bge-m3 and bge-reranker-v2-m3 from the local Hugging Face cache."""
     from groundly.llm import embeddings
 
-    if embeddings.cached_snapshot() is None:
-        console.print(f"{EMBEDDING_MODEL} is not cached — nothing to do")
+    cached = [model for model, revision in _models() if embeddings.cached_snapshot(model, revision)]
+    if not cached:
+        console.print("no models cached — nothing to do")
         return
 
     if not yes:
-        typer.confirm(f"remove {EMBEDDING_MODEL} from the local Hugging Face cache?", abort=True)
+        typer.confirm(
+            f"remove {' and '.join(cached)} from the local Hugging Face cache?", abort=True
+        )
 
-    embeddings.remove_cached()
-    console.print(f"removed {EMBEDDING_MODEL} from the cache")
+    for model in cached:
+        embeddings.remove_cached(model)
+        console.print(f"removed {model} from the cache")
