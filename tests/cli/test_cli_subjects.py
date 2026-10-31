@@ -53,6 +53,35 @@ def test_list_all_subjects():
     assert "PDSS" in result.output and "ML" in result.output
 
 
+def test_list_all_shows_pages_and_ocr():
+    from groundly.core.store import SubjectStore
+    from groundly.core.subject import Subject
+    from groundly.ingestion.extract import ChunkData
+
+    init_subject("PDSS")
+    subj = Subject("PDSS")
+    SubjectStore(subj.store_db_path).add_indexed(
+        "lec.pdf", "a" * 64, 5, [ChunkData("t", None, 1, 1)], iter([([0.1] * 1024, {1: 0.5})])
+    )
+    manifest = subj.load_manifest()
+    manifest.ocr.lang = ["ro"]
+    subj.save_manifest(manifest)
+    result = runner.invoke(app, ["list"])
+    assert result.exit_code == 0, result.output
+    header, row = (line for line in result.output.splitlines() if "pages" in line or "PDSS" in line)
+    assert "pages" in header and "ocr" in header
+    assert " 5 " in row and "ro" in row
+
+
+def test_list_subject_shows_sha_prefix():
+    sdir = _seed_two(sha_a="ab12cd34" + "0" * 56)
+    result = runner.invoke(app, ["list", "PDSS"])
+    assert result.exit_code == 0, result.output
+    assert "ab12cd34" in result.output
+    assert "ab12cd34" + "0" * 56 not in result.output
+    assert sdir.exists()
+
+
 def test_list_unknown_subject_names_the_fix():
     result = runner.invoke(app, ["list", "NOPE"])
     assert result.exit_code == 1

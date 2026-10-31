@@ -145,7 +145,9 @@ def list_(
     from groundly.core.subject import Subject
 
     if subject is None:
-        table = Table("subject", "materials", "chunks")
+        from groundly.core.store import SubjectStore
+
+        table = Table("subject", "materials", "pages", "chunks", "ocr")
         for name in discover_subjects():
             try:
                 subj = Subject(name)
@@ -154,17 +156,29 @@ def list_(
                 # one damaged subject must not take down the whole listing
                 console.print(f"[red]Warning:[/red] {name}: manifest.json is corrupt — skipping")
                 continue
-            table.add_row(name, str(manifest.counts.materials), str(manifest.counts.chunks))
+            try:  # the manifest keeps no page count; a broken store shows "—", not a crash
+                rows = SubjectStore(subj.store_db_path).list_materials()
+                pages = str(sum(r["pages"] or 0 for r in rows if r["status"] == "indexed"))
+            except (RuntimeError, sqlite3.Error):
+                pages = "—"
+            table.add_row(
+                name,
+                str(manifest.counts.materials),
+                pages,
+                str(manifest.counts.chunks),
+                manifest.ocr.lang[0] if manifest.ocr.lang else "—",
+            )
         console.print(table)
         return
 
     subj = _subject_checked(subject)
     store_obj = _store_checked(subj)
     try:
-        table = Table("material", "status", "pages", "chunks", "detail")
+        table = Table("material", "sha256", "status", "pages", "chunks", "detail")
         for row in store_obj.list_materials():
             table.add_row(
                 escape(row["filename"]),
+                row["sha256"][:8],
                 row["status"],
                 str(row["pages"] or "—"),
                 str(row["chunk_count"]),
