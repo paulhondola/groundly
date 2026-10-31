@@ -1,0 +1,64 @@
+"""The verifier gate: the single check every generated item passes before it lands in
+store.db. Nothing unverified enters the question bank. No tool calls it until verified
+quizzes arrive (spec §8, sub-project 3).
+
+Checks citation resolution and answerability by re-retrieval. Answer-key, distractor and
+code-execution checks go inside `verify_card` behind the same contract.
+"""
+
+from dataclasses import dataclass
+
+from groundly.core.store import SubjectStore
+from groundly.retrieval.vector import VectorRetriever
+
+REJECTION_REASONS = (
+    "not_answerable_from_chunks",
+    "wrong_answer_key",
+    "distractor_not_wrong",
+    "reference_solution_failed",
+)
+
+VERIFY_TOP_K = 20  # re-retrieval pool checked for membership of a cited chunk id
+
+
+@dataclass
+class CardCandidate:
+    front: str
+    back: str
+    chunk_ids: list[int]
+
+
+@dataclass
+class Rejection:
+    reason: str  # one of REJECTION_REASONS — the machine-readable contract
+    detail: str  # specific cause, host/human-readable
+
+
+def verify_card(card: CardCandidate, store: SubjectStore, *, embedder=None) -> Rejection | None:
+    """Fail-fast, cheapest check first. Returns None iff the card passes every
+    check implemented so far."""
+    if not card.chunk_ids:
+        return Rejection(
+            "not_answerable_from_chunks",
+            "no chunk_ids given — cite the chunk_id of every supporting chunk returned by search",
+        )
+
+    resolved = {row["chunk_id"] for row in store.chunk_details(card.chunk_ids)}
+    missing = [cid for cid in card.chunk_ids if cid not in resolved]
+    if missing:
+        return Rejection(
+            "not_answerable_from_chunks",
+            f"chunk_ids {missing} do not resolve to any chunk in this subject — "
+            "cite only chunk_id values returned by search",
+        )
+
+    retriever = VectorRetriever(store, embedder=embedder, rerank=False, context_k=VERIFY_TOP_K)
+    retrieved_ids = {h.chunk_id for h in retriever.retrieve(card.front + "\n" + card.back)}
+    if not (set(card.chunk_ids) & retrieved_ids):
+        return Rejection(
+            "not_answerable_from_chunks",
+            f"re-retrieving the front+back text did not surface any cited chunk in the "
+            f"top {VERIFY_TOP_K} results — the card doesn't look answerable from its own citations",
+        )
+
+    return None
