@@ -287,11 +287,11 @@ def test_citation_uri_omits_fragment_for_pageless_chunks():
     assert _citation_uri("TEST", "lec.pdf", 2) == "groundly://TEST/lec.pdf#page=2"
 
 
-# --- http transport (`groundly serve`) ----------------------------------------------
+# --- http transport (`groundly mcp --http`) -----------------------------------------
 
 
 async def test_http_transport_serves_the_same_tools(retrievable_subject):
-    # smoke test for `groundly serve`: same FastMCP instance, Streamable HTTP transport
+    # smoke test for `groundly mcp --http`: same FastMCP instance, Streamable HTTP transport
     import asyncio
     import threading
 
@@ -337,29 +337,3 @@ async def test_http_transport_serves_the_same_tools(retrievable_subject):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
-
-
-def test_serve_cli_wires_http_transport_with_rebinding_protection(monkeypatch):
-    """`groundly serve` must pass the exact production kwargs to run() — the smoke
-    test above exercises the ASGI app; this covers cli/serve.py's own run() line
-    (transport string, loopback host, host_origin_protection)."""
-    from fastmcp import FastMCP
-    from typer.testing import CliRunner
-
-    import groundly.cli.serve  # noqa: F401  — registers the verb on the app
-    from groundly.cli.app import app
-
-    calls: dict = {}
-    # patch the class, not the module-level `mcp` instance: `run` is inherited from a
-    # fastmcp mixin, so an instance patch cannot be undone — teardown writes it into
-    # `mcp.__dict__`, where it shadows this one and serve() boots a real server that
-    # blocks forever. tests/conftest.py fails whichever test leaks it.
-    monkeypatch.setattr(FastMCP, "run", lambda self, **kw: calls.update(kw))
-    result = CliRunner().invoke(app, ["serve", "--port", "5150"])
-    assert result.exit_code == 0
-    assert calls == {
-        "transport": "http",
-        "host": "127.0.0.1",
-        "port": 5150,
-        "host_origin_protection": "auto",
-    }

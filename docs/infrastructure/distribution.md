@@ -19,7 +19,7 @@ Install [`uv`](https://docs.astral.sh/uv/) first if absent. Python ≥3.11 is pr
 { "mcpServers": { "groundly": { "command": "groundly", "args": ["mcp"] } } }
 ```
 
-stdio servers are spawned and killed by the host — there is no daemon to manage. Students running multiple hosts point them at one `groundly serve` (streamable HTTP, `127.0.0.1` only) so the models load once.
+stdio servers are spawned and killed by the host — there is no daemon to manage. Students running multiple hosts point them at one `groundly mcp --http` (streamable HTTP, `127.0.0.1` only) so the models load once.
 
 ## Requirements
 

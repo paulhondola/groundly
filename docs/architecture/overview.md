@@ -65,7 +65,7 @@ Everything needs only the local models: no path reaches a provider, and none nee
 |---|---|---|
 | CLI verbs | `groundly index/search/import/export/...` | one-shot, core in-process, exits |
 | MCP stdio | `groundly mcp` | **spawned and killed by the host agent** |
-| Optional HTTP | `groundly serve` | user-run; MCP over Streamable HTTP; binds **127.0.0.1 only**; exists so multiple hosts share one bge-m3 load |
+| Optional HTTP | `groundly mcp --http` | user-run; MCP over Streamable HTTP; binds **127.0.0.1 only**; exists so multiple hosts share one bge-m3 load |
 
 Multiple processes may open the same `store.db` (an `index` run while a host-spawned MCP process answers). Rules: **WAL + busy_timeout** on every connection; **lazy model loading** (never at MCP spawn — hosts expect fast handshakes).
 

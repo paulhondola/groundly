@@ -46,8 +46,8 @@ One Python package (`uv tool install groundly`), three runtime modes, zero servi
         ▼                                   ▼
   ┌──────────────────── client layer ──────────────────────┐
   │ mcp/ FastMCP tools     cli/ typer verbs                │
-  │ stdio: `groundly mcp`  (init/index/list/remove/search/ │
-  │ HTTP: `groundly serve`  import/export/config/models)   │
+  │ stdio: `groundly mcp`  (index/list/remove/drop/search/ │
+  │ HTTP: `groundly mcp --http`  import/export/config/...) │
   └──────────────┬───────────────┬─────────────────────────┘
                  ▼               ▼
   ┌──────────────────── service layer ─────────────────────┐
@@ -108,7 +108,7 @@ One arm: bge-m3 dense + learned sparse + FTS5/BM25, fused with RRF, cross-encode
 - **Grounding**: every stored question cites chunk ids resolving to document + page; unresolvable citations are rejected, never stored. `search` results always carry their citation fields.
 - **Privacy**: nothing leaves the machine except HF model downloads and sha256-pinned RapidOCR models. Exports contain the whole KB (stated plainly in the export UX) but never `progress.db`.
 - **Zero-key, totally**: no code path constructs an LLM client and no config asks for a key.
-- **Security**: import is the trust boundary (zip-slip protection; imported content is layer 3); `serve` binds 127.0.0.1 only. See [`infrastructure/security.md`](infrastructure/security.md).
+- **Security**: import is the trust boundary (zip-slip protection; imported content is layer 3); `groundly mcp --http` binds 127.0.0.1 only. See [`infrastructure/security.md`](infrastructure/security.md).
 - **Languages**: RO and EN; retrieval is cross-lingual through the dense channel.
 - **Concurrency**: SQLite WAL + busy_timeout on every connection; lazy model loading (never at MCP spawn).
 

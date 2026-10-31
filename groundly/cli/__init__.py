@@ -4,7 +4,6 @@ from groundly.cli import (  # noqa: F401  registers verbs on `app`
     mcp,
     models,
     search,
-    serve,
     sharing,
     subjects,
 )

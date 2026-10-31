@@ -13,7 +13,7 @@ Expands [`groundly-spec.md`](../groundly-spec.md) §4. Every row is a **decision
 | Rerank | **`bge-reranker-v2-m3`**, default ON | Quality-first; same model family as the embedder | `--no-rerank` for weak hardware |
 | Retrieval | **A plain `VectorRetriever` returning `Hit`** | One arm left, so an orchestration framework wrapped a SQLite row (decision 36) | — |
 | Answer generation | **The host agent** | It is already an LLM; enforced server-side answering was measured and removed (decision 33) | — |
-| HTTP transport | `groundly serve`, loopback-only | fastmcp's own Streamable HTTP app (uvicorn arrives with `mcp`) | — |
+| HTTP transport | `groundly mcp --http`, loopback-only | fastmcp's own Streamable HTTP app (uvicorn arrives with `mcp`) | — |
 
 ## No LLM client
 
