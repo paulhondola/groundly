@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Env / secrets
+.env
+.env.*
+
+# Test data (never in the repo)
+fixtures/
+
+# Local tooling state (agent harness, diagram/brainstorm scratch, per-machine MCP config)
+.archify/
+.superpowers/
+.remember/
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
+.mcp.json
+graphify-out/
+
+# OS
+.DS_Store
+Icon?
+
+# Eval run outputs — the gold sets are versioned, the results they produce are not.
+# Unanchored: `groundly eval --out` takes any path, and results carry chunk ids.
+results-*.json
+
+# logs/ dirs graphrag wrote into the CWD in older versions (docs/infrastructure/security.md)
+logs/

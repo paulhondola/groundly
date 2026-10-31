@@ -1,0 +1,77 @@
+[project]
+name = "groundly"
+description = "Local-first course knowledge bases for AI agents: index your materials, study grounded, share the index."
+readme = "README.md"
+requires-python = ">=3.11,<3.15"
+license = { file = "LICENSE" }
+dynamic = ["version"]
+
+
+# Version pinning policy (docs/tech-stack/tech-stack.md): EXACT pins for the
+# interchange-relevant stack, last set 2026-10-31 (decision 39). These are recorded in
+# the thesis + every export manifest; upgrades are deliberate events, never tweaks.
+dependencies = [
+	"typer>=0.12",
+	"rich>=13",
+	"pydantic>=2.7",
+	"pydantic-settings>=2.3",
+	"fastmcp>=2.0",
+	"sqlite-vec>=0.1",
+	"sentence-transformers==6.2.0",
+	"FlagEmbedding==1.4.2",         # bge-m3 dense + learned sparse, one forward pass
+	"transformers>=5",           # extract_worker imports AutoTokenizer directly; 5.x verified (decision 39)
+	"docling==2.115.0",             # includes bundled RapidOCR — OCR enabled
+	"rapidocr==3.10.0",              # load-bearing: docling's OCR engine, local/offline
+	"onnxruntime>=1.31",            # RapidOCR's backend (extract_worker.py pins it)
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+    "memray>=1.14",
+    "import-linter>=2.15",
+]
+
+[project.scripts]
+groundly = "groundly.cli:app"
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["groundly"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.importlinter]
+root_package = "groundly"
+
+# docs/architecture/overview.md: clients -> services -> foundations, one direction.
+# `cli : mcp` may import each other (`groundly mcp` starts the server); `|` siblings may
+# not. Exhaustive: a new subpackage fails the check until it is placed in a layer.
+[[tool.importlinter.contracts]]
+name = "clients -> services -> foundations"
+type = "layers"
+containers = ["groundly"]
+layers = [
+	"cli : mcp",
+	"agents",
+	"retrieval | ingestion",
+	"llm",
+	"core",
+]
+exhaustive = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = ["slow: needs model downloads / real documents; excluded by default, run with -m slow"]
+addopts = "-m 'not slow'"
