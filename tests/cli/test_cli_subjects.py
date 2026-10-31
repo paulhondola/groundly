@@ -217,20 +217,84 @@ def test_remove_failed_row_keeps_indexed_siblings_file(home):
     conn.close()
 
 
-def test_remove_whole_subject_deletes_directory():
+def _seed_two(sha_a="a" * 64, sha_b="b" * 64):
+    """Two indexed materials a.pdf and b.pdf in PDSS, each with its materials/ copy."""
+    from groundly.core import store
+
     init_subject("PDSS")
     sdir = subject_dir("PDSS")
-    (sdir / "store.db").unlink()  # even a damaged subject must be removable
-    result = runner.invoke(app, ["remove", "PDSS", "--yes"])
+    conn = store.connect(sdir / "store.db")
+    with conn:
+        for name, sha in (("a.pdf", sha_a), ("b.pdf", sha_b)):
+            (sdir / "materials" / name).write_text("x")
+            conn.execute(
+                "INSERT INTO materials (filename, sha256, status) VALUES (?, ?, 'indexed')",
+                (name, sha),
+            )
+    conn.close()
+    return sdir
+
+
+def _material_names(sdir):
+    from groundly.core import store
+
+    conn = store.connect(sdir / "store.db")
+    names = [r[0] for r in conn.execute("SELECT filename FROM materials ORDER BY filename")]
+    conn.close()
+    return names
+
+
+def test_remove_requires_a_material():
+    init_subject("PDSS")
+    assert runner.invoke(app, ["remove", "PDSS"]).exit_code == 2
+
+
+def test_remove_many_with_one_unknown_deletes_nothing():
+    sdir = _seed_two()
+    result = runner.invoke(app, ["remove", "PDSS", "a.pdf", "nope.pdf", "-y"])
+    assert result.exit_code == 1
+    assert "nope.pdf" in result.output
+    assert _material_names(sdir) == ["a.pdf", "b.pdf"]
+    assert (sdir / "materials" / "a.pdf").exists()
+
+
+def test_remove_many_prompts_once_and_removes_all():
+    sdir = _seed_two()
+    result = runner.invoke(app, ["remove", "PDSS", "a.pdf", "b.pdf"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert result.output.count("Remove 2 material(s)") == 1
+    assert _material_names(sdir) == []
+    assert not (sdir / "materials" / "a.pdf").exists()
+
+
+def test_remove_same_material_twice_removes_it_once():
+    sdir = _seed_two()
+    result = runner.invoke(app, ["remove", "PDSS", "a.pdf", "a" * 8, "-y"])
+    assert result.exit_code == 0, result.output
+    assert _material_names(sdir) == ["b.pdf"]
+
+
+def test_drop_deletes_subject_directory():
+    init_subject("PDSS")
+    sdir = subject_dir("PDSS")
+    (sdir / "store.db").unlink()  # even a damaged subject must be droppable
+    result = runner.invoke(app, ["drop", "PDSS", "--yes"])
     assert result.exit_code == 0, result.output
     assert not sdir.exists()
 
 
-def test_remove_whole_subject_aborts_without_confirmation():
+def test_drop_aborts_without_confirmation():
     init_subject("PDSS")
-    result = runner.invoke(app, ["remove", "PDSS"], input="n\n")
+    result = runner.invoke(app, ["drop", "PDSS"], input="n\n")
     assert result.exit_code != 0
     assert subject_dir("PDSS").exists()
+
+
+def test_drop_prompt_names_progress_not_notes():
+    init_subject("PDSS")
+    result = runner.invoke(app, ["drop", "PDSS"], input="n\n")
+    assert "progress" in result.output
+    assert "notes" not in result.output
 
 
 @pytest.mark.parametrize(

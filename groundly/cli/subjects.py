@@ -1,4 +1,4 @@
-"""Subject lifecycle verbs: index, list, remove."""
+"""Subject lifecycle verbs: index, list, remove, drop."""
 
 from pathlib import Path
 from typing import Annotated
@@ -177,62 +177,69 @@ def list_(
 
 @app.command()
 def remove(
-    subject: Annotated[str, typer.Argument(help="Subject the material belongs to.")],
+    subject: Annotated[str, typer.Argument(help="Subject the materials belong to.")],
     material: Annotated[
-        str | None,
+        list[str],
         typer.Argument(
-            help="Material filename (or sha256 prefix) as shown by `groundly list`; "
-            "omit to remove the whole subject."
+            help="One or more material filenames (or sha256 prefixes) as shown by `groundly list`."
         ),
-    ] = None,
+    ],
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
 ) -> None:
-    """Remove a material and all its indexed data, or a whole subject if no material given."""
+    """Remove materials and all their indexed data. Every name is resolved before anything
+    is deleted; to delete a whole subject, use `groundly drop`."""
     import sqlite3
 
     from groundly.core.manifest import sync_counts
 
     subj = _subject_checked(subject)
-
-    if material is None:
-        import shutil
-
-        if not yes:
-            typer.confirm(
-                f"Remove subject {subject} and ALL its data (materials, index, progress, notes)?",
-                abort=True,
-            )
-        shutil.rmtree(subj.root_dir)
-        console.print(f"Removed subject [bold]{subject}[/bold]")
-        return
-
     store_obj = _store_checked(subj)
     try:
-        matches = store_obj.find_materials(material)
-        if not matches:
-            _fail(f"no material {material!r} in {subject} — see: groundly list {subject}")
-        if len(matches) > 1:
-            candidates = ", ".join(f"{m['filename']} ({m['sha256'][:8]})" for m in matches)
-            _fail(f"{material!r} is ambiguous — candidates: {candidates}; use a sha256 prefix")
-        target = matches[0]
+        targets = {}  # row id -> row: a material named twice is removed once
+        for ident in material:
+            matches = store_obj.find_materials(ident)
+            if not matches:
+                _fail(f"no material {ident!r} in {subject} — see: groundly list {subject}")
+            if len(matches) > 1:
+                candidates = ", ".join(f"{m['filename']} ({m['sha256'][:8]})" for m in matches)
+                _fail(f"{ident!r} is ambiguous — candidates: {candidates}; use a sha256 prefix")
+            targets[matches[0]["id"]] = matches[0]
         if not yes:
+            names = ", ".join(t["filename"] for t in targets.values())
             typer.confirm(
-                f"Remove {target['filename']} and all its indexed data from {subject}?",
-                abort=True,
+                f"Remove {len(targets)} material(s) from {subject}? ({names})", abort=True
             )
-        store_obj.remove_material(target["id"])
+        for target in targets.values():
+            store_obj.remove_material(target["id"])
+            if target["status"] == "indexed":
+                # failed rows never got a copy in materials/, and their original filename
+                # (no collision suffix) can shadow a different indexed material's file
+                stored = subj.materials_dir / target["filename"]
+                if stored.exists():
+                    stored.unlink()
+            console.print(f"Removed [bold]{escape(target['filename'])}[/bold] from {subject}")
         conn = store_obj.connect()
         try:
             sync_counts(conn, subj.manifest_path)
         finally:
             conn.close()
-
-        if target["status"] == "indexed":
-            # failed rows never got a copy in materials/, and their original filename
-            # (no collision suffix) can shadow a different indexed material's file
-            stored = subj.materials_dir / target["filename"]
-            if stored.exists():
-                stored.unlink()
-        console.print(f"Removed [bold]{escape(target['filename'])}[/bold] from {subject}")
     except sqlite3.OperationalError as exc:
         _fail(f"store.db is corrupt or incomplete: {exc}")
+
+
+@app.command()
+def drop(
+    subject: Annotated[str, typer.Argument(help="Subject to delete entirely.")],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
+) -> None:
+    """Delete a whole subject: its materials, index and private progress."""
+    import shutil
+
+    subj = _subject_checked(subject)
+    if not yes:
+        typer.confirm(
+            f"Drop subject '{subject}' and ALL its data (materials, index, progress)?",
+            abort=True,
+        )
+    shutil.rmtree(subj.root_dir)
+    console.print(f"Dropped subject [bold]{subject}[/bold]")
