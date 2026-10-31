@@ -5,8 +5,8 @@ killed) by the host — no daemon to manage. It works from any working
 directory (subjects live under `~/.groundly/`).
 
 **Prerequisites:** Groundly installed so `groundly` is on your `PATH`, and at
-least one indexed subject (`groundly init <SUBJECT> && groundly index
-<SUBJECT> <files...>`). No API key is needed for anything the host can call.
+least one indexed subject (`groundly index <SUBJECT> <files...>` creates and
+indexes it). No API key is needed for anything the host can call.
 
 ## Claude Code
 

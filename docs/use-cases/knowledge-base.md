@@ -7,7 +7,7 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: the **student**
 ## UC-01 — Index materials
 
 **Actor:** student (CLI).
-**Preconditions:** subject initialized (`groundly init <SUBJECT>`); files are PDF/DOCX/PPTX/MD/HTML/LaTeX/AsciiDoc/CSV/XLSX/EPUB/TXT/source or a standalone raster image (PNG/JPG/JPEG/TIF/TIFF/BMP/WEBP) (a text layer is no longer required — scanned PDFs and images are allowed, OCR'd on extraction; decision 17).
+**Preconditions:** none for the subject — `groundly index <SUBJECT> <paths>` creates it on first run, after checking every path exists; files are PDF/DOCX/PPTX/MD/HTML/LaTeX/AsciiDoc/CSV/XLSX/EPUB/TXT/source or a standalone raster image (PNG/JPG/JPEG/TIF/TIFF/BMP/WEBP) (a text layer is no longer required — scanned PDFs and images are allowed, OCR'd on extraction; decision 17).
 
 **Main flow**
 

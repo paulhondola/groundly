@@ -45,4 +45,4 @@ def test_search_uninitialized_subject_fails_with_fix(tmp_path, monkeypatch):
     (tmp_path / "home").mkdir()
     result = runner.invoke(app, ["search", "NOPE", "q"])
     assert result.exit_code == 1
-    assert "groundly init NOPE" in result.output
+    assert "groundly index NOPE" in result.output

@@ -82,7 +82,7 @@ def connect(path: Path, create: bool = False) -> sqlite3.Connection:
         conn.close()
         raise RuntimeError(
             f"{path.name} was written before groundly 1.0's schema reset — re-index the "
-            "subject from its materials (groundly remove, then init and index)"
+            "subject from its materials (groundly drop, then index)"
         )
     if version > STORE_USER_VERSION:
         conn.close()

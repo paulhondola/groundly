@@ -140,7 +140,7 @@ def _toml_value(v) -> str:
 
 def render_config_toml(settings: Settings) -> str:
     """Regenerate the whole config file with every setting shown at its value. Used by
-    both first-run `init` (defaults) and `config set`."""
+    `Subject.initialize` (first-run defaults) and `config set`."""
     ing = settings.ingestion
     lines = [
         "# Groundly config — operational settings. Groundly never asks for an API key.",

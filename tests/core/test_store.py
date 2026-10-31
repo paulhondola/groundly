@@ -62,7 +62,9 @@ def test_refuses_pre_reset_store_with_reindex_hint(tmp_path):
     conn.execute("CREATE TABLE decks (id INTEGER PRIMARY KEY)")
     conn.execute("PRAGMA user_version = 2")
     conn.close()
-    with pytest.raises(RuntimeError, match="before groundly 1.0's schema reset.*re-index"):
+    with pytest.raises(
+        RuntimeError, match="before groundly 1.0.s schema reset.*groundly drop, then index"
+    ):
         store.connect(path)
 
 

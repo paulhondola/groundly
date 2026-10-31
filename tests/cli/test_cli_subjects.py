@@ -11,6 +11,7 @@ from groundly.cli import app
 from groundly.core.paths import subject_dir
 from groundly.ingestion import pipeline
 from groundly.ingestion.results import FileResult, Status
+from tests.conftest import init_subject
 
 runner = CliRunner()
 
@@ -44,28 +45,9 @@ def test_no_args_shows_help():
     assert "Usage" in runner.invoke(app, []).output
 
 
-def test_init_creates_layout_and_is_idempotent(home):
-    result = runner.invoke(app, ["init", "PDSS"])
-    assert result.exit_code == 0, result.output
-    sdir = home / "PDSS"
-    for expected in ["manifest.json", "materials", "store.db", "progress.db"]:
-        assert (sdir / expected).exists(), expected
-    assert (home / "config.toml").exists()
-
-    result = runner.invoke(app, ["init", "PDSS"])
-    assert result.exit_code == 0
-    assert "already initialized" in result.output
-
-
-def test_init_rejects_bad_name():
-    result = runner.invoke(app, ["init", "../evil"])
-    assert result.exit_code == 1
-    assert "invalid subject name" in result.output
-
-
 def test_list_all_subjects():
-    runner.invoke(app, ["init", "PDSS"])
-    runner.invoke(app, ["init", "ML"])
+    init_subject("PDSS")
+    init_subject("ML")
     result = runner.invoke(app, ["list"])
     assert result.exit_code == 0
     assert "PDSS" in result.output and "ML" in result.output
@@ -74,11 +56,11 @@ def test_list_all_subjects():
 def test_list_unknown_subject_names_the_fix():
     result = runner.invoke(app, ["list", "NOPE"])
     assert result.exit_code == 1
-    assert "groundly init NOPE" in result.output
+    assert "groundly index NOPE" in result.output
 
 
 def test_index_reports_results(monkeypatch, tmp_path):
-    runner.invoke(app, ["init", "PDSS"])
+    init_subject("PDSS")
     f = tmp_path / "lec.txt"
     f.write_text("content")
 
@@ -98,7 +80,7 @@ def test_index_ocr_lang_set_reuse_mismatch(monkeypatch, tmp_path):
     different value is refused (re-index migration, decision 15)."""
     from groundly.core.manifest import Manifest
 
-    runner.invoke(app, ["init", "PDSS"])
+    init_subject("PDSS")
     f = tmp_path / "lec.txt"
     f.write_text("content")
     seen = []
@@ -139,14 +121,6 @@ def test_index_ocr_lang_set_reuse_mismatch(monkeypatch, tmp_path):
     assert Manifest.load(manifest_path).ocr.lang == ["en"]
 
 
-def test_index_uninitialized_subject_fails_with_fix(tmp_path):
-    f = tmp_path / "lec.txt"
-    f.write_text("content")
-    result = runner.invoke(app, ["index", "NOPE", str(f)])
-    assert result.exit_code == 1
-    assert "groundly init NOPE" in result.output
-
-
 @pytest.mark.parametrize("args", [["list", "../evil"], ["remove", "../evil", "x.pdf", "-y"]])
 def test_bad_subject_name_fails_cleanly_not_traceback(args):
     result = runner.invoke(app, args)
@@ -155,7 +129,7 @@ def test_bad_subject_name_fails_cleanly_not_traceback(args):
 
 
 def test_remove_unknown_material():
-    runner.invoke(app, ["init", "PDSS"])
+    init_subject("PDSS")
     result = runner.invoke(app, ["remove", "PDSS", "ghost.pdf", "-y"])
     assert result.exit_code == 1
     assert "no material" in result.output
@@ -164,7 +138,7 @@ def test_remove_unknown_material():
 def test_remove_deletes_rows_and_file(home):
     from groundly.core import store
 
-    runner.invoke(app, ["init", "PDSS"])
+    init_subject("PDSS")
     sdir = subject_dir("PDSS")
     (sdir / "materials" / "lec.txt").write_text("x")
     conn = store.connect(sdir / "store.db")
@@ -184,7 +158,7 @@ def test_remove_deletes_rows_and_file(home):
 
 
 def test_list_missing_store_db_names_cause_not_traceback():
-    runner.invoke(app, ["init", "PDSS"])
+    init_subject("PDSS")
     sdir = subject_dir("PDSS")
     (sdir / "store.db").unlink()
     result = runner.invoke(app, ["list", "PDSS"])
@@ -194,7 +168,7 @@ def test_list_missing_store_db_names_cause_not_traceback():
 
 
 def test_list_empty_store_db_names_cause_not_traceback():
-    runner.invoke(app, ["init", "PDSS"])
+    init_subject("PDSS")
     sdir = subject_dir("PDSS")
     (sdir / "store.db").unlink()
     (sdir / "store.db").touch()  # exists but schema-less (e.g. interrupted init)
@@ -204,8 +178,8 @@ def test_list_empty_store_db_names_cause_not_traceback():
 
 
 def test_list_all_skips_corrupt_manifest_with_warning():
-    runner.invoke(app, ["init", "PDSS"])
-    runner.invoke(app, ["init", "ML"])
+    init_subject("PDSS")
+    init_subject("ML")
     (subject_dir("PDSS") / "manifest.json").write_text("{ truncated")
     result = runner.invoke(app, ["list"])
     assert result.exit_code == 0  # one damaged subject must not take down the listing
@@ -218,7 +192,7 @@ def test_remove_failed_row_keeps_indexed_siblings_file(home):
     it must not delete a same-named indexed material's stored file (citation target)."""
     from groundly.core import store
 
-    runner.invoke(app, ["init", "PDSS"])
+    init_subject("PDSS")
     sdir = subject_dir("PDSS")
     (sdir / "materials" / "lec.pdf").write_text("indexed copy")
     conn = store.connect(sdir / "store.db")
@@ -244,7 +218,7 @@ def test_remove_failed_row_keeps_indexed_siblings_file(home):
 
 
 def test_remove_whole_subject_deletes_directory():
-    runner.invoke(app, ["init", "PDSS"])
+    init_subject("PDSS")
     sdir = subject_dir("PDSS")
     (sdir / "store.db").unlink()  # even a damaged subject must be removable
     result = runner.invoke(app, ["remove", "PDSS", "--yes"])
@@ -253,7 +227,7 @@ def test_remove_whole_subject_deletes_directory():
 
 
 def test_remove_whole_subject_aborts_without_confirmation():
-    runner.invoke(app, ["init", "PDSS"])
+    init_subject("PDSS")
     result = runner.invoke(app, ["remove", "PDSS"], input="n\n")
     assert result.exit_code != 0
     assert subject_dir("PDSS").exists()
@@ -262,7 +236,6 @@ def test_remove_whole_subject_aborts_without_confirmation():
 @pytest.mark.parametrize(
     "args",
     [
-        ["init"],  # subject required
         ["index", "PDSS"],  # paths required
         ["config", "set", "chat.model"],  # value required
         ["search", "PDSS"],  # query required
@@ -285,6 +258,28 @@ def _stub_index_paths(monkeypatch, f):
     monkeypatch.setattr(pipeline, "index_paths", fake_index_paths)
 
 
+def test_index_creates_subject_on_first_run(monkeypatch, tmp_path, home):
+    f = tmp_path / "a.md"
+    f.write_text("# A\n\ntext\n")
+    _stub_index_paths(monkeypatch, f)
+    result = runner.invoke(app, ["index", "PDSS", str(f)])
+    assert result.exit_code == 0, result.output
+    assert (subject_dir("PDSS") / "manifest.json").exists()
+
+
+def test_index_mistyped_path_creates_nothing(tmp_path, home):
+    real = tmp_path / "a.md"
+    real.write_text("x")
+    result = runner.invoke(app, ["index", "PDSS", str(real), str(tmp_path / "sldes")])
+    assert result.exit_code == 1
+    assert "sldes" in result.output
+    assert not subject_dir("PDSS").exists()
+
+
+def test_init_verb_is_gone():
+    assert runner.invoke(app, ["init", "PDSS"]).exit_code == 2
+
+
 # --- --debug (debug-logging design) ---------------------------------------------------
 
 
@@ -300,7 +295,7 @@ def test_index_debug_disables_indexing_progress_bar(monkeypatch, home, tmp_path)
 
     monkeypatch.setattr(rich.progress.Progress, "__init__", spy_init)
 
-    runner.invoke(app, ["init", "PDSS"])
+    init_subject("PDSS")
     f = tmp_path / "lec.txt"
     f.write_text("content")
     _stub_index_paths(monkeypatch, f)
@@ -312,7 +307,7 @@ def test_index_debug_disables_indexing_progress_bar(monkeypatch, home, tmp_path)
 
 def test_index_debug_invalid_log_level_fails_cleanly(monkeypatch, home, tmp_path):
     monkeypatch.setenv("GROUNDLY_LOG_LEVEL", "BOGUS")
-    runner.invoke(app, ["init", "PDSS"])
+    init_subject("PDSS")
     f = tmp_path / "lec.txt"
     f.write_text("content")
     _stub_index_paths(monkeypatch, f)

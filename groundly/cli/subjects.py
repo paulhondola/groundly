@@ -1,4 +1,4 @@
-"""Subject lifecycle verbs: init, index, list, remove."""
+"""Subject lifecycle verbs: index, list, remove."""
 
 from pathlib import Path
 from typing import Annotated
@@ -12,26 +12,8 @@ from groundly.cli.app import _fail, _store_checked, _subject_checked, app, conso
 
 
 @app.command()
-def init(
-    subject: Annotated[str, typer.Argument(help="Subject name; becomes ~/.groundly/<SUBJECT>/.")],
-) -> None:
-    """Create a subject: manifest.json, materials/, store.db, progress.db."""
-    from groundly.core.subject import Subject
-
-    try:
-        subj = Subject(subject)
-        created = subj.initialize()
-    except ValueError as exc:
-        _fail(str(exc))
-    if created:
-        console.print(f"Initialized [bold]{subject}[/bold] at {subj.root_dir}")
-    else:
-        console.print(f"[bold]{subject}[/bold] already initialized at {subj.root_dir}")
-
-
-@app.command()
 def index(
-    subject: Annotated[str, typer.Argument(help="Subject to index into (must be initialized).")],
+    subject: Annotated[str, typer.Argument(help="Subject to index into (created on first run).")],
     paths: Annotated[list[Path], typer.Argument(help="Files or directories to index.")],
     ocr_lang: Annotated[
         str | None,
@@ -63,25 +45,30 @@ def index(
         subj = Subject(subject)
     except ValueError as exc:  # bad subject name — same cause pipeline would name
         _fail(str(exc))
-    if subj.exists():
-        manifest = subj.load_manifest()
-        recorded = manifest.ocr.lang[0] if manifest.ocr.lang else None
-        if ocr_lang and recorded and ocr_lang != recorded:
-            # The recorded lang shaped every OCR'd chunk already stored, so changing it would
-            # mix corpora (decision 15). With nothing indexed there is nothing to mix, which
-            # lets a mistyped lang (it stores no rows) be corrected.
-            if manifest.counts.materials > 0:
-                _fail(
-                    f"OCR language already set to {recorded!r} for this subject; changing it "
-                    "requires re-indexing (remove and re-index scanned materials)"
-                )
-            manifest.ocr.lang = [ocr_lang]
-            subj.save_manifest(manifest)
-        elif ocr_lang and not recorded:
-            manifest.ocr.lang = [ocr_lang]
-            subj.save_manifest(manifest)
-        elif not ocr_lang:
-            ocr_lang = recorded
+    # Check paths before creating the subject: a typo must not leave an empty one behind.
+    missing = [str(p) for p in paths if not p.exists()]
+    if missing:
+        _fail(f"path not found: {', '.join(missing)}")
+    if not subj.exists():
+        subj.initialize()
+    manifest = subj.load_manifest()
+    recorded = manifest.ocr.lang[0] if manifest.ocr.lang else None
+    if ocr_lang and recorded and ocr_lang != recorded:
+        # The recorded lang shaped every OCR'd chunk already stored, so changing it would
+        # mix corpora (decision 15). With nothing indexed there is nothing to mix, which
+        # lets a mistyped lang (it stores no rows) be corrected.
+        if manifest.counts.materials > 0:
+            _fail(
+                f"OCR language already set to {recorded!r} for this subject; changing it "
+                "requires re-indexing (remove and re-index scanned materials)"
+            )
+        manifest.ocr.lang = [ocr_lang]
+        subj.save_manifest(manifest)
+    elif ocr_lang and not recorded:
+        manifest.ocr.lang = [ocr_lang]
+        subj.save_manifest(manifest)
+    elif not ocr_lang:
+        ocr_lang = recorded
 
     labels = {
         Status.INDEXED: "[green]indexed[/green]",

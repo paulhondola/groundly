@@ -222,5 +222,5 @@ def test_uninitialized_subject_names_the_fix(
     monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home2"))
     subj = Subject("NOPE")
     pipe = IngestionPipeline(subject=subj, extractor=stub_extractor(), embedder=stub_embedder())
-    with pytest.raises(RuntimeError, match="groundly init NOPE"):
+    with pytest.raises(RuntimeError, match="groundly index NOPE"):
         pipe.run([course])

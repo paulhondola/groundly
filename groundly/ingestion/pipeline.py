@@ -129,7 +129,7 @@ class IngestionPipeline:
     def run(self, paths: list[Path], ocr_lang: str | None = None) -> list[FileResult]:
         if not self.subject.exists():
             raise RuntimeError(
-                f"subject '{self.subject.name}' is not initialized — run: groundly init {self.subject.name}"
+                f"subject '{self.subject.name}' is not initialized — run: groundly index {self.subject.name} <paths>"
             )
 
         results: list[FileResult] = []
