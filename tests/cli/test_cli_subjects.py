@@ -65,7 +65,7 @@ def test_index_reports_results(monkeypatch, tmp_path):
     f.write_text("content")
 
     def fake_index_paths(
-        subject, paths, embedder=None, on_event=None, on_discovered=None, ocr_lang=None
+        subject, paths, embedder=None, on_event=None, on_discovered=None, ocr_lang=None, **_
     ):
         return [FileResult(f, Status.INDEXED, chunks=3)]
 
@@ -86,7 +86,7 @@ def test_index_ocr_lang_set_reuse_mismatch(monkeypatch, tmp_path):
     seen = []
 
     def fake_index_paths(
-        subject, paths, embedder=None, on_event=None, on_discovered=None, ocr_lang=None
+        subject, paths, embedder=None, on_event=None, on_discovered=None, ocr_lang=None, **_
     ):
         seen.append(ocr_lang)
         return [FileResult(f, Status.INDEXED, chunks=1)]
@@ -251,7 +251,7 @@ def test_bad_usage_is_usage_error(args):
 
 def _stub_index_paths(monkeypatch, f):
     def fake_index_paths(
-        subject, paths, embedder=None, on_event=None, on_discovered=None, ocr_lang=None
+        subject, paths, embedder=None, on_event=None, on_discovered=None, ocr_lang=None, **_
     ):
         return [FileResult(f, Status.INDEXED, chunks=1)]
 
@@ -278,6 +278,21 @@ def test_index_mistyped_path_creates_nothing(tmp_path, home):
 
 def test_init_verb_is_gone():
     assert runner.invoke(app, ["init", "PDSS"]).exit_code == 2
+
+
+def test_index_retry_failed_flag_reaches_pipeline(monkeypatch, tmp_path, home):
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    seen = {}
+
+    def fake_index_paths(subject, paths, **kwargs):
+        seen.update(kwargs)
+        return [FileResult(f, Status.INDEXED, chunks=1)]
+
+    monkeypatch.setattr(pipeline, "index_paths", fake_index_paths)
+    result = runner.invoke(app, ["index", "PDSS", str(f), "--retry-failed"])
+    assert result.exit_code == 0, result.output
+    assert seen["retry_failed"] is True
 
 
 # --- --debug (debug-logging design) ---------------------------------------------------

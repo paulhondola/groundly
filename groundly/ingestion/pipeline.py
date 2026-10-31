@@ -126,7 +126,9 @@ class IngestionPipeline:
         self.on_event = on_event or (lambda path, stage: None)
         self.on_discovered = on_discovered or (lambda total: None)
 
-    def run(self, paths: list[Path], ocr_lang: str | None = None) -> list[FileResult]:
+    def run(
+        self, paths: list[Path], ocr_lang: str | None = None, retry_failed: bool = False
+    ) -> list[FileResult]:
         if not self.subject.exists():
             raise RuntimeError(
                 f"subject '{self.subject.name}' is not initialized — run: groundly index {self.subject.name} <paths>"
@@ -163,16 +165,24 @@ class IngestionPipeline:
                 self.on_event(path, Status.SKIPPED_DUPLICATE)
                 continue
             if known.get(sha) == Status.EXTRACTION_FAILED:
-                # terminal per UC-01: don't re-extract every run; `remove` it to retry
+                # terminal per UC-01 (a slow OCR timeout must not repeat every run) unless
+                # the student asks; the old row goes first because sha256 is UNIQUE
                 materials = self.store.find_materials(sha)
-                error = materials[0]["error"] if materials else "unknown error"
-                results.append(
-                    FileResult(
-                        path, Status.SKIPPED_FAILED, f"failed previously: {error} — remove to retry"
+                if retry_failed:
+                    for row in materials:
+                        self.store.remove_material(row["id"])
+                    del known[sha]
+                else:
+                    error = materials[0]["error"] if materials else "unknown error"
+                    results.append(
+                        FileResult(
+                            path,
+                            Status.SKIPPED_FAILED,
+                            f"failed previously: {error} — re-run with --retry-failed",
+                        )
                     )
-                )
-                self.on_event(path, Status.SKIPPED_FAILED)
-                continue
+                    self.on_event(path, Status.SKIPPED_FAILED)
+                    continue
 
             result = self._index_one(path, sha, ocr_lang)
             results.append(result)
@@ -240,9 +250,10 @@ def index_paths(
     on_event: OnEvent | None = None,
     on_discovered: Callable[[int], None] | None = None,
     ocr_lang: str | None = None,
+    retry_failed: bool = False,
 ) -> list[FileResult]:
     subj = Subject(subject)
     pipeline = IngestionPipeline(
         subject=subj, embedder=embedder, on_event=on_event, on_discovered=on_discovered
     )
-    return pipeline.run(paths, ocr_lang=ocr_lang)
+    return pipeline.run(paths, ocr_lang=ocr_lang, retry_failed=retry_failed)

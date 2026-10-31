@@ -23,6 +23,10 @@ def index(
             "persisted in the manifest.",
         ),
     ] = None,
+    retry_failed: Annotated[
+        bool,
+        typer.Option("--retry-failed", help="Re-extract files that failed on an earlier run."),
+    ] = False,
     debug: Annotated[
         bool,
         typer.Option(
@@ -101,7 +105,12 @@ def index(
 
         try:
             results = pipeline.index_paths(
-                subject, paths, on_event=on_event, on_discovered=on_discovered, ocr_lang=ocr_lang
+                subject,
+                paths,
+                on_event=on_event,
+                on_discovered=on_discovered,
+                ocr_lang=ocr_lang,
+                retry_failed=retry_failed,
             )
         except (RuntimeError, ValueError) as exc:
             _fail(str(exc))

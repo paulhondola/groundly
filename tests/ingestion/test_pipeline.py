@@ -224,3 +224,54 @@ def test_uninitialized_subject_names_the_fix(
     pipe = IngestionPipeline(subject=subj, extractor=stub_extractor(), embedder=stub_embedder())
     with pytest.raises(RuntimeError, match="groundly index NOPE"):
         pipe.run([course])
+
+
+# --- --retry-failed ------------------------------------------------------------------
+
+
+class _AlwaysFail:
+    def extract(self, path, ocr_lang=None):
+        from groundly.ingestion.extract import ExtractionFailure
+
+        raise ExtractionFailure("no readable text — OCR found nothing to extract")
+
+
+def _fail_once(subject, course, stub_embedder):
+    subj = Subject(subject)
+    IngestionPipeline(subject=subj, extractor=_AlwaysFail(), embedder=stub_embedder()).run(
+        [course / "notes.txt"]
+    )
+    return subj
+
+
+def test_failed_file_skipped_without_flag_names_the_flag(
+    subject, course, stub_embedder, stub_extractor
+):
+    subj = _fail_once(subject, course, stub_embedder)
+    pipe = IngestionPipeline(subject=subj, extractor=stub_extractor(), embedder=stub_embedder())
+    [result] = pipe.run([course / "notes.txt"])
+    assert result.status == Status.SKIPPED_FAILED
+    assert result.detail.endswith("re-run with --retry-failed")
+
+
+def test_retry_failed_reextracts_and_indexes(
+    subject, course, stub_embedder, stub_extractor, connect
+):
+    subj = _fail_once(subject, course, stub_embedder)
+    pipe = IngestionPipeline(subject=subj, extractor=stub_extractor(), embedder=stub_embedder())
+    [result] = pipe.run([course / "notes.txt"], retry_failed=True)
+    assert result.status == Status.INDEXED
+    with connect(subject) as conn:
+        statuses = [r[0] for r in conn.execute("SELECT status FROM materials")]
+    assert statuses == ["indexed"]
+
+
+def test_retry_failed_that_fails_again_records_one_failed_row(
+    subject, course, stub_embedder, connect
+):
+    subj = _fail_once(subject, course, stub_embedder)
+    pipe = IngestionPipeline(subject=subj, extractor=_AlwaysFail(), embedder=stub_embedder())
+    [result] = pipe.run([course / "notes.txt"], retry_failed=True)
+    assert result.status == Status.EXTRACTION_FAILED
+    with connect(subject) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM materials").fetchone()[0] == 1
