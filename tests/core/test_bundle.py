@@ -13,7 +13,7 @@ from groundly.cli import app
 from groundly.core import bundle, store
 from groundly.core.manifest import EMBEDDING_DIM, HF_REVISION, Manifest, sync_counts
 from groundly.core.paths import groundly_home, subject_dir
-from groundly.core.store import SubjectStore
+from groundly.core.store import SubjectStore, TopicWrite
 from groundly.core.subject import Subject
 from groundly.ingestion.extract import ChunkData
 from tests.conftest import init_subject
@@ -92,7 +92,9 @@ def test_export_import_roundtrip_preserves_data_and_resets_progress(tmp_path, mo
     bundle_path = tmp_path / "PDSS.groundly"
     result = runner.invoke(app, ["export", "PDSS", "-o", str(bundle_path)])
     assert result.exit_code == 0, result.output
-    assert "everything indexed in this subject" in result.output
+    assert "everything indexed in this subject, including its topic map" in " ".join(
+        result.output.split()
+    )
 
     _use_home(monkeypatch, tmp_path / "b")
     result = runner.invoke(app, ["import", str(bundle_path)])
@@ -181,6 +183,226 @@ def test_import_pin_mismatch_confirm_no_installs_nothing(tmp_path, monkeypatch):
     assert result.exit_code != 0
     assert not Subject("PDSS_C").exists()
     assert not any((groundly_home() / ".imports").glob("*"))
+
+
+# --- Topic tree: import is the trust boundary ----------------------------------------
+
+
+def _seed_tree(name, n_chunks=2):
+    _seed(name, n_chunks=n_chunks)
+    sub = [TopicWrite(None, "Conditions", "The four", [2])]
+    SubjectStore(subject_dir(name) / "store.db").replace_tree(
+        [TopicWrite(None, "Deadlock", "Why it happens", [1], sub)]
+    )
+
+
+def _tamper(name, *statements):
+    """Raw SQL with foreign keys off (sqlite3's default), as a hostile bundle author has."""
+    import sqlite3
+
+    conn = sqlite3.connect(subject_dir(name) / "store.db")
+    try:
+        with conn:
+            for sql in statements:
+                conn.execute(sql)
+    finally:
+        conn.close()
+
+
+def _export_then_import(tmp_path, monkeypatch, name="PDSS"):
+    bundle_path = tmp_path / f"{name}.groundly"
+    assert runner.invoke(app, ["export", name, "-o", str(bundle_path)]).exit_code == 0
+    _use_home(monkeypatch, tmp_path / "b")
+    return runner.invoke(app, ["import", str(bundle_path)])
+
+
+def _assert_refused(result, *phrases):
+    assert result.exit_code != 0
+    text = " ".join(result.output.split())
+    for phrase in phrases:
+        assert phrase in text
+    assert not Subject("PDSS").exists()
+    assert not any((groundly_home() / ".imports").glob("*"))
+
+
+def test_export_import_round_trip_keeps_the_tree_and_no_progress(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_tree("PDSS")
+    (subject_dir("PDSS") / "progress.db").write_bytes(b"private study state")
+    tree_a = SubjectStore(subject_dir("PDSS") / "store.db").tree()
+
+    result = _export_then_import(tmp_path, monkeypatch)
+    assert result.exit_code == 0, result.output
+
+    subj_b = Subject("PDSS")
+    assert SubjectStore(subj_b.store_db_path).tree() == tree_a
+    assert b"private study state" not in subj_b.progress_db_path.read_bytes()
+
+
+def test_import_refuses_citations_that_do_not_resolve(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_tree("PDSS")
+    _tamper("PDSS", "INSERT INTO topic_citations (topic_id, chunk_id, rank) VALUES (1, 999, 5)")
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "'topic_citations'", "no matching 'chunks'")
+
+
+def test_import_refuses_a_three_level_tree(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_tree("PDSS")
+    _tamper(
+        "PDSS", "INSERT INTO topics (parent_id, position, title, summary) VALUES (2, 0, 'x', 'y')"
+    )
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "more than two levels")
+
+
+def test_import_refuses_a_store_without_topic_tables(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed("PDSS")
+    _tamper("PDSS", "DROP TABLE topic_citations", "DROP TABLE topics")
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "no topic tree tables", "re-index")
+
+
+def test_import_refuses_more_than_max_tree_nodes(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_tree("PDSS")
+    _tamper(
+        "PDSS",
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 1000) "
+        "INSERT INTO topics (parent_id, position, title, summary) SELECT NULL, i, 'x', 'y' FROM n",
+    )
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "1002 topics", "limit is 1000")
+
+
+def test_import_refuses_a_topic_with_more_than_max_sources(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_tree("PDSS", n_chunks=6)
+    _tamper(
+        "PDSS",
+        *(
+            f"INSERT INTO topic_citations (topic_id, chunk_id, rank) VALUES (1, {i}, {i})"
+            for i in range(2, 7)
+        ),
+    )
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "topic 1 cites 6 sources", "limit is 5")
+
+
+@pytest.mark.parametrize(
+    ("statement", "phrases"),
+    [
+        (f"UPDATE topics SET title = '{'t' * 201}' WHERE id = 1", ("title", "201 characters")),
+        (f"UPDATE topics SET summary = '{'s' * 501}' WHERE id = 1", ("summary", "501 characters")),
+        ("UPDATE topics SET title = x'4142' WHERE id = 1", ("title", "not text")),
+        ("UPDATE topics SET summary = x'4142' WHERE id = 1", ("summary", "not text")),
+    ],
+)
+def test_import_refuses_titles_and_summaries_over_the_limit_or_not_text(
+    tmp_path, monkeypatch, statement, phrases
+):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_tree("PDSS")
+    _tamper("PDSS", statement)
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, *phrases)
+
+
+def test_import_refuses_a_tree_whose_cited_text_is_too_large(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_tree("PDSS")
+    monkeypatch.setattr(store, "MAX_TREE_SOURCE_BYTES", 20)
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "cite 66 bytes of chunk text", "limit is 20")
+
+
+_NO_FK_TOPICS = (
+    "DROP TABLE topic_citations",
+    "DROP TABLE topics",
+    "CREATE TABLE topics (id INTEGER PRIMARY KEY, parent_id INTEGER, position INTEGER, title TEXT, summary TEXT)",
+    "CREATE TABLE topic_citations (topic_id INTEGER, chunk_id INTEGER, rank INTEGER)",
+    "INSERT INTO topics VALUES (1, NULL, 0, 'a', 'b')",
+)
+
+
+@pytest.mark.parametrize(
+    ("extra", "phrase"),
+    [
+        ("INSERT INTO topic_citations VALUES (777, 1, 0)", "topic_citations.topic_id"),
+        ("INSERT INTO topic_citations VALUES (1, 12345, 0)", "topic_citations.chunk_id"),
+        ("INSERT INTO topics VALUES (2, 999, 1, 'c', 'd')", "topics.parent_id"),
+    ],
+)
+def test_import_refuses_dangling_references_in_a_store_that_declares_no_keys(
+    tmp_path, monkeypatch, extra, phrase
+):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed("PDSS")
+    _tamper("PDSS", *_NO_FK_TOPICS, extra)
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, phrase, "no matching")
+
+
+def test_import_names_hostile_table_names_without_printing_them_raw(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_tree("PDSS")
+    evil = "x\x1b]52;c;cHduZWQ=\x07"
+    _tamper(
+        "PDSS",
+        f'CREATE TABLE "{evil}" (a INTEGER REFERENCES topics(id))',
+        f'INSERT INTO "{evil}" VALUES (42)',
+    )
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    assert result.exit_code != 0
+    assert "\x1b" not in result.output
+    assert "dangling reference" in result.output
+
+
+def test_import_names_a_hostile_schema_and_removes_the_temp_dir(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_tree("PDSS")
+    _tamper(
+        "PDSS",
+        "DROP TABLE topic_citations",
+        "CREATE TABLE topic_citations (topic_id INTEGER REFERENCES topics(title),"
+        " chunk_id INTEGER, rank INTEGER)",
+        "INSERT INTO topic_citations VALUES (1, 1, 0)",
+    )
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "foreign key mismatch")
 
 
 # --- Bundles from before the graph was dropped -------------------------------------

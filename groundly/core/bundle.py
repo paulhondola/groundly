@@ -145,6 +145,90 @@ def check_counts(store_db_path: Path, manifest: Manifest) -> None:
         raise BundleError("bundle is damaged — manifest counts do not match store.db contents")
 
 
+def check_tree(store_db_path: Path) -> None:
+    """Refuse a store whose topic tree is absent, damaged or too costly to load. Foreign
+    keys are enforced on write, so a violation here means the file was edited outside
+    groundly; the anti-joins repeat them because a hostile file declares only the keys it
+    likes, and the limits repeat the gate's because an import never passes through it."""
+    conn = store.connect(store_db_path)
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not {"topics", "topic_citations"} <= tables:
+            raise BundleError(
+                "bundle has no topic tree tables — it was exported by an older groundly; "
+                "on the source machine, re-index the subject, then re-export it"
+            )
+        dangling = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if dangling:
+            found = ", ".join(
+                f"{r['table']!r} row {r['rowid']} has no matching {r['parent']!r}"
+                for r in dangling[:5]
+            )
+            raise BundleError(f"bundle is damaged — {len(dangling)} dangling reference(s): {found}")
+        for table, column, parent in _TREE_REFERENCES:
+            if conn.execute(
+                f"SELECT 1 FROM {table} x LEFT JOIN {parent} p ON p.id = x.{column} "
+                f"WHERE x.{column} IS NOT NULL AND p.id IS NULL LIMIT 1"
+            ).fetchone():
+                raise BundleError(
+                    f"bundle is damaged — {table}.{column} has a value with no matching {parent}"
+                )
+        if conn.execute(
+            "SELECT 1 FROM topics t JOIN topics p ON p.id = t.parent_id "
+            "WHERE p.parent_id IS NOT NULL LIMIT 1"
+        ).fetchone():
+            raise BundleError("bundle is damaged — its topic tree is nested more than two levels")
+        _check_tree_cost(conn)
+    finally:
+        conn.close()
+
+
+# (column checked, table its value must exist in)
+_TREE_REFERENCES = [
+    ("topic_citations", "topic_id", "topics"),
+    ("topic_citations", "chunk_id", "chunks"),
+    ("topics", "parent_id", "topics"),
+]
+
+
+def _check_tree_cost(conn) -> None:
+    nodes = conn.execute("SELECT COUNT(*) FROM topics").fetchone()[0]
+    if nodes > store.MAX_TREE_NODES:
+        raise BundleError(
+            f"bundle has {nodes} topics; the limit is {store.MAX_TREE_NODES} — rejected"
+        )
+    row = conn.execute(
+        "SELECT topic_id, COUNT(*) FROM topic_citations GROUP BY topic_id "
+        "ORDER BY COUNT(*) DESC LIMIT 1"
+    ).fetchone()
+    if row and row[1] > store.MAX_SOURCES:
+        raise BundleError(
+            f"bundle topic {row[0]} cites {row[1]} sources; the limit is {store.MAX_SOURCES}"
+            " — rejected"
+        )
+    for column, limit in (("title", store.MAX_TITLE_CHARS), ("summary", store.MAX_SUMMARY_CHARS)):
+        row = conn.execute(
+            f"SELECT id, typeof({column}), LENGTH({column}) FROM topics "
+            f"WHERE typeof({column}) != 'text' OR LENGTH({column}) > ? LIMIT 1",
+            (limit,),
+        ).fetchone()
+        if row and row[1] != "text":
+            raise BundleError(f"bundle topic {row[0]} has a {column} that is not text — rejected")
+        if row:
+            raise BundleError(
+                f"bundle topic {row[0]} has a {column} of {row[2]} characters; "
+                f"the limit is {limit} — rejected"
+            )
+    cited = conn.execute(
+        "SELECT SUM(LENGTH(c.text)) FROM topic_citations tc JOIN chunks c ON c.id = tc.chunk_id"
+    ).fetchone()[0]
+    if cited and cited > store.MAX_TREE_SOURCE_BYTES:
+        raise BundleError(
+            f"bundle topics cite {cited} bytes of chunk text; the limit is "
+            f"{store.MAX_TREE_SOURCE_BYTES} — rejected"
+        )
+
+
 def re_embed(store_db_path: Path, embedder, on_step: OnStep | None = None) -> None:
     """One transaction: drop vectors + sparse_terms, batch chunk text through embedder,
     reinsert at rowid = chunk id. Chunk text and FTS are untouched."""

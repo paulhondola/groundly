@@ -39,7 +39,9 @@ def export(
             _fail(str(exc))
 
     console.print(f"exported [bold]{subject}[/bold] to {out_path}")
-    console.print("this bundle contains everything indexed in this subject.")
+    console.print(
+        "this bundle contains everything indexed in this subject, including its topic map."
+    )
 
 
 @app.command("import")
@@ -61,6 +63,7 @@ def import_(
     """Import a bundle produced by `groundly export`: validated, zip-slip-safe extraction,
     fresh empty progress database, embedding pin checked (re-embed offered on mismatch)."""
     import shutil
+    import sqlite3
     import tempfile
     import zipfile
 
@@ -103,6 +106,7 @@ def import_(
 
             manifest = bundle.extract_bundle(bundle_path, tmp_dir, on_file=on_file)
             bundle.check_counts(tmp_dir / "store.db", manifest)
+            bundle.check_tree(tmp_dir / "store.db")
 
             if not bundle.pin_matches(manifest):
                 if not yes:
@@ -126,7 +130,7 @@ def import_(
     except typer.Abort:
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise
-    except (RuntimeError, ValueError) as exc:  # BundleError is a RuntimeError
+    except (RuntimeError, ValueError, sqlite3.DatabaseError) as exc:  # BundleError: RuntimeError
         shutil.rmtree(tmp_dir, ignore_errors=True)
         _fail(str(exc))
 

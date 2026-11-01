@@ -15,7 +15,7 @@ from pathlib import Path
 from groundly.ingestion import extract_worker
 from groundly.ingestion.formats import IMAGE_SUFFIXES
 
-EXTRACT_TIMEOUT_SECONDS = 300
+EXTRACT_TIMEOUT_SECONDS = 360
 STDERR_TAIL_BYTES = 4096
 MAX_EXTRACTION_JSON_BYTES = 200 * 1024 * 1024  # far beyond any real textbook
 

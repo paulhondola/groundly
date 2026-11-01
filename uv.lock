@@ -1397,8 +1397,10 @@ dependencies = [
     { name = "rich" },
     { name = "sentence-transformers" },
     { name = "sqlite-vec" },
+    { name = "starlette" },
     { name = "transformers" },
     { name = "typer" },
+    { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
@@ -1427,8 +1429,10 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
     { name = "sentence-transformers", specifier = "==6.2.0" },
     { name = "sqlite-vec", specifier = ">=0.1" },
+    { name = "starlette", specifier = ">=1.0" },
     { name = "transformers", specifier = ">=5" },
     { name = "typer", specifier = ">=0.12" },
+    { name = "uvicorn", specifier = ">=0.30" },
 ]
 provides-extras = ["dev"]
 

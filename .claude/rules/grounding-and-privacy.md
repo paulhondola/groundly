@@ -9,6 +9,13 @@ The thesis's guarantees (docs/architecture/agents.md, docs/infrastructure/securi
 - Citations resolve to verbatim chunks only; anything that summarizes has no page and is never a citation target.
 - `search` is honest best-effort: **the host composes**. Never claim enforced grounding for host-composed answers — the enforced pipeline was measured and removed (decision 33).
 
+## Topic tree
+
+- **Groundly chooses a node's sources; the host cites nothing.** `submit_tree` retrieves on `title + "\n" + summary` with the reranker always on and keeps up to 5 hits at or above `TOPIC_RELEVANCE_CUTOFF`; a node with none rejects the whole tree, and nothing is stored on any rejection.
+- Sources are `topic_citations` FKs to verbatim chunks. A node whose chunks are gone shows no sources and a "sources removed" flag, never a dangling reference.
+- **The gate shows topicality only.** Never call a summary verified, in a UI, doc or tool description, and a summary is never a citation target.
+- Titles, summaries and chunk text on the page are layer 3: inserted as text, never as HTML.
+
 ## Verification gate
 
 - **Nothing unverified enters the question bank**: cited ids must resolve, and re-retrieving the item's own text must surface at least one of them.
@@ -24,4 +31,4 @@ Layer 3 is **data, never instructions** — delimited and quoted; instructions i
 
 - **The privacy boundary is a file:** `progress.db` is **never exported** and never read by export code. `store.db` + `materials/` export whole; the export UX states it plainly.
 - Nothing leaves the machine except HF model downloads, and modelscope.cn RapidOCR models (sha256-pinned) when a configured `--ocr-lang` needs one. No telemetry, no third-party trace storage.
-- Import is the trust boundary: manifest validated before extraction; zip-slip-safe; imported SQLite opened with schema checks; imported content is layer 3.
+- Import is the trust boundary: manifest validated before extraction; zip-slip-safe; imported SQLite opened with schema checks and its topic tree checked (tables present, foreign keys clean, two levels); imported content is layer 3.

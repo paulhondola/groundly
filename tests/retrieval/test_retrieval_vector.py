@@ -113,6 +113,20 @@ def test_vector_retriever_reranks_when_enabled(retrievable_subject):
     assert hits[0].chunk_id == 2
 
 
+def test_a_chunk_vanishing_before_rerank_does_not_shift_scores_onto_others(retrievable_subject):
+    store_obj = SubjectStore(subject_dir(retrievable_subject) / "store.db")
+    real_details = store_obj.chunk_details
+    store_obj.chunk_details = lambda ids: [r for r in real_details(ids) if r["chunk_id"] != 1]
+    reranker = StubReranker()
+    reranker.compute_score = lambda pairs: [float(len(text)) for _, text in pairs]
+    retriever = VectorRetriever(
+        store_obj, embedder=_near_embedder(), reranker=reranker, rerank=True
+    )
+    hits = retriever.retrieve("deadlock")
+    assert {h.chunk_id for h in hits} == {2, 3}
+    assert all(h.score == float(len(h.text)) for h in hits)
+
+
 def test_vector_retriever_empty_store_returns_no_nodes(subject):
     store_obj = SubjectStore(subject_dir(subject) / "store.db")
     retriever = VectorRetriever(store_obj, embedder=_near_embedder(), rerank=False)

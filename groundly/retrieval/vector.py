@@ -102,9 +102,10 @@ class VectorRetriever:
 
         if self.rerank:
             stages.append("rerank")
-            pairs = [(query, details[cid]["text"]) for cid in fused_ids if cid in details]
+            live_ids = [cid for cid in fused_ids if cid in details]  # scores align with these
+            pairs = [(query, details[cid]["text"]) for cid in live_ids]
             scores = self.reranker.compute_score(pairs)
-            ranked = sorted(zip(fused_ids, scores), key=lambda cs: cs[1], reverse=True)
+            ranked = sorted(zip(live_ids, scores), key=lambda cs: cs[1], reverse=True)
         else:
             ranked = [(cid, fused_scores[cid]) for cid in fused_ids]
 

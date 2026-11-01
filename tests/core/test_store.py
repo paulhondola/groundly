@@ -5,7 +5,7 @@ import sqlite_vec
 
 from groundly.core import store
 from groundly.core.manifest import EMBEDDING_DIM, Manifest, sync_counts
-from groundly.core.store import SubjectStore
+from groundly.core.store import StaleTopicError, SubjectStore, TopicWrite
 
 
 @pytest.fixture
@@ -91,6 +91,14 @@ def test_remove_material_leaves_no_rows_in_any_channel(db, tmp_path):
     assert not db.execute(
         "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH 'deadlock'"
     ).fetchall()
+
+
+def test_chunk_ids_are_not_reused_after_removal(db, tmp_path):
+    mid = _add_material(db)
+    removed = {r[0] for r in db.execute("SELECT id FROM chunks")}
+    SubjectStore(tmp_path / "store.db").remove_material(mid)
+    _add_material(db, filename="lec2.pdf", sha="b" * 64)
+    assert not removed & {r[0] for r in db.execute("SELECT id FROM chunks")}
 
 
 def test_add_indexed_streams_vectors_from_lazy_iterable(db, tmp_path):
@@ -311,3 +319,169 @@ def test_scoped_dense_reaches_material_outside_global_top_k(db, tmp_path, two_ma
 def test_unscoped_channels_unchanged(db, tmp_path, two_materials):
     s = SubjectStore(tmp_path / "store.db")
     assert two_materials["other"] in s.bm25_search("deadlock", k=10)
+
+
+# --- topic tree -------------------------------------------------------------------
+
+
+def _chunk_ids(conn, material_id):
+    return [
+        r[0]
+        for r in conn.execute(
+            "SELECT id FROM chunks WHERE material_id = ? ORDER BY id", (material_id,)
+        )
+    ]
+
+
+def _titles(tree):
+    return [(t["title"], [s["title"] for s in t["subtopics"]]) for t in tree]
+
+
+def test_replace_tree_round_trips_order_and_sources(db, tmp_path):
+    mid = _add_material(db, n_chunks=3)
+    c1, c2, c3 = _chunk_ids(db, mid)
+    s = SubjectStore(tmp_path / "store.db")
+    s.replace_tree(
+        [
+            TopicWrite(
+                None,
+                "Deadlock",
+                "Why threads stall",
+                [c3, c1],
+                [TopicWrite(None, "Detection", "d", [c2]), TopicWrite(None, "Avoidance", "a", [])],
+            ),
+            TopicWrite(None, "Scheduling", "s", [c2]),
+        ]
+    )
+    tree = s.tree()
+    assert _titles(tree) == [("Deadlock", ["Detection", "Avoidance"]), ("Scheduling", [])]
+    assert tree[0]["summary"] == "Why threads stall"
+    assert [(x["chunk_id"], x["filename"], x["page"]) for x in tree[0]["sources"]] == [
+        (c3, "lec1.pdf", 3),
+        (c1, "lec1.pdf", 1),
+    ]
+    assert {"material_id", "heading_path", "text"} <= tree[0]["sources"][0].keys()
+    assert s.topic_ids() == {t["id"] for t in tree} | {x["id"] for x in tree[0]["subtopics"]}
+
+
+def test_resubmit_keeps_ids_updates_text_and_replaces_sources(db, tmp_path):
+    mid = _add_material(db, n_chunks=2)
+    c1, c2 = _chunk_ids(db, mid)
+    s = SubjectStore(tmp_path / "store.db")
+    s.replace_tree([TopicWrite(None, "Old", "old", [c1])])
+    (node,) = s.tree()
+    s.replace_tree([TopicWrite(node["id"], "New", "new", [c2])])
+    (again,) = s.tree()
+    assert again["id"] == node["id"]
+    assert (again["title"], again["summary"]) == ("New", "new")
+    assert [x["chunk_id"] for x in again["sources"]] == [c2]
+
+
+def test_a_failing_replace_tree_leaves_the_previous_tree_intact(db, tmp_path):
+    mid = _add_material(db, n_chunks=1)
+    (c1,) = _chunk_ids(db, mid)
+    s = SubjectStore(tmp_path / "store.db")
+    s.replace_tree([TopicWrite(None, "Old", "old", [c1])])
+    with pytest.raises(sqlite3.IntegrityError):
+        s.replace_tree([TopicWrite(None, "A", "a", [c1]), TopicWrite(None, "B", "b", [c1 + 1000])])
+    (node,) = s.tree()
+    assert node["title"] == "Old"
+    assert [x["chunk_id"] for x in node["sources"]] == [c1]
+
+
+def test_replace_tree_refuses_a_kept_id_that_no_longer_exists(db, tmp_path):
+    mid = _add_material(db, n_chunks=1)
+    (c1,) = _chunk_ids(db, mid)
+    s = SubjectStore(tmp_path / "store.db")
+    s.replace_tree([TopicWrite(None, "Old", "old", [c1])])
+    (old,) = s.tree()
+    s.replace_tree([TopicWrite(None, "Other", "o", [c1])])  # drops `old`
+    with pytest.raises(StaleTopicError):
+        s.replace_tree(
+            [TopicWrite(None, "Fresh", "f", [c1]), TopicWrite(old["id"], "Back", "b", [])]
+        )
+    assert [n["title"] for n in s.tree()] == ["Other"]
+
+
+def test_moving_a_subtopic_out_of_a_dropped_big_topic_keeps_it(db, tmp_path):
+    mid = _add_material(db, n_chunks=2)
+    c1, c2 = _chunk_ids(db, mid)
+    s = SubjectStore(tmp_path / "store.db")
+    s.replace_tree([TopicWrite(None, "A", "a", [c1], [TopicWrite(None, "X", "x", [c1])])])
+    (a,) = s.tree()
+    x_id = a["subtopics"][0]["id"]
+    s.replace_tree([TopicWrite(None, "B", "b", [c1], [TopicWrite(x_id, "X", "x2", [c2])])])
+    (b,) = s.tree()
+    assert b["title"] == "B"
+    assert b["id"] != a["id"]
+    (x,) = b["subtopics"]
+    assert x["id"] == x_id
+    assert [src["chunk_id"] for src in x["sources"]] == [c2]
+    assert s.topic_ids() == {b["id"], x_id}
+
+
+def test_deleted_topic_id_is_never_reused(db, tmp_path):
+    s = SubjectStore(tmp_path / "store.db")
+    s.replace_tree([TopicWrite(None, "One", "o", [])])
+    (old,) = s.tree()
+    s.replace_tree([])
+    s.replace_tree([TopicWrite(None, "Two", "t", [])])
+    (new,) = s.tree()
+    assert new["id"] > old["id"]
+
+
+def test_removing_a_material_keeps_the_topic_with_no_sources(db, tmp_path):
+    mid = _add_material(db)
+    s = SubjectStore(tmp_path / "store.db")
+    s.replace_tree([TopicWrite(None, "Only", "o", _chunk_ids(db, mid))])
+    s.remove_material(mid)
+    (node,) = s.tree()
+    assert node["title"] == "Only"
+    assert node["sources"] == []
+
+
+def test_material_headings_skips_chunks_without_a_heading_and_dedupes(db, tmp_path):
+    mid = _add_material(db, filename="b.pdf", n_chunks=0)
+    aid = _add_material(db, filename="a.pdf", sha="b" * 64, n_chunks=0)
+    for material, page, heading in [
+        (mid, 1, "Intro"),
+        (aid, 2, "Locks"),
+        (aid, 2, "Locks"),
+        (aid, 1, "Basics"),
+        (aid, 1, None),
+        (aid, 1, ""),
+    ]:
+        db.execute(
+            "INSERT INTO chunks (material_id, page, heading_path, text) VALUES (?, ?, ?, 't')",
+            (material, page, heading),
+        )
+    db.commit()
+    rows = SubjectStore(tmp_path / "store.db").material_headings()
+    assert [(r["filename"], r["page"], r["heading_path"]) for r in rows] == [
+        ("a.pdf", 1, "Basics"),
+        ("a.pdf", 2, "Locks"),
+        ("b.pdf", 1, "Intro"),
+    ]
+
+
+def test_cited_chunk_counts_groups_by_filename(db, tmp_path):
+    a = _chunk_ids(db, _add_material(db, filename="a.pdf", n_chunks=3))
+    b = _chunk_ids(db, _add_material(db, filename="b.pdf", sha="b" * 64, n_chunks=2))
+    s = SubjectStore(tmp_path / "store.db")
+    s.replace_tree(
+        [
+            TopicWrite(None, "T1", "s", [a[0], a[1]], [TopicWrite(None, "T2", "s", [a[0], b[0]])]),
+        ]
+    )
+    assert s.cited_chunk_counts() == {"a.pdf": 2, "b.pdf": 1}
+
+
+def test_material_filename_covers_indexed_materials_only(db, tmp_path):
+    mid = _add_material(db, n_chunks=1)
+    s = SubjectStore(tmp_path / "store.db")
+    (filename,) = [r["filename"] for r in s.list_materials()]
+    assert s.material_filename(mid) == filename
+    assert s.material_filename(mid + 100) is None
+    with s._open() as conn, conn:
+        conn.execute("UPDATE materials SET status = 'extraction_failed'")
+    assert s.material_filename(mid) is None

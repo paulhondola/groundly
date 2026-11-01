@@ -56,6 +56,21 @@ def _fixed_console_width(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_forced_colour(monkeypatch):
+    """Typer freezes `FORCE_TERMINAL` at import from GITHUB_ACTIONS / FORCE_COLOR /
+    PY_COLORS, and Groundly's console honours FORCE_COLOR. Left on, output carries ANSI
+    codes that split option names (`--port` arrives as "-" + "-port") and colour numbers
+    and paths, so substring assertions pass locally and fail where colour is forced."""
+    import typer.rich_utils
+
+    from groundly.cli.app import console
+
+    monkeypatch.setattr(typer.rich_utils, "FORCE_TERMINAL", False)
+    monkeypatch.setattr(console, "_force_terminal", False)
+    monkeypatch.setattr(console, "_color_system", None)
+
+
+@pytest.fixture(autouse=True)
 def _reset_shared_embedder():
     """`llm/embeddings.py`'s shared_embedder() is a process-level singleton; reset it
     around every test so one test's stub (or a stray real load) never leaks into the
