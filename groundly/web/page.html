@@ -13,6 +13,7 @@
   --line: #d4d4cf;
   --accent: #2b5fd9;
   --accent-bg: #e6edfc;
+  --sheet-shadow: rgb(0 0 0 / 0.16);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -23,6 +24,7 @@
     --line: #3a3a36;
     --accent: #8fb0ff;
     --accent-bg: #23304f;
+    --sheet-shadow: rgb(0 0 0 / 0.5);
   }
 }
 * { box-sizing: border-box; }
@@ -45,13 +47,13 @@ code { background: var(--accent-bg); padding: 1px 6px; border-radius: 4px; }
 .subjects li { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; }
 
 .layout { display: grid; grid-template-columns: 1fr 360px; gap: 24px; align-items: start; margin-top: 24px; }
-.tree { border-left: 2px solid var(--line); padding-left: 20px; display: grid; gap: 16px; }
+.tree { list-style: none; margin: 0; border-left: 2px solid var(--line); padding: 0 0 0 20px; display: grid; gap: 16px; }
 .topic { display: grid; grid-template-columns: minmax(140px, 220px) 1fr; gap: 12px; align-items: start; position: relative; }
 .topic::before {
   content: ""; position: absolute; left: -27px; top: 14px; width: 12px; height: 12px;
   border-radius: 50%; background: var(--line);
 }
-.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
 .node {
   font: inherit; color: var(--text); text-align: left; cursor: pointer;
   background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px;
@@ -63,6 +65,16 @@ code { background: var(--accent-bg); padding: 1px 6px; border-radius: 4px; }
 .node[aria-pressed="true"] { background: var(--accent-bg); border-color: var(--accent); }
 
 .panel { position: sticky; top: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; min-width: 0; max-height: calc(100vh - 32px); overflow: auto; }
+.panel-head {
+  position: sticky; top: -16px; margin: -16px -16px 0; padding: 16px 16px 8px; background: var(--surface);
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+}
+.panel-head h2 { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.close {
+  font: inherit; font-size: 0.9rem; color: var(--text); cursor: pointer; flex: none; min-height: 44px; padding: 0 12px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+}
+.close:hover { border-color: var(--accent); }
 .panel ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
 .panel pre {
   margin: 4px 0 0; padding: 8px; max-height: 240px; overflow: auto; white-space: pre-wrap;
@@ -72,10 +84,21 @@ code { background: var(--accent-bg); padding: 1px 6px; border-radius: 4px; }
 .panel .summary { white-space: pre-wrap; overflow-wrap: anywhere; }
 .notice { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-top: 24px; }
 
+/* Below this width a topic and its subtopics no longer fit side by side next to the panel. */
+@media (max-width: 1000px) {
+  .topic { grid-template-columns: 1fr; }
+}
+/* On a phone the open panel is a sheet over the tree, so the selected node stays in view. */
 @media (max-width: 700px) {
   .layout { grid-template-columns: 1fr; }
-  .panel { position: static; max-height: none; }
-  .topic { grid-template-columns: 1fr; }
+  .panel { position: static; max-height: none; order: -1; }
+  .panel.open {
+    position: fixed; z-index: 1; left: 0; right: 0; top: auto; bottom: 0; max-height: 60dvh;
+    overscroll-behavior: contain; border-width: 1px 0 0; border-radius: 12px 12px 0 0;
+    box-shadow: 0 -4px 24px var(--sheet-shadow);
+  }
+  .layout:has(.panel.open) { padding-bottom: 60dvh; }
+  .node { scroll-margin-bottom: calc(60dvh + 8px); }
 }
 </style>
 </head>
@@ -145,8 +168,13 @@ function sourceItem(subject, src) {
   return item;
 }
 
-function renderPanel(panel, subject, node) {
-  panel.replaceChildren(el("h2", node.title), el("p", "Not started", "muted"));
+function renderPanel(panel, subject, node, onClose) {
+  const close = el("button", "Close", "close");
+  close.type = "button";
+  close.addEventListener("click", onClose);
+  const head = el("div", undefined, "panel-head");
+  head.append(el("h2", node.title), close);
+  panel.replaceChildren(head, el("p", "Not started", "muted"));
   if (node.summary) panel.append(el("p", node.summary, "summary"));
   panel.append(el("h3", "Sources"));
   if (!node.sources.length) {
@@ -186,10 +214,22 @@ async function showTree(subject) {
   }
 
   const panel = el("aside", undefined, "panel");
-  panel.setAttribute("aria-live", "polite");
-  panel.append(el("p", "Select a topic to see its summary and sources.", "muted"));
+  const placeholder = el("p", "Select a topic to see its summary and sources.", "muted");
+  panel.append(placeholder);
 
   let selected = null;
+  function closePanel() {
+    const node = selected;
+    selected = null;
+    node.setAttribute("aria-pressed", "false");
+    panel.classList.remove("open");
+    panel.replaceChildren(placeholder);
+    node.focus();
+  }
+  panel.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && selected) closePanel();
+  });
+
   function node(n, cls) {
     const b = el("button", n.title, "node " + cls + (n.sources.length ? "" : " nosrc"));
     b.type = "button";
@@ -198,19 +238,36 @@ async function showTree(subject) {
       if (selected) selected.setAttribute("aria-pressed", "false");
       selected = b;
       b.setAttribute("aria-pressed", "true");
-      renderPanel(panel, subject, n);
+      renderPanel(panel, subject, n, closePanel);
+      panel.classList.add("open");
       panel.scrollTop = 0;
-      if (window.matchMedia("(max-width: 700px)").matches) panel.scrollIntoView({ block: "nearest" });
+      b.scrollIntoView({ block: "nearest" });
+      // The panel follows the whole tree in the DOM: focus takes keyboard and screen-reader users
+      // straight to it, and Escape or Close brings them back to this node.
+      const heading = panel.querySelector("h2");
+      heading.tabIndex = -1;
+      heading.focus({ preventScroll: true });
     });
     return b;
   }
 
-  const spine = el("div", undefined, "tree");
+  // role="list": Safari drops list semantics from a list styled with list-style: none.
+  const spine = el("ul", undefined, "tree");
+  spine.setAttribute("role", "list");
   for (const topic of tree) {
-    const row = el("div", undefined, "topic");
-    const chips = el("div", undefined, "chips");
-    for (const sub of topic.subtopics) chips.append(node(sub, "chip"));
-    row.append(node(topic, "big"), chips);
+    const row = el("li", undefined, "topic");
+    row.append(node(topic, "big"));
+    if (topic.subtopics.length) {
+      const chips = el("ul", undefined, "chips");
+      chips.setAttribute("role", "list");
+      chips.setAttribute("aria-label", "Subtopics of " + topic.title);
+      for (const sub of topic.subtopics) {
+        const item = el("li");
+        item.append(node(sub, "chip"));
+        chips.append(item);
+      }
+      row.append(chips);
+    }
     spine.append(row);
   }
   const layout = el("div", undefined, "layout");
