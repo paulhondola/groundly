@@ -114,7 +114,7 @@ async def test_the_tool_surface_is_exactly_these_six_entries():
     or one quietly dropped — should fail here rather than in a host months later."""
     async with Client(mcp) as client:
         tools = {t.name for t in await client.list_tools()}
-        templates = {t.uriTemplate for t in await client.list_resource_templates()}
+        templates = {t.uri_template for t in await client.list_resource_templates()}
         resources = await client.list_resources()
         prompts = await client.list_prompts()
     assert tools == {
