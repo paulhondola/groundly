@@ -16,6 +16,8 @@ dependencies = [
 	"pydantic>=2.7",
 	"pydantic-settings>=2.3",
 	"fastmcp>=2.0",
+	"starlette>=1.0",
+	"uvicorn>=0.30",
 	"sqlite-vec>=0.1",
 	"sentence-transformers==6.2.0",
 	"FlagEmbedding==1.4.2",         # bge-m3 dense + learned sparse, one forward pass
@@ -62,7 +64,7 @@ name = "clients -> services -> foundations"
 type = "layers"
 containers = ["groundly"]
 layers = [
-	"cli : mcp",
+	"cli : mcp : web",
 	"agents",
 	"retrieval | ingestion",
 	"llm",

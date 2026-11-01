@@ -448,3 +448,14 @@ def test_cited_chunk_counts_groups_by_filename(db, tmp_path):
         ]
     )
     assert s.cited_chunk_counts() == {"a.pdf": 2, "b.pdf": 1}
+
+
+def test_material_filename_covers_indexed_materials_only(db, tmp_path):
+    mid = _add_material(db, n_chunks=1)
+    s = SubjectStore(tmp_path / "store.db")
+    (filename,) = [r["filename"] for r in s.list_materials()]
+    assert s.material_filename(mid) == filename
+    assert s.material_filename(mid + 100) is None
+    with s._open() as conn, conn:
+        conn.execute("UPDATE materials SET status = 'extraction_failed'")
+    assert s.material_filename(mid) is None

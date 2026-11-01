@@ -354,6 +354,16 @@ class SubjectStore:
                 )
             return material_id
 
+    def material_filename(self, material_id: int) -> str | None:
+        """The stored basename of an indexed material, or None. Untrusted on an imported
+        store: callers resolve it against the materials dir before touching the file."""
+        with self._open() as conn:
+            row = conn.execute(
+                "SELECT filename FROM materials WHERE id = ? AND status = 'indexed'",
+                (material_id,),
+            ).fetchone()
+        return row["filename"] if row else None
+
     def topic_ids(self) -> set[int]:
         with self._open() as conn:
             return {r["id"] for r in conn.execute("SELECT id FROM topics")}
