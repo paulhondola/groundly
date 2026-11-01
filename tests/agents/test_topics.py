@@ -10,6 +10,8 @@ from groundly.agents.topics import (
     GATE_RERANK_POOL,
     MAX_SOURCES,
     MAX_SUMMARY_CHARS,
+    MAX_TITLE_CHARS,
+    MAX_TREE_NODES,
     TOPIC_RELEVANCE_CUTOFF,
     outline,
     submit_tree,
@@ -76,12 +78,14 @@ def _reasons(result):
 
 
 def test_constants():
-    assert (TOPIC_RELEVANCE_CUTOFF, MAX_SOURCES, MAX_SUMMARY_CHARS, GATE_RERANK_POOL) == (
-        1.0,
-        5,
-        500,
-        20,
-    )
+    assert (
+        TOPIC_RELEVANCE_CUTOFF,
+        MAX_SOURCES,
+        MAX_SUMMARY_CHARS,
+        MAX_TITLE_CHARS,
+        MAX_TREE_NODES,
+        GATE_RERANK_POOL,
+    ) == (1.0, 5, 500, 200, 1000, 20)
 
 
 def test_accepted_tree_stores_up_to_five_sources_chosen_by_search(store):
@@ -191,6 +195,21 @@ def test_blank_title_summary_over_500_and_non_string_are_invalid_text(store):
         result = _submit(store, [node])
         assert _reasons(result) == ["invalid_text"], node
         assert store.tree() == []
+
+
+def test_title_over_max_is_invalid_text_and_one_over_max_nodes_is_too_large(store):
+    assert _submit(store, [_node(title="t" * MAX_TITLE_CHARS)])["accepted"] is True
+    store.replace_tree([])
+    assert _reasons(_submit(store, [_node(title="t" * (MAX_TITLE_CHARS + 1))])) == ["invalid_text"]
+
+    forbidden = _Forbidden()
+    at_cap = [_node(f"T{i}") for i in range(MAX_TREE_NODES - 1)]
+    capped = submit_tree(store, [*at_cap, _node(id=999)], embedder=forbidden, reranker=forbidden)
+    assert _reasons(capped) == ["unknown_topic_id"]
+    over = [_node(f"T{i}", subtopics=[_node("s")]) for i in range(MAX_TREE_NODES // 2 + 1)]
+    result = submit_tree(store, over, embedder=forbidden, reranker=forbidden)
+    assert "too_large" in _reasons(result)
+    assert store.tree() == []
 
 
 def test_unknown_and_duplicate_ids_rejected(store):

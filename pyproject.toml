@@ -57,8 +57,9 @@ target-version = "py311"
 root_package = "groundly"
 
 # docs/architecture/overview.md: clients -> services -> foundations, one direction.
-# `cli : mcp` may import each other (`groundly mcp` starts the server); `|` siblings may
-# not. Exhaustive: a new subpackage fails the check until it is placed in a layer.
+# `cli : mcp : web` may import each other (`groundly mcp` starts the server, `serve` the
+# page); `|` siblings may not. Exhaustive: a new subpackage fails the check until it is
+# placed in a layer.
 [[tool.importlinter.contracts]]
 name = "clients -> services -> foundations"
 type = "layers"

@@ -17,6 +17,14 @@ from groundly.core.manifest import EMBEDDING_DIM
 
 STORE_USER_VERSION = 1
 
+# What a stored topic tree may cost: the gate refuses a submission over these and import
+# refuses a bundle over them, so a hostile bundle cannot make `tree()` outgrow memory.
+MAX_TREE_NODES = 1000
+MAX_SOURCES = 5  # citations per topic
+MAX_TITLE_CHARS = 200
+MAX_SUMMARY_CHARS = 500
+MAX_TREE_SOURCE_BYTES = 64 * 1024 * 1024  # chunk text `tree()` loads across all citations
+
 
 @dataclass
 class TopicWrite:

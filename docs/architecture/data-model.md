@@ -53,7 +53,7 @@ Semantics: vectors transfer **as-is only on exact embedding match** (model + rev
 
 ## Export / import
 
-- **Export** = zip an allowlist (`manifest.json`, `store.db`, `materials/`) — never `progress.db` → `PDSS.groundly`. Original files included by default (importer's citations must open the right page); `--no-materials` to shrink. The export UX states plainly: "this bundle contains everything indexed in this subject."
+- **Export** = zip an allowlist (`manifest.json`, `store.db`, `materials/`) — never `progress.db` → `PDSS.groundly`. Original files included by default (importer's citations must open the right page); `--no-materials` to shrink. The export UX states plainly: "this bundle contains everything indexed in this subject, including its topic map."
 - **Import** = validate manifest → zip-slip-safe extraction → check the topic tree (tree tables present, `PRAGMA foreign_key_check` clean, no node deeper than two levels; otherwise refused) → fresh empty `progress.db`. Name collision → import-as-new-name or replace-with-confirm. **No merge in v1**; honest merge = import the materials and re-index the union.
 - Imported chunks are **untrusted layer-3 content**.
 

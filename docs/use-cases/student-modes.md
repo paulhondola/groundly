@@ -16,7 +16,7 @@ A roadmap-style map of a subject: big topics in course order, subtopics under ea
 3. **Read.** The host calls `outline(subject)`: each indexed material with its page count, its pages' headings and how many of its chunks the current tree cites, plus the current tree with topic ids. No chunk text and no chunk ids.
 4. **Think.** The host merges overlapping lectures, drops noise, orders big topics by course order and writes a summary (at most 500 characters) per node. Groundly does not filter headings.
 5. **Submit.** The host calls `submit_tree(subject, tree)` with `[{id?, title, summary, subtopics: [{id?, title, summary}]}]`; list order is course order. The host cites nothing: Groundly retrieves on `title + "\n" + summary` with the reranker always on, and the hits at or above `TOPIC_RELEVANCE_CUTOFF` (1.0, up to 5) become the node's sources. The whole tree is accepted or rejected, in one transaction.
-6. **Fix.** A rejection lists every failing node at once with a machine-readable reason (`empty_tree`, `invalid_text`, `unknown_topic_id`, `duplicate_topic_id`, `too_deep`, `below_relevance_cutoff`). A `below_relevance_cutoff` entry carries the top score and the nearest hit's filename, page and heading, so the host rewords in the course's terms. Structural failures are reported without running the search.
+6. **Fix.** A rejection lists every failing node at once with a machine-readable reason (`empty_tree`, `invalid_text`, `unknown_topic_id`, `duplicate_topic_id`, `too_deep`, `too_large`, `below_relevance_cutoff`). A `below_relevance_cutoff` entry carries the top score and the nearest hit's filename, page and heading, so the host rewords in the course's terms. Structural failures are reported without running the search.
 7. **Read the map.** `groundly serve [--port N]` (default 8765) prints the URL, opens the browser and serves every subject from one process on 127.0.0.1. A node opens a side panel with its title, "Not started", its summary and its sources (`file.pdf · p.17`). A PDF source opens the stored file at that page; any other format shows the cited chunk text. Re-running the flow is the same: the host sends back the ids it keeps, so topic ids survive.
 
 **Alternate / error flows**
@@ -34,7 +34,7 @@ A roadmap-style map of a subject: big topics in course order, subtopics under ea
 2. A tree with a real topic is accepted, each node has 1–5 sources, and every source resolves to a document and page.
 3. An off-topic node (e.g. "French Revolution") rejects the whole tree with `below_relevance_cutoff`, its score and nearest heading, and nothing is written.
 4. Several bad nodes are all reported in one rejection.
-5. Unknown and duplicate ids, a summary over 500 characters, and more than two levels are all refused.
+5. Unknown and duplicate ids, a title over 200 or a summary over 500 characters, more than 1000 topics, and more than two levels are all refused.
 6. Re-submitting with ids keeps those ids; a new node gets a new id; a deleted id is never reused.
 7. Removing a cited material keeps the node, flagged, and the next submit restores its sources.
 8. `store.db` carries the tree through export and import, `progress.db` is not in the bundle, and import refuses a bundle whose citations do not resolve.

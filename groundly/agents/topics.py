@@ -5,12 +5,17 @@ The gate shows a topic is in the course, not that its summary is true: a summary
 a citation target and is never called verified. Sources are always chosen here, never by
 the host."""
 
-from groundly.core.store import SubjectStore, TopicWrite
+from groundly.core.store import (
+    MAX_SOURCES,
+    MAX_SUMMARY_CHARS,
+    MAX_TITLE_CHARS,
+    MAX_TREE_NODES,
+    SubjectStore,
+    TopicWrite,
+)
 from groundly.retrieval.vector import VectorRetriever
 
 TOPIC_RELEVANCE_CUTOFF = 1.0  # minimum reranker score for a hit to count as a source
-MAX_SOURCES = 5
-MAX_SUMMARY_CHARS = 500
 GATE_RERANK_POOL = 20  # fused candidates the gate's reranker scores per node
 
 
@@ -62,6 +67,18 @@ def _structural_rejections(tree, known_ids: set[int]) -> list[dict]:
     if not isinstance(tree, list) or not tree:
         return [_rejection([], "empty_tree", "the tree needs at least one big topic")]
 
+    nodes = len(tree) + sum(
+        len(n["subtopics"])
+        for n in tree
+        if isinstance(n, dict) and isinstance(n.get("subtopics"), list)
+    )
+    if nodes > MAX_TREE_NODES:
+        return [
+            _rejection(
+                [], "too_large", f"the tree has {nodes} topics; the limit is {MAX_TREE_NODES}"
+            )
+        ]
+
     rejections: list[dict] = []
     seen_ids: set[int] = set()
 
@@ -72,6 +89,14 @@ def _structural_rejections(tree, known_ids: set[int]) -> list[dict]:
         title, summary = node.get("title"), node.get("summary")
         if not isinstance(title, str) or not title.strip():
             rejections.append(_rejection(path, "invalid_text", "title must be non-empty text"))
+        elif len(title) > MAX_TITLE_CHARS:
+            rejections.append(
+                _rejection(
+                    path,
+                    "invalid_text",
+                    f"title is {len(title)} characters; the limit is {MAX_TITLE_CHARS}",
+                )
+            )
         if not isinstance(summary, str) or not summary.strip():
             rejections.append(_rejection(path, "invalid_text", "summary must be non-empty text"))
         elif len(summary) > MAX_SUMMARY_CHARS:

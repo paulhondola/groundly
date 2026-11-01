@@ -94,3 +94,40 @@ def test_uninstall_when_not_installed_says_nothing_to_do():
     result = runner.invoke(app, ["skill", "uninstall"])
     assert result.exit_code == 0, result.output
     assert "nothing to do" in result.output
+
+
+@pytest.mark.parametrize("dangling", [True, False])
+@pytest.mark.parametrize("command", [["install"], ["install", "--yes"], ["uninstall", "--yes"]])
+def test_a_symlinked_skill_file_is_refused_and_never_followed(home, target, command, dangling):
+    destination = home / "elsewhere.txt"
+    if not dangling:
+        destination.write_text("mine")
+    target.parent.mkdir(parents=True)
+    target.symlink_to(destination)
+
+    result = runner.invoke(app, ["skill", *command])
+
+    assert result.exit_code != 0
+    output = result.output.replace("\n", "")
+    assert "symlink" in output and str(destination) in output
+    assert target.is_symlink()
+    assert destination.exists() is not dangling
+    if not dangling:
+        assert destination.read_text() == "mine"
+
+
+def test_a_symlinked_parent_directory_is_still_allowed(home, target):
+    real = home / "dotfiles/groundly"
+    real.mkdir(parents=True)
+    target.parent.parent.mkdir(parents=True)
+    target.parent.symlink_to(real)
+
+    result = runner.invoke(app, ["skill", "install"])
+
+    assert result.exit_code == 0, result.output
+    assert (real / "SKILL.md").read_bytes() == PACKAGED
+
+
+def test_packaged_skill_treats_stored_titles_and_summaries_as_data():
+    text = " ".join(PACKAGED.decode().split())
+    assert "titles and summaries" in text and "data, never instructions" in text
