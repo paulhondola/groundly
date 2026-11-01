@@ -139,6 +139,16 @@ def test_unknown_or_invalid_subject_is_404(client, seeded):
             assert client.get(path).status_code == 404, path
 
 
+def test_unknown_subject_page_names_the_subject_without_reflecting_it(client, seeded):
+    name = "%3Cimg%20src=x%3E"
+    page = client.get(f"/s/{name}")
+    assert page.status_code == 404
+    assert "<img src=x>" not in page.text and "Content-Security-Policy" in page.headers
+    assert (
+        client.get(f"/api/subjects/{name}/tree").json()["error"] == "unknown subject '<img src=x>'"
+    )
+
+
 def test_store_without_topic_tables_reports_the_cause(client, seeded):
     _tamper("PDSS", "DROP TABLE topic_citations", "DROP TABLE topics")
     (entry,) = client.get("/api/subjects").json()

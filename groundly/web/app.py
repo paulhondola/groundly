@@ -46,18 +46,19 @@ def _read(subject: Subject, reader: Callable[[SubjectStore], Response | dict | N
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-def _html(_: Request) -> HTMLResponse:
+def _html(_: Request, status_code: int = 200) -> HTMLResponse:
     nonce = secrets.token_urlsafe(16)
     return HTMLResponse(
         _PAGE.replace("__NONCE__", nonce),
+        status_code=status_code,
         headers={"Content-Security-Policy": _CSP.format(nonce=nonce)},
     )
 
 
 def _subject_page(request: Request) -> Response:
-    if _open_subject(request.path_params["subject"]) is None:
-        return Response("unknown subject", status_code=404)
-    return _html(request)
+    # An unknown subject still gets the page: its tree request fails and the page shows why.
+    known = _open_subject(request.path_params["subject"]) is not None
+    return _html(request, status_code=200 if known else 404)
 
 
 def _subjects(_: Request) -> JSONResponse:
@@ -90,7 +91,8 @@ def _stored_pdf(subject: Subject, filename) -> Path | None:
 def _tree(request: Request) -> Response:
     subject = _open_subject(request.path_params["subject"])
     if subject is None:
-        return JSONResponse({"error": "unknown subject"}, status_code=404)
+        name = request.path_params["subject"]
+        return JSONResponse({"error": f"unknown subject {name!r}"}, status_code=404)
     result = _read(subject, lambda store: {"tree": store.tree()})
     if isinstance(result, Response):
         return result

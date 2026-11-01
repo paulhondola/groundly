@@ -6,6 +6,7 @@
 <title>Groundly</title>
 <style>
 :root {
+  color-scheme: light dark;
   --bg: #f7f7f5;
   --surface: #ffffff;
   --text: #1c1c1a;
@@ -32,7 +33,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 1rem/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
 h1 { font-size: 1.4rem; margin: 0 0 4px; }
@@ -44,7 +45,8 @@ a { color: var(--accent); }
 code { background: var(--accent-bg); padding: 1px 6px; border-radius: 4px; }
 
 .subjects { list-style: none; padding: 0; margin: 24px 0 0; display: grid; gap: 8px; }
-.subjects li { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; }
+.subjects li { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; }
+.subjects a::after { content: ""; position: absolute; inset: 0; }
 
 .layout { display: grid; grid-template-columns: 1fr 360px; gap: 24px; align-items: start; margin-top: 24px; }
 .tree { list-style: none; margin: 0; border-left: 2px solid var(--line); padding: 0 0 0 20px; display: grid; gap: 16px; }
@@ -60,8 +62,8 @@ code { background: var(--accent-bg); padding: 1px 6px; border-radius: 4px; }
 }
 .node.big { font-weight: 600; width: 100%; padding: 8px 12px; }
 .node.chip { border-radius: 999px; font-size: 0.9rem; }
-.node:hover { border-color: var(--accent); }
 .node.nosrc { border-style: dashed; }
+.flag { display: block; font-size: 0.8rem; font-weight: 400; color: var(--muted); }
 .node[aria-pressed="true"] { background: var(--accent-bg); border-color: var(--accent); }
 
 .panel { position: sticky; top: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; min-width: 0; max-height: calc(100vh - 32px); overflow: auto; }
@@ -74,7 +76,9 @@ code { background: var(--accent-bg); padding: 1px 6px; border-radius: 4px; }
   font: inherit; font-size: 0.9rem; color: var(--text); cursor: pointer; flex: none; min-height: 44px; padding: 0 12px;
   background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
 }
-.close:hover { border-color: var(--accent); }
+@media (hover: hover) {
+  .node:hover, .close:hover { border-color: var(--accent); }
+}
 .panel ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
 .panel pre {
   margin: 4px 0 0; padding: 8px; max-height: 240px; overflow: auto; white-space: pre-wrap;
@@ -98,7 +102,10 @@ code { background: var(--accent-bg); padding: 1px 6px; border-radius: 4px; }
     box-shadow: 0 -4px 24px var(--sheet-shadow);
   }
   .layout:has(.panel.open) { padding-bottom: 60dvh; }
-  .node { scroll-margin-bottom: calc(60dvh + 8px); }
+  .node { min-height: 44px; scroll-margin-bottom: calc(60dvh + 8px); }
+  .back { display: inline-block; padding: 10px 0; }
+  .panel ul { gap: 4px; }
+  .panel li a { display: inline-block; padding: 10px 0; }
 }
 </style>
 </head>
@@ -128,6 +135,12 @@ async function getJSON(url) {
   return body;
 }
 
+function backLink() {
+  const back = el("a", "All subjects", "back");
+  back.href = "/";
+  return back;
+}
+
 function showError(message) {
   app.replaceChildren(el("h1", "Groundly"), el("p", message, "notice"));
 }
@@ -137,7 +150,9 @@ async function showSubjects() {
   let subjects;
   try { subjects = await getJSON("/api/subjects"); } catch (e) { return showError(e.message); }
   if (!subjects.length) {
-    app.append(el("p", "No subjects yet. Index one with groundly index.", "notice"));
+    const none = el("p", "No subjects yet. Index one with ", "notice");
+    none.append(el("code", "groundly index"), ".");
+    app.append(none);
     return;
   }
   const list = el("ul", undefined, "subjects");
@@ -163,7 +178,10 @@ function sourceItem(subject, src) {
     link.rel = "noopener";
     item.append(link);
   } else {
-    item.append(el("div", label), el("pre", src.text));
+    const text = el("pre", src.text);
+    text.tabIndex = 0; // it scrolls, and a keyboard can only scroll what takes focus
+    text.setAttribute("aria-label", "Text from " + label);
+    item.append(el("div", label), text);
   }
   return item;
 }
@@ -196,25 +214,31 @@ function renderPanel(panel, subject, node, onClose) {
 }
 
 async function showTree(subject) {
+  document.title = subject + " · Groundly";
   let tree;
   try { tree = (await getJSON("/api/subjects/" + encodeURIComponent(subject) + "/tree")).tree; }
-  catch (e) { return showError(e.message); }
+  catch (e) {
+    showError(e.message);
+    app.prepend(backLink());
+    return;
+  }
 
-  const back = el("a", "All subjects");
-  back.href = "/";
-  app.replaceChildren(back, el("h1", subject));
+  app.replaceChildren(backLink(), el("h1", subject));
 
   if (!tree.length) {
     const note = el("div", undefined, "notice");
     const say = el("p", "No map yet. In Claude Code, say: ");
     say.append(el("code", "map my " + subject + " course."));
-    note.append(say, el("p", "This needs the Groundly skill: run groundly skill install first.", "muted"));
+    const skill = el("p", "This needs the Groundly skill: run ", "muted");
+    skill.append(el("code", "groundly skill install"), " first.");
+    note.append(say, skill);
     app.append(note);
     return;
   }
 
   const panel = el("aside", undefined, "panel");
   const placeholder = el("p", "Select a topic to see its summary and sources.", "muted");
+  panel.setAttribute("aria-label", "Topic details");
   panel.append(placeholder);
 
   let selected = null;
@@ -232,6 +256,7 @@ async function showTree(subject) {
 
   function node(n, cls) {
     const b = el("button", n.title, "node " + cls + (n.sources.length ? "" : " nosrc"));
+    if (!n.sources.length) b.append(el("span", "sources removed", "flag"));
     b.type = "button";
     b.setAttribute("aria-pressed", "false");
     b.addEventListener("click", () => {
