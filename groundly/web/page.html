@@ -4,9 +4,213 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Groundly</title>
+<style>
+:root {
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --text: #1c1c1a;
+  --muted: #5f5f5a;
+  --line: #d4d4cf;
+  --accent: #2b5fd9;
+  --accent-bg: #e6edfc;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161615;
+    --surface: #1f1f1d;
+    --text: #ecece8;
+    --muted: #a3a39c;
+    --line: #3a3a36;
+    --accent: #8fb0ff;
+    --accent-bg: #23304f;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+h1 { font-size: 1.4rem; margin: 0 0 4px; }
+h2 { font-size: 1.15rem; margin: 0 0 4px; }
+h3 { font-size: 0.8rem; margin: 20px 0 8px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+a { color: var(--accent); }
+.muted { color: var(--muted); }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+code { background: var(--accent-bg); padding: 1px 6px; border-radius: 4px; }
+
+.subjects { list-style: none; padding: 0; margin: 24px 0 0; display: grid; gap: 8px; }
+.subjects li { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; }
+
+.layout { display: grid; grid-template-columns: 1fr 360px; gap: 24px; align-items: start; margin-top: 24px; }
+.tree { border-left: 2px solid var(--line); padding-left: 20px; display: grid; gap: 16px; }
+.topic { display: grid; grid-template-columns: minmax(140px, 220px) 1fr; gap: 12px; align-items: start; position: relative; }
+.topic::before {
+  content: ""; position: absolute; left: -27px; top: 14px; width: 12px; height: 12px;
+  border-radius: 50%; background: var(--line);
+}
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.node {
+  font: inherit; color: var(--text); text-align: left; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px;
+}
+.node.big { font-weight: 600; width: 100%; padding: 8px 12px; }
+.node.chip { border-radius: 999px; font-size: 0.9rem; }
+.node:hover { border-color: var(--accent); }
+.node.nosrc { border-style: dashed; }
+.node[aria-pressed="true"] { background: var(--accent-bg); border-color: var(--accent); }
+
+.panel { position: sticky; top: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; min-width: 0; }
+.panel ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.panel pre {
+  margin: 4px 0 0; padding: 8px; max-height: 240px; overflow: auto; white-space: pre-wrap;
+  overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+  font-size: 0.8rem;
+}
+.panel .summary { white-space: pre-wrap; overflow-wrap: anywhere; }
+.notice { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-top: 24px; }
+
+@media (max-width: 700px) {
+  .layout { grid-template-columns: 1fr; }
+  .panel { position: static; }
+  .topic { grid-template-columns: 1fr; }
+}
+</style>
 </head>
 <body>
-<div id="app"></div>
-<script nonce="__NONCE__"></script>
+<main id="app"></main>
+<script nonce="__NONCE__">
+"use strict";
+
+// Every string from the API (titles, summaries, filenames, chunk text) may come from an imported
+// bundle, so it only ever reaches the DOM through textContent.
+function el(tag, text, cls) {
+  const node = document.createElement(tag);
+  if (text !== undefined) node.textContent = text;
+  if (cls) node.className = cls;
+  return node;
+}
+
+const app = document.getElementById("app");
+
+async function getJSON(url) {
+  const res = await fetch(url);
+  let body = null;
+  try { body = await res.json(); } catch (_) { /* non-JSON failure body */ }
+  if (!res.ok || (body && body.error)) {
+    throw new Error((body && body.error) || "request failed (" + res.status + ")");
+  }
+  return body;
+}
+
+function showError(message) {
+  app.replaceChildren(el("h1", "Groundly"), el("p", message, "notice"));
+}
+
+async function showSubjects() {
+  app.replaceChildren(el("h1", "Groundly"), el("p", "Pick a subject to see its topic map.", "muted"));
+  let subjects;
+  try { subjects = await getJSON("/api/subjects"); } catch (e) { return showError(e.message); }
+  if (!subjects.length) {
+    app.append(el("p", "No subjects yet. Index one with groundly index.", "notice"));
+    return;
+  }
+  const list = el("ul", undefined, "subjects");
+  for (const s of subjects) {
+    const item = el("li");
+    const link = el("a", s.subject);
+    link.href = "/s/" + encodeURIComponent(s.subject);
+    item.append(link, el("span", " — " + (s.error ? s.error : s.has_tree ? "topic map ready" : "no map yet"), "muted"));
+    list.append(item);
+  }
+  app.append(list);
+}
+
+function sourceItem(subject, src) {
+  const item = el("li");
+  const filename = String(src.filename);
+  const label = filename + (src.page != null ? " · p." + Number(src.page) : "");
+  if (filename.toLowerCase().endsWith(".pdf")) {
+    const link = el("a", label);
+    link.href = "/s/" + encodeURIComponent(subject) + "/materials/" + Number(src.material_id) +
+      (src.page != null ? "#page=" + Number(src.page) : "");
+    link.target = "_blank";
+    link.rel = "noopener";
+    item.append(link);
+  } else {
+    item.append(el("div", label), el("pre", src.text));
+  }
+  return item;
+}
+
+function renderPanel(panel, subject, node) {
+  panel.replaceChildren(el("h2", node.title), el("p", "Not started", "muted"));
+  if (node.summary) panel.append(el("p", node.summary, "summary"));
+  panel.append(el("h3", "Sources"));
+  if (!node.sources.length) {
+    panel.append(el("p", "sources removed — ask your agent to update the map", "muted"));
+    return;
+  }
+  const list = el("ul");
+  for (const src of node.sources) list.append(sourceItem(subject, src));
+  panel.append(list);
+}
+
+async function showTree(subject) {
+  let tree;
+  try { tree = (await getJSON("/api/subjects/" + encodeURIComponent(subject) + "/tree")).tree; }
+  catch (e) { return showError(e.message); }
+
+  const back = el("a", "All subjects");
+  back.href = "/";
+  app.replaceChildren(back, el("h1", subject));
+
+  if (!tree.length) {
+    const note = el("div", undefined, "notice");
+    const say = el("p", "No map yet. In Claude Code, say: ");
+    say.append(el("code", "map my " + subject + " course."));
+    note.append(say, el("p", "This needs the Groundly skill: run groundly skill install first.", "muted"));
+    app.append(note);
+    return;
+  }
+
+  const panel = el("aside", undefined, "panel");
+  panel.setAttribute("aria-live", "polite");
+  panel.append(el("p", "Select a topic to see its summary and sources.", "muted"));
+
+  let selected = null;
+  function node(n, cls) {
+    const b = el("button", n.title, "node " + cls + (n.sources.length ? "" : " nosrc"));
+    b.type = "button";
+    b.setAttribute("aria-pressed", "false");
+    b.addEventListener("click", () => {
+      if (selected) selected.setAttribute("aria-pressed", "false");
+      selected = b;
+      b.setAttribute("aria-pressed", "true");
+      renderPanel(panel, subject, n);
+      if (window.matchMedia("(max-width: 700px)").matches) panel.scrollIntoView({ block: "nearest" });
+    });
+    return b;
+  }
+
+  const spine = el("div", undefined, "tree");
+  for (const topic of tree) {
+    const row = el("div", undefined, "topic");
+    const chips = el("div", undefined, "chips");
+    for (const sub of topic.subtopics) chips.append(node(sub, "chip"));
+    row.append(node(topic, "big"), chips);
+    spine.append(row);
+  }
+  const layout = el("div", undefined, "layout");
+  layout.append(spine, panel);
+  app.append(layout);
+}
+
+const parts = location.pathname.split("/");
+if (parts[1] === "s" && parts[2]) showTree(decodeURIComponent(parts[2]));
+else showSubjects();
+</script>
 </body>
 </html>

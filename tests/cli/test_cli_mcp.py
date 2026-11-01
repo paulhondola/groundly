@@ -57,7 +57,3 @@ def test_mcp_debug_accepted_in_stdio_mode(monkeypatch):
     result = runner.invoke(app, ["mcp", "--debug"])
     assert result.exit_code == 0, result.output
     assert calls == [{}]
-
-
-def test_serve_verb_is_gone():
-    assert runner.invoke(app, ["serve"]).exit_code == 2
