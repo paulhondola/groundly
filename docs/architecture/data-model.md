@@ -21,7 +21,7 @@ The storage backbone for [`overview.md`](overview.md). SQLite (WAL) per subject;
 | Table | Contents | Notes |
 |---|---|---|
 | materials | filename, sha-256, status (`indexed`/`extraction_failed`), page count | unique hash per subject = duplicate rejection |
-| chunks | material FK, page ref, **heading path**, text, token count | the citation unit; heading path from Docling HybridChunker |
+| chunks | material FK, page ref, **heading path**, text, token count | the citation unit; ids are never reused, so a stored citation can't come to mean a different chunk; heading path from Docling HybridChunker |
 | vectors | sqlite-vec virtual table, bge-m3 dense (1024-d) | exact KNN (brute force — an upgrade over approximate HNSW) |
 | sparse_terms | inverted index of bge-m3 learned sparse weights | same forward pass as dense |
 | chunks_fts | FTS5 index over chunk text | BM25 channel |

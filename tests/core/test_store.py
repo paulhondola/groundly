@@ -93,6 +93,14 @@ def test_remove_material_leaves_no_rows_in_any_channel(db, tmp_path):
     ).fetchall()
 
 
+def test_chunk_ids_are_not_reused_after_removal(db, tmp_path):
+    mid = _add_material(db)
+    removed = {r[0] for r in db.execute("SELECT id FROM chunks")}
+    SubjectStore(tmp_path / "store.db").remove_material(mid)
+    _add_material(db, filename="lec2.pdf", sha="b" * 64)
+    assert not removed & {r[0] for r in db.execute("SELECT id FROM chunks")}
+
+
 def test_add_indexed_streams_vectors_from_lazy_iterable(db, tmp_path):
     """add_indexed consumes a one-shot (dense, sparse) generator aligned with chunks,
     so a document's vectors need never be materialized as a list at once."""

@@ -27,8 +27,9 @@ CREATE TABLE materials (
     indexed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- AUTOINCREMENT: a stored citation must never resolve to a different chunk after a removal
 CREATE TABLE chunks (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
     page INTEGER,
     heading_path TEXT,
