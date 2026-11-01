@@ -145,6 +145,32 @@ def check_counts(store_db_path: Path, manifest: Manifest) -> None:
         raise BundleError("bundle is damaged — manifest counts do not match store.db contents")
 
 
+def check_tree(store_db_path: Path) -> None:
+    """Refuse a store whose topic tree is absent or damaged. Foreign keys are enforced on
+    write, so a violation here means the file was edited outside groundly."""
+    conn = store.connect(store_db_path)
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not {"topics", "topic_citations"} <= tables:
+            raise BundleError(
+                "bundle has no topic tree tables — it was exported by an older groundly; "
+                "re-export it from the source machine"
+            )
+        dangling = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if dangling:
+            found = ", ".join(
+                f"{r['table']} row {r['rowid']} has no matching {r['parent']}" for r in dangling[:5]
+            )
+            raise BundleError(f"bundle is damaged — {len(dangling)} dangling reference(s): {found}")
+        if conn.execute(
+            "SELECT 1 FROM topics t JOIN topics p ON p.id = t.parent_id "
+            "WHERE p.parent_id IS NOT NULL LIMIT 1"
+        ).fetchone():
+            raise BundleError("bundle is damaged — its topic tree is nested more than two levels")
+    finally:
+        conn.close()
+
+
 def re_embed(store_db_path: Path, embedder, on_step: OnStep | None = None) -> None:
     """One transaction: drop vectors + sparse_terms, batch chunk text through embedder,
     reinsert at rowid = chunk id. Chunk text and FTS are untouched."""

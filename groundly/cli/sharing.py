@@ -103,6 +103,7 @@ def import_(
 
             manifest = bundle.extract_bundle(bundle_path, tmp_dir, on_file=on_file)
             bundle.check_counts(tmp_dir / "store.db", manifest)
+            bundle.check_tree(tmp_dir / "store.db")
 
             if not bundle.pin_matches(manifest):
                 if not yes:
