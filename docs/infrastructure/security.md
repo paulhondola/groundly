@@ -11,11 +11,12 @@ A `.groundly` bundle is third-party content that will enter the student's prompt
 - **Manifest validation before anything is read**: format version supported, counts sane; unknown schema versions refused (`PRAGMA user_version` check on the imported store.db).
 - **Imported chunks are layer-3 data** — delimited, quoted, never instructions ([`../architecture/agents.md`](../architecture/agents.md)).
 - Imported SQLite files are opened with the same schema checks as native ones; no code paths execute content from the bundle.
+- **The topic tree is checked after extraction**: a bundle without the tree tables, with dangling references (`PRAGMA foreign_key_check`) or with a tree deeper than two levels is refused. Imported titles and summaries are layer-3 text, shown by the page only as text (section 4).
 - **Legacy `graph/` entries are never extracted** (decision 37). Bundles built before the graph was dropped still carry parquet; the entries pass the zip-slip and allowlist gates and are then skipped, so no parquet or lancedb reader exists in Groundly at all.
 
 ## 2. Prompt injection via documents
 
-The student's *own* lecture PDFs are as capable of carrying "ignore previous instructions" as an import. All retrieved content — chunks and summaries — is layer 3: instructions inside it are inert by construction of the immutable system layer.
+The student's *own* lecture PDFs are as capable of carrying "ignore previous instructions" as an import. All retrieved content — chunks, and the titles and summaries stored in a topic tree — is layer 3: instructions inside it are inert by construction of the immutable system layer.
 
 ## 3. Subprocess execution (verifier + coding challenges)
 
@@ -25,12 +26,19 @@ An idea, not planned (spec §3, coding challenges): the verifier would execute L
 
 ## 4. Local servers
 
-`groundly mcp --http` (MCP over Streamable HTTP) binds **127.0.0.1 only** — no-auth is acceptable exactly and only on loopback. Refuse `--host` values other than loopback without an explicit `--i-know-what-im-doing` style override. stdio MCP has no network surface at all.
+`groundly mcp --http` (MCP over Streamable HTTP) and `groundly serve` (the topic-tree page) bind **127.0.0.1 only** — no-auth is acceptable exactly and only on loopback. Neither takes a `--host`. stdio MCP has no network surface at all.
+
+**The topic-tree page** (`groundly serve`) is a new local surface, and a hostile page in the student's browser can reach loopback. What it exposes: read-only routes over every subject's tree, chunk text and stored PDFs. Controls:
+- **Host header check** (`TrustedHost`: `127.0.0.1`, `localhost`) against DNS rebinding, as `mcp --http` has. The port is limited to 1–65535, and a busy or refused port is named by cause.
+- **Read-only**: every route refuses POST/PUT/PATCH/DELETE (405), the page opens `store.db` only to read, and a test holds a connection and checks `PRAGMA data_version` is unchanged. Opening a store through `connect()` sets WAL mode, which changes no rows. It loads no model.
+- **Untrusted text**: titles, summaries, filenames and chunk text may come from an imported bundle. The page inserts them with `textContent` only (a test bans the HTML-inserting sinks), under a per-response CSP nonce on HTML responses (`default-src 'none'`, `script-src` nonce only, `frame-ancestors 'none'`), with no external resource.
+- **Files**: a PDF is addressed by material id, never by a path from the request; its stored name must resolve inside the subject's `materials/` directory (symlinks out, `..`, embedded NULs and non-PDF suffixes are refused), and it is served as `application/pdf` with `nosniff`. Other formats are never served raw — an HTML file from a bundle would otherwise run script on the page's origin — and show the cited chunk text instead.
+- Residual: a PDF opens in the browser's own viewer on the page's origin, so a hostile PDF is a browser-viewer risk, not a Groundly one; the student's own materials carry the same risk anywhere.
 
 ## 5. Privacy
 
 - **Nothing leaves the machine** except model downloads from Hugging Face, plus RapidOCR models from modelscope.cn (sha256-pinned) only if a configured `--ocr-lang` resolves to a model not bundled in the rapidocr wheel.
-- **The privacy boundary is a file**: `progress.db` — empty today, study progress in sub-projects 2–3 — is never exported. `store.db` exports carry the whole knowledge base including chunk text and original materials; the export UX says so plainly ("this bundle contains everything indexed in this subject").
+- **The privacy boundary is a file**: `progress.db` — empty today, study progress in sub-project 3 — is never exported. The topic tree lives in `store.db`, so it exports with the bundle; the page and the tools write nothing to `progress.db`. `store.db` exports carry the whole knowledge base including chunk text and original materials; the export UX says so plainly ("this bundle contains everything indexed in this subject").
 - **Sharing = sharing course-material text.** Between enrolled students this is note-sharing; Groundly documents it rather than policing it (thesis acknowledges the copyright surface).
 - **Debug logs are stderr-only, never a Groundly-written file.** `--debug` (on `index`/`search`/`mcp`) and `GROUNDLY_LOG_LEVEL` stream to stderr and nowhere else: a log file would be a new artifact holding query text and chunk ids that export code would then have to reason about, so there isn't one. Off by default at *every* level — `groundly/__init__.py` attaches a `NullHandler` so stdlib's `logging.lastResort` can't emit WARNING+ records on its own. inside the host-spawned `groundly mcp` process the switch is either `--debug` in the host's `args` or `GROUNDLY_LOG_LEVEL` in its `env`; every record goes to stderr precisely because that process speaks the MCP protocol over stdout.
 - No telemetry, no accounts, no third-party trace storage (LangSmith was dropped for exactly this reason).
