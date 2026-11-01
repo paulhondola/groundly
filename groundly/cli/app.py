@@ -19,6 +19,9 @@ app.add_typer(config_app, name="config")
 models_app = typer.Typer()
 app.add_typer(models_app, name="models")
 
+skill_app = typer.Typer()
+app.add_typer(skill_app, name="skill")
+
 
 console = Console()
 
