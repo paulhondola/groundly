@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 CHANNEL_K = 50  # candidates pulled per channel before fusion
 RRF_K = 60  # standard reciprocal-rank-fusion constant
 RERANK_POOL = 20  # fused candidates handed to the cross-encoder
-CONTEXT_K = 8  # default number of hits returned
+TOP_K = 8  # default number of hits returned
 
 
 def rrf(rankings: list[list[int]], k: int = RRF_K) -> list[tuple[int, float]]:
@@ -30,7 +30,7 @@ def rrf(rankings: list[list[int]], k: int = RRF_K) -> list[tuple[int, float]]:
 
 
 class VectorRetriever:
-    """dense + sparse + BM25 -> RRF -> optional cross-encoder rerank -> top context_k.
+    """dense + sparse + BM25 -> RRF -> optional cross-encoder rerank -> top_k hits.
 
     `embedder`/`reranker` default to the lazily loaded bge-m3 / bge-reranker-v2-m3
     models; tests inject stubs."""
@@ -43,20 +43,20 @@ class VectorRetriever:
         rerank: bool | None = None,
         channel_k: int = CHANNEL_K,
         rerank_pool: int = RERANK_POOL,
-        context_k: int | None = None,
+        top_k: int | None = None,
     ) -> None:
-        # rerank/context_k default from config (retrieval.*); explicit args override.
-        if rerank is None or context_k is None:
+        # rerank/top_k default from config (retrieval.*); explicit args override.
+        if rerank is None or top_k is None:
             from groundly.core.config import load_settings
 
             settings = load_settings().retrieval
             rerank = settings.rerank if rerank is None else rerank
-            context_k = settings.context_k if context_k is None else context_k
+            top_k = settings.top_k if top_k is None else top_k
         self.store = store
         self.rerank = rerank
         self.channel_k = channel_k
         self.rerank_pool = rerank_pool
-        self.context_k = context_k
+        self.top_k = top_k
         self._embedder = embedder
         self._reranker = reranker
 
@@ -76,12 +76,13 @@ class VectorRetriever:
             self._reranker = BgeReranker()
         return self._reranker
 
-    def retrieve(self, query: str) -> list[Hit]:
+    def retrieve(self, query: str, material_id: int | None = None) -> list[Hit]:
+        """Ranked hits for `query`; `material_id` scopes every channel to one material."""
         dense, sparse = self.embedder.encode([query])  # one pass feeds both channels
 
-        dense_ids = self.store.dense_search(dense[0], self.channel_k)
-        sparse_ids = self.store.sparse_search(sparse[0], self.channel_k)
-        bm25_ids = self.store.bm25_search(query, self.channel_k)
+        dense_ids = self.store.dense_search(dense[0], self.channel_k, material_id)
+        sparse_ids = self.store.sparse_search(sparse[0], self.channel_k, material_id)
+        bm25_ids = self.store.bm25_search(query, self.channel_k, material_id)
         stages = ["dense", "sparse", "bm25", "rrf"]
         logger.debug(
             "channel hits: dense=%d sparse=%d bm25=%d",
@@ -108,7 +109,7 @@ class VectorRetriever:
             ranked = [(cid, fused_scores[cid]) for cid in fused_ids]
 
         hits = []
-        for chunk_id, score in ranked[: self.context_k]:
+        for chunk_id, score in ranked[: self.top_k]:
             row = details.get(chunk_id)
             if row is None:  # removed between fusion and detail lookup — skip, don't crash
                 logger.debug("chunk %s vanished between fusion and detail lookup", chunk_id)
@@ -124,6 +125,7 @@ def search(
     *,
     k: int | None = None,
     rerank: bool | None = None,
+    material_id: int | None = None,
     embedder=None,
     reranker=None,
 ) -> list[Hit]:
@@ -132,7 +134,5 @@ def search(
     from groundly.core.subject import Subject
 
     store = SubjectStore(Subject(subject).store_db_path)
-    retriever = VectorRetriever(
-        store, embedder=embedder, reranker=reranker, rerank=rerank, context_k=k
-    )
-    return retriever.retrieve(query)
+    retriever = VectorRetriever(store, embedder=embedder, reranker=reranker, rerank=rerank, top_k=k)
+    return retriever.retrieve(query, material_id=material_id)

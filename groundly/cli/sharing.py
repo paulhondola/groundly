@@ -48,8 +48,14 @@ def import_(
     as_name: Annotated[
         str | None, typer.Option("--as", help="Import under a different subject name.")
     ] = None,
-    force: Annotated[
-        bool, typer.Option("--force", help="Replace an existing subject without confirmation.")
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help="Skip confirmation prompts (replace an existing subject, re-embed on pin "
+            "mismatch).",
+        ),
     ] = False,
 ) -> None:
     """Import a bundle produced by `groundly export`: validated, zip-slip-safe extraction,
@@ -79,9 +85,9 @@ def import_(
         _fail(str(exc))
 
     target = Subject(name)
-    if target.exists() and not force:
+    if target.exists() and not yes:
         typer.confirm(
-            f"subject '{name}' exists — replace it? (its progress and notes are deleted)",
+            f"subject '{name}' exists — replace it? (its progress is deleted)",
             abort=True,
         )
 
@@ -99,10 +105,12 @@ def import_(
             bundle.check_counts(tmp_dir / "store.db", manifest)
 
             if not bundle.pin_matches(manifest):
-                typer.confirm(
-                    "embedding pin mismatch — re-embed locally now? (free, takes a few minutes)",
-                    abort=True,
-                )
+                if not yes:
+                    typer.confirm(
+                        "embedding pin mismatch — re-embed locally now? (free, takes a few "
+                        "minutes)",
+                        abort=True,
+                    )
                 from groundly.llm.embeddings import shared_embedder
 
                 def on_step(done: int, total: int) -> None:

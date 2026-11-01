@@ -16,7 +16,7 @@ app = typer.Typer(
 config_app = typer.Typer()
 app.add_typer(config_app, name="config")
 
-models_app = typer.Typer(no_args_is_help=True)
+models_app = typer.Typer()
 app.add_typer(models_app, name="models")
 
 
@@ -36,7 +36,7 @@ def _subject_checked(subject: str):
     except ValueError as exc:
         _fail(str(exc))
     if not subj.exists():
-        _fail(f"Subject '{subject}' is not initialized — run: groundly init {subject}")
+        _fail(f"Subject '{subject}' is not initialized — run: groundly index {subject} <paths>")
     return subj
 
 

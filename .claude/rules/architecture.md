@@ -21,7 +21,7 @@ Layers: clients (`cli/`, `mcp/`) → services (`agents/`, `retrieval/`, `ingesti
 
 - SQLite **WAL + busy_timeout on every connection** (one-shot CLI and host-spawned MCP share store.db); schema via `PRAGMA user_version`, no migration framework.
 - **Lazy model loading** — never load bge-m3/reranker at MCP spawn; load on first use.
-- `groundly serve` binds **127.0.0.1 only**.
+- `groundly mcp --http` binds **127.0.0.1 only**.
 - `progress.db` is the student's private study state (no tables yet); `search` is read-only.
 
 ## Frameworks

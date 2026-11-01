@@ -10,7 +10,7 @@ flowchart LR
     host[Host AI agent]
 
     subgraph Groundly[Groundly actions]
-        init[init, list, index, remove]
+        init[index, list, remove, drop]
         share[import, export]
         discover[list_subjects]
         search[search]

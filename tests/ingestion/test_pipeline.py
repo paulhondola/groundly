@@ -222,5 +222,84 @@ def test_uninitialized_subject_names_the_fix(
     monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home2"))
     subj = Subject("NOPE")
     pipe = IngestionPipeline(subject=subj, extractor=stub_extractor(), embedder=stub_embedder())
-    with pytest.raises(RuntimeError, match="groundly init NOPE"):
+    with pytest.raises(RuntimeError, match="groundly index NOPE"):
         pipe.run([course])
+
+
+# --- --retry-failed ------------------------------------------------------------------
+
+
+class _AlwaysFail:
+    def extract(self, path, ocr_lang=None):
+        from groundly.ingestion.extract import ExtractionFailure
+
+        raise ExtractionFailure("no readable text — OCR found nothing to extract")
+
+
+def _fail_once(subject, course, stub_embedder):
+    subj = Subject(subject)
+    IngestionPipeline(subject=subj, extractor=_AlwaysFail(), embedder=stub_embedder()).run(
+        [course / "notes.txt"]
+    )
+    return subj
+
+
+def test_failed_file_skipped_without_flag_names_the_flag(
+    subject, course, stub_embedder, stub_extractor
+):
+    subj = _fail_once(subject, course, stub_embedder)
+    pipe = IngestionPipeline(subject=subj, extractor=stub_extractor(), embedder=stub_embedder())
+    [result] = pipe.run([course / "notes.txt"])
+    assert result.status == Status.SKIPPED_FAILED
+    assert result.detail.endswith("re-run with --retry-failed")
+
+
+def test_retry_failed_reextracts_and_indexes(
+    subject, course, stub_embedder, stub_extractor, connect
+):
+    subj = _fail_once(subject, course, stub_embedder)
+    pipe = IngestionPipeline(subject=subj, extractor=stub_extractor(), embedder=stub_embedder())
+    [result] = pipe.run([course / "notes.txt"], retry_failed=True)
+    assert result.status == Status.INDEXED
+    with connect(subject) as conn:
+        statuses = [r[0] for r in conn.execute("SELECT status FROM materials")]
+    assert statuses == ["indexed"]
+
+
+def test_retry_failed_that_fails_again_records_one_failed_row(
+    subject, course, stub_embedder, connect
+):
+    subj = _fail_once(subject, course, stub_embedder)
+    pipe = IngestionPipeline(subject=subj, extractor=_AlwaysFail(), embedder=stub_embedder())
+    [result] = pipe.run([course / "notes.txt"], retry_failed=True)
+    assert result.status == Status.EXTRACTION_FAILED
+    with connect(subject) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM materials").fetchone()[0] == 1
+
+
+def test_retry_failed_extracts_same_content_sibling_once(subject, tmp_path, stub_embedder):
+    """Two identical files: a retry run re-extracts the content once; the sibling is a skip
+    and must not replace the failure row just written."""
+    course = tmp_path / "dup"
+    course.mkdir()
+    for name in ("a.txt", "b.txt"):
+        (course / name).write_text("same content")
+
+    class CountingFail(_AlwaysFail):
+        def __init__(self):
+            self.seen = []
+
+        def extract(self, path, ocr_lang=None):
+            self.seen.append(path.name)
+            return super().extract(path, ocr_lang)
+
+    subj = Subject(subject)
+    IngestionPipeline(subject=subj, extractor=CountingFail(), embedder=stub_embedder()).run(
+        [course]
+    )
+    retry = CountingFail()
+    results = IngestionPipeline(subject=subj, extractor=retry, embedder=stub_embedder()).run(
+        [course], retry_failed=True
+    )
+    assert retry.seen == ["a.txt"]
+    assert [r.status for r in results] == [Status.EXTRACTION_FAILED, Status.SKIPPED_FAILED]

@@ -9,6 +9,7 @@ whole template.
 import logging
 import tomllib
 from pathlib import Path
+from typing import get_args
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
@@ -24,7 +25,7 @@ class IngestionSettings(BaseModel):
 
 
 class RetrievalSettings(BaseModel):
-    context_k: int = 8  # CONTEXT_K — retrieval/vector.py
+    top_k: int = 8  # TOP_K — retrieval/vector.py
     rerank: bool = True
 
 
@@ -75,17 +76,26 @@ def _valid_fields(model: type[BaseModel]) -> str:
     return ", ".join(model.model_fields)
 
 
+# plain-language names for `config set` errors, keyed by field type
+_EXPECTED = {int: "an integer", float: "a number", bool: "true or false", str: "text"}
+
+
 def _coerce(model: type[BaseModel], field: str, value: str, section: str):
     if field not in model.model_fields:
         raise ConfigKeyError(
             f"unknown field '{field}' for '{section}' — valid: {_valid_fields(model)}"
         )
     annotation = model.model_fields[field].annotation
+    nullable = type(None) in get_args(annotation)
+    if nullable and value.lower() in ("none", "null"):
+        return None
     try:
         return TypeAdapter(annotation).validate_python(value)
     except ValidationError:
+        base = next(a for a in get_args(annotation) or (annotation,) if a is not type(None))
+        expected = _EXPECTED[base] + (" or 'none'" if nullable else "")
         raise ConfigKeyError(
-            f"invalid value for {section}.{field}: expected {annotation}, got {value!r}"
+            f"invalid value for {section}.{field}: expected {expected}, got {value!r}"
         ) from None
 
 
@@ -130,11 +140,11 @@ def _toml_value(v) -> str:
 
 def render_config_toml(settings: Settings) -> str:
     """Regenerate the whole config file with every setting shown at its value. Used by
-    both first-run `init` (defaults) and `config set`."""
+    `Subject.initialize` (first-run defaults) and `config set`."""
     ing = settings.ingestion
     lines = [
         "# Groundly config — operational settings. Groundly never asks for an API key.",
-        "# Set values with e.g.:  groundly config set retrieval.context_k 12",
+        "# Set values with e.g.:  groundly config set retrieval.top_k 12",
         "",
         "[ingestion]",
         f"timeout_seconds = {_toml_value(ing.timeout_seconds)}   # per-file extraction wall-clock; raise for large PDFs / heavy OCR",
@@ -151,7 +161,7 @@ def render_config_toml(settings: Settings) -> str:
     lines += [
         "",
         "[retrieval]",
-        f"context_k = {_toml_value(settings.retrieval.context_k)}   # chunks returned per search",
+        f"top_k = {_toml_value(settings.retrieval.top_k)}   # chunks returned per search",
         f"rerank = {_toml_value(settings.retrieval.rerank)}   # cross-encoder rerank (off is faster on weak hardware)",
         "",
     ]

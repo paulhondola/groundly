@@ -82,7 +82,7 @@ def connect(path: Path, create: bool = False) -> sqlite3.Connection:
         conn.close()
         raise RuntimeError(
             f"{path.name} was written before groundly 1.0's schema reset — re-index the "
-            "subject from its materials (groundly remove, then init and index)"
+            "subject from its materials (groundly drop, then index)"
         )
     if version > STORE_USER_VERSION:
         conn.close()
@@ -172,17 +172,35 @@ class SubjectStore:
                 (filename, sha256, error),
             )
 
-    def dense_search(self, embedding: list[float], k: int) -> list[int]:
+    def dense_search(
+        self, embedding: list[float], k: int, material_id: int | None = None
+    ) -> list[int]:
         """Exact KNN over the dense channel (sqlite-vec brute force). Chunk ids
-        nearest-first."""
+        nearest-first.
+
+        Scoped to one material, the vec0 KNN cannot help (it takes no material
+        predicate without a metadata column, i.e. a schema change), so that material's
+        vectors are ranked by exact L2 distance — vec0's metric — in a plain scan. One
+        material's chunks are few."""
+        query = sqlite_vec.serialize_float32(embedding)
         with self._open() as conn:
-            rows = conn.execute(
-                "SELECT rowid FROM vectors WHERE embedding MATCH ? AND k = ? ORDER BY distance",
-                (sqlite_vec.serialize_float32(embedding), k),
-            ).fetchall()
+            if material_id is None:
+                rows = conn.execute(
+                    "SELECT rowid FROM vectors WHERE embedding MATCH ? AND k = ? ORDER BY distance",
+                    (query, k),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT rowid FROM vectors "
+                    "WHERE rowid IN (SELECT id FROM chunks WHERE material_id = ?) "
+                    "ORDER BY vec_distance_l2(embedding, ?) LIMIT ?",
+                    (material_id, query, k),
+                ).fetchall()
             return [r["rowid"] for r in rows]
 
-    def sparse_search(self, weights: dict[int, float], k: int) -> list[int]:
+    def sparse_search(
+        self, weights: dict[int, float], k: int, material_id: int | None = None
+    ) -> list[int]:
         """Learned-sparse channel: sum of weight * query_weight per chunk, best-first."""
         if not weights:
             return []
@@ -193,15 +211,17 @@ class SubjectStore:
                 SELECT st.chunk_id AS chunk_id, SUM(st.weight * qw.value) AS score
                 FROM sparse_terms st
                 JOIN json_each(?) AS qw ON CAST(qw.key AS INTEGER) = st.token_id
+                JOIN chunks c ON c.id = st.chunk_id
+                WHERE ? IS NULL OR c.material_id = ?
                 GROUP BY st.chunk_id
                 ORDER BY score DESC
                 LIMIT ?
                 """,
-                (query_json, k),
+                (query_json, material_id, material_id, k),
             ).fetchall()
             return [r["chunk_id"] for r in rows]
 
-    def bm25_search(self, query: str, k: int) -> list[int]:
+    def bm25_search(self, query: str, k: int, material_id: int | None = None) -> list[int]:
         """FTS5 BM25 channel. Each term is individually double-quoted before joining
         with OR — an unescaped query string is FTS5 query syntax, not a literal, and
         raises on stray quotes/operators (query-injection safety)."""
@@ -211,9 +231,11 @@ class SubjectStore:
         match_expr = " OR ".join('"' + t.replace('"', '""') + '"' for t in terms)
         with self._open() as conn:
             rows = conn.execute(
-                "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? "
+                "SELECT chunks_fts.rowid AS rowid FROM chunks_fts "
+                "JOIN chunks c ON c.id = chunks_fts.rowid "
+                "WHERE chunks_fts MATCH ? AND (? IS NULL OR c.material_id = ?) "
                 "ORDER BY bm25(chunks_fts) LIMIT ?",
-                (match_expr, k),
+                (match_expr, material_id, material_id, k),
             ).fetchall()
             return [r["rowid"] for r in rows]
 
