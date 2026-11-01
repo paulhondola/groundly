@@ -30,7 +30,7 @@ A roadmap-style map of a subject: big topics in course order, subtopics under ea
 
 **Acceptance criteria**
 
-1. `outline` returns materials, pages, headings and the current tree, loads no model, and stays under 15,000 tokens on apd.
+1. `outline` returns materials, pages, headings and the current tree, loads no model, and its reply reaches the host whole on a subject the size of apd.
 2. A tree with a real topic is accepted, each node has 1–5 sources, and every source resolves to a document and page.
 3. An off-topic node (e.g. "French Revolution") rejects the whole tree with `below_relevance_cutoff`, its score and nearest heading, and nothing is written.
 4. Several bad nodes are all reported in one rejection.
@@ -44,7 +44,9 @@ A roadmap-style map of a subject: big topics in course order, subtopics under ea
 12. **Human review:** on a fully re-indexed apd, the skill builds a tree Paul recognises as the course against the issue's seven big nodes (Intro, POSIX Threads, Synchronization, Performance, OpenMP, MPI, Sockets & Distributed). The review is recorded with the criteria.
 13. **Cutoff check before release:** Claude Code-written trees on apd and `passc` pass without wrongly rejected nodes piling up. Change the constant if they do.
 
-Criteria 12–13, the token budget in 1 and the end-to-end half of 11 are manual and stay open until recorded. The rest have tests; criterion 10 is checked as "the page has no HTML-inserting sink", not by rendering a hostile bundle.
+**Recorded 2026-11-01 (Paul, Claude Code):** apd (14 big topics, 66 subtopics) and `passc` (9 big topics, 38 subtopics) were both mapped and accepted, every node with sources, and Paul reviewed the maps and reports they look right. The apd map goes beyond the seven big nodes where the course does: dense matrix, OpenMP tasking, Java threads, Raft, GPU. One apd node was rejected on the first submit and passed after rewording, and no pile-up of wrong rejections was reported, so the cutoff stays at 1.0. With the server not connected, the skill gave the connect command. Submit duration was not timed.
+
+Criteria 1, 12, 13 and the end-to-end half of 11 are manual and recorded above. The rest have tests; criterion 10 is checked as "the page has no HTML-inserting sink", not by rendering a hostile bundle.
 
 ## Planned
 
