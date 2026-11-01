@@ -9,7 +9,12 @@ from typer.testing import CliRunner
 from groundly.cli import app
 
 runner = CliRunner()
-PAGE = Path(__file__).parents[2] / "groundly" / "web" / "page.html"
+WEB = Path(__file__).parents[2] / "groundly" / "web"
+# The shell and its script and stylesheet: the guarantees below hold across all three.
+PAGE = "".join(
+    (WEB / f).read_text(encoding="utf-8")
+    for f in ("page.html", "static/page.js", "static/page.css")
+)
 
 
 def _patch(monkeypatch, probe_free=True):
@@ -78,18 +83,15 @@ def test_serve_names_the_real_cause_when_the_bind_is_refused(monkeypatch):
 
 
 def test_page_inserts_content_only_as_text():
-    page = PAGE.read_text(encoding="utf-8")
     for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval("):
-        assert sink not in page, sink
+        assert sink not in PAGE, sink
 
 
 def test_page_loads_nothing_external():
-    page = PAGE.read_text(encoding="utf-8")
-    assert "http://" not in page and "https://" not in page
-    assert " onclick=" not in page
+    assert "http://" not in PAGE and "https://" not in PAGE
+    assert " onclick=" not in PAGE
 
 
 def test_page_links_a_source_only_when_the_server_says_it_is_a_stored_pdf():
-    page = PAGE.read_text(encoding="utf-8")
-    assert "src.pdf === true" in page
-    assert '.endsWith(".pdf")' not in page
+    assert "src.pdf === true" in PAGE
+    assert '.endsWith(".pdf")' not in PAGE

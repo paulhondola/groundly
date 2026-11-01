@@ -5,7 +5,6 @@ nothing here is writable, no model loads, and a stored filename is never trusted
 a material is addressed by id and its file must resolve inside the subject's materials dir.
 """
 
-import secrets
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
@@ -15,17 +14,19 @@ from starlette.middleware import Middleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import Request
 from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Response
-from starlette.routing import Route
+from starlette.routing import Mount, Route
+from starlette.staticfiles import StaticFiles
 
 from groundly.core.paths import discover_subjects
 from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
 
-_PAGE = (Path(__file__).parent / "page.html").read_text(encoding="utf-8")
+_WEB = Path(__file__).parent
+_PAGE = (_WEB / "page.html").read_text(encoding="utf-8")
 
 # HTML responses only: the browser's own PDF viewer needs the PDF response left unrestricted.
 _CSP = (
-    "default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; "
+    "default-src 'none'; script-src 'self'; style-src 'self'; "
     "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 )
 
@@ -47,12 +48,7 @@ def _read(subject: Subject, reader: Callable[[SubjectStore], Response | dict | N
 
 
 def _html(_: Request, status_code: int = 200) -> HTMLResponse:
-    nonce = secrets.token_urlsafe(16)
-    return HTMLResponse(
-        _PAGE.replace("__NONCE__", nonce),
-        status_code=status_code,
-        headers={"Content-Security-Policy": _CSP.format(nonce=nonce)},
-    )
+    return HTMLResponse(_PAGE, status_code=status_code, headers={"Content-Security-Policy": _CSP})
 
 
 def _subject_page(request: Request) -> Response:
@@ -135,6 +131,7 @@ def create_app() -> Starlette:
     return Starlette(
         routes=[
             Route("/", _html),
+            Mount("/static", StaticFiles(directory=_WEB / "static")),
             Route("/s/{subject}", _subject_page),
             Route("/api/subjects", _subjects),
             Route("/api/subjects/{subject}/tree", _tree),

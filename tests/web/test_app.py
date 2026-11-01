@@ -1,7 +1,6 @@
 """The page server is a read-only loopback surface over content a stranger's bundle may have
 written, so these tests pin what it refuses as much as what it serves."""
 
-import re
 import subprocess
 import sys
 
@@ -75,19 +74,24 @@ def _tamper(name, *statements):
         conn.close()
 
 
-def test_page_routes_serve_html_with_a_fresh_csp_nonce(client, seeded):
-    nonces = []
-    for path in ("/", "/s/PDSS", "/"):
+def test_page_routes_serve_html_under_a_self_only_csp(client, seeded):
+    for path in ("/", "/s/PDSS"):
         r = client.get(path)
         assert r.status_code == 200
         assert r.headers["content-type"].startswith("text/html")
-        nonce = re.search(r"script-src 'nonce-([^']+)'", r.headers["content-security-policy"])[1]
-        assert f'nonce="{nonce}"' in r.text
-        assert "__NONCE__" not in r.text
-        nonces.append(nonce)
-    assert len(set(nonces)) == 3
-    csp = r.headers["content-security-policy"]
-    assert "default-src 'none'" in csp and "frame-ancestors 'none'" in csp
+        csp = r.headers["content-security-policy"]
+        assert "script-src 'self'; style-src 'self'" in csp
+        assert "unsafe-inline" not in csp and "nonce" not in csp
+        assert "default-src 'none'" in csp and "frame-ancestors 'none'" in csp
+        assert "/static/page.js" in r.text and "/static/page.css" in r.text
+
+
+def test_page_assets_are_served_with_their_own_types(client, seeded):
+    css, js = client.get("/static/page.css"), client.get("/static/page.js")
+    assert css.status_code == js.status_code == 200
+    assert css.headers["content-type"].startswith("text/css")
+    assert "javascript" in js.headers["content-type"]
+    assert client.get("/static/../app.py").status_code == 404
 
 
 def test_foreign_host_header_is_rejected(client, seeded):
