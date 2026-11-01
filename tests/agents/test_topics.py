@@ -173,6 +173,7 @@ def test_subject_with_no_chunks_rejects_with_null_nearest(monkeypatch, tmp_path)
 @pytest.mark.parametrize("tree", [[], None])
 def test_empty_tree_rejected(store, tree):
     assert _reasons(_submit(store, tree)) == ["empty_tree"]
+    assert store.tree() == []
 
 
 def test_blank_title_summary_over_500_and_non_string_are_invalid_text(store):
@@ -234,16 +235,20 @@ def test_structural_failures_never_touch_the_models(store):
     forbidden = _Forbidden()
     result = submit_tree(store, [_node(), _node(id=999)], embedder=forbidden, reranker=forbidden)
     assert _reasons(result) == ["unknown_topic_id"]
+    assert store.tree() == []
 
 
 def test_reranker_runs_even_when_config_disables_it(store):
     from groundly.core.config import set_key
 
     set_key("retrieval.rerank", "false")
-    reranker = _FnReranker(_by_query)
-    result = _submit(store, [_node(OFF_TOPIC, "Revolution in 1789")], reranker)
+    # without the reranker, fused scores (< 1.0) would reject this and chunk 1 would lead
+    reranker = _FnReranker(lambda _q, text: 5.0 if text.startswith("semaphores") else 3.0)
+    assert _submit(store, [_node()], reranker)["accepted"] is True
     assert reranker.calls == 1
-    assert result["rejections"][0]["score"] == -5.0
+    texts = [s["text"] for s in store.tree()[0]["sources"]]
+    assert len(texts) == 3
+    assert texts[0].startswith("semaphores")
 
 
 def test_big_topic_without_subtopics_is_accepted(store):
@@ -251,7 +256,11 @@ def test_big_topic_without_subtopics_is_accepted(store):
     assert store.tree()[0]["subtopics"] == []
 
 
-def test_outline_lists_headings_and_current_tree_without_chunk_ids_or_text(store):
+def test_outline_lists_headings_and_current_tree_without_chunk_ids_or_text(store, monkeypatch):
+    def no_embedder():
+        raise AssertionError("outline must not load an embedder")
+
+    monkeypatch.setattr("groundly.llm.embeddings.shared_embedder", no_embedder)
     store.add_extraction_failed("broken.pdf", "b" * 64, "no readable text")
     store.replace_tree(
         [TopicWrite(None, "Deadlocks", "Why", [1, 3], [TopicWrite(None, "Cycle", "c", [])])]
