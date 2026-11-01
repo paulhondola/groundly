@@ -8,6 +8,7 @@ import json
 import sqlite3
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import sqlite_vec
@@ -15,6 +16,19 @@ import sqlite_vec
 from groundly.core.manifest import EMBEDDING_DIM
 
 STORE_USER_VERSION = 1
+
+
+@dataclass
+class TopicWrite:
+    """One node of a submitted topic tree. `id` is None for a new topic, or the id of an
+    existing one to keep; `chunk_ids` are its sources, best first."""
+
+    id: int | None
+    title: str
+    summary: str
+    chunk_ids: list[int]
+    subtopics: list["TopicWrite"] = field(default_factory=list)
+
 
 _SCHEMA = f"""
 CREATE TABLE materials (
@@ -60,6 +74,25 @@ CREATE TRIGGER chunks_au AFTER UPDATE ON chunks BEGIN
     INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
     INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
 END;
+
+-- AUTOINCREMENT: a topic id survives re-submissions and is never reused after a delete.
+-- Citations die with their chunk; the topic stays.
+CREATE TABLE topics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_id INTEGER REFERENCES topics(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL
+);
+CREATE INDEX idx_topics_parent ON topics(parent_id);
+
+CREATE TABLE topic_citations (
+    topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+    chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+    rank INTEGER NOT NULL,
+    PRIMARY KEY (topic_id, chunk_id)
+);
+CREATE INDEX idx_topic_citations_chunk ON topic_citations(chunk_id);
 """
 
 
@@ -320,3 +353,113 @@ class SubjectStore:
                     [(token_id, cid, weight) for token_id, weight in weights.items()],
                 )
             return material_id
+
+    def topic_ids(self) -> set[int]:
+        with self._open() as conn:
+            return {r["id"] for r in conn.execute("SELECT id FROM topics")}
+
+    def material_headings(self) -> list[sqlite3.Row]:
+        """Each distinct (file, page, heading) in reading order — the outline a topic
+        tree is organised around. Chunks without a heading carry no structure."""
+        with self._open() as conn:
+            return conn.execute(
+                """
+                SELECT m.filename, c.page, c.heading_path
+                FROM chunks c JOIN materials m ON m.id = c.material_id
+                WHERE c.heading_path IS NOT NULL AND c.heading_path != ''
+                GROUP BY m.filename, c.page, c.heading_path
+                ORDER BY m.filename, c.page, MIN(c.id)
+                """
+            ).fetchall()
+
+    def cited_chunk_counts(self) -> dict[str, int]:
+        """filename -> distinct chunks the tree cites from it."""
+        with self._open() as conn:
+            return {
+                r["filename"]: r["n"]
+                for r in conn.execute(
+                    """
+                    SELECT m.filename, COUNT(DISTINCT tc.chunk_id) AS n
+                    FROM topic_citations tc
+                    JOIN chunks c ON c.id = tc.chunk_id
+                    JOIN materials m ON m.id = c.material_id
+                    GROUP BY m.filename
+                    """
+                )
+            }
+
+    def tree(self) -> list[dict]:
+        """The topic tree in position order, each node's sources in rank order."""
+        with self._open() as conn:
+            sources: dict[int, list[dict]] = {}
+            for r in conn.execute(
+                """
+                SELECT tc.topic_id, c.id AS chunk_id, c.material_id, m.filename, c.page,
+                       c.heading_path, c.text
+                FROM topic_citations tc
+                JOIN chunks c ON c.id = tc.chunk_id
+                JOIN materials m ON m.id = c.material_id
+                ORDER BY tc.topic_id, tc.rank
+                """
+            ):
+                sources.setdefault(r["topic_id"], []).append(
+                    {
+                        "chunk_id": r["chunk_id"],
+                        "material_id": r["material_id"],
+                        "filename": r["filename"],
+                        "page": r["page"],
+                        "heading_path": r["heading_path"],
+                        "text": r["text"],
+                    }
+                )
+            children: dict[int | None, list[dict]] = {}
+            for r in conn.execute(
+                "SELECT id, parent_id, title, summary FROM topics ORDER BY position, id"
+            ):
+                children.setdefault(r["parent_id"], []).append(
+                    {
+                        "id": r["id"],
+                        "title": r["title"],
+                        "summary": r["summary"],
+                        "sources": sources.get(r["id"], []),
+                        "subtopics": [],
+                    }
+                )
+        for siblings in children.values():
+            for node in siblings:
+                node["subtopics"] = children.get(node["id"], [])
+        return children.get(None, [])
+
+    def replace_tree(self, tree: list[TopicWrite]) -> None:
+        """One transaction. Every submitted node is written (update by id, else insert)
+        before any other topic is deleted, so a subtopic moved out of a dropped parent
+        survives the parent's cascade."""
+        with self._open() as conn, conn:
+            existing = {r["id"] for r in conn.execute("SELECT id FROM topics")}
+            kept: set[int] = set()
+
+            def write(nodes: list[TopicWrite], parent_id: int | None) -> None:
+                for position, node in enumerate(nodes):
+                    if node.id in existing:
+                        topic_id = node.id
+                        conn.execute(
+                            "UPDATE topics SET parent_id = ?, position = ?, title = ?, "
+                            "summary = ? WHERE id = ?",
+                            (parent_id, position, node.title, node.summary, topic_id),
+                        )
+                    else:
+                        topic_id = conn.execute(
+                            "INSERT INTO topics (parent_id, position, title, summary) "
+                            "VALUES (?, ?, ?, ?)",
+                            (parent_id, position, node.title, node.summary),
+                        ).lastrowid
+                    kept.add(topic_id)
+                    conn.execute("DELETE FROM topic_citations WHERE topic_id = ?", (topic_id,))
+                    conn.executemany(
+                        "INSERT INTO topic_citations (topic_id, chunk_id, rank) VALUES (?, ?, ?)",
+                        [(topic_id, cid, rank) for rank, cid in enumerate(node.chunk_ids)],
+                    )
+                    write(node.subtopics, topic_id)
+
+            write(tree, None)
+            conn.executemany("DELETE FROM topics WHERE id = ?", [(i,) for i in existing - kept])
