@@ -1,5 +1,6 @@
 """The MCP tool surface plus a citation resource template: thin wrappers over the functions
-the `groundly` CLI verbs call. Service imports live inside tool bodies, so host spawn is
+the `groundly` CLI verbs call, and the topic-tree pair (`outline`, `submit_tree`) a host
+uses to build a course map. Service imports live inside tool bodies, so host spawn is
 fast and bge-m3/torch load on first use.
 """
 
@@ -96,6 +97,40 @@ def search(subject: str, query: str, k: int | None = None) -> list[dict]:
         }
         for h in hits
     ]
+
+
+@mcp.tool
+def outline(subject: str) -> dict:
+    """Call this before you build a course map for `subject`: it lists each indexed
+    material with its page headings, and the current topic tree with ids. Write the tree
+    from this course's own headings and wording, then pass it to `submit_tree`. Returns
+    no chunk text — use `search` to read the material itself."""
+    from groundly.agents.topics import outline as outline_fn
+    from groundly.core.store import SubjectStore
+
+    store = SubjectStore(_subject_or_error(subject, ToolError).store_db_path)
+    return outline_fn(store)
+
+
+@mcp.tool
+def submit_tree(subject: str, tree: list[dict]) -> dict:
+    """Call this once you have drafted a course map for `subject` from `outline` (and
+    `search`). `tree` is a list of big topics, each `{"title", "summary", "subtopics"}`
+    with an optional `"id"` copied from `outline` to keep an existing topic; a subtopic
+    has no subtopics of its own, and a summary is at most 500 characters. Groundly
+    chooses each topic's sources itself — you do not cite any. It checks that every topic
+    is in this course, not that a summary is true. Nothing is stored unless every topic
+    passes: a rejection comes back as `accepted: false` with a reason per topic (a normal
+    result, not an error) — fix those and submit again. No LLM call, no provider needed."""
+    from groundly.agents.topics import submit_tree as submit_tree_fn
+    from groundly.core.store import SubjectStore
+    from groundly.llm.embeddings import ModelDownloadError
+
+    store = SubjectStore(_subject_or_error(subject, ToolError).store_db_path)
+    try:
+        return submit_tree_fn(store, tree)
+    except ModelDownloadError as exc:
+        raise ToolError(str(exc)) from exc
 
 
 def _parse_citation_uri(uri: str) -> tuple[str, str, int | None]:

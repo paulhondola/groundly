@@ -109,7 +109,7 @@ async def test_search_description_leads_with_when_to_use_not_retrieval_mechanics
     )
 
 
-async def test_the_tool_surface_is_exactly_these_four_entries():
+async def test_the_tool_surface_is_exactly_these_six_entries():
     """The surface is UX (.claude/rules/conventions.md). A tool that creeps back in —
     or one quietly dropped — should fail here rather than in a host months later."""
     async with Client(mcp) as client:
@@ -121,6 +121,8 @@ async def test_the_tool_surface_is_exactly_these_four_entries():
         "list_subjects",
         "search",
         "get_page",
+        "outline",
+        "submit_tree",
     }
     assert templates == {"groundly://{subject}/{filename}"}
     assert resources == []
@@ -193,6 +195,72 @@ async def test_search_model_download_error_raises_tool_error(retrievable_subject
     async with Client(mcp) as client:
         with pytest.raises(ToolError, match="failed to load bge-m3"):
             await client.call_tool("search", {"subject": "TEST", "query": "q"})
+
+
+# --- outline / submit_tree --------------------------------------------------------
+
+_TREE = [{"title": "Deadlocks", "summary": "How circular wait blocks processes."}]
+
+
+class _ZeroReranker:
+    """Scores every pair 0.0, below the topic relevance cutoff."""
+
+    def compute_score(self, pairs):
+        return [0.0 for _ in pairs]
+
+
+async def test_outline_tool_returns_materials_for_a_subject(retrievable_subject):
+    async with Client(mcp) as client:
+        result = await client.call_tool("outline", {"subject": "TEST"})
+    assert [m["filename"] for m in result.data["materials"]] == ["lec.pdf"]
+    assert result.data["tree"] == []
+
+
+async def test_submit_tree_tool_stores_an_accepted_tree(retrievable_subject):
+    async with Client(mcp) as client:
+        result = await client.call_tool("submit_tree", {"subject": "TEST", "tree": _TREE})
+        stored = await client.call_tool("outline", {"subject": "TEST"})
+    assert result.data["accepted"] is True
+    assert [n["title"] for n in stored.data["tree"]] == ["Deadlocks"]
+    assert stored.data["tree"][0]["source_count"] > 0
+
+
+async def test_submit_tree_tool_returns_rejections_not_errors(retrievable_subject, monkeypatch):
+    monkeypatch.setattr("groundly.llm.rerank.BgeReranker", _ZeroReranker)
+    async with Client(mcp) as client:
+        result = await client.call_tool("submit_tree", {"subject": "TEST", "tree": _TREE})
+        stored = await client.call_tool("outline", {"subject": "TEST"})
+    assert result.data["accepted"] is False
+    assert [r["reason"] for r in result.data["rejections"]] == ["below_relevance_cutoff"]
+    assert stored.data["tree"] == []
+
+
+@pytest.mark.parametrize(("tool", "args"), [("outline", {}), ("submit_tree", {"tree": _TREE})])
+async def test_unknown_subject_raises_tool_error(subject_free_home, tool, args):
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="unknown subject 'NOPE'"):
+            await client.call_tool(tool, {"subject": "NOPE", **args})
+
+
+async def test_submit_tree_model_download_error_raises_tool_error(retrievable_subject, monkeypatch):
+    from groundly.llm.embeddings import ModelDownloadError
+
+    def fake_submit(*a, **k):
+        raise ModelDownloadError("failed to load bge-m3: boom")
+
+    monkeypatch.setattr("groundly.agents.topics.submit_tree", fake_submit)
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="failed to load bge-m3"):
+            await client.call_tool("submit_tree", {"subject": "TEST", "tree": _TREE})
+
+
+async def test_outline_and_submit_tree_descriptions_lead_with_when_to_call():
+    async with Client(mcp) as client:
+        tools = {t.name: " ".join(t.description.lower().split()) for t in await client.list_tools()}
+    assert tools["outline"].startswith("call this before")
+    assert tools["submit_tree"].startswith("call this once")
+    assert "groundly chooses" in tools["submit_tree"]
+    assert "not that a summary is true" in tools["submit_tree"]
 
 
 # --- get_page -----------------------------------------------------------------------
