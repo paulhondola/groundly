@@ -272,7 +272,7 @@ def test_import_refuses_a_store_without_topic_tables(tmp_path, monkeypatch):
 
     result = _export_then_import(tmp_path, monkeypatch)
 
-    _assert_refused(result, "no topic tree tables", "re-export")
+    _assert_refused(result, "no topic tree tables", "re-index")
 
 
 def test_import_refuses_more_than_max_tree_nodes(tmp_path, monkeypatch):

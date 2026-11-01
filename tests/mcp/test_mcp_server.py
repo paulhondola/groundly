@@ -254,6 +254,65 @@ async def test_submit_tree_model_download_error_raises_tool_error(retrievable_su
             await client.call_tool("submit_tree", {"subject": "TEST", "tree": _TREE})
 
 
+def _failing_submit(exc):
+    def fake_submit(*a, **k):
+        raise exc
+
+    return fake_submit
+
+
+async def test_submit_tree_names_a_locked_store(retrievable_subject, monkeypatch):
+    import sqlite3
+
+    monkeypatch.setattr(
+        "groundly.agents.topics.submit_tree",
+        _failing_submit(sqlite3.OperationalError("database is locked")),
+    )
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match=r"store is busy.*groundly index.*submit again"):
+            await client.call_tool("submit_tree", {"subject": "TEST", "tree": _TREE})
+
+
+async def test_submit_tree_does_not_mislabel_another_operational_error(
+    retrievable_subject, monkeypatch
+):
+    import sqlite3
+
+    monkeypatch.setattr(
+        "groundly.agents.topics.submit_tree",
+        _failing_submit(sqlite3.OperationalError("no such table: topics")),
+    )
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="no such table: topics") as raised:
+            await client.call_tool("submit_tree", {"subject": "TEST", "tree": _TREE})
+    assert "busy" not in str(raised.value)
+
+
+async def test_submit_tree_names_a_material_removed_during_the_check(
+    retrievable_subject, monkeypatch
+):
+    import sqlite3
+
+    monkeypatch.setattr(
+        "groundly.agents.topics.submit_tree",
+        _failing_submit(sqlite3.IntegrityError("FOREIGN KEY constraint failed")),
+    )
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match=r"material was removed.*submit again"):
+            await client.call_tool("submit_tree", {"subject": "TEST", "tree": _TREE})
+
+
+async def test_submit_tree_names_a_topic_dropped_during_the_check(retrievable_subject, monkeypatch):
+    from groundly.core.store import StaleTopicError
+
+    monkeypatch.setattr(
+        "groundly.agents.topics.submit_tree", _failing_submit(StaleTopicError("topic 7"))
+    )
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match=r"map changed.*run outline and submit again"):
+            await client.call_tool("submit_tree", {"subject": "TEST", "tree": _TREE})
+
+
 async def test_outline_and_submit_tree_descriptions_lead_with_when_to_call():
     async with Client(mcp) as client:
         tools = {t.name: " ".join(t.description.lower().split()) for t in await client.list_tools()}
@@ -262,6 +321,8 @@ async def test_outline_and_submit_tree_descriptions_lead_with_when_to_call():
     assert tools["submit_tree"].startswith("call this once")
     assert "groundly chooses" in tools["submit_tree"]
     assert "not that a summary is true" in tools["submit_tree"]
+    assert "1000 topics" in tools["submit_tree"] and "200 characters" in tools["submit_tree"]
+    assert not any("verified" in tools[name] for name in ("outline", "submit_tree"))
 
 
 # --- get_page -----------------------------------------------------------------------

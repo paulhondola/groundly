@@ -38,6 +38,11 @@ class TopicWrite:
     subtopics: list["TopicWrite"] = field(default_factory=list)
 
 
+class StaleTopicError(Exception):
+    """A submitted tree keeps a topic id that no longer exists: another submit dropped it
+    after the caller read the ids. Raised before anything is written."""
+
+
 _SCHEMA = f"""
 CREATE TABLE materials (
     id INTEGER PRIMARY KEY,
@@ -451,13 +456,16 @@ class SubjectStore:
     def replace_tree(self, tree: list[TopicWrite]) -> None:
         """One transaction. Every submitted node is written (update by id, else insert)
         before any other topic is deleted, so a subtopic moved out of a dropped parent
-        survives the parent's cascade."""
+        survives the parent's cascade. A kept id that is gone raises StaleTopicError and
+        nothing is written."""
         with self._open() as conn, conn:
             existing = {r["id"] for r in conn.execute("SELECT id FROM topics")}
             kept: set[int] = set()
 
             def write(nodes: list[TopicWrite], parent_id: int | None) -> None:
                 for position, node in enumerate(nodes):
+                    if node.id is not None and node.id not in existing:
+                        raise StaleTopicError(f"topic {node.id} no longer exists")
                     if node.id in existing:
                         topic_id = node.id
                         conn.execute(

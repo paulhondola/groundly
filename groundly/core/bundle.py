@@ -156,7 +156,7 @@ def check_tree(store_db_path: Path) -> None:
         if not {"topics", "topic_citations"} <= tables:
             raise BundleError(
                 "bundle has no topic tree tables — it was exported by an older groundly; "
-                "re-export it from the source machine"
+                "on the source machine, re-index the subject, then re-export it"
             )
         dangling = conn.execute("PRAGMA foreign_key_check").fetchall()
         if dangling:

@@ -25,7 +25,7 @@ groundly/
 - **clients → services → foundations**, one direction: `cli`/`mcp`/`web` call `agents`/`retrieval`/`ingestion`/`core` (`web` only reads, through `core`); those call only `llm`/`core`. **Nothing imports the client layer.** Enforced by the import-linter `layers` contract in `pyproject.toml` (`lint-imports`, run in CI).
 - Model loading lives **only** in `llm/`. Groundly constructs no LLM client anywhere (decision 37).
 - `agents` calls `retrieval` (the verifier re-retrieves). `retrieval` never calls `agents`.
-- Two writers touch `store.db`: `ingestion` (materials, chunks, vectors) and the topic gate in `agents` (the tree, reached from `submit_tree`). `ingestion` never serves queries; `web` never writes.
+- Two writers touch `store.db`: `ingestion` (materials, chunks, vectors) and the topic gate in `agents` (the tree, reached from `submit_tree`). `ingestion` never serves queries; `web` never writes. It marks each source `pdf` only when the stored file resolves inside the materials dir, so the page never links a PDF an export left out.
 
 ## System context
 

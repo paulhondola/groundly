@@ -87,3 +87,9 @@ def test_page_loads_nothing_external():
     page = PAGE.read_text(encoding="utf-8")
     assert "http://" not in page and "https://" not in page
     assert " onclick=" not in page
+
+
+def test_page_links_a_source_only_when_the_server_says_it_is_a_stored_pdf():
+    page = PAGE.read_text(encoding="utf-8")
+    assert "src.pdf === true" in page
+    assert '.endsWith(".pdf")' not in page

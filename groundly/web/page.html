@@ -132,7 +132,7 @@ function sourceItem(subject, src) {
   const item = el("li");
   const filename = String(src.filename);
   const label = filename + (src.page != null ? " · p." + Number(src.page) : "");
-  if (filename.toLowerCase().endsWith(".pdf")) {
+  if (src.pdf === true) {
     const link = el("a", label);
     link.href = "/s/" + encodeURIComponent(subject) + "/materials/" + Number(src.material_id) +
       (src.page != null ? "#page=" + Number(src.page) : "");
@@ -154,7 +154,16 @@ function renderPanel(panel, subject, node) {
     return;
   }
   const list = el("ul");
-  for (const src of node.sources) list.append(sourceItem(subject, src));
+  const linked = new Set();
+  for (const src of node.sources) {
+    if (src.pdf === true) {
+      // chunks of one page are separate sources, but one link opens the page
+      const label = src.filename + "\u0000" + src.page;
+      if (linked.has(label)) continue;
+      linked.add(label);
+    }
+    list.append(sourceItem(subject, src));
+  }
   panel.append(list);
 }
 

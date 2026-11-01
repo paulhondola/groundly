@@ -117,6 +117,22 @@ def test_tree_api_returns_tree_with_sources(client, seeded):
     ]
 
 
+def test_tree_flags_which_pdf_sources_can_be_opened(client, seeded):
+    (node,) = client.get("/api/subjects/PDSS/tree").json()["tree"]
+    assert [(s["filename"], s["pdf"]) for s in node["sources"]] == [
+        ("lec.pdf", True),
+        ("lec.html", False),
+    ]
+    (Subject("PDSS").materials_dir / "lec.pdf").unlink()  # e.g. exported with --no-materials
+    (node,) = client.get("/api/subjects/PDSS/tree").json()["tree"]
+    assert node["sources"][0]["pdf"] is False
+
+
+def test_pdf_route_404_when_filename_is_not_text(client, seeded):
+    _tamper("PDSS", ("UPDATE materials SET filename = ? WHERE id = ?", (b"x.pdf", seeded["pdf"])))
+    assert client.get(f"/s/PDSS/materials/{seeded['pdf']}").status_code == 404
+
+
 def test_unknown_or_invalid_subject_is_404(client, seeded):
     for name in ("nope", "..%2Fx", "a.b"):
         for path in (f"/s/{name}", f"/api/subjects/{name}/tree", f"/s/{name}/materials/1"):

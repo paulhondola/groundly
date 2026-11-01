@@ -75,12 +75,39 @@ def _subjects(_: Request) -> JSONResponse:
     return JSONResponse(out)
 
 
+def _stored_pdf(subject: Subject, filename) -> Path | None:
+    """The stored PDF a material's filename names, or None. The name is untrusted (an
+    imported bundle wrote it), so the resolved path must stay inside the materials dir."""
+    root = subject.materials_dir.resolve()
+    try:
+        path = (root / filename).resolve()
+        servable = path.is_relative_to(root) and path.suffix.lower() == ".pdf" and path.is_file()
+    except (ValueError, OSError, TypeError):  # NUL in a name; a non-text name from a hostile db
+        return None
+    return path if servable else None
+
+
 def _tree(request: Request) -> Response:
     subject = _open_subject(request.path_params["subject"])
     if subject is None:
         return JSONResponse({"error": "unknown subject"}, status_code=404)
     result = _read(subject, lambda store: {"tree": store.tree()})
-    return result if isinstance(result, Response) else JSONResponse(result)
+    if isinstance(result, Response):
+        return result
+    # `pdf` tells the page whether a link would open: a bundle exported without its
+    # materials still cites PDFs it cannot serve.
+    openable: dict[int, bool] = {}
+
+    def flag(nodes: list[dict]) -> None:
+        for node in nodes:
+            for src in node["sources"]:
+                if src["material_id"] not in openable:
+                    openable[src["material_id"]] = _stored_pdf(subject, src["filename"]) is not None
+                src["pdf"] = openable[src["material_id"]]
+            flag(node["subtopics"])
+
+    flag(result["tree"])
+    return JSONResponse(result)
 
 
 def _material(request: Request) -> Response:
@@ -92,13 +119,8 @@ def _material(request: Request) -> Response:
         return filename
     if filename is None:
         return Response("unknown material", status_code=404)
-    root = subject.materials_dir.resolve()
-    try:
-        path = (root / filename).resolve()
-        servable = path.is_relative_to(root) and path.suffix.lower() == ".pdf" and path.is_file()
-    except (ValueError, OSError):  # e.g. an embedded NUL in a hostile filename
-        servable = False
-    if not servable:
+    path = _stored_pdf(subject, filename)
+    if path is None:
         return Response("not a stored pdf", status_code=404)
     return FileResponse(
         path,

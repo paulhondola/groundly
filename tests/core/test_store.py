@@ -5,7 +5,7 @@ import sqlite_vec
 
 from groundly.core import store
 from groundly.core.manifest import EMBEDDING_DIM, Manifest, sync_counts
-from groundly.core.store import SubjectStore, TopicWrite
+from groundly.core.store import StaleTopicError, SubjectStore, TopicWrite
 
 
 @pytest.fixture
@@ -375,6 +375,32 @@ def test_resubmit_keeps_ids_updates_text_and_replaces_sources(db, tmp_path):
     assert again["id"] == node["id"]
     assert (again["title"], again["summary"]) == ("New", "new")
     assert [x["chunk_id"] for x in again["sources"]] == [c2]
+
+
+def test_a_failing_replace_tree_leaves_the_previous_tree_intact(db, tmp_path):
+    mid = _add_material(db, n_chunks=1)
+    (c1,) = _chunk_ids(db, mid)
+    s = SubjectStore(tmp_path / "store.db")
+    s.replace_tree([TopicWrite(None, "Old", "old", [c1])])
+    with pytest.raises(sqlite3.IntegrityError):
+        s.replace_tree([TopicWrite(None, "A", "a", [c1]), TopicWrite(None, "B", "b", [c1 + 1000])])
+    (node,) = s.tree()
+    assert node["title"] == "Old"
+    assert [x["chunk_id"] for x in node["sources"]] == [c1]
+
+
+def test_replace_tree_refuses_a_kept_id_that_no_longer_exists(db, tmp_path):
+    mid = _add_material(db, n_chunks=1)
+    (c1,) = _chunk_ids(db, mid)
+    s = SubjectStore(tmp_path / "store.db")
+    s.replace_tree([TopicWrite(None, "Old", "old", [c1])])
+    (old,) = s.tree()
+    s.replace_tree([TopicWrite(None, "Other", "o", [c1])])  # drops `old`
+    with pytest.raises(StaleTopicError):
+        s.replace_tree(
+            [TopicWrite(None, "Fresh", "f", [c1]), TopicWrite(old["id"], "Back", "b", [])]
+        )
+    assert [n["title"] for n in s.tree()] == ["Other"]
 
 
 def test_moving_a_subtopic_out_of_a_dropped_big_topic_keeps_it(db, tmp_path):
