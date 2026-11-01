@@ -62,7 +62,7 @@ code { background: var(--accent-bg); padding: 1px 6px; border-radius: 4px; }
 .node.nosrc { border-style: dashed; }
 .node[aria-pressed="true"] { background: var(--accent-bg); border-color: var(--accent); }
 
-.panel { position: sticky; top: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; min-width: 0; }
+.panel { position: sticky; top: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; min-width: 0; max-height: calc(100vh - 32px); overflow: auto; }
 .panel ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
 .panel pre {
   margin: 4px 0 0; padding: 8px; max-height: 240px; overflow: auto; white-space: pre-wrap;
@@ -74,7 +74,7 @@ code { background: var(--accent-bg); padding: 1px 6px; border-radius: 4px; }
 
 @media (max-width: 700px) {
   .layout { grid-template-columns: 1fr; }
-  .panel { position: static; }
+  .panel { position: static; max-height: none; }
   .topic { grid-template-columns: 1fr; }
 }
 </style>
@@ -190,6 +190,7 @@ async function showTree(subject) {
       selected = b;
       b.setAttribute("aria-pressed", "true");
       renderPanel(panel, subject, n);
+      panel.scrollTop = 0;
       if (window.matchMedia("(max-width: 700px)").matches) panel.scrollIntoView({ block: "nearest" });
     });
     return b;
