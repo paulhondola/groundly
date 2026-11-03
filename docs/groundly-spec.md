@@ -25,7 +25,7 @@ One human role: the **student** (owner of the machine and the data). The other "
 
 ## 3. Core Use Cases
 
-- **UC-01 Index materials** — digital PDF/DOCX/PPTX/MD/HTML/LaTeX/AsciiDoc/CSV/XLSX/EPUB/TXT/source and raster images → Docling (+OCR) → chunks → embeddings. [Detail](use-cases/knowledge-base.md)
+- **UC-01 Index materials** — digital PDF/DOCX/PPTX/MD/HTML/LaTeX/AsciiDoc/CSV/XLSX/EPUB/TXT/source, Jupyter notebooks and raster images → Docling (+OCR) → chunks → embeddings. [Detail](use-cases/knowledge-base.md)
 - **UC-02 Grounded search** — `search` returns ranked verbatim chunks with citations; the host composes and cites. [Detail](use-cases/knowledge-base.md)
 - **UC-03 Source management** — list/re-index/delete materials per subject. [Detail](use-cases/knowledge-base.md)
 - **UC-30 Share knowledge bases** — export/import `.groundly` bundles with manifest-pinned compatibility. [Detail](use-cases/sharing.md)
@@ -129,7 +129,7 @@ Live decisions only, one line each where possible. Gaps in the numbering are ret
 8. **Frameworks**: FastMCP (the tool surface) only. Starlette and uvicorn serve the topic-tree page (decision 41); they are not a second tool-surface framework.
 11. **Pilot subjects: two** — apd (Parallel & Distributed Algorithms) and passc (Software Architecture).
 12. **Timeline**: defense June/July 2027.
-13. **Expanded ingest formats** (2026-07-16): all docling-native text formats plus a wider plain-text set; `.ipynb` excluded.
+13. **Expanded ingest formats** (2026-07-16): all docling-native text formats plus a wider plain-text set; notebooks since decision 43.
 14. **OCR enabled** (2026-07-17): docling's bundled RapidOCR is local, offline and zero-key; scanned course PDFs are common.
 15. **Per-subject OCR language** (2026-07-17): `--ocr-lang` recorded in the manifest; changing it later requires re-indexing and is refused with a specific message.
 16. **`.groundlyignore`** (2026-07-19): a built-in junk-dir deny-list plus an optional per-root ignore file.
@@ -154,6 +154,7 @@ Live decisions only, one line each where possible. Gaps in the numbering are ret
     - *Consequences.* MCP tools now write `store.db` through the gate, so `ingestion` is no longer the only writer. `serve` adds a local page to the threat model ([`infrastructure/security.md`](infrastructure/security.md)). Starlette and uvicorn become direct dependencies; FastMCP already installed both, so the install does not grow, and they are not a second tool-surface framework. `serve` supersedes decision 40's reservation of the verb; the outline tool is the material listing decision 40 deferred, while the MCP `material` filter on `search` stays out.
 
 42. **A subject's title is a label, not its name** (Paul, 2026-11-03): `groundly title <subject> <text>` stores an optional `manifest.title`, shown by `groundly list`, `list_subjects` and the topic-tree page. The subject name stays the one ID in commands, paths and `groundly://` URIs, and keeps its strict character set. Why: course names have spaces and diacritics ("Algoritmi Paraleli și Distribuiți"), but the name is a directory, an MCP identifier and a URI part, and a bundle can supply it, so loosening its check to allow them would weaken the import boundary and changing it would break citations already handed out. A label needs neither. Rejected: renaming to a long slug (breaks citations, long to type) and spaces in names (touches URIs and routes). Consequences: at most 120 visible characters, checked on every manifest read; titles from bundles are layer 3; a corrupt manifest costs `list_subjects` and the page only that subject's title, while `groundly list` still warns and skips the subject. No `format_version` bump: an older groundly ignores the field, and drops it if it rewrites the manifest.
+43. **Notebooks are indexed; plain text stays verbatim** (Paul, 2026-11-03): an `.ipynb` is rendered to Markdown from its cells and chunked by docling, so its headings reach `heading_path` and `outline`, and its code stays intact. Saved outputs are dropped: they are machine-generated, and one embedded image would become hundreds of junk chunks. Plain-text chunks are cut from the source by tokenizer offsets, because decoding tokens collapsed all whitespace and broke the verbatim rule. The embedding pin, manifest and `format_version` are unchanged; a material already indexed keeps its old chunks until `groundly remove` and `groundly index` run on it.
 
 ## 8. Roadmap
 

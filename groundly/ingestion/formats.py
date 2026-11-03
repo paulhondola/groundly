@@ -58,6 +58,7 @@ PLAIN_TEXT_SUFFIXES = {
     ".rb",
     ".kt",
     ".swift",
-    ".ipynb",
 }
-SUPPORTED_SUFFIXES = DOCLING_SUFFIXES | PLAIN_TEXT_SUFFIXES
+# Rendered to Markdown from their cells, then chunked by docling like any .md.
+NOTEBOOK_SUFFIXES = {".ipynb"}
+SUPPORTED_SUFFIXES = DOCLING_SUFFIXES | PLAIN_TEXT_SUFFIXES | NOTEBOOK_SUFFIXES
