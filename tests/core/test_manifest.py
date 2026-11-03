@@ -39,10 +39,12 @@ def test_manifest_from_before_the_graph_was_dropped_still_parses(tmp_path):
 def test_title_round_trips_as_utf8_whatever_the_locale(tmp_path):
     """Bundles parse manifests as UTF-8, so a locale-encoded file would not import elsewhere."""
     path = tmp_path / "manifest.json"
+    title = "Paraleli și Distribuiți"
+    # ascii(): a C locale on Linux cannot decode non-ASCII in the -c argument itself.
     code = (
         "import sys; from pathlib import Path; from groundly.core.manifest import Manifest;"
-        "p = Path(sys.argv[1]); Manifest(subject='s', title='Paraleli și Distribuiți').save(p);"
-        "assert Manifest.load(p).title == 'Paraleli și Distribuiți'"
+        f"p = Path(sys.argv[1]); Manifest(subject='s', title={title!a}).save(p);"
+        f"assert Manifest.load(p).title == {title!a}"
     )
     env = {**os.environ, "LC_ALL": "C", "PYTHONCOERCECLOCALE": "0", "PYTHONUTF8": "0"}
     result = subprocess.run(
@@ -53,4 +55,4 @@ def test_title_round_trips_as_utf8_whatever_the_locale(tmp_path):
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert "Paraleli și Distribuiți" in path.read_bytes().decode("utf-8")
+    assert title in path.read_bytes().decode("utf-8")
