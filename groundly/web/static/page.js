@@ -27,12 +27,21 @@ function backLink() {
   return back;
 }
 
+function brand() {
+  const h1 = el("h1", "Groundly", "brand");
+  const logo = document.createElement("img");
+  logo.src = "/static/claude-code.svg";
+  logo.alt = "";
+  h1.prepend(logo);
+  return h1;
+}
+
 function showError(message) {
-  app.replaceChildren(el("h1", "Groundly"), el("p", message, "notice"));
+  app.replaceChildren(brand(), el("p", message, "notice"));
 }
 
 async function showSubjects() {
-  app.replaceChildren(el("h1", "Groundly"), el("p", "Pick a subject to see its topic map.", "muted"));
+  app.replaceChildren(brand(), el("p", "Pick a subject to see its topic map.", "muted"));
   let subjects;
   try { subjects = await getJSON("/api/subjects"); } catch (e) { return showError(e.message); }
   if (!subjects.length) {

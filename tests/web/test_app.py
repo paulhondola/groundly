@@ -80,7 +80,7 @@ def test_page_routes_serve_html_under_a_self_only_csp(client, seeded):
         assert r.status_code == 200
         assert r.headers["content-type"].startswith("text/html")
         csp = r.headers["content-security-policy"]
-        assert "script-src 'self'; style-src 'self'" in csp
+        assert "script-src 'self'; style-src 'self'; img-src 'self'" in csp
         assert "unsafe-inline" not in csp and "nonce" not in csp
         assert "default-src 'none'" in csp and "frame-ancestors 'none'" in csp
         assert "/static/page.js" in r.text and "/static/page.css" in r.text

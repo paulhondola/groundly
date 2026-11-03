@@ -26,7 +26,7 @@ _PAGE = (_WEB / "page.html").read_text(encoding="utf-8")
 
 # HTML responses only: the browser's own PDF viewer needs the PDF response left unrestricted.
 _CSP = (
-    "default-src 'none'; script-src 'self'; style-src 'self'; "
+    "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; "
     "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 )
 
