@@ -30,6 +30,8 @@ body {
 }
 main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
 h1 { font-size: 1.4rem; margin: 0 0 4px; }
+h1.brand { display: flex; align-items: center; gap: 8px; }
+h1.brand img { width: 1.4rem; height: 1.4rem; }
 h2 { font-size: 1.15rem; margin: 0 0 4px; }
 h3 { font-size: 0.8rem; margin: 20px 0 8px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
 a { color: var(--accent); }

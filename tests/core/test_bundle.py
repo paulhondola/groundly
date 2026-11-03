@@ -551,6 +551,50 @@ def test_import_as_creates_second_subject_alongside_original(tmp_path, monkeypat
     assert Subject("PDSS2").exists()
 
 
+def test_title_survives_export_import_as_and_count_syncs(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed("PDSS")
+    assert runner.invoke(app, ["title", "PDSS", "Parallel Systems"]).exit_code == 0
+    conn = SubjectStore(subject_dir("PDSS") / "store.db").connect()
+    try:
+        sync_counts(conn, Subject("PDSS").manifest_path)
+    finally:
+        conn.close()
+    assert Subject("PDSS").load_manifest().title == "Parallel Systems"
+
+    bundle_path = tmp_path / "PDSS.groundly"
+    runner.invoke(app, ["export", "PDSS", "-o", str(bundle_path)])
+    result = runner.invoke(app, ["import", str(bundle_path), "--as", "PDSS2"])
+    assert result.exit_code == 0, result.output
+    imported = Subject("PDSS2").load_manifest()
+    assert (imported.subject, imported.title) == ("PDSS2", "Parallel Systems")
+
+
+@pytest.mark.parametrize(
+    "title", ["x" * 121, "two\nlines", "rtl\N{RIGHT-TO-LEFT OVERRIDE}override", "tag\U000e0100"]
+)
+def test_import_refuses_a_bad_title_and_installs_nothing(tmp_path, monkeypatch, title):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed("PDSS")
+    bundle_path = tmp_path / "PDSS.groundly"
+    runner.invoke(app, ["export", "PDSS", "-o", str(bundle_path)])
+    with zipfile.ZipFile(bundle_path) as zf:
+        contents = {name: zf.read(name) for name in zf.namelist()}
+    manifest = json.loads(contents["manifest.json"])
+    manifest["title"] = title
+    contents["manifest.json"] = json.dumps(manifest).encode()
+    with zipfile.ZipFile(bundle_path, "w") as zf:
+        for name, data in contents.items():
+            zf.writestr(name, data)
+
+    result = runner.invoke(app, ["import", str(bundle_path), "--as", "HOSTILE"])
+    assert result.exit_code == 1
+    assert "title" in result.output
+    assert not Subject("HOSTILE").exists()
+
+
 def test_import_onto_leftover_dir_without_manifest_fails_cleanly(tmp_path, monkeypatch):
     _use_home(monkeypatch, tmp_path / "a")
     init_subject("PDSS")
@@ -669,3 +713,237 @@ def test_import_force_flag_is_gone(tmp_path, monkeypatch):
     bundle_path = tmp_path / "PDSS.groundly"
     bundle_path.write_bytes(b"")
     assert runner.invoke(app, ["import", str(bundle_path), "--force"]).exit_code == 2
+
+
+# --- hostile material rows and manifest fields ---------------------------------------
+
+
+def _rewrite_zip(bundle_path, edit):
+    with zipfile.ZipFile(bundle_path) as zf:
+        contents = {name: zf.read(name) for name in zf.namelist()}
+    edit(contents)
+    with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, data in contents.items():
+            zf.writestr(name, data)
+
+
+def _seed_exportable(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_tree("PDSS")
+
+
+def _export(tmp_path):
+    bundle_path = tmp_path / "PDSS.groundly"
+    assert runner.invoke(app, ["export", "PDSS", "-o", str(bundle_path)]).exit_code == 0
+    return bundle_path
+
+
+@pytest.mark.parametrize(
+    "columns, values",
+    [
+        ("filename, sha256, status", "'../../victim', '{sha}', 'extraction_failed'"),
+        ("filename, sha256, status", "'a/b.pdf', '{sha}', 'extraction_failed'"),
+        ("filename, sha256, status", "'a\\b.pdf', '{sha}', 'extraction_failed'"),
+        ("filename, sha256, status", "'..', '{sha}', 'extraction_failed'"),
+        ("filename, sha256, status", "'', '{sha}', 'extraction_failed'"),
+        ("filename, sha256, status", "'a' || char(0) || '.pdf', '{sha}', 'extraction_failed'"),
+        ("filename, sha256, status", "x'00ff', '{sha}', 'extraction_failed'"),
+        ("filename, sha256, status", "'a.pdf', '[/nosuch]', 'extraction_failed'"),
+        ("filename, sha256, status", "'a.pdf', '{sha}', '[/nosuch]'"),
+        ("filename, sha256, status, pages", "'a.pdf', '{sha}', 'extraction_failed', 'many'"),
+        ("filename, sha256, status, error", "'a.pdf', '{sha}', 'extraction_failed', x'00ff'"),
+    ],
+)
+def test_import_refuses_a_material_row_groundly_could_not_have_written(
+    tmp_path, monkeypatch, columns, values
+):
+    _seed_exportable(tmp_path, monkeypatch)
+    _tamper(
+        "PDSS",
+        "PRAGMA ignore_check_constraints = ON",
+        f"INSERT INTO materials ({columns}) VALUES ({values.format(sha='b' * 64)})",
+    )
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "material")
+    assert "\x1b" not in result.output
+
+
+def test_import_keeps_free_text_in_a_material_error(tmp_path, monkeypatch):
+    """Parser output is free text: it is escaped when shown, and a bundle is not refused for it."""
+    _seed_exportable(tmp_path, monkeypatch)
+    _tamper(
+        "PDSS",
+        "INSERT INTO materials (filename, sha256, status, error) VALUES "
+        f"('a.pdf', '{'b' * 64}', 'extraction_failed', 'x' || char(27) || '[31m [/nosuch]')",
+    )
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    assert result.exit_code == 0, result.output
+    assert Subject("PDSS").exists()
+
+
+@pytest.mark.parametrize("name", ["notes\tfinal.pdf", "a\nb.pdf", "bell\x07.pdf", "e\x1b[31m.pdf"])
+def test_import_keeps_a_filename_the_filesystem_allows(tmp_path, monkeypatch, name):
+    """Indexing stores a file's own name, so these are real exports. Only a name that could
+    leave the materials dir is refused; printing it is made inert where it is shown."""
+    _seed_exportable(tmp_path, monkeypatch)
+    SubjectStore(subject_dir("PDSS") / "store.db").add_extraction_failed(name, "b" * 64, "no text")
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    assert result.exit_code == 0, result.output
+    assert "\x1b" not in runner.invoke(app, ["list", "PDSS"]).output
+
+
+def test_import_refuses_a_page_that_is_not_a_number(tmp_path, monkeypatch):
+    _seed_exportable(tmp_path, monkeypatch)
+    _tamper("PDSS", "UPDATE chunks SET page = 'p' || char(27) || '[31m' WHERE id = 1")
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "chunk", "page")
+    assert "\x1b" not in result.output
+
+
+@pytest.mark.parametrize(
+    "statements",
+    [
+        pytest.param(
+            [
+                "ALTER TABLE materials RENAME TO m0",
+                "CREATE VIEW materials AS SELECT * FROM m0",
+            ],
+            id="materials-as-a-view",
+        ),
+        pytest.param(["CREATE VIEW extra AS SELECT 1"], id="extra-view"),
+        pytest.param(
+            ["CREATE TRIGGER extra AFTER DELETE ON topics BEGIN SELECT 1; END"],
+            id="extra-trigger",
+        ),
+        pytest.param(
+            [
+                "DROP TRIGGER chunks_ad",
+                (
+                    "CREATE TRIGGER chunks_ad AFTER DELETE ON chunks BEGIN "
+                    "INSERT INTO materials (filename, sha256, status) "
+                    "VALUES ('../../victim', 'x', 'indexed'); END"
+                ),
+            ],
+            id="shipped-trigger-name-with-another-body",
+        ),
+    ],
+)
+def test_import_refuses_views_and_triggers_groundly_does_not_ship(
+    tmp_path, monkeypatch, statements
+):
+    """A view answers the row checks with one thing and later reads with another; a trigger
+    rewrites rows after the checks have passed."""
+    _seed_exportable(tmp_path, monkeypatch)
+    _tamper("PDSS", *statements)
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "views or triggers")
+
+
+def test_import_refuses_a_view_before_any_check_reads_through_it(tmp_path, monkeypatch):
+    """A view runs when it is read, and one can be written never to finish. This one only
+    changes the row count, so the counts check would name the wrong cause if it ran first."""
+    _seed_exportable(tmp_path, monkeypatch)
+    _seed("PDSS", filename="other.pdf", sha256="b" * 64)
+    _tamper(
+        "PDSS",
+        "ALTER TABLE materials RENAME TO m0",
+        "CREATE VIEW materials AS SELECT * FROM m0 WHERE 0",
+    )
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "views or triggers")
+
+
+def test_export_status_shows_a_filename_as_plain_text(tmp_path, monkeypatch):
+    """The status line is transient, so it never reaches captured output. A plain string would
+    be parsed for markup and emoji codes; `Text` is shown as it is."""
+    from rich.status import Status
+    from rich.text import Text
+
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed("PDSS", filename=":warning:.pdf")
+    seen = []
+    real_update = Status.update
+
+    def recording_update(self, status=None, **kwargs):
+        seen.append(status)
+        real_update(self, status, **kwargs)
+
+    monkeypatch.setattr(Status, "update", recording_update)
+
+    result = runner.invoke(app, ["export", "PDSS", "-o", str(tmp_path / "out.groundly")])
+
+    assert result.exit_code == 0, result.output
+    assert any(isinstance(s, Text) and ":warning:.pdf" in s.plain for s in seen)
+
+
+def test_import_refuses_a_materials_table_missing_a_column(tmp_path, monkeypatch):
+    _seed_exportable(tmp_path, monkeypatch)
+    _tamper("PDSS", "ALTER TABLE materials DROP COLUMN error")
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "error")
+
+
+@pytest.mark.parametrize("lang", ["\x1b]52;c;cHduZWQ=\x07", "[/nosuch]"])
+def test_import_refuses_a_hostile_ocr_lang_without_printing_it_raw(tmp_path, monkeypatch, lang):
+    _seed_exportable(tmp_path, monkeypatch)
+    bundle_path = _export(tmp_path)
+
+    def edit(contents):
+        manifest = json.loads(contents["manifest.json"])
+        manifest["ocr"]["lang"] = [lang]
+        contents["manifest.json"] = json.dumps(manifest).encode()
+
+    _rewrite_zip(bundle_path, edit)
+    _use_home(monkeypatch, tmp_path / "b")
+
+    result = runner.invoke(app, ["import", str(bundle_path)])
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)  # a named refusal, not a traceback
+    assert "not a valid bundle" in " ".join(result.output.split())
+    assert "\x1b" not in result.output and "\x07" not in result.output
+    assert not Subject("PDSS").exists()
+
+
+def test_import_survives_markup_in_a_bundle_entry_name(tmp_path, monkeypatch):
+    """The name reaches the status line, which parses a plain string as console markup."""
+    _seed_exportable(tmp_path, monkeypatch)
+    bundle_path = _export(tmp_path)
+    _rewrite_zip(bundle_path, lambda contents: contents.update({"materials/[/nosuch].pdf": b"x"}))
+    _use_home(monkeypatch, tmp_path / "b")
+
+    result = runner.invoke(app, ["import", str(bundle_path)])
+
+    assert result.exit_code == 0, result.output
+    assert Subject("PDSS").exists()
+
+
+def test_export_survives_markup_in_a_material_path(tmp_path, monkeypatch):
+    """A nested entry an earlier import extracted: its stored path reads as a closing tag."""
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed("PDSS", filename="nosuch].pdf")
+    materials = subject_dir("PDSS") / "materials"
+    (materials / "[").mkdir()
+    (materials / "nosuch].pdf").rename(materials / "[" / "nosuch].pdf")
+    bundle_path = tmp_path / "out.groundly"
+
+    result = runner.invoke(app, ["export", "PDSS", "-o", str(bundle_path)])
+
+    assert result.exit_code == 0, result.output

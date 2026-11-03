@@ -8,7 +8,7 @@ There is no server to deploy. The product is a local **core library** with three
 
 ```
 groundly/
-├── cli/         # typer verbs: index, list, remove, drop, search, import, export,
+├── cli/         # typer verbs: index, list, title, remove, drop, search, import, export,
 │             #   config, models, skill, mcp (stdio, or --http), serve
 ├── mcp/         # FastMCP tool definitions over the core (stdio + streamable HTTP)
 ├── web/         # Starlette app + one HTML file: the read-only topic-tree page

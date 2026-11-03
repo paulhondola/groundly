@@ -40,6 +40,7 @@ No tables yet: the file is created empty (`PRAGMA user_version = 1`) so the priv
 {
   "format_version": 1,
   "subject": "PDSS",
+  "title": "Parallel and Distributed Systems",
   "embedding": { "model": "BAAI/bge-m3", "hf_revision": "<pin>", "dim": 1024,
                   "dtype": "float16", "normalized": true },
   "chunking":  { "strategy": "docling-hybrid", "max_tokens": 512, "overlap": 0 },
@@ -48,6 +49,8 @@ No tables yet: the file is created empty (`PRAGMA user_version = 1`) so the priv
   "tool_version": "<groundly version>"
 }
 ```
+
+`title` is an optional display label (`""` when unset, set with `groundly title`): at most 120 visible characters on one line, checked whenever a manifest is read, so a bad one in a bundle refuses the import. Commands, paths and citations always use `subject`, so changing a title moves nothing (decision 42). Adding it is not a `format_version` event: an older groundly ignores it, and drops it if that version rewrites the manifest.
 
 Semantics: vectors transfer **as-is only on exact embedding match** (model + revision + dim + dtype + normalization) — the global bge-m3 pin makes this the default. Mismatch → re-embed from chunk text (which is why chunk text always ships). Bundles built before decision 37 carry a `graphrag` manifest block and a `graph/` directory; both are ignored on import (the directory is never extracted), and dropping them is not a `format_version` event. Bundles built before decision 38 carry a `store.db` with the dropped deck tables; import refuses them with a re-index message (no users existed, so there is no migration). `ocr.lang` records the subject's OCR language set via `groundly index --ocr-lang` (`[]` = bundled default model set); it is part of the interchange contract because it shapes extracted chunk text — a re-index with a different lang is a different corpus (decision 15).
 

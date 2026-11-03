@@ -27,12 +27,21 @@ function backLink() {
   return back;
 }
 
+function brand() {
+  const h1 = el("h1", "Groundly", "brand");
+  const logo = document.createElement("img");
+  logo.src = "/static/claude-code.svg";
+  logo.alt = "";
+  h1.prepend(logo);
+  return h1;
+}
+
 function showError(message) {
-  app.replaceChildren(el("h1", "Groundly"), el("p", message, "notice"));
+  app.replaceChildren(brand(), el("p", message, "notice"));
 }
 
 async function showSubjects() {
-  app.replaceChildren(el("h1", "Groundly"), el("p", "Pick a subject to see its topic map.", "muted"));
+  app.replaceChildren(brand(), el("p", "Pick a subject to see its topic map.", "muted"));
   let subjects;
   try { subjects = await getJSON("/api/subjects"); } catch (e) { return showError(e.message); }
   if (!subjects.length) {
@@ -44,9 +53,10 @@ async function showSubjects() {
   const list = el("ul", undefined, "subjects");
   for (const s of subjects) {
     const item = el("li");
-    const link = el("a", s.subject);
+    const link = el("a", s.title || s.subject);
     link.href = "/s/" + encodeURIComponent(s.subject);
-    item.append(link, el("span", " — " + (s.error ? s.error : s.has_tree ? "topic map ready" : "no map yet"), "muted"));
+    const status = s.error ? s.error : s.has_tree ? "topic map ready" : "no map yet";
+    item.append(link, el("span", " — " + (s.title ? s.subject + " · " : "") + status, "muted"));
     list.append(item);
   }
   app.append(list);
@@ -101,15 +111,18 @@ function renderPanel(panel, subject, node, onClose) {
 
 async function showTree(subject) {
   document.title = subject + " · Groundly";
-  let tree;
-  try { tree = (await getJSON("/api/subjects/" + encodeURIComponent(subject) + "/tree")).tree; }
+  let tree, title;
+  try { ({ tree, title } = await getJSON("/api/subjects/" + encodeURIComponent(subject) + "/tree")); }
   catch (e) {
     showError(e.message);
     app.prepend(backLink());
     return;
   }
 
-  app.replaceChildren(backLink(), el("h1", subject));
+  document.title = (title || subject) + " · Groundly";
+  app.replaceChildren(backLink(), el("h1", title || subject));
+  // A bundle chooses its own title, so the page always names the subject it really is.
+  if (title) app.append(el("p", subject, "muted"));
 
   if (!tree.length) {
     const note = el("div", undefined, "notice");

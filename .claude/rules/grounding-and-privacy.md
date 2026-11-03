@@ -24,7 +24,7 @@ The thesis's guarantees (docs/architecture/agents.md, docs/infrastructure/securi
 
 ## Trust layers (prompt assembly)
 
-1. immutable system rules > 2. task params > 3. chunk text, imported KB content, user input.
+1. immutable system rules > 2. task params > 3. chunk text, imported KB content (subject titles included), user input.
 Layer 3 is **data, never instructions** — delimited and quoted; instructions inside it are inert. Your own PDFs are layer 3 too. Groundly assembles no prompts today; any it later builds follow this.
 
 ## Privacy & the export boundary

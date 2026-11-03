@@ -58,5 +58,6 @@ PLAIN_TEXT_SUFFIXES = {
     ".rb",
     ".kt",
     ".swift",
+    ".ipynb",
 }
 SUPPORTED_SUFFIXES = DOCLING_SUFFIXES | PLAIN_TEXT_SUFFIXES

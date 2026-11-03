@@ -26,7 +26,7 @@ _PAGE = (_WEB / "page.html").read_text(encoding="utf-8")
 
 # HTML responses only: the browser's own PDF viewer needs the PDF response left unrestricted.
 _CSP = (
-    "default-src 'none'; script-src 'self'; style-src 'self'; "
+    "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; "
     "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 )
 
@@ -63,7 +63,7 @@ def _subjects(_: Request) -> JSONResponse:
         subject = _open_subject(name)
         if subject is None:
             continue
-        entry: dict = {"subject": name, "has_tree": False}
+        entry: dict = {"subject": name, "title": subject.display_title(), "has_tree": False}
         try:
             entry["has_tree"] = bool(SubjectStore(subject.store_db_path).topic_ids())
         except (sqlite3.DatabaseError, RuntimeError) as e:
@@ -73,15 +73,8 @@ def _subjects(_: Request) -> JSONResponse:
 
 
 def _stored_pdf(subject: Subject, filename) -> Path | None:
-    """The stored PDF a material's filename names, or None. The name is untrusted (an
-    imported bundle wrote it), so the resolved path must stay inside the materials dir."""
-    root = subject.materials_dir.resolve()
-    try:
-        path = (root / filename).resolve()
-        servable = path.is_relative_to(root) and path.suffix.lower() == ".pdf" and path.is_file()
-    except (ValueError, OSError, TypeError):  # NUL in a name; a non-text name from a hostile db
-        return None
-    return path if servable else None
+    path = subject.stored_material(filename)
+    return path if path is not None and path.suffix.lower() == ".pdf" else None
 
 
 def _tree(request: Request) -> Response:
@@ -89,7 +82,7 @@ def _tree(request: Request) -> Response:
     if subject is None:
         name = request.path_params["subject"]
         return JSONResponse({"error": f"unknown subject {name!r}"}, status_code=404)
-    result = _read(subject, lambda store: {"tree": store.tree()})
+    result = _read(subject, lambda store: {"title": subject.display_title(), "tree": store.tree()})
     if isinstance(result, Response):
         return result
     # `pdf` tells the page whether a link would open: a bundle exported without its

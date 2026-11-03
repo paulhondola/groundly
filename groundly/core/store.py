@@ -140,6 +140,23 @@ def connect(path: Path, create: bool = False) -> sqlite3.Connection:
     return conn
 
 
+def programs(conn: sqlite3.Connection) -> set[tuple[str, str, str]]:
+    """The store's views and triggers: the schema objects that run SQL on a later read or write."""
+    rows = conn.execute(
+        "SELECT type, name, sql FROM sqlite_master WHERE type IN ('view', 'trigger')"
+    )
+    return {tuple(r) for r in rows}
+
+
+def shipped_programs() -> set[tuple[str, str, str]]:
+    conn = connect(Path(":memory:"), create=True)
+    try:
+        conn.executescript(_SCHEMA)
+        return programs(conn)
+    finally:
+        conn.close()
+
+
 def create_store(path: Path) -> None:
     conn = connect(path, create=True)
     try:
