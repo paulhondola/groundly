@@ -17,7 +17,6 @@ fixtures/
 # Local tooling state (agent harness, diagram/brainstorm scratch, per-machine MCP config)
 .archify/
 .superpowers/
-.remember/
 .claude/worktrees/
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
