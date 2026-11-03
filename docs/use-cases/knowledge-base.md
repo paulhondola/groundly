@@ -62,8 +62,11 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: the **student**
 1. `groundly list <SUBJECT>` shows materials with status, page counts, chunk counts; `list_subjects` (MCP) exposes the same.
 2. Removing a material deletes its chunks/vectors/sparse/FTS rows immediately.
 3. `manifest.json` counts stay in sync after every mutation.
+4. `groundly title <SUBJECT> <TEXT>` sets a display title (`""` clears it), shown by `groundly list`, `list_subjects` and the topic-tree page. Commands and citations keep using the subject name.
 
 **Acceptance criteria**
 
 - Deleting a material leaves no retrievable chunks in any channel.
 - `list_subjects` works from an MCP host spawned in an arbitrary working directory (global `~/.groundly/` discovery).
+- Setting or clearing a title changes no citation, path or stored chunk, and survives export and import.
+- A subject whose manifest is corrupt still appears in `list_subjects` and on the page, without a title.

@@ -101,7 +101,7 @@ stop it.
 
 | Tool | What it does |
 |---|---|
-| `list_subjects` | subjects with material/page/chunk counts |
+| `list_subjects` | subjects with title and material/page/chunk counts |
 | `search` | top-k ranked chunks with citations; the host composes the answer |
 | `get_page` | takes a citation `uri` from `search` and returns the verbatim chunks on that page |
 | `outline` | a subject's materials with their page headings, and its current topic tree with ids |

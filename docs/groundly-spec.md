@@ -48,8 +48,8 @@ One Python package (`uv tool install groundly`), three runtime modes, zero servi
         ▼                                   ▼
   ┌──────────────────── client layer ──────────────────────┐
   │ mcp/ FastMCP tools     cli/ typer verbs                │
-  │ stdio: `groundly mcp`  (index/list/remove/drop/search/ │
-  │ HTTP: `groundly mcp --http`  import/export/config/...) │
+  │ stdio: `groundly mcp`  (index/list/title/remove/drop/  │
+  │ HTTP: `groundly mcp --http`  search/import/export/...) │
   │ web/ topic-tree page (`groundly serve`, read-only)     │
   └──────────────┬───────────────┬─────────────────────────┘
                  ▼               ▼
@@ -152,6 +152,8 @@ Live decisions only, one line each where possible. Gaps in the numbering are ret
     - *Topicality only.* The gate shows a course passage is about the node's topic. It does not show the summary is correct, and no UI, doc or tool description may call a summary verified.
     - *Tables in schema v1, no migration.* `topics` and `topic_citations` join the single schema at `user_version = 1`: the project had just reset to v1 and subjects get re-indexed anyway. `AUTOINCREMENT` on `chunks.id` and `topics.id` means a deleted chunk's id is never reused, so a citation cannot silently point at a different chunk, and topic ids survive re-runs. Subjects indexed before the tables exist work for search and are re-indexed once; a bundle without the tables is refused on import, as is one whose tree is damaged.
     - *Consequences.* MCP tools now write `store.db` through the gate, so `ingestion` is no longer the only writer. `serve` adds a local page to the threat model ([`infrastructure/security.md`](infrastructure/security.md)). Starlette and uvicorn become direct dependencies; FastMCP already installed both, so the install does not grow, and they are not a second tool-surface framework. `serve` supersedes decision 40's reservation of the verb; the outline tool is the material listing decision 40 deferred, while the MCP `material` filter on `search` stays out.
+
+42. **A subject's title is a label, not its name** (Paul, 2026-11-03): `groundly title <subject> <text>` stores an optional `manifest.title`, shown by `groundly list`, `list_subjects` and the topic-tree page. The subject name stays the one ID in commands, paths and `groundly://` URIs, and keeps its strict character set. Why: course names have spaces and diacritics ("Algoritmi Paraleli și Distribuiți"), but the name is a directory, an MCP identifier and a URI part, and a bundle can supply it, so loosening its check to allow them would weaken the import boundary and changing it would break citations already handed out. A label needs neither. Rejected: renaming to a long slug (breaks citations, long to type) and spaces in names (touches URIs and routes). Consequences: at most 120 visible characters, checked on every manifest read; titles from bundles are layer 3; a corrupt manifest costs `list_subjects` and the page only that subject's title, while `groundly list` still warns and skips the subject. No `format_version` bump: an older groundly ignores the field, and drops it if it rewrites the manifest.
 
 ## 8. Roadmap
 

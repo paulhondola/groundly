@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 from groundly.cli import app
 from groundly.core.paths import subject_dir
+from groundly.core.subject import Subject
 from groundly.ingestion import pipeline
 from groundly.ingestion.results import FileResult, Status
 from tests.conftest import init_subject
@@ -411,3 +412,80 @@ def test_index_rejects_the_retired_graph_flag(tmp_path):
     f.write_text("content")
     result = runner.invoke(app, ["index", "PDSS", str(f), "--graph"])
     assert result.exit_code == 2
+
+
+# --- title ----------------------------------------------------------------------
+
+
+def test_title_sets_a_label_and_leaves_the_subject_name_alone():
+    init_subject("apd")
+    result = runner.invoke(app, ["title", "apd", "Algoritmi Paraleli si Distribuiti"])
+    assert result.exit_code == 0, result.output
+    assert "Algoritmi Paraleli si Distribuiti" in result.output
+    manifest = Subject("apd").load_manifest()
+    assert manifest.title == "Algoritmi Paraleli si Distribuiti"
+    assert manifest.subject == "apd"
+
+
+def test_title_accepts_diacritics_and_strips_outer_space():
+    init_subject("apd")
+    assert runner.invoke(app, ["title", "apd", "  Paraleli și Distribuiți "]).exit_code == 0
+    assert Subject("apd").load_manifest().title == "Paraleli și Distribuiți"
+
+
+def test_title_empty_string_clears_it():
+    init_subject("apd")
+    runner.invoke(app, ["title", "apd", "Algoritmi"])
+    assert runner.invoke(app, ["title", "apd", ""]).exit_code == 0
+    assert Subject("apd").load_manifest().title == ""
+
+
+@pytest.mark.parametrize(
+    ("text", "cause"),
+    [
+        ("a" * 121, "120"),
+        ("two\nlines", "invisible"),
+        ("rtl\N{RIGHT-TO-LEFT OVERRIDE}override", "invisible"),
+        ("selector\N{VARIATION SELECTOR-16}", "invisible"),
+        ("tag\U000e0100", "invisible"),
+        ("\N{HANGUL FILLER}", "invisible"),
+        ("\N{BRAILLE PATTERN BLANK}", "invisible"),
+    ],
+)
+def test_title_refuses_bad_text_naming_the_cause_and_stores_nothing(text, cause):
+    init_subject("apd")
+    result = runner.invoke(app, ["title", "apd", text])
+    assert result.exit_code == 1
+    assert cause in result.output
+    assert Subject("apd").load_manifest().title == ""
+
+
+def test_title_shows_exactly_what_was_set_without_rich_rewriting_it():
+    init_subject("apd")
+    result = runner.invoke(app, ["title", "apd", ":warning: Fine\\"])
+    assert ":warning: Fine\\" in result.output
+    assert ":warning: Fine\\" in runner.invoke(app, ["list"]).output
+
+
+def test_title_unknown_subject_names_the_fix():
+    result = runner.invoke(app, ["title", "NOPE", "Algoritmi"])
+    assert result.exit_code == 1
+    assert "not initialized" in result.output
+
+
+def test_title_corrupt_manifest_names_the_cause_not_a_traceback():
+    init_subject("apd")
+    Subject("apd").manifest_path.write_text("{not json")
+    result = runner.invoke(app, ["title", "apd", "Algoritmi"])
+    assert result.exit_code == 1
+    assert "manifest.json" in result.output
+
+
+def test_list_all_shows_title_and_treats_it_as_text_not_markup():
+    init_subject("apd")
+    init_subject("ml")
+    runner.invoke(app, ["title", "apd", "[/red] Parallel"])
+    result = runner.invoke(app, ["list"])
+    assert result.exit_code == 0, result.output
+    assert "[/red] Parallel" in result.output
+    assert "—" in result.output  # ml has no title

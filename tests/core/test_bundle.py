@@ -551,6 +551,50 @@ def test_import_as_creates_second_subject_alongside_original(tmp_path, monkeypat
     assert Subject("PDSS2").exists()
 
 
+def test_title_survives_export_import_as_and_count_syncs(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed("PDSS")
+    assert runner.invoke(app, ["title", "PDSS", "Parallel Systems"]).exit_code == 0
+    conn = SubjectStore(subject_dir("PDSS") / "store.db").connect()
+    try:
+        sync_counts(conn, Subject("PDSS").manifest_path)
+    finally:
+        conn.close()
+    assert Subject("PDSS").load_manifest().title == "Parallel Systems"
+
+    bundle_path = tmp_path / "PDSS.groundly"
+    runner.invoke(app, ["export", "PDSS", "-o", str(bundle_path)])
+    result = runner.invoke(app, ["import", str(bundle_path), "--as", "PDSS2"])
+    assert result.exit_code == 0, result.output
+    imported = Subject("PDSS2").load_manifest()
+    assert (imported.subject, imported.title) == ("PDSS2", "Parallel Systems")
+
+
+@pytest.mark.parametrize(
+    "title", ["x" * 121, "two\nlines", "rtl\N{RIGHT-TO-LEFT OVERRIDE}override", "tag\U000e0100"]
+)
+def test_import_refuses_a_bad_title_and_installs_nothing(tmp_path, monkeypatch, title):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed("PDSS")
+    bundle_path = tmp_path / "PDSS.groundly"
+    runner.invoke(app, ["export", "PDSS", "-o", str(bundle_path)])
+    with zipfile.ZipFile(bundle_path) as zf:
+        contents = {name: zf.read(name) for name in zf.namelist()}
+    manifest = json.loads(contents["manifest.json"])
+    manifest["title"] = title
+    contents["manifest.json"] = json.dumps(manifest).encode()
+    with zipfile.ZipFile(bundle_path, "w") as zf:
+        for name, data in contents.items():
+            zf.writestr(name, data)
+
+    result = runner.invoke(app, ["import", str(bundle_path), "--as", "HOSTILE"])
+    assert result.exit_code == 1
+    assert "title" in result.output
+    assert not Subject("HOSTILE").exists()
+
+
 def test_import_onto_leftover_dir_without_manifest_fails_cleanly(tmp_path, monkeypatch):
     _use_home(monkeypatch, tmp_path / "a")
     init_subject("PDSS")

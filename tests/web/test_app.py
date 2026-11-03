@@ -106,9 +106,30 @@ def test_localhost_host_header_is_accepted(client, seeded):
 def test_api_lists_subjects_with_has_tree(client, seeded):
     Subject("EMPTY").initialize()
     assert client.get("/api/subjects").json() == [
-        {"subject": "EMPTY", "has_tree": False},
-        {"subject": "PDSS", "has_tree": True},
+        {"subject": "EMPTY", "title": "", "has_tree": False},
+        {"subject": "PDSS", "title": "", "has_tree": True},
     ]
+
+
+def _set_title(name, title):
+    subject = Subject(name)
+    manifest = subject.load_manifest()
+    manifest.title = title
+    subject.save_manifest(manifest)
+
+
+def test_api_reports_the_title_in_the_list_and_the_tree(client, seeded):
+    _set_title("PDSS", "Parallel Systems")
+    (entry,) = client.get("/api/subjects").json()
+    assert entry["title"] == "Parallel Systems"
+    assert client.get("/api/subjects/PDSS/tree").json()["title"] == "Parallel Systems"
+
+
+def test_corrupt_manifest_loses_the_title_not_the_listing(client, seeded):
+    Subject("PDSS").manifest_path.write_text("{not json")
+    (entry,) = client.get("/api/subjects").json()
+    assert entry == {"subject": "PDSS", "title": "", "has_tree": True}
+    assert client.get("/api/subjects/PDSS/tree").json()["title"] == ""
 
 
 def test_tree_api_returns_tree_with_sources(client, seeded):

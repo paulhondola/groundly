@@ -1,4 +1,4 @@
-"""Subject lifecycle verbs: index, list, remove, drop."""
+"""Subject lifecycle verbs: index, list, title, remove, drop."""
 
 from pathlib import Path
 from typing import Annotated
@@ -7,6 +7,7 @@ import typer
 from rich.markup import escape
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
 from rich.table import Table
+from rich.text import Text
 
 from groundly.cli.app import _fail, _store_checked, _subject_checked, app, console
 
@@ -147,7 +148,7 @@ def list_(
     if subject is None:
         from groundly.core.store import SubjectStore
 
-        table = Table("subject", "materials", "pages", "chunks", "ocr")
+        table = Table("subject", "title", "materials", "pages", "chunks", "ocr")
         for name in discover_subjects():
             try:
                 subj = Subject(name)
@@ -163,6 +164,7 @@ def list_(
                 pages = "—"
             table.add_row(
                 name,
+                Text(manifest.title or "—"),
                 str(manifest.counts.materials),
                 pages,
                 str(manifest.counts.chunks),
@@ -187,6 +189,33 @@ def list_(
         console.print(table)
     except sqlite3.OperationalError as exc:
         _fail(f"store.db is corrupt or incomplete: {exc}")
+
+
+@app.command()
+def title(
+    subject: Annotated[str, typer.Argument(help="Subject to label.")],
+    text: Annotated[str, typer.Argument(help='Display title; "" clears it.')],
+) -> None:
+    """Set a subject's display title. Commands and citations keep using the subject name."""
+    from pydantic import ValidationError
+
+    from groundly.core.manifest import validate_title
+
+    subj = _subject_checked(subject)
+    try:
+        cleaned = validate_title(text)
+    except ValueError as exc:
+        _fail(str(exc))
+    try:
+        manifest = subj.load_manifest()
+    except ValidationError:
+        _fail(f"manifest.json of '{subject}' is corrupt — the title was not changed")
+    manifest.title = cleaned
+    subj.save_manifest(manifest)
+    if cleaned:
+        console.print(f"[bold]{subject}[/bold] is now titled:", Text(cleaned))
+    else:
+        console.print(f"Cleared the title of [bold]{subject}[/bold]")
 
 
 @app.command()

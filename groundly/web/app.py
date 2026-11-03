@@ -63,7 +63,7 @@ def _subjects(_: Request) -> JSONResponse:
         subject = _open_subject(name)
         if subject is None:
             continue
-        entry: dict = {"subject": name, "has_tree": False}
+        entry: dict = {"subject": name, "title": subject.display_title(), "has_tree": False}
         try:
             entry["has_tree"] = bool(SubjectStore(subject.store_db_path).topic_ids())
         except (sqlite3.DatabaseError, RuntimeError) as e:
@@ -89,7 +89,7 @@ def _tree(request: Request) -> Response:
     if subject is None:
         name = request.path_params["subject"]
         return JSONResponse({"error": f"unknown subject {name!r}"}, status_code=404)
-    result = _read(subject, lambda store: {"tree": store.tree()})
+    result = _read(subject, lambda store: {"title": subject.display_title(), "tree": store.tree()})
     if isinstance(result, Response):
         return result
     # `pdf` tells the page whether a link would open: a bundle exported without its

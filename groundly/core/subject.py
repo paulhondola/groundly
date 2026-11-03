@@ -62,3 +62,10 @@ class Subject:
 
     def save_manifest(self, manifest: Manifest) -> None:
         manifest.save(self.manifest_path)
+
+    def display_title(self) -> str:
+        """The title, or "" if none is set. For listings: a damaged manifest costs only its label."""
+        try:
+            return self.load_manifest().title
+        except (OSError, ValueError):  # pydantic's ValidationError is a ValueError
+            return ""

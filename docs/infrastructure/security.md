@@ -8,7 +8,7 @@ A `.groundly` bundle is third-party content that will enter the student's prompt
 
 **Controls:**
 - **Zip-slip protection**: extraction rejects entries escaping the target directory (no absolute paths, no `..`); symlinks not extracted.
-- **Manifest validation before anything is read**: format version supported, counts sane; unknown schema versions refused (`PRAGMA user_version` check on the imported store.db).
+- **Manifest validation before anything is read**: format version supported, counts sane, subject title short and free of control or invisible characters; unknown schema versions refused (`PRAGMA user_version` check on the imported store.db).
 - **Imported chunks are layer-3 data** — delimited, quoted, never instructions ([`../architecture/agents.md`](../architecture/agents.md)).
 - Imported SQLite files are opened with the same schema checks as native ones; no code paths execute content from the bundle.
 - **The topic tree is checked after extraction**: a bundle without the tree tables, with dangling references (`PRAGMA foreign_key_check`) or with a tree deeper than two levels is refused. `PRAGMA foreign_key_check` only covers keys a file declares, so explicit anti-joins also check `topic_citations.topic_id` and `chunk_id` and `topics.parent_id`. **The tree's cost is bounded**: more than 1000 topics, more than 5 citations on one topic, a title over 200 or a summary over 500 characters (or either not stored as text), or more than 64 MiB of cited chunk text refuses the bundle, so `tree()` cannot be made to allocate without limit. An SQLite error while reading a hostile schema is reported with its cause and the temporary import directory is removed. Imported titles and summaries are layer-3 text, shown by the page only as text (section 4).
@@ -16,7 +16,7 @@ A `.groundly` bundle is third-party content that will enter the student's prompt
 
 ## 2. Prompt injection via documents
 
-The student's *own* lecture PDFs are as capable of carrying "ignore previous instructions" as an import. All retrieved content — chunks, and the titles and summaries stored in a topic tree — is layer 3: instructions inside it are inert by construction of the immutable system layer.
+The student's *own* lecture PDFs are as capable of carrying "ignore previous instructions" as an import. All retrieved content — chunks, subject titles, and the titles and summaries stored in a topic tree — is layer 3: instructions inside it are inert by construction of the immutable system layer.
 
 ## 3. Subprocess execution (verifier + coding challenges)
 
@@ -47,7 +47,7 @@ An idea, not planned (spec §3, coding challenges): the verifier would execute L
 ## Residual risks, named
 
 - A hostile store's table definitions are not compared with the shipped schema: the checks above bound what the topic tables hold, not how an imported file declares them.
-- Imported text (a title, summary or chunk) may try to steer a host into calling `submit_tree`. The `outline` and `submit_tree` descriptions and the skill tell the host to treat course text as data, but nothing can prevent a host from obeying it; the gate still bounds what such a call can store, and it writes only the topic tree.
+- Imported text (a title, summary or chunk) may try to steer a host into calling `submit_tree`. A subject title reaches the host earliest, through `list_subjects`, even in a session about another course. The `list_subjects`, `outline` and `submit_tree` descriptions and the skill tell the host to treat course text as data, but nothing can prevent a host from obeying it; the gate still bounds what such a call can store, and it writes only the topic tree.
 - A malicious `.groundly` bundle with a crafted SQLite file targeting parser bugs — mitigated by schema checks, not eliminated.
 - A malicious `.groundly` bundle sized as a zip bomb — declared uncompressed sizes are checked before anything is decompressed (manifest.json capped at 1 MB, bundle total at 20 GiB), relying on zipfile's own enforcement of each entry's declared size on read; a legitimately-huge bundle under that cap exceeding the student's free disk still fails, but at extraction with an OS error, not silently.
 - Docling parsing a hostile PDF (from a merge-by-reindex of imported materials) — contained to the extraction subprocess (`extraction_failed`), not the app.

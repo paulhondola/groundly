@@ -4,11 +4,12 @@ The embedding pin (model + hf_revision + dim + dtype + normalization) decides wh
 shared vectors transfer as-is; changing it is a full re-index migration, never a tweak.
 """
 
+import re
 import sqlite3
 from importlib.metadata import version as _package_version
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 FORMAT_VERSION = 1
 EMBEDDING_MODEL = "BAAI/bge-m3"
@@ -16,6 +17,24 @@ HF_REVISION = "5617a9f61b028005a4858fdac845db406aefb181"  # pinned 2026-07-16 (P
 EMBEDDING_DIM = 1024
 CHUNK_MAX_TOKENS = 512
 CHUNK_OVERLAP = 0  # HybridChunker is structure-aware (split+merge); it has no token overlap
+TITLE_MAX_CHARS = 120
+# Unicode's Default_Ignorable_Code_Point plus the blank braille cell. str.isprintable accepts
+# many of these, and a run of them can carry text a host model reads and a student never sees.
+_INVISIBLE = re.compile(
+    "[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u202a-\u202e"
+    "\u2060-\u206f\u2800\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufff8\U000e0000-\U000e0fff]"
+)
+
+
+def validate_title(title: str) -> str:
+    """A subject's display label, stripped. It reaches terminals, the page and the host model
+    from bundles a stranger may have written, so it stays one short line of visible text."""
+    title = title.strip()
+    if len(title) > TITLE_MAX_CHARS:
+        raise ValueError(f"title is {len(title)} characters; the limit is {TITLE_MAX_CHARS}")
+    if not title.isprintable() or _INVISIBLE.search(title):
+        raise ValueError("title contains control or invisible characters")
+    return title
 
 
 class Embedding(BaseModel):
@@ -45,11 +64,14 @@ class Counts(BaseModel):
 class Manifest(BaseModel):
     format_version: int = FORMAT_VERSION
     subject: str
+    title: str = ""  # display only: commands, paths and citations always use `subject`
     embedding: Embedding = Embedding()
     chunking: Chunking = Chunking()
     ocr: Ocr = Ocr()
     counts: Counts = Counts()
     tool_version: str = ""
+
+    _title_is_valid = field_validator("title")(validate_title)
 
     @classmethod
     def new(cls, subject: str) -> "Manifest":
@@ -57,12 +79,12 @@ class Manifest(BaseModel):
 
     @classmethod
     def load(cls, path: Path) -> "Manifest":
-        return cls.model_validate_json(path.read_text())
+        return cls.model_validate_json(path.read_text(encoding="utf-8"))
 
     def save(self, path: Path) -> None:
         # write-then-rename: a Ctrl-C or concurrent save never leaves torn JSON behind
         tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(self.model_dump_json(indent=2) + "\n")
+        tmp.write_text(self.model_dump_json(indent=2) + "\n", encoding="utf-8")
         tmp.replace(path)
 
 

@@ -20,7 +20,8 @@
 - **The server's `instructions` state the norm; tool descriptions say which tool. Never rank one tool above another server-wide.** Measured (decision 31): instructions ending "`ask` returns an enforced, cited answer; `search` returns raw chunks for you to compose from" took a `search`-only host to **4/48** questions retrieved; deleting that one clause took it to **29/48** (Fisher p=8.3e-08). A tool preferred server-wide is invisible to whoever allowlists a subset later.
 - The surface is pinned by `tests/mcp/test_mcp_server.py::test_the_tool_surface_is_exactly_these_six_entries` — adding or removing a tool is a deliberate change, not a side effect.
 - Citations are `groundly://<subject>/<file>#page=N` URIs: `get_page(uri)` opens the cited page, and the URI read as an MCP resource returns the whole document (a fragment is not part of a resource's identity).
-- CLI verbs are batch lifecycle only (index/list/remove/drop/search/import/export/config/models/skill/mcp/serve); `serve` opens the read-only topic-tree page on loopback and `skill` installs the Claude Code skill that builds the tree; `-y/--yes` is the one way to skip a prompt; anything conversational belongs to the host agent. No TUI.
+- CLI verbs are batch lifecycle only (index/list/title/remove/drop/search/import/export/config/models/skill/mcp/serve); `serve` opens the read-only topic-tree page on loopback and `skill` installs the Claude Code skill that builds the tree; `-y/--yes` is the one way to skip a prompt; anything conversational belongs to the host agent. No TUI.
+- A subject's name is its ID: strict, stable, used in commands, paths and citations. Its `title` is a label for people and models, shown beside the name and never accepted in its place (decision 42).
 - Long operations report per-file/per-item progress.
 - User-facing failure messages name the cause specifically ("no readable text — OCR found nothing to extract"), never generic errors.
 
