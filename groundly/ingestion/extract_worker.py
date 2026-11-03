@@ -10,11 +10,17 @@ Output JSON: {"pages": N|null, "chunks": [{"text", "heading_path", "page", "toke
 
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
 
-from groundly.ingestion.formats import DOCLING_FORMATS, DOCLING_SUFFIXES, IMAGE_SUFFIXES
+from groundly.ingestion.formats import (
+    DOCLING_FORMATS,
+    DOCLING_SUFFIXES,
+    IMAGE_SUFFIXES,
+    NOTEBOOK_SUFFIXES,
+)
 
 # Silence the fast-tokenizer advisory HybridChunker triggers. The env var, not
 # logging.setLevel: transformers resets its logger level on first (lazy) import.
@@ -169,17 +175,24 @@ def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
 
 
 def _extract_plain_text(path: Path) -> dict:
+    """Token-window chunks cut from the source by offset. Decoding the tokens instead would
+    collapse all whitespace; each window starts where the last ended, so indentation at a
+    window's start survives and the chunks join back into the file."""
     from groundly.core.manifest import CHUNK_MAX_TOKENS
 
     text = path.read_text(errors="replace")
     tokenizer = _model_step(_bge_m3_tokenizer)
-    ids = tokenizer.encode(text, add_special_tokens=False)
+    offsets = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)[
+        "offset_mapping"
+    ]
     chunks = []
-    for start in range(0, len(ids), CHUNK_MAX_TOKENS):
-        window = ids[start : start + CHUNK_MAX_TOKENS]
+    end = 0
+    for start in range(0, len(offsets), CHUNK_MAX_TOKENS):
+        window = offsets[start : start + CHUNK_MAX_TOKENS]
+        begin, end = end, window[-1][1]
         chunks.append(
             {
-                "text": tokenizer.decode(window),
+                "text": text[begin:end],
                 "heading_path": None,
                 "page": None,
                 "token_count": len(window),
@@ -188,12 +201,44 @@ def _extract_plain_text(path: Path) -> dict:
     return {"pages": None, "chunks": chunks}
 
 
+def _notebook_markdown(path: Path) -> str:
+    """A notebook's cells as Markdown: code fenced, saved outputs dropped. Outputs are
+    machine-generated and can be megabytes of base64 that would index as junk chunks."""
+    try:
+        cells = json.loads(path.read_bytes())["cells"]
+        parts = []
+        for cell in cells:
+            source = "".join(cell["source"])
+            if not source.strip():
+                continue
+            if cell["cell_type"] == "code":
+                longest = max(map(len, re.findall("`+", source)), default=0)
+                fence = "`" * max(3, longest + 1)
+                source = f"{fence}\n{source}\n{fence}"
+            parts.append(source)
+    except (ValueError, LookupError, TypeError) as exc:
+        sys.exit(f"not a readable nbformat 4 notebook: {exc!r}")
+    return "\n\n".join(parts)
+
+
+def _extract_notebook(path: Path) -> dict:
+    markdown = _notebook_markdown(path)
+    if not markdown:
+        return {"pages": None, "chunks": []}
+    with tempfile.TemporaryDirectory() as tmp:
+        rendered = Path(tmp) / "notebook.md"
+        rendered.write_text(markdown, encoding="utf-8")
+        return _extract_docling(rendered)
+
+
 def main() -> None:
     in_path, out_path = Path(sys.argv[1]), Path(sys.argv[2])
     ocr_lang = sys.argv[3] if len(sys.argv) > 3 else None
 
     if in_path.suffix.lower() in DOCLING_SUFFIXES:
         result = _extract_docling(in_path, ocr_lang)
+    elif in_path.suffix.lower() in NOTEBOOK_SUFFIXES:
+        result = _extract_notebook(in_path)
     else:
         result = _extract_plain_text(in_path)
 

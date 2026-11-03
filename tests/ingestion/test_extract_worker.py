@@ -1,9 +1,13 @@
 """Worker-internal tests: import extract_worker directly rather than going through
 the subprocess (extract.py) boundary."""
 
+import json
+import re
 from pathlib import Path
 
 import pytest
+
+from groundly.core.manifest import CHUNK_MAX_TOKENS
 
 
 def test_docling_model_fetch_failure_exits_retryable(monkeypatch, tmp_path):
@@ -289,3 +293,128 @@ def test_blank_image_reports_ocr_failure(tmp_path):
 
     with pytest.raises(ExtractionFailure, match="OCR found nothing to extract"):
         SubprocessExtractor().extract(png)
+
+
+class _WhitespaceTokenizer:
+    """One token per word, and a decode that collapses whitespace the way bge-m3's does."""
+
+    def __call__(self, text, add_special_tokens, return_offsets_mapping):
+        return {"offset_mapping": [m.span() for m in re.finditer(r"\S+", text)]}
+
+    def decode(self, ids):
+        raise AssertionError("chunk text is cut from the source, never decoded from tokens")
+
+
+def test_plain_text_chunks_keep_the_source_verbatim(monkeypatch, tmp_path):
+    """Windows are contiguous source slices: indentation and newlines survive, including at
+    the start of a window, and joining the chunks gives back the file."""
+    from groundly.ingestion import extract_worker
+
+    source = "".join(f"def f{i}():\n    return {i}\n\n" for i in range(400))
+    path = tmp_path / "code.py"
+    path.write_text(source)
+    monkeypatch.setattr(extract_worker, "_bge_m3_tokenizer", _WhitespaceTokenizer)
+
+    chunks = extract_worker._extract_plain_text(path)["chunks"]
+
+    assert len(chunks) > 1
+    assert "".join(c["text"] for c in chunks) == source.rstrip()
+    assert all(c["token_count"] <= CHUNK_MAX_TOKENS for c in chunks)
+
+
+@pytest.mark.slow
+def test_plain_text_keeps_whitespace_with_the_real_tokenizer(tmp_path):
+    from groundly.ingestion import extract_worker
+
+    source = "".join(f"def f{i}(x):\n    if x:\n        return 'ă{i}'\n\n" for i in range(300))
+    path = tmp_path / "code.py"
+    path.write_text(source)
+
+    chunks = extract_worker._extract_plain_text(path)["chunks"]
+
+    assert len(chunks) > 1
+    assert "".join(c["text"] for c in chunks) == source.rstrip()
+    assert all(c["token_count"] <= CHUNK_MAX_TOKENS for c in chunks)
+
+
+def _notebook(path, cells):
+    path.write_text(json.dumps({"cells": cells, "metadata": {}, "nbformat": 4}))
+    return path
+
+
+def test_notebook_renders_cells_and_drops_outputs(tmp_path):
+    from groundly.ingestion import extract_worker
+
+    png = {"output_type": "display_data", "data": {"image/png": "QUJD"}, "metadata": {}}
+    path = _notebook(
+        tmp_path / "lab.ipynb",
+        [
+            {"cell_type": "markdown", "metadata": {"id": "x1"}, "source": ["# Lab\n", "Intro\n"]},
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "source": "if x:\n    y()",  # nbformat allows a string as well as a list
+                "outputs": [png],
+                "execution_count": 1,
+            },
+            {"cell_type": "markdown", "metadata": {}, "source": []},
+        ],
+    )
+
+    assert extract_worker._notebook_markdown(path) == "# Lab\nIntro\n\n\n```\nif x:\n    y()\n```"
+
+
+def test_notebook_fence_outlasts_backticks_in_the_code(tmp_path):
+    from groundly.ingestion import extract_worker
+
+    code = 'doc = """\n```\nnot a fence\n```\n"""'
+    path = _notebook(tmp_path / "lab.ipynb", [{"cell_type": "code", "source": code}])
+
+    assert extract_worker._notebook_markdown(path) == f"````\n{code}\n````"
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["{not json", '{"worksheets": []}', '{"cells": [{"source": ["no cell_type"]}]}', "[1]"],
+)
+def test_unreadable_notebook_names_the_cause(tmp_path, content):
+    from groundly.ingestion import extract_worker
+
+    path = tmp_path / "lab.ipynb"
+    path.write_text(content)
+
+    with pytest.raises(SystemExit, match="not a readable nbformat 4 notebook"):
+        extract_worker._notebook_markdown(path)
+
+
+def test_empty_notebook_exits_no_text(tmp_path, monkeypatch):
+    from groundly.ingestion import extract_worker
+
+    path = _notebook(tmp_path / "lab.ipynb", [{"cell_type": "code", "source": ["  \n"]}])
+    monkeypatch.setattr("sys.argv", ["extract_worker", str(path), str(tmp_path / "out.json")])
+
+    with pytest.raises(SystemExit) as exc:
+        extract_worker.main()
+    assert exc.value.code == extract_worker.EXIT_NO_TEXT
+
+
+@pytest.mark.slow
+def test_notebook_indexes_with_headings_and_intact_code(tmp_path):
+    """Through docling: the heading reaches heading_path, which is what `outline` shows the
+    host, and no notebook JSON reaches a chunk."""
+    from groundly.ingestion import extract_worker
+
+    path = _notebook(
+        tmp_path / "lab.ipynb",
+        [
+            {"cell_type": "markdown", "source": ["# Spark Lab\n", "## Skew\n", "Salting helps.\n"]},
+            {"cell_type": "code", "source": ["if skewed:\n", "    salt(key)\n"], "outputs": []},
+        ],
+    )
+
+    result = extract_worker._extract_notebook(path)
+    text = "\n".join(c["text"] for c in result["chunks"])
+
+    assert any("Skew" in (c["heading_path"] or "") for c in result["chunks"])
+    assert "if skewed:\n    salt(key)" in text
+    assert "cell_type" not in text
