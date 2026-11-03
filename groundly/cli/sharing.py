@@ -6,7 +6,7 @@ from typing import Annotated
 import typer
 from rich.text import Text
 
-from groundly.cli.app import _fail, _subject_checked, _visible, app, console
+from groundly.cli.app import _fail, _manifest_checked, _subject_checked, _visible, app, console
 
 
 @app.command()
@@ -25,6 +25,7 @@ def export(
     from groundly.core import bundle
 
     subj = _subject_checked(subject)
+    _manifest_checked(subj)  # a bundle with a bad manifest would only fail on its recipient
     out_path = out or Path(f"{subject}.groundly")
 
     with console.status("exporting…") as status:

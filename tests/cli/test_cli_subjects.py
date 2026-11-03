@@ -723,6 +723,56 @@ def test_index_progress_prints_a_hostile_filename_inert(monkeypatch, tmp_path):
     assert ":warning:" in result.output
 
 
+def _manifest_has_a_hostile_ocr_lang(path):
+    path.write_text('{"subject": "PDSS", "ocr": {"lang": ["[/nosuch]"]}}')
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        _manifest_not_utf8,
+        _manifest_is_a_directory,
+        _manifest_dangles,
+        _manifest_has_a_hostile_ocr_lang,
+    ],
+)
+@pytest.mark.parametrize(
+    "verb",
+    [
+        ["index", "PDSS", "{file}"],
+        ["title", "PDSS", "Algoritmi"],
+        ["remove", "PDSS", "aaaaaaaa", "-y"],
+        ["export", "PDSS", "-o", "{out}"],
+    ],
+    ids=lambda verb: verb[0],
+)
+def test_a_verb_needing_the_manifest_names_the_damage_and_changes_nothing(tmp_path, damage, verb):
+    """Checked before anything is written, so `remove` never drops a row it could not count."""
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    out = tmp_path / "out.groundly"
+    init_subject("PDSS")
+    store = SubjectStore(subject_dir("PDSS") / "store.db")
+    store.add_extraction_failed("a.pdf", "a" * 64, "no text")
+    damage(subject_dir("PDSS") / "manifest.json")
+
+    result = runner.invoke(app, [arg.format(file=f, out=out) for arg in verb])
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)  # a named cause, not a traceback
+    assert "manifest.json" in result.output
+    assert len(store.list_materials()) == 1
+    assert not out.exists()
+
+
+def test_drop_still_removes_a_subject_with_a_dangling_manifest():
+    init_subject("PDSS")
+    _manifest_dangles(subject_dir("PDSS") / "manifest.json")
+
+    assert runner.invoke(app, ["drop", "PDSS", "-y"]).exit_code == 0
+    assert not subject_dir("PDSS").exists()
+
+
 def _groundly_on_ascii_stdout(home, *args):
     """A real process: Python's stdout encoding is fixed before any of this code runs."""
     return subprocess.run(

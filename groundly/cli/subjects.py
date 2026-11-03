@@ -8,7 +8,16 @@ from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
 from rich.table import Table
 from rich.text import Text
 
-from groundly.cli.app import _fail, _safe, _store_checked, _subject_checked, _visible, app, console
+from groundly.cli.app import (
+    _fail,
+    _manifest_checked,
+    _safe,
+    _store_checked,
+    _subject_checked,
+    _visible,
+    app,
+    console,
+)
 
 
 @app.command()
@@ -62,7 +71,7 @@ def index(
         _fail(f"path not found: {', '.join(missing)}")
     if not subj.exists():
         subj.initialize()
-    manifest = subj.load_manifest()
+    manifest = _manifest_checked(subj)
     recorded = manifest.ocr.lang[0] if manifest.ocr.lang else None
     if ocr_lang and recorded and ocr_lang != recorded:
         # The recorded lang shaped every OCR'd chunk already stored, so changing it would
@@ -204,8 +213,6 @@ def title(
     text: Annotated[str, typer.Argument(help='Display title; "" clears it.')],
 ) -> None:
     """Set a subject's display title. Commands and citations keep using the subject name."""
-    from pydantic import ValidationError
-
     from groundly.core.manifest import validate_title
 
     subj = _subject_checked(subject)
@@ -213,10 +220,7 @@ def title(
         cleaned = validate_title(text)
     except ValueError as exc:
         _fail(str(exc))
-    try:
-        manifest = subj.load_manifest()
-    except ValidationError:
-        _fail(f"manifest.json of '{subject}' is corrupt — the title was not changed")
+    manifest = _manifest_checked(subj)
     manifest.title = cleaned
     subj.save_manifest(manifest)
     if cleaned:
@@ -244,6 +248,7 @@ def remove(
 
     subj = _subject_checked(subject)
     store_obj = _store_checked(subj)
+    _manifest_checked(subj)  # the counts are saved after the rows go: fail before, not between
     try:
         targets = {}  # row id -> row: a material named twice is removed once
         for ident in material:

@@ -70,6 +70,16 @@ def _subject_checked(subject: str):
     return subj
 
 
+def _manifest_checked(subj):
+    try:
+        return subj.load_manifest()
+    except (OSError, ValueError):  # pydantic's ValidationError is a ValueError
+        _fail(
+            f"manifest.json of '{subj.name}' is corrupt or unreadable, so nothing was changed — "
+            f"re-import the subject, or run: groundly drop {subj.name}"
+        )
+
+
 def _store_checked(subj):
     from groundly.core.store import SubjectStore
 

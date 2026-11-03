@@ -1,5 +1,6 @@
 """Subject lifecycle: create the on-disk layout that everything else assumes."""
 
+import os
 from pathlib import Path
 
 from groundly.core import progress, store
@@ -36,7 +37,8 @@ class Subject:
         return self._root_dir / "manifest.json"
 
     def exists(self) -> bool:
-        return self.manifest_path.exists()
+        # lexists: a dangling manifest is a damaged subject, not a free name to initialize over
+        return os.path.lexists(self.manifest_path)
 
     def initialize(self) -> bool:
         """Create subject layout (~/.groundly/<name>/).
