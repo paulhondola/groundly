@@ -5,7 +5,10 @@ import os
 import subprocess
 import sys
 
-from groundly.core.manifest import Manifest
+import pytest
+from pydantic import ValidationError
+
+from groundly.core.manifest import Manifest, Ocr
 
 
 def test_manifest_round_trips(tmp_path):
@@ -56,3 +59,16 @@ def test_title_round_trips_as_utf8_whatever_the_locale(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert title in path.read_bytes().decode("utf-8")
+
+
+@pytest.mark.parametrize("lang", ["ro", "en", "ch_doc", "chinese_cht", "pt-BR"])
+def test_ocr_lang_accepts_language_names(lang):
+    assert Ocr(lang=[lang]).lang == [lang]
+
+
+@pytest.mark.parametrize(
+    "lang", ["", "\x1b[31mred", "[/nosuch]", "-c", "two words", "ro\n", "../ro", "x" * 33]
+)
+def test_ocr_lang_refuses_anything_but_a_bare_name(lang):
+    with pytest.raises(ValidationError):
+        Ocr(lang=[lang])

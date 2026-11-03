@@ -63,6 +63,16 @@ class Subject:
     def save_manifest(self, manifest: Manifest) -> None:
         manifest.save(self.manifest_path)
 
+    def stored_material(self, filename) -> Path | None:
+        """The stored file a material row names, or None. The name is untrusted (an imported
+        bundle wrote it), so the resolved path must stay inside the materials dir."""
+        root = self.materials_dir.resolve()
+        try:
+            path = (root / filename).resolve()
+            return path if path.is_relative_to(root) and path.is_file() else None
+        except (ValueError, OSError, TypeError):  # NUL in a name; a non-text name from a hostile db
+            return None
+
     def display_title(self) -> str:
         """The title, or "" if none is set. For listings: a damaged manifest costs only its label."""
         try:

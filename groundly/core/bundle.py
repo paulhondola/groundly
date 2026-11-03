@@ -4,6 +4,7 @@ Export zips a fixed allowlist (manifest.json, store.db, materials/**), never a
 directory walk. The private study-state file is never opened, referenced or named here.
 """
 
+import re
 import stat
 import zipfile
 from collections.abc import Callable
@@ -26,6 +27,8 @@ _ALLOWED_PREFIXES = ("materials/", _IGNORED_PREFIX)
 _REEMBED_BATCH = 32
 _MANIFEST_MAX_BYTES = 1024 * 1024  # 1 MB; a real manifest is ~600 bytes
 _BUNDLE_MAX_BYTES = 20 * 1024**3  # 20 GiB declared uncompressed total
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+_UNSAFE_FILENAME_CHARS = re.compile(r"[/\\\x00]")  # backslash separates paths on Windows
 
 
 class BundleError(RuntimeError):
@@ -143,6 +146,44 @@ def check_counts(store_db_path: Path, manifest: Manifest) -> None:
         conn.close()
     if materials != manifest.counts.materials or chunks != manifest.counts.chunks:
         raise BundleError("bundle is damaged — manifest counts do not match store.db contents")
+
+
+def check_store_shape(store_db_path: Path) -> None:
+    """Refuse a store holding what groundly could not have written: a view or trigger it does
+    not ship, which would answer these checks with one thing and later reads with another, or
+    a row outside a field's fixed shape. A filename is joined to the materials dir, so it must
+    stay one path component. Free text (`error`, chunk text, heading paths, and any other
+    character the filesystem allows in a filename) is made inert where it is shown."""
+    conn = store.connect(store_db_path)
+    try:
+        if store.programs(conn) != store.shipped_programs():
+            raise BundleError("bundle store.db holds views or triggers groundly does not ship")
+        for row in conn.execute("SELECT id, filename, sha256, status, pages, error FROM materials"):
+            problem = _material_problem(row)
+            if problem:
+                raise BundleError(f"bundle material {row['id']!r} has {problem} — rejected")
+        row = conn.execute(
+            "SELECT id FROM chunks WHERE typeof(page) NOT IN ('integer', 'null') LIMIT 1"
+        ).fetchone()
+        if row:
+            raise BundleError(f"bundle chunk {row['id']!r} has a page that is not a number")
+    finally:
+        conn.close()
+
+
+def _material_problem(row) -> str | None:
+    name = row["filename"]
+    if not isinstance(name, str) or name in ("", ".", "..") or _UNSAFE_FILENAME_CHARS.search(name):
+        return "an unsafe filename"
+    if not isinstance(row["sha256"], str) or not _SHA256_HEX.fullmatch(row["sha256"]):
+        return "a sha256 that is not 64 hex digits"
+    if row["status"] not in ("indexed", "extraction_failed"):
+        return "an unknown status"
+    if not (row["pages"] is None or isinstance(row["pages"], int)):
+        return "a page count that is not a number"
+    if not (row["error"] is None or isinstance(row["error"], str)):
+        return "an error that is not text"
+    return None
 
 
 def check_tree(store_db_path: Path) -> None:

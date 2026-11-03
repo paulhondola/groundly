@@ -4,9 +4,8 @@
 from typing import Annotated
 
 import typer
-from rich.markup import escape
 
-from groundly.cli.app import _fail, _store_checked, _subject_checked, app, console
+from groundly.cli.app import _fail, _safe, _store_checked, _subject_checked, app, console
 
 
 @app.command()
@@ -68,7 +67,7 @@ def search(
         return
     for i, hit in enumerate(hits, start=1):
         loc = f" p.{hit.page}" if hit.page else ""
-        heading = f" — {escape(hit.heading_path)}" if hit.heading_path else ""
-        console.print(f"[bold]{i}.[/bold] {escape(hit.filename)}{loc}{heading}")
-        console.print(escape(hit.text))
+        heading = f" — {hit.heading_path}" if hit.heading_path else ""
+        console.print(f"[bold]{i}.[/bold] {_safe(f'{hit.filename}{loc}{heading}')}")
+        console.print(_safe(hit.text, multiline=True))
         console.print()

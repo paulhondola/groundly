@@ -8,8 +8,9 @@ import re
 import sqlite3
 from importlib.metadata import version as _package_version
 from pathlib import Path
+from typing import Annotated
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AfterValidator, BaseModel, Field, field_validator
 
 FORMAT_VERSION = 1
 EMBEDDING_MODEL = "BAAI/bge-m3"
@@ -37,6 +38,20 @@ def validate_title(title: str) -> str:
     return title
 
 
+_OCR_LANG = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,31}")
+
+
+def validate_ocr_lang(lang: str) -> str:
+    """An OCR language name. From a bundle it reaches terminals and the extraction worker's
+    argv, so it stays one bare token: no option prefix, console markup or control bytes."""
+    if not _OCR_LANG.fullmatch(lang):
+        raise ValueError(
+            f"invalid OCR language {lang!r} — use up to 32 letters, digits, '-' or '_', "
+            "starting with a letter"
+        )
+    return lang
+
+
 class Embedding(BaseModel):
     model: str = EMBEDDING_MODEL
     hf_revision: str = HF_REVISION
@@ -53,7 +68,8 @@ class Chunking(BaseModel):
 
 class Ocr(BaseModel):
     engine: str = "rapidocr-onnxruntime"
-    lang: list[str] = Field(default_factory=list)  # [] = bundled default model set
+    # [] = bundled default model set
+    lang: list[Annotated[str, AfterValidator(validate_ocr_lang)]] = Field(default_factory=list)
 
 
 class Counts(BaseModel):

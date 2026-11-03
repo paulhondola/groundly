@@ -2,11 +2,17 @@
 against a temp GROUNDLY_HOME. Heavy index logic is covered in test_pipeline.py; the
 CLI index test stubs the pipeline entry point."""
 
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 from typer.testing import CliRunner
 
 from groundly.cli import app
 from groundly.core.paths import subject_dir
+from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
 from groundly.ingestion import pipeline
 from groundly.ingestion.results import FileResult, Status
@@ -489,3 +495,260 @@ def test_list_all_shows_title_and_treats_it_as_text_not_markup():
     assert result.exit_code == 0, result.output
     assert "[/red] Parallel" in result.output
     assert "—" in result.output  # ml has no title
+
+
+# --- hostile values from a bundle or a damaged home ----------------------------------
+
+HOSTILE = "\x1b]52;c;cHduZWQ=\x07[/nosuch]\x9b31m\u202e"
+
+
+def _raw_store(subject, *statements):
+    """Raw SQL as a hostile bundle author has it: constraints off."""
+    import sqlite3
+
+    conn = sqlite3.connect(subject_dir(subject) / "store.db")
+    try:
+        conn.execute("PRAGMA ignore_check_constraints = ON")
+        with conn:
+            for statement, *params in statements:
+                conn.execute(statement, *params)
+    finally:
+        conn.close()
+
+
+def _assert_no_raw_control(output):
+    for char in ("\x1b", "\x07", "\x9b", "\u202e"):
+        assert char not in output
+
+
+def _set_raw_manifest_lang(subject, lang):
+    import json
+
+    path = subject_dir(subject) / "manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest["ocr"]["lang"] = [lang]
+    path.write_text(json.dumps(manifest))
+
+
+@pytest.mark.parametrize("lang", ["\x1b]52;c;cHduZWQ=\x07", "[/nosuch]"])
+def test_list_all_skips_a_hostile_ocr_lang(lang):
+    init_subject("EVIL")
+    init_subject("ML")
+    _set_raw_manifest_lang("EVIL", lang)
+
+    result = runner.invoke(app, ["list"])
+
+    assert result.exit_code == 0, result.output
+    assert "ML" in result.output and "EVIL" in result.output and "corrupt" in result.output
+    _assert_no_raw_control(result.output)
+
+
+def test_index_refuses_a_bad_ocr_lang_before_storing_it(tmp_path):
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+
+    result = runner.invoke(app, ["index", "PDSS", str(f), "--ocr-lang", "[/nosuch]"])
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert "OCR language" in " ".join(result.output.split())
+    assert not Subject("PDSS").exists()
+
+
+def test_list_subject_prints_hostile_store_fields_inert():
+    init_subject("PDSS")
+    _raw_store(
+        "PDSS",
+        (
+            "INSERT INTO materials (filename, sha256, status, pages, error) VALUES (?, ?, ?, ?, ?)",
+            (f"a{HOSTILE}.pdf", HOSTILE, HOSTILE, HOSTILE, HOSTILE),
+        ),
+    )
+
+    result = runner.invoke(app, ["list", "PDSS"])
+
+    assert result.exit_code == 0, result.output
+    assert "[/nosuch]" in result.output  # shown literally, not parsed
+    _assert_no_raw_control(result.output)
+
+
+def test_list_subject_prints_an_emoji_code_literally():
+    init_subject("PDSS")
+    SubjectStore(subject_dir("PDSS") / "store.db").add_extraction_failed(
+        ":warning:.pdf", "a" * 64, "no text"
+    )
+
+    assert ":warning:.pdf" in runner.invoke(app, ["list", "PDSS"]).output
+
+
+def test_list_subject_survives_non_text_store_fields():
+    init_subject("PDSS")
+    _raw_store(
+        "PDSS",
+        (
+            (
+                "INSERT INTO materials (filename, sha256, status, pages, error) "
+                "VALUES (x'00ff', x'00ff', x'00ff', x'00ff', x'00ff')"
+            ),
+        ),
+    )
+
+    result = runner.invoke(app, ["list", "PDSS"])
+
+    assert result.exit_code == 0, result.output
+
+
+def test_list_all_shows_a_dash_for_pages_that_are_not_numbers():
+    init_subject("EVIL")
+    init_subject("ML")
+    _raw_store(
+        "EVIL",
+        (
+            (
+                "INSERT INTO materials (filename, sha256, status, pages) "
+                "VALUES ('a.pdf', ?, 'indexed', 'many')"
+            ),
+            ("a" * 64,),
+        ),
+    )
+
+    result = runner.invoke(app, ["list"])
+
+    assert result.exit_code == 0, result.output
+    assert "ML" in result.output
+    assert "—" in next(line for line in result.output.splitlines() if "EVIL" in line)
+
+
+def _manifest_not_utf8(path):
+    path.write_bytes(b"\xff\xfe not utf-8")
+
+
+def _manifest_is_a_directory(path):
+    path.unlink()
+    path.mkdir()
+
+
+def _manifest_dangles(path):
+    path.unlink()
+    path.symlink_to(path.parent / "gone.json")
+
+
+@pytest.mark.parametrize(
+    "damage", [_manifest_not_utf8, _manifest_is_a_directory, _manifest_dangles]
+)
+def test_list_all_warns_about_an_unreadable_manifest(damage):
+    init_subject("PDSS")
+    init_subject("ML")
+    damage(subject_dir("PDSS") / "manifest.json")
+
+    result = runner.invoke(app, ["list"])
+
+    assert result.exit_code == 0, result.output
+    assert "ML" in result.output
+
+
+@pytest.mark.parametrize("name", ["bad name", "evil\x1b[31m", "[nosuch]", ".hidden"])
+def test_list_all_warns_about_a_badly_named_directory(home, name):
+    init_subject("ML")
+    (home / name).mkdir()
+    (home / name / "manifest.json").write_text("{}")
+
+    result = runner.invoke(app, ["list"])
+
+    assert result.exit_code == 0, result.output
+    assert "ML" in result.output
+    _assert_no_raw_control(result.output)
+
+
+def test_remove_never_deletes_outside_materials(home):
+    victim = home / "victim.txt"
+    victim.write_text("keep me")
+    init_subject("PDSS")
+    _raw_store(
+        "PDSS",
+        (
+            (
+                "INSERT INTO materials (filename, sha256, status, pages) "
+                "VALUES ('../../victim.txt', ?, 'indexed', 1)"
+            ),
+            ("a" * 64,),
+        ),
+    )
+
+    result = runner.invoke(app, ["remove", "PDSS", "aaaaaaaa", "-y"])
+
+    assert result.exit_code == 0, result.output
+    assert victim.read_text() == "keep me"
+
+
+def test_remove_prompt_prints_a_hostile_filename_inert():
+    init_subject("PDSS")
+    _raw_store(
+        "PDSS",
+        (
+            (
+                "INSERT INTO materials (filename, sha256, status, pages) "
+                "VALUES (?, ?, 'extraction_failed', 1)"
+            ),
+            (f"a{HOSTILE}.pdf", "a" * 64),
+        ),
+    )
+
+    result = runner.invoke(app, ["remove", "PDSS", "aaaaaaaa"], input="n\n")
+
+    assert "Remove 1 material" in result.output
+    _assert_no_raw_control(result.output)
+
+
+def test_index_progress_prints_a_hostile_filename_inert(monkeypatch, tmp_path):
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    init_subject("PDSS")
+
+    def fake_index_paths(subject, paths, on_event=None, on_discovered=None, **_):
+        on_discovered(1)
+        on_event(Path("[bold]a\x1b]52;c;cHduZWQ=:warning:.txt"), "extracting")
+        return [FileResult(f, Status.INDEXED, chunks=1)]
+
+    from groundly.cli.app import console
+
+    monkeypatch.setattr(pipeline, "index_paths", fake_index_paths)
+    monkeypatch.setattr(console, "_force_terminal", True)  # the bar renders only on a terminal
+
+    result = runner.invoke(app, ["index", "PDSS", str(f)])
+
+    assert result.exit_code == 0, result.output
+    assert "[bold]a" in result.output
+    assert "\x1b]52;" not in result.output
+    assert ":warning:" in result.output
+
+
+def _groundly_on_ascii_stdout(home, *args):
+    """A real process: Python's stdout encoding is fixed before any of this code runs."""
+    return subprocess.run(
+        [sys.executable, "-c", "from groundly.cli import app; app()", *args],
+        check=False,
+        capture_output=True,
+        env={**os.environ, "GROUNDLY_HOME": str(home), "PYTHONIOENCODING": "ascii"},
+    )
+
+
+def test_ascii_stdout_replaces_non_ascii_instead_of_crashing(home):
+    init_subject("PDSS")
+    subject = Subject("PDSS")
+    manifest = subject.load_manifest()
+    manifest.title = "Programare în C — curs"
+    subject.save_manifest(manifest)
+    SubjectStore(subject.store_db_path).add_extraction_failed("curs_în_C.pdf", "a" * 64, "eșec")
+
+    listing = _groundly_on_ascii_stdout(home, "list")
+    materials = _groundly_on_ascii_stdout(home, "list", "PDSS")
+    usage = _groundly_on_ascii_stdout(home, "--help")
+
+    for result in (listing, materials, usage):
+        assert result.returncode == 0, result.stderr.decode()
+    assert b"Programare ?n C" in listing.stdout
+    assert b"curs_?n_C.pdf" in materials.stdout
+    # replacing is a property of the stream: nothing stored changed
+    assert subject.load_manifest().title == "Programare în C — curs"
+    assert SubjectStore(subject.store_db_path).list_materials()[0]["filename"] == "curs_în_C.pdf"

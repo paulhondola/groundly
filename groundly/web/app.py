@@ -73,15 +73,8 @@ def _subjects(_: Request) -> JSONResponse:
 
 
 def _stored_pdf(subject: Subject, filename) -> Path | None:
-    """The stored PDF a material's filename names, or None. The name is untrusted (an
-    imported bundle wrote it), so the resolved path must stay inside the materials dir."""
-    root = subject.materials_dir.resolve()
-    try:
-        path = (root / filename).resolve()
-        servable = path.is_relative_to(root) and path.suffix.lower() == ".pdf" and path.is_file()
-    except (ValueError, OSError, TypeError):  # NUL in a name; a non-text name from a hostile db
-        return None
-    return path if servable else None
+    path = subject.stored_material(filename)
+    return path if path is not None and path.suffix.lower() == ".pdf" else None
 
 
 def _tree(request: Request) -> Response:

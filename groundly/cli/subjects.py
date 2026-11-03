@@ -4,12 +4,11 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from rich.markup import escape
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
 from rich.table import Table
 from rich.text import Text
 
-from groundly.cli.app import _fail, _store_checked, _subject_checked, app, console
+from groundly.cli.app import _fail, _safe, _store_checked, _subject_checked, _visible, app, console
 
 
 @app.command()
@@ -37,6 +36,7 @@ def index(
 ) -> None:
     """Index course materials: hash-skip idempotent, per-file progress, resumable."""
     from groundly.core.logs import setup_logging
+    from groundly.core.manifest import validate_ocr_lang
     from groundly.core.subject import Subject
     from groundly.ingestion import pipeline
     from groundly.ingestion.results import Status
@@ -50,7 +50,13 @@ def index(
         subj = Subject(subject)
     except ValueError as exc:  # bad subject name — same cause pipeline would name
         _fail(str(exc))
-    # Check paths before creating the subject: a typo must not leave an empty one behind.
+    # Check the inputs before creating the subject: a typo must not leave an empty one behind,
+    # and a language the manifest would refuse must never be saved into it.
+    try:
+        if ocr_lang:
+            validate_ocr_lang(ocr_lang)
+    except ValueError as exc:
+        _fail(str(exc))
     missing = [str(p) for p in paths if not p.exists()]
     if missing:
         _fail(f"path not found: {', '.join(missing)}")
@@ -85,7 +91,7 @@ def index(
     }
 
     with Progress(
-        TextColumn("{task.description}"),
+        TextColumn("{task.description}", markup=False),
         BarColumn(),
         MofNCompleteColumn(),
         console=console,
@@ -100,7 +106,7 @@ def index(
 
         def on_event(path: Path, stage: str) -> None:
             if stage in ("extracting", "embedding"):
-                progress.update(task, description=f"{path.name}: {stage}…")
+                progress.update(task, description=f"{_visible(path.name)}: {stage}…")
             elif stage in set(Status):
                 progress.advance(task)
 
@@ -118,9 +124,9 @@ def index(
 
     for r in results:
         # filenames and parser errors are document-influenced — never live markup
-        detail = f" — {escape(r.detail)}" if r.detail else ""
+        detail = f" — {_safe(r.detail, multiline=True)}" if r.detail else ""
         chunks = f" ({r.chunks} chunks)" if r.status == Status.INDEXED else ""
-        console.print(f"  {escape(r.path.name)}: {labels[r.status]}{chunks}{detail}")
+        console.print(f"  {_safe(r.path.name)}: {labels[r.status]}{chunks}{detail}")
 
     indexed = sum(r.status == Status.INDEXED for r in results)
     failed = sum(r.status in (Status.EXTRACTION_FAILED, Status.ERROR) for r in results)
@@ -140,8 +146,6 @@ def list_(
     """List subjects, or one subject's materials with status, pages, chunks."""
     import sqlite3
 
-    from pydantic import ValidationError
-
     from groundly.core.paths import discover_subjects
     from groundly.core.subject import Subject
 
@@ -153,14 +157,17 @@ def list_(
             try:
                 subj = Subject(name)
                 manifest = subj.load_manifest()
-            except ValidationError:
+            except (OSError, ValueError):  # pydantic's ValidationError is a ValueError
                 # one damaged subject must not take down the whole listing
-                console.print(f"[red]Warning:[/red] {name}: manifest.json is corrupt — skipping")
+                console.print(
+                    f"[red]Warning:[/red] {_safe(name)}: not a valid subject name, or its "
+                    "manifest.json is corrupt or unreadable — skipping"
+                )
                 continue
             try:  # the manifest keeps no page count; a broken store shows "—", not a crash
                 rows = SubjectStore(subj.store_db_path).list_materials()
                 pages = str(sum(r["pages"] or 0 for r in rows if r["status"] == "indexed"))
-            except (RuntimeError, sqlite3.Error):
+            except (RuntimeError, sqlite3.Error, TypeError):  # TypeError: pages not a number
                 pages = "—"
             table.add_row(
                 name,
@@ -179,12 +186,12 @@ def list_(
         table = Table("material", "sha256", "status", "pages", "chunks", "detail")
         for row in store_obj.list_materials():
             table.add_row(
-                escape(row["filename"]),
-                row["sha256"][:8],
-                row["status"],
-                str(row["pages"] or "—"),
+                _safe(row["filename"]),
+                _safe(str(row["sha256"])[:8]),
+                _safe(row["status"]),
+                _safe(row["pages"] or "—"),
                 str(row["chunk_count"]),
-                escape(row["error"] or ""),
+                _safe(row["error"] or "", multiline=True),
             )
         console.print(table)
     except sqlite3.OperationalError as exc:
@@ -248,7 +255,7 @@ def remove(
                 _fail(f"{ident!r} is ambiguous — candidates: {candidates}; use a sha256 prefix")
             targets[matches[0]["id"]] = matches[0]
         if not yes:
-            names = ", ".join(t["filename"] for t in targets.values())
+            names = ", ".join(_visible(t["filename"]) for t in targets.values())
             typer.confirm(
                 f"Remove {len(targets)} material(s) from {subject}? ({names})", abort=True
             )
@@ -257,10 +264,10 @@ def remove(
             if target["status"] == "indexed":
                 # failed rows never got a copy in materials/, and their original filename
                 # (no collision suffix) can shadow a different indexed material's file
-                stored = subj.materials_dir / target["filename"]
-                if stored.exists():
+                stored = subj.stored_material(target["filename"])
+                if stored:
                     stored.unlink()
-            console.print(f"Removed [bold]{escape(target['filename'])}[/bold] from {subject}")
+            console.print(f"Removed [bold]{_safe(target['filename'])}[/bold] from {subject}")
         conn = store_obj.connect()
         try:
             sync_counts(conn, subj.manifest_path)

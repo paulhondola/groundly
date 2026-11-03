@@ -4,8 +4,9 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from rich.text import Text
 
-from groundly.cli.app import _fail, _subject_checked, app, console
+from groundly.cli.app import _fail, _subject_checked, _visible, app, console
 
 
 @app.command()
@@ -29,7 +30,7 @@ def export(
     with console.status("exporting…") as status:
 
         def on_file(name: str) -> None:
-            status.update(f"packing {name}…")
+            status.update(Text(f"packing {_visible(name)}…"))
 
         try:
             bundle.export_subject(
@@ -102,9 +103,11 @@ def import_(
         with console.status("importing…") as status:
 
             def on_file(fname: str) -> None:
-                status.update(f"extracting {fname}…")
+                status.update(Text(f"extracting {_visible(fname)}…"))
 
             manifest = bundle.extract_bundle(bundle_path, tmp_dir, on_file=on_file)
+            # First: every later check reads tables, and a hostile view runs when it is read.
+            bundle.check_store_shape(tmp_dir / "store.db")
             bundle.check_counts(tmp_dir / "store.db", manifest)
             bundle.check_tree(tmp_dir / "store.db")
 

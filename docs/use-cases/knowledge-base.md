@@ -70,3 +70,4 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: the **student**
 - `list_subjects` works from an MCP host spawned in an arbitrary working directory (global `~/.groundly/` discovery).
 - Setting or clearing a title changes no citation, path or stored chunk, and survives export and import.
 - A subject whose manifest is corrupt still appears in `list_subjects` and on the page, without a title.
+- A subject whose store is damaged still appears in `list_subjects`, with zero counts and an `error`; `groundly list` warns about a subject it cannot read and lists the rest.
