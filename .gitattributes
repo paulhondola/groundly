@@ -1,0 +1,2 @@
+# Archify output: rebuilt whole from the JSON source, so keep it out of language stats and diffs.
+docs/diagrams/*.html linguist-generated -diff
