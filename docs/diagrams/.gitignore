@@ -1,0 +1,2 @@
+# Delivery receipts record absolute local paths.
+*.delivery.json

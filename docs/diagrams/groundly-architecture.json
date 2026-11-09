@@ -1,0 +1,580 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Groundly architecture (proposed interfaces)",
+    "locale": "en",
+    "output": "docs/diagrams/groundly-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/paulhondola/groundly",
+      "provider": "github",
+      "link_mode": "local-only",
+      "revision": "f36c236a4ef46e5ef24635d6d753bb63806a6085"
+    }
+  },
+  "components": [
+    {
+      "id": "host",
+      "type": "external",
+      "label": "Host agent",
+      "sublabel": "MCP client",
+      "pos": [
+        40,
+        150
+      ],
+      "size": [
+        130,
+        60
+      ],
+      "sources": [
+        {
+          "path": "groundly/cli/mcp.py",
+          "line": 35,
+          "end_line": 58
+        },
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 22
+        }
+      ]
+    },
+    {
+      "id": "student",
+      "type": "external",
+      "icon": "person",
+      "label": "Student",
+      "sublabel": "terminal, browser",
+      "pos": [
+        40,
+        700
+      ],
+      "size": [
+        130,
+        290
+      ],
+      "sources": [
+        {
+          "path": "groundly/cli/app.py",
+          "line": 14,
+          "end_line": 26
+        },
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 21
+        }
+      ]
+    },
+    {
+      "id": "mcp",
+      "type": "frontend",
+      "label": "MCP server",
+      "sublabel": "13 tools, host-spawned",
+      "pos": [
+        250,
+        150
+      ],
+      "size": [
+        140,
+        500
+      ],
+      "sources": [
+        {
+          "path": "groundly/mcp/server.py",
+          "line": 46,
+          "end_line": 226
+        },
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 276,
+          "end_line": 300,
+          "label": "proposed tool surface"
+        }
+      ]
+    },
+    {
+      "id": "cli",
+      "type": "frontend",
+      "label": "CLI",
+      "sublabel": "13 verbs, one-shot",
+      "pos": [
+        250,
+        700
+      ],
+      "size": [
+        140,
+        170
+      ],
+      "sources": [
+        {
+          "path": "groundly/cli/app.py",
+          "line": 14,
+          "end_line": 26
+        },
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 302,
+          "end_line": 320,
+          "label": "CLI verbs"
+        }
+      ]
+    },
+    {
+      "id": "page",
+      "type": "frontend",
+      "label": "Topic-tree page",
+      "sublabel": "read-only, 127.0.0.1",
+      "pos": [
+        250,
+        930
+      ],
+      "size": [
+        140,
+        60
+      ],
+      "sources": [
+        {
+          "path": "groundly/web/app.py",
+          "line": 120,
+          "end_line": 134
+        },
+        {
+          "path": "groundly/cli/serve.py",
+          "line": 22,
+          "end_line": 47
+        }
+      ]
+    },
+    {
+      "id": "quiz",
+      "type": "backend",
+      "label": "Quiz and progress",
+      "sublabel": "planned · grading, mastery",
+      "pos": [
+        560,
+        150
+      ],
+      "size": [
+        160,
+        60
+      ],
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 227,
+          "end_line": 249,
+          "label": "UC-12, UC-13"
+        }
+      ]
+    },
+    {
+      "id": "gates",
+      "type": "security",
+      "label": "Gates",
+      "sublabel": "tree; questions planned",
+      "pos": [
+        560,
+        260
+      ],
+      "size": [
+        160,
+        60
+      ],
+      "sources": [
+        {
+          "path": "groundly/agents/topics.py",
+          "line": 149,
+          "end_line": 209,
+          "label": "topic gate"
+        },
+        {
+          "path": "groundly/agents/verifier.py",
+          "line": 37,
+          "end_line": 64,
+          "label": "re-retrieval check"
+        },
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 213,
+          "end_line": 225,
+          "label": "UC-11"
+        }
+      ]
+    },
+    {
+      "id": "retrieval",
+      "type": "backend",
+      "label": "Retrieval",
+      "sublabel": "dense+sparse+BM25 → rerank",
+      "pos": [
+        560,
+        370
+      ],
+      "size": [
+        160,
+        60
+      ],
+      "sources": [
+        {
+          "path": "groundly/retrieval/vector.py",
+          "line": 32,
+          "end_line": 120
+        }
+      ]
+    },
+    {
+      "id": "ingestion",
+      "type": "backend",
+      "label": "Ingestion",
+      "sublabel": "one run per subject",
+      "pos": [
+        560,
+        590
+      ],
+      "size": [
+        160,
+        60
+      ],
+      "sources": [
+        {
+          "path": "groundly/ingestion/pipeline.py",
+          "line": 110,
+          "end_line": 245
+        },
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 341,
+          "end_line": 350,
+          "label": "background run via MCP"
+        }
+      ]
+    },
+    {
+      "id": "extractor",
+      "type": "backend",
+      "label": "Extractor",
+      "sublabel": "Docling + OCR subprocess",
+      "pos": [
+        560,
+        700
+      ],
+      "size": [
+        160,
+        60
+      ],
+      "sources": [
+        {
+          "path": "groundly/ingestion/extract.py",
+          "line": 53,
+          "end_line": 110
+        }
+      ]
+    },
+    {
+      "id": "bundle",
+      "type": "backend",
+      "label": "Bundle",
+      "sublabel": "export / import .groundly",
+      "pos": [
+        560,
+        810
+      ],
+      "size": [
+        160,
+        60
+      ],
+      "sources": [
+        {
+          "path": "groundly/core/bundle.py",
+          "line": 38,
+          "end_line": 66,
+          "label": "export allowlist"
+        },
+        {
+          "path": "groundly/core/bundle.py",
+          "line": 95,
+          "end_line": 233,
+          "label": "import checks"
+        }
+      ]
+    },
+    {
+      "id": "models",
+      "type": "backend",
+      "label": "Local models",
+      "sublabel": "bge-m3 + reranker, lazy",
+      "pos": [
+        790,
+        480
+      ],
+      "size": [
+        130,
+        60
+      ],
+      "sources": [
+        {
+          "path": "groundly/llm/embeddings.py",
+          "line": 91,
+          "end_line": 140
+        },
+        {
+          "path": "groundly/llm/rerank.py",
+          "line": 10,
+          "end_line": 31
+        }
+      ]
+    },
+    {
+      "id": "progress",
+      "type": "database",
+      "label": "progress.db",
+      "sublabel": "answers; never exported",
+      "pos": [
+        990,
+        150
+      ],
+      "size": [
+        140,
+        60
+      ],
+      "sources": [
+        {
+          "path": "groundly/core/subject.py",
+          "line": 32,
+          "end_line": 33
+        },
+        {
+          "path": "groundly/core/store.py",
+          "line": 3,
+          "end_line": 4
+        }
+      ]
+    },
+    {
+      "id": "store",
+      "type": "database",
+      "label": "Subject store",
+      "sublabel": "store.db + materials/",
+      "pos": [
+        990,
+        260
+      ],
+      "size": [
+        140,
+        610
+      ],
+      "sources": [
+        {
+          "path": "groundly/core/store.py",
+          "line": 112,
+          "end_line": 125,
+          "label": "WAL + busy_timeout"
+        },
+        {
+          "path": "groundly/core/store.py",
+          "line": 473,
+          "end_line": 491,
+          "label": "topic tree write"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Groundly package (several local processes)",
+      "wraps": [
+        "mcp",
+        "cli",
+        "page",
+        "quiz",
+        "gates",
+        "retrieval",
+        "ingestion",
+        "extractor",
+        "bundle",
+        "models"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "~/.groundly/<subject>/",
+      "wraps": [
+        "progress",
+        "store"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "host-mcp",
+      "from": "host",
+      "to": "mcp",
+      "label": "stdio / HTTP",
+      "variant": "emphasis"
+    },
+    {
+      "id": "student-cli",
+      "from": "student",
+      "to": "cli",
+      "label": "verbs"
+    },
+    {
+      "id": "student-page",
+      "from": "student",
+      "to": "page",
+      "label": "browser"
+    },
+    {
+      "id": "mcp-quiz",
+      "from": "mcp",
+      "to": "quiz",
+      "label": "quiz, answers, progress"
+    },
+    {
+      "id": "mcp-gates",
+      "from": "mcp",
+      "to": "gates",
+      "label": "submit_tree, questions",
+      "variant": "security"
+    },
+    {
+      "id": "mcp-retrieval",
+      "from": "mcp",
+      "to": "retrieval",
+      "label": "search",
+      "variant": "emphasis"
+    },
+    {
+      "id": "mcp-ingestion",
+      "from": "mcp",
+      "to": "ingestion",
+      "label": "index (background)",
+      "variant": "dashed"
+    },
+    {
+      "id": "mcp-bundle",
+      "from": "mcp",
+      "to": "bundle",
+      "label": "export / import"
+    },
+    {
+      "id": "cli-retrieval",
+      "from": "cli",
+      "to": "retrieval",
+      "label": "search"
+    },
+    {
+      "id": "cli-ingestion",
+      "from": "cli",
+      "to": "ingestion",
+      "label": "index"
+    },
+    {
+      "id": "cli-bundle",
+      "from": "cli",
+      "to": "bundle",
+      "label": "export / import"
+    },
+    {
+      "id": "gates-retrieval",
+      "from": "gates",
+      "to": "retrieval",
+      "label": "retrieve, rerank on",
+      "variant": "security"
+    },
+    {
+      "id": "gates-store",
+      "from": "gates",
+      "to": "store",
+      "label": "tree, questions"
+    },
+    {
+      "id": "quiz-progress",
+      "from": "quiz",
+      "to": "progress",
+      "label": "answers"
+    },
+    {
+      "id": "retrieval-models",
+      "from": "retrieval",
+      "to": "models",
+      "label": "embed, rerank"
+    },
+    {
+      "id": "retrieval-store",
+      "from": "retrieval",
+      "to": "store",
+      "label": "read chunks"
+    },
+    {
+      "id": "ingestion-models",
+      "from": "ingestion",
+      "to": "models",
+      "label": "embed"
+    },
+    {
+      "id": "ingestion-extractor",
+      "from": "ingestion",
+      "to": "extractor",
+      "label": "extract"
+    },
+    {
+      "id": "ingestion-store",
+      "from": "ingestion",
+      "to": "store",
+      "label": "chunks, vectors, copies"
+    },
+    {
+      "id": "bundle-store",
+      "from": "bundle",
+      "to": "store",
+      "label": "zip, minus progress.db"
+    },
+    {
+      "id": "page-store",
+      "from": "page",
+      "to": "store",
+      "label": "read-only",
+      "fromSide": "right",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Layers and processes",
+      "items": [
+        "Clients → services → foundations, one direction (import-linter)",
+        "Processes: host-spawned MCP server, one-shot CLI runs, groundly serve, the extraction subprocess",
+        "They share store.db through SQLite WAL + busy_timeout"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Proposed in this design",
+      "items": [
+        "The host indexes through MCP; the run continues in the server and the host follows it with list_materials",
+        "Lifecycle operations exist on both surfaces through the same service code",
+        "One indexer per subject across all processes"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "No LLM, no key; privacy",
+      "items": [
+        "Only local bge-m3 and the reranker; the host composes and generates",
+        "Network: model downloads from Hugging Face and pinned OCR models from modelscope.cn, nothing else",
+        "progress.db is never exported; MCP HTTP and the page bind 127.0.0.1"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Not drawn",
+      "items": [
+        "list_subjects, list_materials, outline, get_page, title, remove and drop read or change the store directly",
+        "The page will also read mastery from progress.db (planned)"
+      ]
+    }
+  ]
+}

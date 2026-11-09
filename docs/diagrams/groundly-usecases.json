@@ -1,0 +1,642 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Groundly use cases",
+    "locale": "en",
+    "output": "docs/diagrams/groundly-usecases.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/paulhondola/groundly",
+      "provider": "github",
+      "link_mode": "local-only",
+      "revision": "f36c236a4ef46e5ef24635d6d753bb63806a6085"
+    },
+    "legend": {
+      "entries": {
+        "frontend": {
+          "label": "CLI only"
+        },
+        "backend": {
+          "label": "CLI and MCP"
+        },
+        "cloud": {
+          "label": "MCP only"
+        },
+        "external": {
+          "label": "Actor"
+        }
+      }
+    }
+  },
+  "components": [
+    {
+      "id": "student",
+      "type": "external",
+      "icon": "person",
+      "label": "Student",
+      "sublabel": "primary, human",
+      "pos": [
+        40,
+        160
+      ],
+      "size": [
+        130,
+        960
+      ],
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 21
+        }
+      ]
+    },
+    {
+      "id": "host",
+      "type": "external",
+      "label": "Host agent",
+      "sublabel": "MCP client",
+      "pos": [
+        1060,
+        160
+      ],
+      "size": [
+        130,
+        960
+      ],
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 22
+        }
+      ]
+    },
+    {
+      "id": "hub",
+      "type": "external",
+      "icon": "cloud",
+      "label": "Model hub",
+      "sublabel": "Hugging Face, modelscope",
+      "pos": [
+        350,
+        30
+      ],
+      "size": [
+        170,
+        56
+      ],
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 24
+        }
+      ]
+    },
+    {
+      "id": "author",
+      "type": "external",
+      "icon": "person",
+      "label": "Bundle author",
+      "sublabel": "another Groundly user",
+      "pos": [
+        350,
+        1190
+      ],
+      "size": [
+        170,
+        56
+      ],
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 23
+        }
+      ]
+    },
+    {
+      "id": "uc02",
+      "type": "frontend",
+      "icon": "none",
+      "label": "UC-02 Models and configuration",
+      "sublabel": "models install, config set",
+      "pos": [
+        320,
+        160
+      ],
+      "size": [
+        230,
+        60
+      ],
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 76,
+          "end_line": 84
+        }
+      ]
+    },
+    {
+      "id": "uc01",
+      "type": "frontend",
+      "icon": "none",
+      "label": "UC-01 Connect a host agent",
+      "sublabel": "register server, install skill",
+      "pos": [
+        320,
+        250
+      ],
+      "size": [
+        230,
+        60
+      ],
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 64,
+          "end_line": 74
+        }
+      ]
+    },
+    {
+      "id": "uc10",
+      "type": "frontend",
+      "icon": "none",
+      "label": "UC-10 View the topic tree",
+      "sublabel": "groundly serve, 127.0.0.1",
+      "pos": [
+        320,
+        340
+      ],
+      "size": [
+        230,
+        60
+      ],
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 201,
+          "end_line": 211
+        }
+      ]
+    },
+    {
+      "id": "uc03",
+      "type": "backend",
+      "icon": "none",
+      "label": "UC-03 Index materials",
+      "sublabel": "changed · background, per-file state",
+      "pos": [
+        320,
+        610
+      ],
+      "size": [
+        230,
+        60
+      ],
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 88,
+          "end_line": 115
+        }
+      ]
+    },
+    {
+      "id": "uc04",
+      "type": "backend",
+      "icon": "none",
+      "label": "UC-04 Manage materials",
+      "sublabel": "changed · list states, remove",
+      "pos": [
+        320,
+        700
+      ],
+      "size": [
+        230,
+        60
+      ],
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 117,
+          "end_line": 127
+        }
+      ]
+    },
+    {
+      "id": "uc05",
+      "type": "backend",
+      "icon": "none",
+      "label": "UC-05 Manage subjects",
+      "sublabel": "changed · list, title, drop",
+      "pos": [
+        320,
+        790
+      ],
+      "size": [
+        230,
+        60
+      ],
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 129,
+          "end_line": 138
+        }
+      ]
+    },
+    {
+      "id": "uc06",
+      "type": "backend",
+      "icon": "none",
+      "label": "UC-06 Grounded search",
+      "sublabel": "cited chunks, get_page",
+      "pos": [
+        320,
+        880
+      ],
+      "size": [
+        230,
+        60
+      ],
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 140,
+          "end_line": 151
+        }
+      ]
+    },
+    {
+      "id": "uc07",
+      "type": "backend",
+      "icon": "none",
+      "label": "UC-07 Export a knowledge base",
+      "sublabel": "changed · one bundle, no progress.db",
+      "pos": [
+        320,
+        970
+      ],
+      "size": [
+        230,
+        60
+      ],
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 155,
+          "end_line": 164
+        }
+      ]
+    },
+    {
+      "id": "uc08",
+      "type": "backend",
+      "icon": "none",
+      "label": "UC-08 Import a knowledge base",
+      "sublabel": "changed · validated, untrusted",
+      "pos": [
+        320,
+        1060
+      ],
+      "size": [
+        230,
+        60
+      ],
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 166,
+          "end_line": 181
+        }
+      ]
+    },
+    {
+      "id": "uc09",
+      "type": "cloud",
+      "icon": "none",
+      "label": "UC-09 Build the topic tree",
+      "sublabel": "gated · outline, then submit_tree",
+      "pos": [
+        670,
+        160
+      ],
+      "size": [
+        230,
+        60
+      ],
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 185,
+          "end_line": 199
+        }
+      ]
+    },
+    {
+      "id": "uc11",
+      "type": "cloud",
+      "icon": "none",
+      "label": "UC-11 Verified question bank",
+      "sublabel": "planned · verifier gate per question",
+      "pos": [
+        670,
+        250
+      ],
+      "size": [
+        230,
+        60
+      ],
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 213,
+          "end_line": 225
+        }
+      ]
+    },
+    {
+      "id": "uc12",
+      "type": "cloud",
+      "icon": "none",
+      "label": "UC-12 Take a quiz",
+      "sublabel": "planned · MC graded, open host-judged",
+      "pos": [
+        670,
+        340
+      ],
+      "size": [
+        230,
+        60
+      ],
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 227,
+          "end_line": 238
+        }
+      ]
+    },
+    {
+      "id": "uc13",
+      "type": "cloud",
+      "icon": "none",
+      "label": "UC-13 Track mastery",
+      "sublabel": "planned · 90% of the last 10 answers",
+      "pos": [
+        670,
+        430
+      ],
+      "size": [
+        230,
+        60
+      ],
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 240,
+          "end_line": 249
+        }
+      ]
+    },
+    {
+      "id": "uc14",
+      "type": "cloud",
+      "icon": "none",
+      "label": "UC-14 Coding challenge",
+      "sublabel": "idea · subprocess runner",
+      "pos": [
+        670,
+        520
+      ],
+      "size": [
+        230,
+        60
+      ],
+      "sources": [
+        {
+          "path": "docs/superpowers/specs/2026-11-09-use-cases-and-interfaces-design.md",
+          "line": 251,
+          "end_line": 262
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Groundly",
+      "wraps": [
+        "uc01",
+        "uc02",
+        "uc03",
+        "uc04",
+        "uc05",
+        "uc06",
+        "uc07",
+        "uc08",
+        "uc09",
+        "uc10",
+        "uc11",
+        "uc12",
+        "uc13",
+        "uc14"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "s-host",
+      "from": "student",
+      "to": "host",
+      "label": "asks in conversation",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "via": [
+        [
+          105,
+          1300
+        ],
+        [
+          1125,
+          1300
+        ]
+      ]
+    },
+    {
+      "id": "s-uc02",
+      "from": "student",
+      "to": "uc02",
+      "label": "models, config"
+    },
+    {
+      "id": "s-uc01",
+      "from": "student",
+      "to": "uc01",
+      "label": "skill, mcp"
+    },
+    {
+      "id": "s-uc10",
+      "from": "student",
+      "to": "uc10",
+      "label": "serve"
+    },
+    {
+      "id": "s-uc03",
+      "from": "student",
+      "to": "uc03",
+      "label": "index"
+    },
+    {
+      "id": "s-uc04",
+      "from": "student",
+      "to": "uc04",
+      "label": "list, remove"
+    },
+    {
+      "id": "s-uc05",
+      "from": "student",
+      "to": "uc05",
+      "label": "list, title, drop"
+    },
+    {
+      "id": "s-uc06",
+      "from": "student",
+      "to": "uc06",
+      "label": "search"
+    },
+    {
+      "id": "s-uc07",
+      "from": "student",
+      "to": "uc07",
+      "label": "export"
+    },
+    {
+      "id": "s-uc08",
+      "from": "student",
+      "to": "uc08",
+      "label": "import"
+    },
+    {
+      "id": "h-uc03",
+      "from": "host",
+      "to": "uc03",
+      "label": "index, list_materials"
+    },
+    {
+      "id": "h-uc04",
+      "from": "host",
+      "to": "uc04",
+      "label": "list_materials, remove_materials"
+    },
+    {
+      "id": "h-uc05",
+      "from": "host",
+      "to": "uc05",
+      "label": "list_subjects, set_title, drop_subject"
+    },
+    {
+      "id": "h-uc06",
+      "from": "host",
+      "to": "uc06",
+      "label": "search, get_page",
+      "variant": "emphasis"
+    },
+    {
+      "id": "h-uc07",
+      "from": "host",
+      "to": "uc07",
+      "label": "export_subject"
+    },
+    {
+      "id": "h-uc08",
+      "from": "host",
+      "to": "uc08",
+      "label": "import_bundle"
+    },
+    {
+      "id": "h-uc09",
+      "from": "host",
+      "to": "uc09",
+      "label": "outline, submit_tree",
+      "variant": "security"
+    },
+    {
+      "id": "h-uc11",
+      "from": "host",
+      "to": "uc11",
+      "label": "submit_questions",
+      "variant": "security"
+    },
+    {
+      "id": "h-uc12",
+      "from": "host",
+      "to": "uc12",
+      "label": "quiz, record_answer"
+    },
+    {
+      "id": "h-uc13",
+      "from": "host",
+      "to": "uc13",
+      "label": "progress"
+    },
+    {
+      "id": "h-uc14",
+      "from": "host",
+      "to": "uc14",
+      "label": "code questions"
+    },
+    {
+      "id": "uc09-uc10",
+      "from": "uc09",
+      "to": "uc10",
+      "label": "accepted tree"
+    },
+    {
+      "id": "hub-uc02",
+      "from": "hub",
+      "to": "uc02",
+      "label": "downloads models"
+    },
+    {
+      "id": "author-uc08",
+      "from": "author",
+      "to": "uc08",
+      "label": "untrusted bundle",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Reading the diagram",
+      "items": [
+        "An edge from an actor is a use case it can start; its label names the CLI verbs or MCP tools",
+        "Colour shows the surface; the sublabel starts with the status: changed (now also over MCP), gated, planned, idea",
+        "The student starts study use cases by asking the host"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Between use cases",
+      "items": [
+        "Search, the tree and quizzes need indexed materials (UC-03)",
+        "Questions are written per topic of the tree (UC-09)",
+        "A quiz draws from the verified bank (UC-11)",
+        "Mastery is shown on the topic-tree page (UC-10)",
+        "Coding challenges extend the bank and quiz tools"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Gates and privacy",
+      "items": [
+        "The topic gate stores the whole tree or nothing",
+        "Nothing unverified enters the question bank",
+        "Answers live in progress.db, which is never exported",
+        "An imported bundle is untrusted data"
+      ]
+    }
+  ]
+}
