@@ -15,7 +15,7 @@ import sqlite_vec
 
 from groundly.core.manifest import EMBEDDING_DIM
 
-STORE_USER_VERSION = 1
+STORE_USER_VERSION = 2
 
 # What a stored topic tree may cost: the gate refuses a submission over these and import
 # refuses a bundle over them, so a hostile bundle cannot make `tree()` outgrow memory.
@@ -24,6 +24,14 @@ MAX_SOURCES = 5  # citations per topic
 MAX_TITLE_CHARS = 200
 MAX_SUMMARY_CHARS = 500
 MAX_TREE_SOURCE_BYTES = 64 * 1024 * 1024  # chunk text `tree()` loads across all citations
+
+# What a stored question may cost: the question gate and import both refuse anything over these.
+MAX_STEM_CHARS = 500
+MAX_CODE_CHARS = 2000
+MAX_OPTION_CHARS = 300
+MAX_REFERENCE_CHARS = 1000
+MAX_QUESTION_CITATIONS = 5
+MAX_QUESTIONS_PER_TOPIC = 200
 
 
 @dataclass
@@ -38,12 +46,25 @@ class TopicWrite:
     subtopics: list["TopicWrite"] = field(default_factory=list)
 
 
+@dataclass
+class QuestionWrite:
+    """One question the gate has passed. `options` are (text, correct) in the order shown,
+    empty for an open question; `reference_answer` is set for an open question only."""
+
+    kind: str
+    stem: str
+    code: str | None
+    reference_answer: str | None
+    options: list[tuple[str, bool]]
+    chunk_ids: list[int]
+
+
 class StaleTopicError(Exception):
     """A submitted tree keeps a topic id that no longer exists: another submit dropped it
     after the caller read the ids. Raised before anything is written."""
 
 
-_SCHEMA = f"""
+_BASE_SCHEMA = f"""
 CREATE TABLE materials (
     id INTEGER PRIMARY KEY,
     filename TEXT NOT NULL,
@@ -108,6 +129,45 @@ CREATE TABLE topic_citations (
 CREATE INDEX idx_topic_citations_chunk ON topic_citations(chunk_id);
 """
 
+# Kept apart from the base schema so a version-1 store gains exactly these objects on open.
+_QUESTION_SCHEMA = """
+-- AUTOINCREMENT: a recorded answer must never come to mean a different question.
+CREATE TABLE questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('single', 'multiple', 'open')),
+    stem TEXT NOT NULL,
+    code TEXT,
+    reference_answer TEXT
+);
+CREATE INDEX idx_questions_topic ON questions(topic_id);
+
+CREATE TABLE question_options (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    correct INTEGER NOT NULL CHECK (correct IN (0, 1))
+);
+CREATE INDEX idx_question_options_question ON question_options(question_id);
+
+CREATE TABLE question_citations (
+    question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+    chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+    PRIMARY KEY (question_id, chunk_id)
+);
+CREATE INDEX idx_question_citations_chunk ON question_citations(chunk_id);
+
+-- Every stored question cites a chunk that resolves: one that loses its last citation goes too.
+CREATE TRIGGER question_citations_ad AFTER DELETE ON question_citations
+WHEN NOT EXISTS (SELECT 1 FROM question_citations WHERE question_id = old.question_id)
+BEGIN
+    DELETE FROM questions WHERE id = old.question_id;
+END;
+"""
+
+_SCHEMA = _BASE_SCHEMA + _QUESTION_SCHEMA
+
 
 def connect(path: Path, create: bool = False) -> sqlite3.Connection:
     if not create and not path.exists():
@@ -137,7 +197,34 @@ def connect(path: Path, create: bool = False) -> sqlite3.Connection:
             f"{path.name} has schema version {version}, newer than this groundly "
             f"understands (max {STORE_USER_VERSION}) — upgrade groundly"
         )
+    if version == 1:
+        _upgrade(conn)
     return conn
+
+
+def _upgrade(conn: sqlite3.Connection) -> None:
+    """Give a version-1 store the question tables, touching no existing row. The version is
+    read again under the write lock: another process may have upgraded while this one waited."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if conn.execute("PRAGMA user_version").fetchone()[0] == 1:
+            for statement in _statements(_QUESTION_SCHEMA):
+                conn.execute(statement)
+            conn.execute(f"PRAGMA user_version = {STORE_USER_VERSION}")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def _statements(script: str) -> Iterator[str]:
+    """Split a schema script without leaving its transaction, which `executescript` would."""
+    buffer = ""
+    for line in script.splitlines(keepends=True):
+        buffer += line
+        if sqlite3.complete_statement(buffer):
+            yield buffer.strip()
+            buffer = ""
 
 
 def programs(conn: sqlite3.Connection) -> set[tuple[str, str, str]]:
@@ -397,6 +484,114 @@ class SubjectStore:
     def topic_ids(self) -> set[int]:
         with self._open() as conn:
             return {r["id"] for r in conn.execute("SELECT id FROM topics")}
+
+    def leaf_topic_ids(self) -> set[int]:
+        """Topics with no subtopics: the only ones that hold questions."""
+        with self._open() as conn:
+            return {
+                r["id"]
+                for r in conn.execute(
+                    "SELECT id FROM topics WHERE id NOT IN "
+                    "(SELECT parent_id FROM topics WHERE parent_id IS NOT NULL)"
+                )
+            }
+
+    def question_counts(self) -> dict[int, int]:
+        """Stored questions per topic id; a topic with none is absent."""
+        with self._open() as conn:
+            return {
+                r["topic_id"]: r["n"]
+                for r in conn.execute(
+                    "SELECT topic_id, COUNT(*) AS n FROM questions GROUP BY topic_id"
+                )
+            }
+
+    def question_stems(self, topic_id: int) -> list[str]:
+        with self._open() as conn:
+            return [
+                r["stem"]
+                for r in conn.execute(
+                    "SELECT stem FROM questions WHERE topic_id = ? ORDER BY id", (topic_id,)
+                )
+            ]
+
+    def add_questions(self, topic_id: int, questions: list[QuestionWrite]) -> list[int]:
+        """One transaction; returns the new ids in the order given."""
+        ids: list[int] = []
+        with self._open() as conn, conn:
+            for q in questions:
+                question_id = conn.execute(
+                    "INSERT INTO questions (topic_id, kind, stem, code, reference_answer) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (topic_id, q.kind, q.stem, q.code, q.reference_answer),
+                ).lastrowid
+                conn.executemany(
+                    "INSERT INTO question_options (question_id, position, text, correct) "
+                    "VALUES (?, ?, ?, ?)",
+                    [
+                        (question_id, position, text, int(correct))
+                        for position, (text, correct) in enumerate(q.options)
+                    ],
+                )
+                conn.executemany(
+                    "INSERT INTO question_citations (question_id, chunk_id) VALUES (?, ?)",
+                    [(question_id, cid) for cid in q.chunk_ids],
+                )
+                ids.append(question_id)
+        return ids
+
+    def remove_questions(self, ids: list[int]) -> list[int]:
+        """Delete these questions, all or none: returns the ids that do not exist, and
+        deletes only when that list is empty."""
+        with self._open() as conn, conn:
+            known = {r["id"] for r in conn.execute("SELECT id FROM questions")}
+            unknown = [i for i in ids if i not in known]
+            if not unknown:
+                conn.executemany("DELETE FROM questions WHERE id = ?", [(i,) for i in ids])
+            return unknown
+
+    def questions(
+        self, *, ids: list[int] | None = None, topic_ids: list[int] | None = None
+    ) -> list[dict]:
+        """Stored questions in id order, each with its options in position order and its
+        sources in the shape `tree()` gives a node. With neither filter, every question."""
+        where, params = "", []
+        for column, values in (("q.id", ids), ("q.topic_id", topic_ids)):
+            if values is not None:
+                where = f"WHERE {column} IN ({','.join('?' for _ in values)})"
+                params = list(values)
+        with self._open() as conn:
+            out = {
+                r["id"]: {**dict(r), "options": [], "sources": []}
+                for r in conn.execute(
+                    f"SELECT q.id, q.topic_id, q.kind, q.stem, q.code, q.reference_answer "
+                    f"FROM questions q {where} ORDER BY q.id",
+                    params,
+                )
+            }
+            for r in conn.execute(
+                f"SELECT o.question_id, o.id, o.text, o.correct FROM question_options o "
+                f"JOIN questions q ON q.id = o.question_id {where} ORDER BY o.position, o.id",
+                params,
+            ):
+                out[r["question_id"]]["options"].append(
+                    {"id": r["id"], "text": r["text"], "correct": bool(r["correct"])}
+                )
+            for r in conn.execute(
+                f"""
+                SELECT qc.question_id, c.id AS chunk_id, c.material_id, m.filename, c.page,
+                       c.heading_path, c.text
+                FROM question_citations qc
+                JOIN questions q ON q.id = qc.question_id
+                JOIN chunks c ON c.id = qc.chunk_id
+                JOIN materials m ON m.id = c.material_id
+                {where} ORDER BY c.id
+                """,
+                params,
+            ):
+                source = dict(r)
+                out[source.pop("question_id")]["sources"].append(source)
+        return list(out.values())
 
     def material_headings(self) -> list[sqlite3.Row]:
         """Each distinct (file, page, heading) in reading order — the outline a topic
