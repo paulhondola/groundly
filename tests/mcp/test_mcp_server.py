@@ -464,7 +464,7 @@ async def test_remove_questions_tool_names_unknown_ids_and_removes_nothing(retri
 async def test_remove_questions_is_marked_destructive():
     async with Client(mcp) as client:
         tools = {t.name: t for t in await client.list_tools()}
-    assert tools["remove_questions"].annotations.destructiveHint is True
+    assert tools["remove_questions"].annotations.destructive_hint is True
 
 
 async def test_submit_questions_names_a_locked_store(retrievable_subject, monkeypatch):
