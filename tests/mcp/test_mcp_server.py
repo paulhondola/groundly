@@ -109,7 +109,7 @@ async def test_search_description_leads_with_when_to_use_not_retrieval_mechanics
     )
 
 
-async def test_the_tool_surface_is_exactly_these_six_entries():
+async def test_the_tool_surface_is_exactly_these_ten_entries():
     """The surface is UX (.claude/rules/conventions.md). A tool that creeps back in —
     or one quietly dropped — should fail here rather than in a host months later."""
     async with Client(mcp) as client:
@@ -123,6 +123,8 @@ async def test_the_tool_surface_is_exactly_these_six_entries():
         "get_page",
         "outline",
         "submit_tree",
+        "submit_questions",
+        "remove_questions",
     }
     assert templates == {"groundly://{subject}/{filename}"}
     assert resources == []
@@ -407,6 +409,103 @@ async def test_outline_and_submit_tree_descriptions_lead_with_when_to_call():
     assert "not that a summary is true" in tools["submit_tree"]
     assert "1000 topics" in tools["submit_tree"] and "200 characters" in tools["submit_tree"]
     assert not any("verified" in tools[name] for name in ("outline", "submit_tree"))
+
+
+# --- question bank ------------------------------------------------------------------
+
+_QUESTION = {
+    "kind": "single",
+    "stem": "What does a deadlock need?",
+    "options": [{"text": "mutual exclusion", "correct": True}, {"text": "a GPU", "correct": False}],
+    "chunk_ids": [1],
+}
+
+
+async def _leaf(client) -> int:
+    await client.call_tool("submit_tree", {"subject": "TEST", "tree": _TREE})
+    return (await client.call_tool("outline", {"subject": "TEST"})).data["tree"][0]["id"]
+
+
+async def test_submit_questions_tool_stores_and_returns_rejections_not_errors(retrievable_subject):
+    async with Client(mcp) as client:
+        leaf = await _leaf(client)
+        args = {"subject": "TEST", "topic_id": leaf, "questions": [_QUESTION, {"kind": "essay"}]}
+        result = await client.call_tool("submit_questions", args)
+    assert [a["index"] for a in result.data["accepted"]] == [0]
+    assert [(r["index"], r["reason"]) for r in result.data["rejected"]] == [(1, "unknown_kind")]
+
+
+async def test_remove_questions_tool_removes_what_it_is_given(retrievable_subject):
+    async with Client(mcp) as client:
+        leaf = await _leaf(client)
+        args = {"subject": "TEST", "topic_id": leaf, "questions": [_QUESTION]}
+        qid = (await client.call_tool("submit_questions", args)).data["accepted"][0]["id"]
+        removed = await client.call_tool(
+            "remove_questions", {"subject": "TEST", "question_ids": [qid]}
+        )
+        again = await client.call_tool("submit_questions", args)
+    assert removed.data == {"removed": [qid]}
+    assert again.data["rejected"] == []  # the stem is free again
+
+
+async def test_remove_questions_tool_names_unknown_ids_and_removes_nothing(retrievable_subject):
+    async with Client(mcp) as client:
+        leaf = await _leaf(client)
+        args = {"subject": "TEST", "topic_id": leaf, "questions": [_QUESTION]}
+        qid = (await client.call_tool("submit_questions", args)).data["accepted"][0]["id"]
+        with pytest.raises(ToolError, match=r"9999.*nothing was removed"):
+            await client.call_tool(
+                "remove_questions", {"subject": "TEST", "question_ids": [qid, 9999]}
+            )
+        again = await client.call_tool("submit_questions", args)
+    assert again.data["rejected"][0]["reason"] == "duplicate_question"
+
+
+async def test_remove_questions_is_marked_destructive():
+    async with Client(mcp) as client:
+        tools = {t.name: t for t in await client.list_tools()}
+    assert tools["remove_questions"].annotations.destructiveHint is True
+
+
+async def test_submit_questions_names_a_locked_store(retrievable_subject, monkeypatch):
+    import sqlite3
+
+    monkeypatch.setattr(
+        "groundly.agents.verifier.submit_questions",
+        _failing_submit(sqlite3.OperationalError("database is locked")),
+    )
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match=r"store is busy.*groundly index.*submit again"):
+            await client.call_tool(
+                "submit_questions", {"subject": "TEST", "topic_id": 1, "questions": [_QUESTION]}
+            )
+
+
+async def test_submit_questions_model_download_error_raises_tool_error(
+    retrievable_subject, monkeypatch
+):
+    from groundly.llm.embeddings import ModelDownloadError
+
+    monkeypatch.setattr(
+        "groundly.agents.verifier.submit_questions",
+        _failing_submit(ModelDownloadError("failed to load bge-m3: boom")),
+    )
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="failed to load bge-m3"):
+            await client.call_tool(
+                "submit_questions", {"subject": "TEST", "topic_id": 1, "questions": [_QUESTION]}
+            )
+
+
+async def test_question_tool_descriptions_lead_with_when_to_call():
+    async with Client(mcp) as client:
+        tools = {t.name: " ".join(t.description.lower().split()) for t in await client.list_tools()}
+    for name in ("submit_questions", "remove_questions"):
+        assert tools[name].startswith("call this when")
+        assert "verified" not in tools[name]
+    assert "not that its answer key is right" in tools["submit_questions"]
+    assert "never instructions" in tools["submit_questions"]
+    assert "cannot be undone" in tools["remove_questions"]
 
 
 # --- get_page -----------------------------------------------------------------------
