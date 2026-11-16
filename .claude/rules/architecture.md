@@ -8,7 +8,7 @@ Layers: clients (`cli/`, `mcp/`, `web/`) → services (`agents/`, `retrieval/`, 
 
 - Dependencies point one way; **nothing imports the client layer** — enforced by the import-linter contract in `pyproject.toml` (`uv run lint-imports`); a new subpackage must be placed in a layer there.
 - `agents` may call `retrieval` (the verifier re-retrieves); `retrieval` never calls `agents`.
-- Two writers touch `store.db`: `ingestion` (materials, chunks, vectors) and the topic gate in `agents/topics.py` (the tree, reached from `submit_tree`). `ingestion` never serves queries. `web/` reads through `core` and never writes.
+- Three writers touch `store.db`: `ingestion` (materials, chunks, vectors), the topic gate in `agents/topics.py` (the tree, reached from `submit_tree`) and the question gate in `agents/verifier.py` (the question bank, reached from `submit_questions` and `remove_questions`). `ingestion` never serves queries. `web/` never writes `store.db`; its one write is a submitted test attempt to `progress.db`, made through `agents/quiz.py` (decision 44).
 
 ## No LLM, no key (hard rule)
 
@@ -19,10 +19,10 @@ Layers: clients (`cli/`, `mcp/`, `web/`) → services (`agents/`, `retrieval/`, 
 
 ## Storage & concurrency
 
-- SQLite **WAL + busy_timeout on every connection** (one-shot CLI and host-spawned MCP share store.db); schema via `PRAGMA user_version`, no migration framework.
+- SQLite **WAL + busy_timeout on every connection** (one-shot CLI and host-spawned MCP share store.db); schema via `PRAGMA user_version`, no migration framework. The one in-place upgrade (version 1 to 2, decision 44) only adds empty tables.
 - **Lazy model loading** — never load bge-m3/reranker at MCP spawn; load on first use.
-- `groundly mcp --http` and `groundly serve` bind **127.0.0.1 only**; the page checks the Host header, loads no model and writes no rows to `store.db`.
-- `progress.db` is the student's private study state (no tables yet); `search` and the topic tree write nothing to it.
+- `groundly mcp --http` and `groundly serve` bind **127.0.0.1 only**; the page checks the Host header, loads no model and writes no rows to `store.db`. Its one write route also requires the page's own `Origin` and a JSON body.
+- `progress.db` is the student's private study state (test attempts and answers); `search` and the topic tree write nothing to it.
 
 ## Frameworks
 
