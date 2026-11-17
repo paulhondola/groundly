@@ -29,7 +29,7 @@ setup:
 }
 ```
 
-Verify with `/mcp` inside Claude Code — `groundly` should list five tools (`list_subjects`, `search`, `get_page`, `outline`, `submit_tree`).
+Verify with `/mcp` inside Claude Code — `groundly` should list nine tools (`list_subjects`, `search`, `get_page`, `outline`, `submit_tree`, `submit_questions`, `remove_questions`, `progress`, `review_answers`).
 
 ### Map a course (topic tree)
 
@@ -50,9 +50,17 @@ If the skill is installed but the server is not connected, it prints the connect
 
 The check on each node shows that its topic appears in your course materials; it does not show that Claude's summary is correct.
 
+### Tests (decision 44)
+
+5. Say *"write me ten questions on OpenMP reductions"* (naming the subject). The skill picks the topic from `progress`, writes questions from `search` results citing their chunks, and calls `submit_questions`; rejected items are rewritten from their reason and resubmitted.
+6. On the page, open the topic and press **Start test** (5, 10 or 20 questions), or **Test the whole course**. Choice questions are graded when you submit; written answers wait for review.
+7. Say *"grade my test"*. The skill reads the written answers with `review_answers`, judges each against its reference answer and cited slides, and records a verdict and a comment that the result page then shows. A verdict is final.
+
+The question check shows a question is well formed and about its cited slides, not that its answer key is right. A wrong question can be removed by the number its result shows: ask Claude to remove it.
+
 ## Codex
 
-The five tools work here, but there is no skill setup for Codex yet, so building a topic tree is Claude Code only for now.
+The tools work here, but there is no skill setup for Codex yet, so building a topic tree and writing questions are Claude Code only for now.
 
 Add to `~/.codex/config.toml`:
 
