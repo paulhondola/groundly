@@ -83,6 +83,7 @@ def test_python_dash_m_groundly_runs_the_cli():
     r = subprocess.run([sys.executable, "-m", "groundly", "--help"], capture_output=True, text=True)
     assert r.returncode == 0 and "mcp" in r.stdout
 
+
 def test_availability_names_why_no_run_can_start(monkeypatch):
     monkeypatch.setattr(runs.shutil, "which", lambda name: None)
     assert runs.availability() == (None, "no_host")
@@ -92,56 +93,88 @@ def test_availability_names_why_no_run_can_start(monkeypatch):
     monkeypatch.setattr(runs.sys, "platform", "darwin")
     assert runs.availability() == ("/bin/claude", None)
 
+
 def test_mcp_config_is_the_running_mcp_or_this_installations_stdio():
     assert runs.mcp_config("http://127.0.0.1:8765/mcp") == {
-        "mcpServers": {"groundly": {"type": "http", "url": "http://127.0.0.1:8765/mcp"}}}
-    assert runs.mcp_config(None) == {"mcpServers": {"groundly": {
-        "command": sys.executable, "args": ["-m", "groundly", "mcp"]}}}
+        "mcpServers": {"groundly": {"type": "http", "url": "http://127.0.0.1:8765/mcp"}}
+    }
+    assert runs.mcp_config(None) == {
+        "mcpServers": {"groundly": {"command": sys.executable, "args": ["-m", "groundly", "mcp"]}}
+    }
+
 
 def test_write_argv_is_isolated_and_allows_only_the_write_tools():
     argv = runs.build_argv("/bin/claude", "write", "P", None)
     assert argv[:3] == ["/bin/claude", "-p", "P"]
-    for flag, value in [("--setting-sources", ""), ("--tools", ""), ("--permission-mode", "dontAsk"),
-                        ("--output-format", "stream-json")]:
+    for flag, value in [
+        ("--setting-sources", ""),
+        ("--tools", ""),
+        ("--permission-mode", "dontAsk"),
+        ("--output-format", "stream-json"),
+    ]:
         assert argv[argv.index(flag) + 1] == value
     for flag in ("--strict-mcp-config", "--verbose", "--no-session-persistence"):
         assert flag in argv
     assert "--model" not in argv
     allowed = argv[argv.index("--allowedTools") + 1].split(",")
     assert set(allowed) == set(runs.WRITE_TOOLS)
-    assert not {"mcp__groundly__remove_questions", "mcp__groundly__submit_tree",
-                "mcp__groundly__review_answers"} & set(allowed)
+    assert not {
+        "mcp__groundly__remove_questions",
+        "mcp__groundly__submit_tree",
+        "mcp__groundly__review_answers",
+    } & set(allowed)
     skill = Path(argv[argv.index("--append-system-prompt-file") + 1])
     assert skill.name == "SKILL.md" and "## Grade a test" in skill.read_text()
     assert json.loads(argv[argv.index("--mcp-config") + 1]) == runs.mcp_config(None)
+
 
 def test_grade_argv_allows_only_the_grade_tools():
     argv = runs.build_argv("/bin/claude", "grade", "P", "http://127.0.0.1:8765/mcp")
     assert set(argv[argv.index("--allowedTools") + 1].split(",")) == set(runs.GRADE_TOOLS)
 
+
 def test_prompts_carry_only_the_flow_the_subject_and_the_topic_id():
     leaf = runs.build_prompt("write", "apd", 27, big=False)
     big = runs.build_prompt("write", "apd", 3, big=True)
     grade = runs.build_prompt("grade", "apd", None, big=False)
-    assert '"Write questions for a topic"' in leaf and "topic id 27" in leaf and "10 questions" in leaf
+    assert (
+        '"Write questions for a topic"' in leaf and "topic id 27" in leaf and "10 questions" in leaf
+    )
     assert "each subtopic of topic id 3" in big and "fewer than 10" in big
     assert '"Grade a test"' in grade and "`remaining` is 0" in grade
     for p in (leaf, big, grade):
-        assert '"apd"' in p and "verified" in p  # the closing line forbids calling anything verified
+        assert (
+            '"apd"' in p and "verified" in p
+        )  # the closing line forbids calling anything verified
 
-INIT = {"type": "system", "subtype": "init",
-        "tools": ["mcp__groundly__search", "mcp__groundly__progress"],
-        "mcp_servers": [{"name": "groundly", "status": "connected"}]}
+
+INIT = {
+    "type": "system",
+    "subtype": "init",
+    "tools": ["mcp__groundly__search", "mcp__groundly__progress"],
+    "mcp_servers": [{"name": "groundly", "status": "connected"}],
+}
+
 
 def test_init_check_passes_only_groundly():
     assert runs.check_init(INIT) is None
     assert runs.check_init({**INIT, "tools": INIT["tools"] + ["Bash", "Read"]}) == (
-        "isolation_failed", "the run had tools other than Groundly's: Bash, Read")
-    other = {**INIT, "mcp_servers": INIT["mcp_servers"] + [{"name": "github", "status": "connected"}]}
-    assert runs.check_init(other) == ("isolation_failed", "the run had MCP servers other than Groundly: github")
+        "isolation_failed",
+        "the run had tools other than Groundly's: Bash, Read",
+    )
+    other = {
+        **INIT,
+        "mcp_servers": INIT["mcp_servers"] + [{"name": "github", "status": "connected"}],
+    }
+    assert runs.check_init(other) == (
+        "isolation_failed",
+        "the run had MCP servers other than Groundly: github",
+    )
     failed = {**INIT, "mcp_servers": [{"name": "groundly", "status": "failed"}]}
     assert runs.check_init(failed) == (
-        "groundly_not_connected", "Groundly's MCP server did not connect (status: failed)")
+        "groundly_not_connected",
+        "Groundly's MCP server did not connect (status: failed)",
+    )
 ```
 
 Plus `Steps` and `summary_of` tests. Event shapes are as `claude -p --output-format stream-json --verbose` prints them:
@@ -155,17 +188,28 @@ def test_steps_come_from_tool_names_and_counts_never_model_text():
     assert s.feed(_text("I will now write <script>")) == []
     assert s.feed(_use("t1", "mcp__groundly__search", {})) == ["Reading the course"]
     assert s.feed(_use("t2", "mcp__groundly__search", {})) == []  # consecutive repeats collapse
-    assert s.feed(_use("t3", "mcp__groundly__submit_questions", {"questions": [1, 2, 3]})) == ["Submitting 3 questions"]
-    assert s.feed(_result("t3", {"accepted": [{}, {}], "rejected": [{}]})) == ["2 stored, 1 rejected"]
-    assert s.feed(_use("t4", "mcp__groundly__review_answers", {"reviews": [1, 2]})) == ["Recording 2 verdicts"]
-    assert s.feed(_result("t4", {"recorded": [7, 8], "awaiting": [], "remaining": 0})) == ["2 verdicts recorded"]
+    assert s.feed(_use("t3", "mcp__groundly__submit_questions", {"questions": [1, 2, 3]})) == [
+        "Submitting 3 questions"
+    ]
+    assert s.feed(_result("t3", {"accepted": [{}, {}], "rejected": [{}]})) == [
+        "2 stored, 1 rejected"
+    ]
+    assert s.feed(_use("t4", "mcp__groundly__review_answers", {"reviews": [1, 2]})) == [
+        "Recording 2 verdicts"
+    ]
+    assert s.feed(_result("t4", {"recorded": [7, 8], "awaiting": [], "remaining": 0})) == [
+        "2 verdicts recorded"
+    ]
     assert s.feed(_result("t9", "boom", is_error=True)) == ["A tool call failed"]
 
+
 def test_summary_of_success_and_error():
-    assert runs.summary_of({"type": "result", "subtype": "success", "is_error": False,
-                            "result": "x" * 5000}) == ("x" * runs.MAX_SUMMARY_CHARS, None)
-    assert runs.summary_of({"type": "result", "subtype": "success", "is_error": True,
-                            "result": "Please run /login"}) == (None, ("host_error", "Please run /login"))
+    assert runs.summary_of(
+        {"type": "result", "subtype": "success", "is_error": False, "result": "x" * 5000}
+    ) == ("x" * runs.MAX_SUMMARY_CHARS, None)
+    assert runs.summary_of(
+        {"type": "result", "subtype": "success", "is_error": True, "result": "Please run /login"}
+    ) == (None, ("host_error", "Please run /login"))
 ```
 
 (`_text`, `_use` and `_result` are three small local builders for those event shapes.)
@@ -192,14 +236,20 @@ Expected: FAIL (`No module named groundly.__main__` / `groundly.web.runs`)
     - **The prompts**, exact copy:
 
 ```python
-_ENDING = (" Finish with at most three plain sentences for the student: what was stored or graded,"
-           " and what was rejected. Do not tell them to run any command, and do not call any"
-           " question, answer key or verdict verified.")
+_ENDING = (
+    " Finish with at most three plain sentences for the student: what was stored or graded,"
+    " and what was rejected. Do not tell them to run any command, and do not call any"
+    " question, answer key or verdict verified."
+)
 _WRITE_LEAF = 'Follow "Write questions for a topic" for subject "{subject}", topic id {topic_id}: bring that topic to {target} questions.'
-_WRITE_BIG = ('Follow "Write questions for a topic" for subject "{subject}": for each subtopic of topic id'
-              ' {topic_id} that has fewer than {target} questions (see `progress`), bring it to {target} questions.')
-_GRADE = ('Follow "Grade a test" for subject "{subject}": review every written answer awaiting review,'
-          ' calling `review_answers` until `remaining` is 0.')
+_WRITE_BIG = (
+    'Follow "Write questions for a topic" for subject "{subject}": for each subtopic of topic id'
+    " {topic_id} that has fewer than {target} questions (see `progress`), bring it to {target} questions."
+)
+_GRADE = (
+    'Follow "Grade a test" for subject "{subject}": review every written answer awaiting review,'
+    " calling `review_answers` until `remaining` is 0."
+)
 ```
 
 - [ ] **Step 4: Run the tests to make sure they pass**
