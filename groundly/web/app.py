@@ -3,8 +3,8 @@
 Titles, summaries, questions and chunk text come from stores that an imported bundle may have
 written. The page writes one thing, a submitted test attempt to the student's `progress.db`,
 through `agents/quiz.py`, and only from a JSON POST carrying the page's own Origin; it never
-writes store.db and loads no model; under `groundly start` the same process also serves the MCP
-tools at `/mcp`, whose first search loads the models. A stored filename is never trusted as a path: a material is
+writes store.db and loads no model; under `groundly start` the same process also serves
+the MCP tools at `/mcp`, whose first search loads the models. A stored filename is never trusted as a path: a material is
 addressed by id and its file must resolve inside the subject's materials dir.
 """
 
@@ -272,7 +272,9 @@ def create_app(mcp_app: Starlette | None = None) -> Starlette:
             Route("/api/subjects/{subject}/attempts", _history),
             Route("/api/subjects/{subject}/attempts/{id:int}", _result),
             Route("/s/{subject}/materials/{id:int}", _material),
-            *([Mount("", app=mcp_app)] if mcp_app else []),
+            # A Route, not Mount(""): a catch-all mount would answer wrong-method page requests
+            # with 404 instead of their 405. FastMCP's own Host/Origin guard still runs inside.
+            *([Route("/mcp", mcp_app)] if mcp_app else []),
         ],
         # The mounted app's session manager runs in its lifespan; the parent must run it.
         lifespan=mcp_app.lifespan if mcp_app else None,

@@ -10,7 +10,7 @@ Several Claude Code sessions often work on different subjects at once. Over stdi
 
 - `groundly start [--port N]` (default **8765**) runs one process on 127.0.0.1 serving:
   - `http://groundly.localhost:8765/` — the topic-tree and test page (what `serve` shows), opened in the browser;
-  - `http://groundly.localhost:8765/mcp` — the MCP tools over Streamable HTTP, for every host session.
+  - `http://127.0.0.1:8765/mcp` — the MCP tools over Streamable HTTP, for every host session (also answers on `groundly.localhost`; MCP clients are given the IP because they resolve through the OS — changed after the security review).
 - `groundly.localhost` is accepted alongside `127.0.0.1` and `localhost`; existing URLs keep working.
 
 ## Non-goals
@@ -39,7 +39,7 @@ Verified on macOS: `*.localhost` resolves to 127.0.0.1/::1 at the OS level and i
 
 - Verb `start`, HTTP transport, path split, default port 8765.
 - `serve` also prints the `groundly.localhost` URL.
-- Host connect line in the guide: `claude mcp add --transport http groundly http://groundly.localhost:8765/mcp`.
+- Host connect line in the guide: `claude mcp add --transport http groundly http://127.0.0.1:8765/mcp`.
 
 ## Left to the builder
 

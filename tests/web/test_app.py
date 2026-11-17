@@ -603,3 +603,12 @@ def test_start_app_mcp_refuses_foreign_host_and_origin(start_client):
     foreign_origin = {**MCP_HEADERS, "Origin": "http://evil.com"}
     assert start_client.post("/mcp", json=INIT, headers=foreign_host).status_code == 400
     assert start_client.post("/mcp", json=INIT, headers=foreign_origin).status_code == 403
+
+
+def test_start_app_keeps_the_page_405s(start_client):
+    """The mounted MCP app must not take over wrong-method requests on page routes."""
+    for path in ("/", "/api/subjects", "/api/subjects/PDSS/tree"):
+        for method in ("post", "put", "patch", "delete"):
+            assert getattr(start_client, method)(path).status_code == 405, (method, path)
+    for method in ("put", "patch", "delete"):
+        assert getattr(start_client, method)("/api/subjects/PDSS/attempts").status_code == 405

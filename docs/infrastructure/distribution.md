@@ -21,7 +21,7 @@ Install [`uv`](https://docs.astral.sh/uv/) first if absent. Python ≥3.11 is pr
 
 In Claude Code, connect first, then install the skill that builds the topic tree (`groundly skill install`; see [`../guides/mcp-hosts.md`](../guides/mcp-hosts.md)). `groundly serve` shows the tree on loopback. Codex and Claude Desktop skill setup is not supported yet.
 
-stdio servers are spawned and killed by the host — there is no daemon to manage. Students running several host sessions run `groundly start` and point them all at `http://groundly.localhost:8765/mcp` (streamable HTTP, `127.0.0.1` only), so the models load once and the page is served alongside (decision 45).
+stdio servers are spawned and killed by the host — there is no daemon to manage. Students running several host sessions run `groundly start` and point them all at `http://127.0.0.1:8765/mcp` (streamable HTTP, `127.0.0.1` only), so the models load once and the page is served alongside (decision 45).
 
 ## Requirements
 

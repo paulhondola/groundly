@@ -78,16 +78,16 @@ mcp`.)
 Each stdio connection spawns its own Groundly, and each loads the models on its first search. When several Claude Code sessions use Groundly at once (say, one per subject), run one process for all of them instead:
 
 ```sh
-groundly start                   # page at http://groundly.localhost:8765/, MCP at /mcp
+groundly start                   # page at http://groundly.localhost:8765/, MCP at http://127.0.0.1:8765/mcp
 ```
 
 It binds 127.0.0.1 only, opens the page, and prints the connect command:
 
 ```sh
-claude mcp add --transport http groundly http://groundly.localhost:8765/mcp
+claude mcp add --transport http groundly http://127.0.0.1:8765/mcp
 ```
 
-Keep it running while you work; the tools fail while it is stopped. If `groundly.localhost` does not resolve on your machine, use `127.0.0.1` in its place.
+Keep it running while you work; the tools fail while it is stopped. If the page's `groundly.localhost` address does not open, use the printed `127.0.0.1` one. The MCP URL uses the IP on purpose: Claude Code looks names up through the operating system, which on some Linux setups asks outside DNS about `*.localhost`.
 
 ## HTTP transport (`groundly mcp --http`)
 

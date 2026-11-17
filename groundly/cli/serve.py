@@ -69,7 +69,9 @@ def start(port: _PORT = 8765) -> None:
 
     # host_origin_protection stays on: FastMCP's own DNS-rebinding guard, scoped to HOSTS.
     mcp_app = mcp.http_app(path="/mcp", host_origin_protection="auto", allowed_hosts=HOSTS)
-    mcp_url = f"http://groundly.localhost:{port}/mcp"
+    # The IP, not groundly.localhost: an MCP client resolves through the OS, which on some
+    # Linux setups forwards *.localhost to upstream DNS that could point it elsewhere.
+    mcp_url = f"http://127.0.0.1:{port}/mcp"
     _run(
         create_app(mcp_app),
         port,
