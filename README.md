@@ -7,8 +7,8 @@ Bachelor thesis project, Universitatea Politehnica Timișoara.
 ```
 $ groundly index <SUBJECT> ./slides/
   ✓ 12 PDFs → 384 chunks → embedded (bge-m3, local) → indexed
-$ claude mcp add groundly -- groundly mcp   # wire into Claude Code
-$ groundly skill install                     # then: "map my course"
+$ claude mcp add --scope user groundly -- groundly mcp   # wire into Claude Code
+$ groundly skill install                                 # then: "map my course"
 ```
 
 Then, inside your agent: *"What did lecture 4 say about deadlock prevention?"* It searches the course's own slides and answers citing **lecture-04.pdf, page 12, "Deadlocks › Prevention"**.

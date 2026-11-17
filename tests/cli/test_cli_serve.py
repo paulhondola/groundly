@@ -53,7 +53,7 @@ def test_start_binds_loopback_opens_page_and_prints_both_urls(monkeypatch):
     # MCP clients get the IP: they use the OS resolver, which may send *.localhost upstream
     assert "groundly.localhost:8765/mcp" not in result.output
     # one unwrapped line, so it pastes as a command at any terminal width
-    connect = "claude mcp add --transport http groundly http://127.0.0.1:8765/mcp"
+    connect = "claude mcp add --scope user --transport http groundly http://127.0.0.1:8765/mcp"
     assert connect in result.output.splitlines()[-1]
     assert "http://127.0.0.1:8765/" in result.output  # fallback when *.localhost won't resolve
 

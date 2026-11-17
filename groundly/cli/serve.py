@@ -78,6 +78,6 @@ def start(port: _PORT = 8765) -> None:
         [
             _page_line(port),
             f"MCP:  {mcp_url}",
-            f"Connect Claude Code: claude mcp add --transport http groundly {mcp_url}",
+            f"Connect Claude Code: claude mcp add --scope user --transport http groundly {mcp_url}",
         ],
     )
