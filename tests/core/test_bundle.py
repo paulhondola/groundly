@@ -361,10 +361,13 @@ def test_import_refuses_dangling_references_in_a_store_that_declares_no_keys(
     init_subject("PDSS")
     _seed("PDSS")
     _tamper("PDSS", *_NO_FK_TOPICS, extra)
+    # The anti-joins stand behind the schema comparison, which refuses such a store first.
+    with pytest.raises(bundle.BundleError, match=f"{phrase}.*no matching"):
+        bundle.check_tree(subject_dir("PDSS") / "store.db")
 
     result = _export_then_import(tmp_path, monkeypatch)
 
-    _assert_refused(result, phrase, "no matching")
+    _assert_refused(result, "a changed table", "groundly does not ship")
 
 
 def test_import_names_hostile_table_names_without_printing_them_raw(tmp_path, monkeypatch):
@@ -382,7 +385,7 @@ def test_import_names_hostile_table_names_without_printing_them_raw(tmp_path, mo
 
     assert result.exit_code != 0
     assert "\x1b" not in result.output
-    assert "dangling reference" in result.output
+    assert "groundly does not ship" in result.output
 
 
 def test_import_names_a_hostile_schema_and_removes_the_temp_dir(tmp_path, monkeypatch):
@@ -399,7 +402,7 @@ def test_import_names_a_hostile_schema_and_removes_the_temp_dir(tmp_path, monkey
 
     result = _export_then_import(tmp_path, monkeypatch)
 
-    _assert_refused(result, "foreign key mismatch")
+    _assert_refused(result, "a changed table 'topic_citations'")
 
 
 # --- Bundles from before the graph was dropped -------------------------------------
@@ -893,7 +896,7 @@ def test_import_refuses_a_materials_table_missing_a_column(tmp_path, monkeypatch
 
     result = _export_then_import(tmp_path, monkeypatch)
 
-    _assert_refused(result, "error")
+    _assert_refused(result, "a changed table 'materials'")
 
 
 @pytest.mark.parametrize("lang", ["\x1b]52;c;cHduZWQ=\x07", "[/nosuch]"])
@@ -985,6 +988,13 @@ def _edit_bundled_store(bundle_path, scratch, *statements):
         contents["store.db"] = db.read_bytes()
 
     _rewrite_zip(bundle_path, edit)
+
+
+def _shipped_trigger_sql():
+    (sql,) = [
+        sql for kind, name, sql in store.shipped_programs() if name == "question_citations_ad"
+    ]
+    return sql
 
 
 _DOWNGRADE = (
@@ -1138,3 +1148,115 @@ def test_a_version_1_bundle_with_its_own_questions_table_is_refused(tmp_path, mo
 
     _assert_refused(result, "could not be upgraded", "tables groundly did not write")
     assert "Traceback" not in result.output
+
+
+def test_import_refuses_duplicate_options_in_a_question(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_bank()
+    _tamper("PDSS", "UPDATE question_options SET text = ' Mutual Exclusion' WHERE position = 1")
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "bundle question 1 has two options with the same text")
+
+
+def test_import_refuses_duplicate_stems_in_a_topic(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_bank()
+    SubjectStore(subject_dir("PDSS") / "store.db").add_questions(
+        2, [store.QuestionWrite("single", "Other?", None, None, [("a", True), ("b", False)], [2])]
+    )
+    _tamper("PDSS", "UPDATE questions SET stem = 'WHAT does a deadlock need? ' WHERE id = 2")
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "bundle topic 2 has two questions with the same stem")
+
+
+@pytest.mark.parametrize(
+    "statements",
+    [
+        # questions without AUTOINCREMENT: a removed question's id could be reused
+        (
+            "DROP TRIGGER question_citations_ad",
+            "ALTER TABLE questions RENAME TO q_old",
+            (
+                "CREATE TABLE questions (id INTEGER PRIMARY KEY, topic_id INTEGER NOT NULL, "
+                "kind TEXT NOT NULL, stem TEXT NOT NULL, code TEXT, reference_answer TEXT)"
+            ),
+            "INSERT INTO questions SELECT * FROM q_old",
+            "DROP TABLE q_old",
+            _shipped_trigger_sql(),
+        ),
+        # an index groundly does not ship
+        ("CREATE INDEX extra ON questions(stem)",),
+    ],
+)
+def test_import_refuses_question_tables_declared_differently(tmp_path, monkeypatch, statements):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_bank()
+    bundle_path = _export(tmp_path)
+    _edit_bundled_store(bundle_path, tmp_path, *statements)
+    _use_home(monkeypatch, tmp_path / "b")
+
+    result = runner.invoke(app, ["import", str(bundle_path)])
+
+    _assert_refused(result, "groundly does not ship")
+
+
+@pytest.mark.parametrize(
+    "statements",
+    [
+        # a generated column that would make the first length check allocate gigabytes
+        (
+            "DROP TRIGGER question_citations_ad",
+            "ALTER TABLE questions RENAME TO q_old",
+            (
+                "CREATE TABLE questions (id INTEGER PRIMARY KEY AUTOINCREMENT, topic_id INTEGER, "
+                "kind TEXT, stem TEXT GENERATED ALWAYS AS (printf('%.*c', 600, 'x')) VIRTUAL, "
+                "code TEXT, reference_answer TEXT)"
+            ),
+            "DROP TABLE q_old",
+            _shipped_trigger_sql(),
+        ),
+        # a dropped index that turns the bank check quadratic
+        ("DROP INDEX idx_question_options_question",),
+        # a table groundly never writes
+        ("CREATE TABLE extra (x)",),
+    ],
+)
+def test_import_refuses_tables_and_indexes_groundly_does_not_ship(
+    tmp_path, monkeypatch, statements
+):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_bank()
+    bundle_path = _export(tmp_path)
+    _edit_bundled_store(bundle_path, tmp_path, *statements)
+    _use_home(monkeypatch, tmp_path / "b")
+
+    result = runner.invoke(app, ["import", str(bundle_path)])
+
+    _assert_refused(result, "groundly does not ship")
+
+
+def test_a_locked_version_1_store_names_the_lock_not_a_foreign_table(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "store.db"
+    store.create_store(path)
+    raw = sqlite3.connect(path)
+    raw.executescript(";".join(_DOWNGRADE))
+    raw.close()
+    holder = sqlite3.connect(path, timeout=0)
+    holder.execute("BEGIN IMMEDIATE")
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="locked") as raised:
+            store.connect(path)
+        assert not isinstance(raised.value, store.SchemaUpgradeError)
+    finally:
+        holder.rollback()
+        holder.close()

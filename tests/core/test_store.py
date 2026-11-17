@@ -596,10 +596,17 @@ def test_removing_a_material_deletes_a_question_left_without_citations(bank):
         conn.close()
 
 
-def test_removing_a_topic_removes_its_questions(bank):
+def test_a_deleted_topic_takes_its_questions_with_it(bank):
+    """The FK cascade, so no question outlives its topic. `replace_tree` itself refuses to
+    delete a topic holding questions (see the tests below)."""
     s = bank["store"]
     s.add_questions(bank["leaf"], [_single([bank["c1"]])])
-    s.replace_tree([TopicWrite(bank["lone"], "Scheduling", "s", [bank["c2"]])])
+    conn = s.connect()
+    try:
+        with conn:
+            conn.execute("DELETE FROM topics WHERE id = ?", (bank["leaf"],))
+    finally:
+        conn.close()
     assert s.questions() == [] and s.question_counts() == {}
 
 
@@ -636,3 +643,43 @@ def test_the_upgrade_leaves_a_store_another_process_already_upgraded(tmp_path):
     store._upgrade(conn)  # a second opener that read version 1 before the first one committed
     assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
     conn.close()
+
+
+# --- writers re-check under the write lock --------------------------------------------
+
+
+def test_replace_tree_refuses_to_drop_a_topic_that_gained_questions(bank):
+    """The gate counted questions before its slow search; one added meanwhile must stop the write."""
+    s = bank["store"]
+    s.add_questions(bank["lone"], [_single([bank["c2"]])])
+    before = s.tree()
+    with pytest.raises(StaleTopicError, match="holds questions"):
+        s.replace_tree([TopicWrite(bank["parent"], "Deadlock", "d", [bank["c1"]])])
+    assert s.tree() == before and s.question_counts() == {bank["lone"]: 1}
+
+
+def test_replace_tree_refuses_to_subdivide_a_topic_that_gained_questions(bank):
+    s = bank["store"]
+    s.add_questions(bank["lone"], [_single([bank["c2"]])])
+    before = s.tree()
+    tree = [
+        TopicWrite(
+            bank["lone"],
+            "Scheduling",
+            "s",
+            [bank["c2"]],
+            [TopicWrite(None, "RR", "r", [bank["c2"]])],
+        )
+    ]
+    with pytest.raises(StaleTopicError, match="holds questions"):
+        s.replace_tree(tree)
+    assert s.tree() == before
+
+
+def test_add_questions_refuses_a_topic_that_gained_subtopics_or_was_removed(bank):
+    s = bank["store"]
+    with pytest.raises(StaleTopicError, match="no longer a topic without subtopics"):
+        s.add_questions(bank["parent"], [_single([bank["c1"]])])
+    with pytest.raises(StaleTopicError, match="no longer a topic without subtopics"):
+        s.add_questions(9999, [_single([bank["c1"]])])
+    assert s.question_counts() == {}

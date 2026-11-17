@@ -205,8 +205,10 @@ def connect(path: Path, create: bool = False) -> sqlite3.Connection:
     if version == 1:
         try:
             _upgrade(conn)
-        except sqlite3.Error as exc:
+        except sqlite3.OperationalError as exc:
             conn.close()
+            if "already exists" not in str(exc):
+                raise  # a lock or I/O failure keeps its own message
             raise SchemaUpgradeError(
                 f"{path.name} could not be upgraded to schema {STORE_USER_VERSION} — {exc}"
             ) from exc
@@ -244,6 +246,49 @@ def programs(conn: sqlite3.Connection) -> set[tuple[str, str, str]]:
         "SELECT type, name, sql FROM sqlite_master WHERE type IN ('view', 'trigger')"
     )
     return {tuple(r) for r in rows}
+
+
+# Objects sqlite-vec and FTS5 create for their virtual tables: their DDL belongs to the
+# extension, so a store is checked for their presence, not their exact SQL.
+_EXTENSION_OBJECTS = ("vectors_", "chunks_fts_", "sqlite_autoindex_vectors_")
+
+
+def schema(conn: sqlite3.Connection) -> dict[tuple[str, str], tuple[str, str | None]]:
+    """Every table and index: (type, name) -> (table it belongs to, its SQL)."""
+    rows = conn.execute(
+        "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table', 'index')"
+    )
+    return {(r[0], r[1]): (r[2], r[3]) for r in rows}
+
+
+def schema_problem(conn: sqlite3.Connection) -> str | None:
+    """Why this store's tables and indexes differ from a fresh store's, or None. An object
+    groundly declares must match it exactly; an extension's object must exist under its
+    shipped name. A missing table is left to the checks that need it, but an index on a
+    present table must be there: without one, a check's scan grows with the square."""
+    shipped = shipped_schema()
+    found = schema(conn)
+    for key, (table, sql) in found.items():
+        if key not in shipped:
+            return f"{key[0]} {key[1]!r}"
+        if table != shipped[key][0] or (
+            not key[1].startswith(_EXTENSION_OBJECTS) and sql != shipped[key][1]
+        ):
+            return f"a changed {key[0]} {key[1]!r}"
+    tables = {name for kind, name in found if kind == "table"}
+    for key, (table, _) in shipped.items():
+        if key[0] == "index" and table in tables and key not in found:
+            return f"a missing index {key[1]!r}"
+    return None
+
+
+def shipped_schema() -> dict[tuple[str, str], tuple[str, str | None]]:
+    conn = connect(Path(":memory:"), create=True)
+    try:
+        conn.executescript(_SCHEMA)
+        return schema(conn)
+    finally:
+        conn.close()
 
 
 def shipped_programs() -> set[tuple[str, str, str]]:
@@ -527,9 +572,18 @@ class SubjectStore:
             ]
 
     def add_questions(self, topic_id: int, questions: list[QuestionWrite]) -> list[int]:
-        """One transaction; returns the new ids in the order given."""
+        """One transaction; returns the new ids in the order given. The topic is checked
+        again under the write lock: a re-map may have given it subtopics or removed it since
+        the gate looked, and then StaleTopicError is raised and nothing is written."""
         ids: list[int] = []
         with self._open() as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if not conn.execute(
+                "SELECT 1 FROM topics WHERE id = ? AND NOT EXISTS "
+                "(SELECT 1 FROM topics c WHERE c.parent_id = topics.id)",
+                (topic_id,),
+            ).fetchone():
+                raise StaleTopicError(f"topic {topic_id} is no longer a topic without subtopics")
             for q in questions:
                 question_id = conn.execute(
                     "INSERT INTO questions (topic_id, kind, stem, code, reference_answer) "
@@ -679,9 +733,11 @@ class SubjectStore:
     def replace_tree(self, tree: list[TopicWrite]) -> None:
         """One transaction. Every submitted node is written (update by id, else insert)
         before any other topic is deleted, so a subtopic moved out of a dropped parent
-        survives the parent's cascade. A kept id that is gone raises StaleTopicError and
-        nothing is written."""
+        survives the parent's cascade. A kept id that is gone, or a topic holding questions
+        that the tree leaves out or subdivides, raises StaleTopicError and nothing is written:
+        the gate checked both before its slow search, and another writer may have acted since."""
         with self._open() as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
             existing = {r["id"] for r in conn.execute("SELECT id FROM topics")}
             kept: set[int] = set()
 
@@ -711,4 +767,17 @@ class SubjectStore:
                     write(node.subtopics, topic_id)
 
             write(tree, None)
+            stranded = conn.execute(
+                "SELECT DISTINCT q.topic_id FROM questions q LEFT JOIN topics t ON t.id = q.topic_id "
+                "WHERE t.id IS NULL OR q.topic_id NOT IN ({}) OR EXISTS "
+                "(SELECT 1 FROM topics c WHERE c.parent_id = q.topic_id)".format(
+                    ",".join("?" for _ in kept) or "NULL"
+                ),
+                list(kept),
+            ).fetchall()
+            if stranded:
+                raise StaleTopicError(
+                    f"topic {stranded[0][0]} holds questions and this tree leaves it out or "
+                    "gives it subtopics"
+                )
             conn.executemany("DELETE FROM topics WHERE id = ?", [(i,) for i in existing - kept])

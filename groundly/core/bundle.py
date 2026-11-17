@@ -164,6 +164,12 @@ def check_store_shape(store_db_path: Path) -> None:
     try:
         if store.programs(conn) != store.shipped_programs():
             raise BundleError("bundle store.db holds views or triggers groundly does not ship")
+        problem = store.schema_problem(conn)
+        if problem:
+            raise BundleError(
+                f"bundle store.db holds {problem}, which groundly does not ship"
+                " — re-index the subject on the source machine and export it again"
+            )
         for row in conn.execute("SELECT id, filename, sha256, status, pages, error FROM materials"):
             problem = _material_problem(row)
             if problem:
@@ -336,8 +342,33 @@ def check_questions(store_db_path: Path) -> None:
             problem = _question_problem(row)
             if problem:
                 raise BundleError(f"bundle question {row['id']} {problem} — rejected")
+        _check_duplicates(conn)
     finally:
         conn.close()
+
+
+def _same(text: str) -> str:
+    """How the gate compares two stems or two options; text lengths are checked by now."""
+    return text.strip().casefold()
+
+
+def _check_duplicates(conn) -> None:
+    seen: set[tuple[int, str]] = set()
+    for r in conn.execute("SELECT question_id, text FROM question_options ORDER BY id"):
+        key = (r[0], _same(r[1]))
+        if key in seen:
+            raise BundleError(
+                f"bundle question {r[0]} has two options with the same text — rejected"
+            )
+        seen.add(key)
+    seen.clear()
+    for r in conn.execute("SELECT topic_id, stem FROM questions ORDER BY id"):
+        key = (r[0], _same(r[1]))
+        if key in seen:
+            raise BundleError(
+                f"bundle topic {r[0]} has two questions with the same stem — rejected"
+            )
+        seen.add(key)
 
 
 def _check_question_counts(conn) -> None:

@@ -201,7 +201,7 @@ def submit_questions(subject: str, topic_id: int, questions: list[dict]) -> dict
     import sqlite3
 
     from groundly.agents import verifier
-    from groundly.core.store import SubjectStore
+    from groundly.core.store import StaleTopicError, SubjectStore
     from groundly.llm.embeddings import ModelDownloadError
 
     store = SubjectStore(_subject_or_error(subject, ToolError).store_db_path)
@@ -209,6 +209,10 @@ def submit_questions(subject: str, topic_id: int, questions: list[dict]) -> dict
         return verifier.submit_questions(store, topic_id, questions)
     except ModelDownloadError as exc:
         raise ToolError(str(exc)) from exc
+    except StaleTopicError as exc:
+        raise ToolError(
+            "the map changed while this was being checked; run outline and submit again"
+        ) from exc
     except sqlite3.IntegrityError as exc:
         raise ToolError(
             "a material or topic was removed while this was being checked; submit again"

@@ -481,6 +481,22 @@ async def test_submit_questions_names_a_locked_store(retrievable_subject, monkey
             )
 
 
+async def test_submit_questions_names_a_topic_changed_during_the_check(
+    retrievable_subject, monkeypatch
+):
+    from groundly.core.store import StaleTopicError
+
+    monkeypatch.setattr(
+        "groundly.agents.verifier.submit_questions",
+        _failing_submit(StaleTopicError("topic 1 is no longer a topic without subtopics")),
+    )
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match=r"map changed.*run outline"):
+            await client.call_tool(
+                "submit_questions", {"subject": "TEST", "topic_id": 1, "questions": [_QUESTION]}
+            )
+
+
 async def test_submit_questions_model_download_error_raises_tool_error(
     retrievable_subject, monkeypatch
 ):

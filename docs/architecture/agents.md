@@ -73,4 +73,4 @@ Titles and summaries a host submits, and the chunk text the topic page shows, ar
 
 ## Observability
 
-Nothing is traced. **`progress.db`** (personal, never exported) holds no tables yet: `search` is read-only, and verifier verdicts are no longer logged (decision 33). Study progress arrives with verified quizzes (sub-project 3); the topic tree records none.
+Nothing is traced. **`progress.db`** (personal, never exported) holds the student's submitted test attempts and their answers (decision 44); `search`, the topic tree and the question gate write nothing to it, and gate verdicts are not logged (decision 33).
