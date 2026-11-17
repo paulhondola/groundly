@@ -112,7 +112,9 @@ def _structure(question) -> QuestionWrite:
     stem = _text(question.get("stem"), "stem", MAX_STEM_CHARS)
     code = question.get("code")
     if code is not None:
-        code = _text(code, "code", MAX_CODE_CHARS)
+        # Leading spaces are the code's own indentation: keep them, trim only blank lines.
+        _text(code, "code", MAX_CODE_CHARS)
+        code = code.strip("\n")
 
     if kind == "open":
         if question.get("options"):

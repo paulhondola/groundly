@@ -124,3 +124,7 @@ def test_the_page_drops_a_test_whose_question_was_removed():
 def test_the_suggested_host_sentence_quotes_the_topic_title():
     """A title may come from an imported bundle: it reaches the host quoted, as data."""
     assert '"Write questions on \\"" + title + "\\" for "' in PAGE
+
+
+def test_a_test_dropped_for_a_removed_question_is_never_saved_again():
+    assert "function store() { if (!dead) saveTest(key, test); }" in PAGE

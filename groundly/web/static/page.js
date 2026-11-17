@@ -360,7 +360,10 @@ async function showTest(subject) {
   let confirming = false;
   let sending = false;
 
-  function store() { saveTest(key, test); }
+  // Set once Submit is refused for a removed question: that test can never be submitted,
+  // so nothing may save it again.
+  let dead = false;
+  function store() { if (!dead) saveTest(key, test); }
 
   function go(i) { test.current = i; confirming = false; error = null; store(); render(); }
 
@@ -445,7 +448,10 @@ async function showTest(subject) {
     confirming = false;
     // A removed question can never be submitted again: drop the stored test so a refresh or
     // "Start test" draws a new one, and keep this one on screen with the server's reason.
-    if (body && body.error === "unknown_question") dropTest(key);
+    if (body && body.error === "unknown_question") {
+      dead = true;
+      dropTest(key);
+    }
     error = (body && (body.detail || body.error)) || "the test could not be submitted — try Submit again";
     render();
   }

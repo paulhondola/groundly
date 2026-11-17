@@ -24,6 +24,7 @@ MAX_SOURCES = 5  # citations per topic
 MAX_TITLE_CHARS = 200
 MAX_SUMMARY_CHARS = 500
 MAX_TREE_SOURCE_BYTES = 64 * 1024 * 1024  # chunk text `tree()` loads across all citations
+MAX_BANK_SOURCE_BYTES = 64 * 1024 * 1024  # chunk text `questions()` loads across the bank
 
 # What a stored question may cost: the question gate and import both refuse anything over these.
 MAX_STEM_CHARS = 500
@@ -561,6 +562,10 @@ class SubjectStore:
                     "SELECT topic_id, COUNT(*) AS n FROM questions GROUP BY topic_id"
                 )
             }
+
+    def question_ids(self) -> set[int]:
+        with self._open() as conn:
+            return {r["id"] for r in conn.execute("SELECT id FROM questions")}
 
     def question_stems(self, topic_id: int) -> list[str]:
         with self._open() as conn:

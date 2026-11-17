@@ -288,3 +288,11 @@ def test_structural_rejections_never_touch_the_embedder(gate):
         embedder=_NoModel(),
     )
     assert len(result["rejected"]) == 2
+
+
+def test_a_code_block_keeps_its_indentation(gate):
+    store, leaf, _ = gate
+    code = "    if x:\n        y()\n"
+    result = _submit(store, leaf, [{**CODE_READING, "code": code}])
+    (stored,) = store.questions(ids=[result["accepted"][0]["id"]])
+    assert stored["code"] == "    if x:\n        y()"

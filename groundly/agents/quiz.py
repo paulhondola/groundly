@@ -105,15 +105,19 @@ def _scope_leaves(store: SubjectStore, topic_id: int | None) -> list[int]:
 
 
 def draw(store: SubjectStore, progress: ProgressStore, topic_id: int | None, n: int) -> list[dict]:
-    """Up to `n` questions from the scope's leaves, taken round-robin in tree order. Within a
-    topic: never answered, then last answered wrong, then least recently answered. The result
-    carries no answer key and no reference answer."""
+    """Up to `n` questions from the scope's leaves, taken round-robin starting with the leaves
+    least recently practised (never practised first, ties in tree order), so successive tests
+    of a wide scope reach every leaf. Within a topic: never answered, then last answered wrong,
+    then least recently answered. The result carries no answer key and no reference answer."""
     if n not in TEST_LENGTHS:
         raise QuizError("invalid_text", f"a test is {', '.join(map(str, TEST_LENGTHS))} questions")
     leaves = _scope_leaves(store, topic_id)
     last: dict[int, tuple[int, bool | None]] = {}
+    practised: dict[int, int] = {}
     for index, a in enumerate(progress.answers()):
         last[a["question_id"]] = (index, a["correct"])
+        practised[a["topic_id"]] = index
+    leaves.sort(key=lambda leaf: practised.get(leaf, -1))  # stable: ties keep tree order
 
     def priority(q: dict) -> tuple[int, int, int]:
         if q["id"] not in last:
@@ -269,7 +273,7 @@ def attempt_result(store: SubjectStore, progress: ProgressStore, attempt_id: int
 
 def attempt_history(store: SubjectStore, progress: ProgressStore) -> list[dict]:
     """Every attempt, newest first, with its score and the title of its scope."""
-    existing = {q["id"] for q in store.questions()}
+    existing = store.question_ids()
     states: dict[int, list[str]] = {}
     for a in progress.answers():
         states.setdefault(a["attempt_id"], []).append(_state(a, a["question_id"] not in existing))

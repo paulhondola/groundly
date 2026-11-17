@@ -504,3 +504,47 @@ def test_an_unreviewable_answer_is_not_listed_and_cannot_be_reviewed(bank):
             bank.store, bank.progress, [{"answer_id": answer_id, "correct": True, "comment": "ok"}]
         )
     assert err.value.reason == "unknown_answer_id"
+
+
+# --- final review ----------------------------------------------------------------------
+
+
+def test_a_wide_scope_reaches_every_subtopic_over_successive_tests(retrievable_subject):
+    """More leaves than a test is long: each test starts with the leaves least practised."""
+    root = subject_dir(retrievable_subject)
+    store = SubjectStore(root / "store.db")
+    progress = ProgressStore(root / "progress.db")
+    store.replace_tree(
+        [
+            TopicWrite(
+                None, "Big", "b", [1], [TopicWrite(None, f"Leaf {i}", "l", [1]) for i in range(8)]
+            )
+        ]
+    )
+    leaves = [s["id"] for s in store.tree()[0]["subtopics"]]
+    for leaf in leaves:
+        store.add_questions(leaf, [_choice(f"q {leaf} {i}") for i in range(3)])
+    seen: set[int] = set()
+    for i in range(2):
+        drawn = quiz.draw(store, progress, None, 5)
+        seen |= {q["topic_id"] for q in drawn}
+        quiz.submit_attempt(
+            store,
+            progress,
+            f"tok-wide-{i}",
+            None,
+            [{"question_id": q["id"], "selected": []} for q in drawn],
+        )
+    assert seen == set(leaves)
+
+
+def test_the_history_does_not_load_question_sources(bank, monkeypatch):
+    bank.submit([{"question_id": bank.ids[bank.leaf()][0], "selected": []}])
+
+    def unfiltered(*, ids=None, topic_ids=None):
+        assert ids is not None or topic_ids is not None, "loaded every question with its sources"
+        return original(ids=ids, topic_ids=topic_ids)
+
+    original = bank.store.questions
+    monkeypatch.setattr(bank.store, "questions", unfiltered)
+    assert len(quiz.attempt_history(bank.store, bank.progress)) == 1

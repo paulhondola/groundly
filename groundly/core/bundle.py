@@ -314,6 +314,7 @@ def check_questions(store_db_path: Path) -> None:
                     f"bundle is damaged — {table}.{column} has a value with no matching {parent}"
                 )
         _check_question_counts(conn)
+        _check_bank_cost(conn)
         for row in conn.execute(
             """
             SELECT q.id, q.kind,
@@ -369,6 +370,18 @@ def _check_duplicates(conn) -> None:
                 f"bundle topic {r[0]} has two questions with the same stem — rejected"
             )
         seen.add(key)
+
+
+def _check_bank_cost(conn) -> None:
+    """A whole-course draw loads every cited chunk's text, as `tree()` does for the map."""
+    cited = conn.execute(
+        "SELECT SUM(LENGTH(c.text)) FROM question_citations qc JOIN chunks c ON c.id = qc.chunk_id"
+    ).fetchone()[0]
+    if cited and cited > store.MAX_BANK_SOURCE_BYTES:
+        raise BundleError(
+            f"bundle questions cite {cited} bytes of chunk text; the limit is "
+            f"{store.MAX_BANK_SOURCE_BYTES} — rejected"
+        )
 
 
 def _check_question_counts(conn) -> None:

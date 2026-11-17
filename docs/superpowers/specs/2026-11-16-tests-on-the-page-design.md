@@ -170,7 +170,7 @@ Everything is in the existing Starlette app and its vanilla script; no new depen
 
 **Starting a test.** A node's panel shows its bank size and its mastery state, and a "Start test" control with a length of 5, 10 or 20 (default 10, capped by what the bank has). A big topic's test covers all its subtopics; the subject header has "Test the whole course". With no questions in scope, the panel shows the sentence to say to the host, as the empty map does today.
 
-**The draw.** From the scope's leaf topics, taken round-robin across the topics so a wide scope is spread evenly. Within a topic: never answered first, then last answered wrong, then least recently answered. Options are shuffled in the browser and identified by id.
+**The draw.** From the scope's leaf topics, taken round-robin across the topics so a wide scope is spread evenly, starting with the topics least recently practised (never practised first, ties in tree order) so successive tests reach every topic when there are more topics than questions. Within a topic: never answered first, then last answered wrong, then least recently answered. Options are shuffled in the browser and identified by id.
 
 **Taking it.** One question per screen. A header names the subject, the scope and "Question 3 of 10". Numbered dots jump to any question and show which are answered. Back and Next move between questions; the last screen has Submit, which warns if any question is unanswered. An unanswered question is recorded as wrong. Answers are kept in session storage until Submit.
 

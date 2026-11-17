@@ -1260,3 +1260,14 @@ def test_a_locked_version_1_store_names_the_lock_not_a_foreign_table(tmp_path):
     finally:
         holder.rollback()
         holder.close()
+
+
+def test_import_refuses_a_bank_whose_cited_text_is_too_large(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_bank()
+    monkeypatch.setattr(store, "MAX_BANK_SOURCE_BYTES", 10)
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "bundle questions cite", "limit is 10")
