@@ -73,7 +73,7 @@ Criteria 1, 12, 13 and the end-to-end half of 11 are manual and recorded above. 
 
 **Out of scope:** live coding (code questions the student answers by writing code are refused at the door), a quiz asked in the chat, fixed tests written by the host, timers, partial credit. The gate shows a question is well formed and about its cited chunks; it never shows an answer key is right, and nothing may call a key verified.
 
-**Acceptance criteria** (1–12, 5a and 5b met; 13 awaits Paul's review)
+**Acceptance criteria** (1–12, 5a, 5b and 14–16 met; 13 and 17 await Paul)
 
 1. A well-formed question of each kind citing real chunks is stored; each structural fault is rejected with its reason and nothing is stored for that item.
 2. A question citing an unknown chunk, or whose text does not retrieve any cited chunk, is rejected with `not_answerable_from_chunks`.

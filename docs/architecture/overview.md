@@ -57,6 +57,7 @@ flowchart LR
     services --> store
     web -->|read only| store
     web -->|submitted attempts, via agents/quiz| progress
+    mcp -->|review_answers verdicts, via agents/quiz| progress
     web -->|PDFs| materials
     services --> models
     bundle[.groundly export] --> store

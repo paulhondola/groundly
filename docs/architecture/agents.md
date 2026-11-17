@@ -73,4 +73,4 @@ Titles and summaries a host submits, and the chunk text the topic page shows, ar
 
 ## Observability
 
-Nothing is traced. **`progress.db`** (personal, never exported) holds the student's submitted test attempts and their answers (decision 44); `search`, the topic tree and the question gate write nothing to it, and gate verdicts are not logged (decision 33).
+Nothing is traced. **`progress.db`** (personal, never exported) holds the student's submitted test attempts and their answers, and the host's verdicts and comments on written answers recorded through `review_answers` (decision 44); `search`, the topic tree and the question gate write nothing to it, and gate verdicts are not logged (decision 33).

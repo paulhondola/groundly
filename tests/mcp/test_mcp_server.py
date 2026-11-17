@@ -761,3 +761,18 @@ async def test_review_answers_sources_carry_a_citation_uri(retrievable_subject):
         listed = await client.call_tool("review_answers", {"subject": retrievable_subject})
     (source,) = listed.structured_content["awaiting"][0]["sources"]
     assert source["uri"] == f"groundly://{retrievable_subject}/lec.pdf#page=1"
+
+
+async def test_review_answers_names_a_locked_store(retrievable_subject, monkeypatch):
+    import sqlite3
+
+    def locked(*_a, **_k):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr("groundly.agents.quiz.record_reviews", locked)
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="busy"):
+            await client.call_tool(
+                "review_answers",
+                {"subject": "TEST", "reviews": [{"answer_id": 1, "correct": True, "comment": "x"}]},
+            )
