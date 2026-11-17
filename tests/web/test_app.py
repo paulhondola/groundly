@@ -265,3 +265,234 @@ def test_tree_read_leaves_the_store_unchanged(client, seeded):
     finally:
         held.close()
     assert after == before
+
+
+# --- tests on the page -------------------------------------------------------------------
+
+ORIGIN = {"Origin": "http://127.0.0.1"}
+
+
+def _bank(seeded):
+    """Two single-answer questions and one open on the Locks leaf; returns their stored rows."""
+    s = SubjectStore(subject_dir("PDSS") / "store.db")
+    leaf = s.tree()[0]["id"]
+    _, chunk = _index("PDSS", "extra.pdf", "c" * 64)
+    options = [("mutual exclusion", True), ("a GPU", False)]
+    s.add_questions(
+        leaf,
+        [
+            store.QuestionWrite("single", "What does a lock give?", None, None, options, [chunk]),
+            store.QuestionWrite("single", "<script>x</script>", None, None, options, [chunk]),
+            store.QuestionWrite("open", "Why lock?", None, "To keep data consistent.", [], [chunk]),
+        ],
+    )
+    return leaf, s.questions()
+
+
+def _key(q):
+    return [o["id"] for o in q["options"] if o["correct"]]
+
+
+def _post(client, body, headers=ORIGIN):
+    return client.post("/api/subjects/PDSS/attempts", json=body, headers=headers)
+
+
+def _attempt(q, selected, token="token-0001", topic_id=None):
+    return {
+        "token": token,
+        "topic_id": topic_id,
+        "answers": [{"question_id": q["id"], "selected": selected}],
+    }
+
+
+def test_a_drawn_test_holds_no_key(client, seeded):
+    leaf, _ = _bank(seeded)
+    r = client.get(f"/api/subjects/PDSS/test?topic={leaf}&n=5")
+    assert r.status_code == 200
+    assert len(r.json()["questions"]) == 3
+    assert "correct" not in r.text and "reference_answer" not in r.text
+    assert len(client.get("/api/subjects/PDSS/test?n=5").json()["questions"]) == 3
+
+
+def test_a_bad_draw_is_a_400_with_its_reason(client, seeded):
+    _bank(seeded)
+    r = client.get("/api/subjects/PDSS/test?n=7")
+    assert r.status_code == 400 and r.json()["error"] == "invalid_text"
+    assert client.get("/api/subjects/PDSS/test?topic=999&n=5").json()["error"] == "unknown_topic_id"
+    assert client.get("/api/subjects/PDSS/test?n=five").status_code == 400
+
+
+def test_submit_grades_and_the_result_shows_the_key_and_source(client, seeded):
+    leaf, (q, *_) = _bank(seeded)
+    r = _post(client, _attempt(q, _key(q), topic_id=leaf))
+    assert r.status_code == 201
+    result = client.get(f"/api/subjects/PDSS/attempts/{r.json()['id']}").json()
+    assert result["score"] == {"correct": 1, "graded": 1, "awaiting": 0}
+    (answer,) = result["answers"]
+    assert answer["state"] == "correct"
+    assert [o["correct"] for o in answer["options"]] == [True, False]
+    assert answer["sources"][0]["filename"] == "extra.pdf"
+
+
+def test_tree_nodes_carry_bank_size_and_mastery(client, seeded):
+    _, (q, *_) = _bank(seeded)
+    _post(client, _attempt(q, _key(q)))
+    (node,) = client.get("/api/subjects/PDSS/tree").json()["tree"]
+    assert node["progress"]["questions"] == 3
+    assert node["progress"]["answered"] == 1
+    assert node["progress"]["state"] == "in_progress"
+
+
+@pytest.mark.parametrize(
+    ("headers", "status"),
+    [({}, 403), ({"Origin": "http://evil.example"}, 403), ({"Origin": "null"}, 403)],
+)
+def test_a_submit_from_elsewhere_is_refused_and_writes_nothing(client, seeded, headers, status):
+    _, (q, *_) = _bank(seeded)
+    assert _post(client, _attempt(q, _key(q)), headers=headers).status_code == status
+    assert client.get("/api/subjects/PDSS/attempts").json() == []
+
+
+def test_a_form_encoded_submit_is_refused(client, seeded):
+    _bank(seeded)
+    r = client.post("/api/subjects/PDSS/attempts", data={"token": "token-0001"}, headers=ORIGIN)
+    assert r.status_code == 415
+    assert client.get("/api/subjects/PDSS/attempts").json() == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        [],
+        {"token": "short", "topic_id": None, "answers": []},
+        {"token": "has space in it", "topic_id": None, "answers": []},
+        {"token": "x" * 65, "topic_id": None, "answers": []},
+        {"token": "token-0001", "topic_id": "1", "answers": []},
+        {"token": "token-0001", "topic_id": True, "answers": []},
+        {"token": "token-0001", "topic_id": None, "answers": "all"},
+        {"token": "token-0001", "topic_id": None},
+    ],
+)
+def test_a_malformed_body_or_token_is_a_400(client, seeded, body):
+    _bank(seeded)
+    r = _post(client, body)
+    assert r.status_code == 400 and r.json()["error"]
+    assert client.get("/api/subjects/PDSS/attempts").json() == []
+
+
+def test_a_body_that_is_not_json_is_a_400(client, seeded):
+    r = client.post(
+        "/api/subjects/PDSS/attempts",
+        content=b"{not json",
+        headers={**ORIGIN, "Content-Type": "application/json"},
+    )
+    assert r.status_code == 400
+
+
+def test_a_removed_question_refusal_reaches_the_page_with_its_cause(client, seeded):
+    _, (q, *_) = _bank(seeded)
+    SubjectStore(subject_dir("PDSS") / "store.db").remove_questions([q["id"]])
+    r = _post(client, _attempt(q, []))
+    assert r.status_code == 400
+    assert r.json()["error"] == "unknown_question" and "removed" in r.json()["detail"]
+
+
+def test_a_busy_progress_db_is_a_503_naming_it(client, seeded, monkeypatch):
+    import sqlite3
+
+    from groundly.agents import quiz
+
+    _, (q, *_) = _bank(seeded)
+
+    def locked(*_a, **_k):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(quiz, "submit_attempt", locked)
+    r = _post(client, _attempt(q, _key(q)))
+    assert r.status_code == 503 and "progress.db is busy" in r.json()["detail"]
+
+
+def test_the_same_token_twice_returns_the_same_attempt(client, seeded):
+    _, (q, *_) = _bank(seeded)
+    first = _post(client, _attempt(q, _key(q))).json()["id"]
+    assert _post(client, _attempt(q, _key(q))).json()["id"] == first
+    assert len(client.get("/api/subjects/PDSS/attempts").json()) == 1
+
+
+def test_history_lists_attempts_newest_first(client, seeded):
+    leaf, (q, *_) = _bank(seeded)
+    first = _post(client, _attempt(q, _key(q), topic_id=leaf)).json()["id"]
+    second = _post(client, _attempt(q, [], token="token-0002")).json()["id"]
+    history = client.get("/api/subjects/PDSS/attempts").json()
+    assert [h["id"] for h in history] == [second, first]
+    assert history[1]["scope_title"] == "Locks"
+
+
+def test_an_unknown_attempt_is_404(client, seeded):
+    assert client.get("/api/subjects/PDSS/attempts/404").status_code == 404
+    assert client.get("/api/subjects/NOPE/attempts").status_code == 404
+
+
+def test_test_and_result_pages_serve_the_shell_under_the_csp(client, seeded):
+    for path in ("/s/PDSS/test", "/s/PDSS/attempts/1"):
+        r = client.get(path)
+        assert r.status_code == 200, path
+        assert "default-src 'none'" in r.headers["content-security-policy"]
+        assert "/static/page.js" in r.text
+    assert client.get("/s/NOPE/test").status_code == 404
+
+
+def test_the_write_route_takes_only_post(client, seeded):
+    for method in ("put", "patch", "delete"):
+        assert getattr(client, method)("/api/subjects/PDSS/attempts").status_code == 405
+    for path in ("/api/subjects/PDSS/test", "/api/subjects/PDSS/attempts/1", "/s/PDSS/test"):
+        assert client.post(path, headers=ORIGIN).status_code == 405, path
+
+
+def test_the_page_writes_no_rows_to_store_db(client, seeded):
+    leaf, _questions = _bank(seeded)
+    held = store.connect(subject_dir("PDSS") / "store.db")
+    try:
+        before = held.execute("PRAGMA data_version").fetchone()[0]
+        drawn = client.get(f"/api/subjects/PDSS/test?topic={leaf}&n=5").json()["questions"]
+        answers = [
+            {"question_id": d["id"], "text": "Because."}
+            if d["kind"] == "open"
+            else {"question_id": d["id"], "selected": [d["options"][0]["id"]]}
+            for d in drawn
+        ]
+        attempt = _post(client, {"token": "token-0001", "topic_id": leaf, "answers": answers})
+        assert attempt.status_code == 201
+        client.get(f"/api/subjects/PDSS/attempts/{attempt.json()['id']}")
+        client.get("/api/subjects/PDSS/attempts")
+        client.get("/api/subjects/PDSS/tree")
+        after = held.execute("PRAGMA data_version").fetchone()[0]
+    finally:
+        held.close()
+    assert after == before
+
+
+def test_serving_a_test_loads_no_model(client, seeded, monkeypatch):
+    from groundly.llm import embeddings
+
+    def boom(*_a, **_k):
+        raise AssertionError("a model was loaded")
+
+    monkeypatch.setattr(embeddings, "shared_embedder", boom)
+    _, (q, *_) = _bank(seeded)
+    assert client.get("/api/subjects/PDSS/test?n=5").status_code == 200
+    assert _post(client, _attempt(q, _key(q))).status_code == 201
+
+
+def test_a_version_1_store_still_shows_its_map(client, seeded):
+    """A subject indexed before the question tables: opening it adds them in place."""
+    _tamper(
+        "PDSS",
+        "DROP TRIGGER question_citations_ad",
+        "DROP TABLE question_citations",
+        "DROP TABLE question_options",
+        "DROP TABLE questions",
+        "PRAGMA user_version = 1",
+    )
+    (node,) = client.get("/api/subjects/PDSS/tree").json()["tree"]
+    assert node["title"] == "Locks" and node["progress"]["state"] == "not_started"

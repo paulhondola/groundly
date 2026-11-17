@@ -286,3 +286,18 @@ def attempt_history(store: SubjectStore, progress: ProgressStore) -> list[dict]:
             }
         )
     return out
+
+
+def progress_report(store: SubjectStore, progress: ProgressStore) -> list[dict]:
+    """The topic tree with each node's mastery entry; `subtopics` holds the child nodes."""
+    states = mastery(store, progress)
+
+    def node(n: dict) -> dict:
+        return {
+            "id": n["id"],
+            "title": n["title"],
+            **states[n["id"]],
+            "subtopics": [node(s) for s in n["subtopics"]],
+        }
+
+    return [node(n) for n in store.tree()]

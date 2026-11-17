@@ -125,6 +125,7 @@ async def test_the_tool_surface_is_exactly_these_ten_entries():
         "submit_tree",
         "submit_questions",
         "remove_questions",
+        "progress",
     }
     assert templates == {"groundly://{subject}/{filename}"}
     assert resources == []
@@ -667,3 +668,39 @@ async def test_http_transport_serves_the_same_tools(retrievable_subject):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+# --- progress ---------------------------------------------------------------------
+
+
+async def test_progress_tool_reports_each_topic(retrievable_subject):
+    from groundly.core.paths import subject_dir
+    from groundly.core.store import QuestionWrite, SubjectStore, TopicWrite
+
+    store = SubjectStore(subject_dir(retrievable_subject) / "store.db")
+    store.replace_tree(
+        [TopicWrite(None, "Deadlocks", "d", [1], [TopicWrite(None, "Conditions", "c", [1])])]
+    )
+    leaf = store.tree()[0]["subtopics"][0]["id"]
+    store.add_questions(
+        leaf, [QuestionWrite("single", "Q?", None, None, [("a", True), ("b", False)], [1])]
+    )
+    async with Client(mcp) as client:
+        result = await client.call_tool("progress", {"subject": retrievable_subject})
+    (parent,) = result.structured_content["result"]
+    assert parent["title"] == "Deadlocks" and parent["state"] == "not_started"
+    assert parent["questions"] == 1 and parent["subtopics_mastered"] == 0
+    (sub,) = parent["subtopics"]
+    assert (sub["id"], sub["title"], sub["questions"], sub["answered"]) == (
+        leaf,
+        "Conditions",
+        1,
+        0,
+    )
+    assert sub["subtopics"] == []
+
+
+async def test_progress_is_marked_read_only():
+    async with Client(mcp) as client:
+        tools = {t.name: t for t in await client.list_tools()}
+    assert tools["progress"].annotations.read_only_hint is True

@@ -1,10 +1,14 @@
-"""The topic-tree page server: read-only, loopback, one process for every subject.
+"""The topic-tree and test page server: loopback, one process for every subject.
 
-Titles, summaries and chunk text come from stores that an imported bundle may have written, so
-nothing here is writable, no model loads, and a stored filename is never trusted as a path:
-a material is addressed by id and its file must resolve inside the subject's materials dir.
+Titles, summaries, questions and chunk text come from stores that an imported bundle may have
+written. The page writes one thing, a submitted test attempt to the student's `progress.db`,
+through `agents/quiz.py`, and only from a JSON POST carrying the page's own Origin; it never
+writes store.db and loads no model. A stored filename is never trusted as a path: a material is
+addressed by id and its file must resolve inside the subject's materials dir.
 """
 
+import json
+import re
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
@@ -17,7 +21,9 @@ from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Respon
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from groundly.agents import quiz
 from groundly.core.paths import discover_subjects
+from groundly.core.progress import ProgressStore
 from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
 
@@ -82,15 +88,26 @@ def _tree(request: Request) -> Response:
     if subject is None:
         name = request.path_params["subject"]
         return JSONResponse({"error": f"unknown subject {name!r}"}, status_code=404)
-    result = _read(subject, lambda store: {"title": subject.display_title(), "tree": store.tree()})
+
+    def read(store: SubjectStore) -> dict:
+        return {
+            "title": subject.display_title(),
+            "tree": store.tree(),
+            "progress": quiz.mastery(store, ProgressStore(subject.progress_db_path)),
+        }
+
+    result = _read(subject, read)
     if isinstance(result, Response):
         return result
     # `pdf` tells the page whether a link would open: a bundle exported without its
     # materials still cites PDFs it cannot serve.
     openable: dict[int, bool] = {}
 
+    states = result.pop("progress")
+
     def flag(nodes: list[dict]) -> None:
         for node in nodes:
+            node["progress"] = states[node["id"]]
             for src in node["sources"]:
                 if src["material_id"] not in openable:
                     openable[src["material_id"]] = _stored_pdf(subject, src["filename"]) is not None
@@ -120,14 +137,106 @@ def _material(request: Request) -> Response:
     )
 
 
+_TOKEN = re.compile(r"[A-Za-z0-9-]{8,64}")
+
+
+def _error(error: str, detail: str, status_code: int = 400) -> JSONResponse:
+    return JSONResponse({"error": error, "detail": detail}, status_code=status_code)
+
+
+def _quiz(request: Request, call: Callable[[SubjectStore, ProgressStore], Response]) -> Response:
+    """Run a quiz call on the subject's two stores, mapping each failure to its own answer."""
+    subject = _open_subject(request.path_params["subject"])
+    if subject is None:
+        name = request.path_params["subject"]
+        return _error("unknown_subject", f"unknown subject {name!r}", 404)
+    try:
+        return call(SubjectStore(subject.store_db_path), ProgressStore(subject.progress_db_path))
+    except quiz.QuizError as e:
+        return _error(e.reason, e.detail)
+    except sqlite3.OperationalError as e:
+        if "locked" in str(e) or "busy" in str(e):
+            return _error("busy", "progress.db is busy — try Submit again", 503)
+        return _error("store_error", str(e), 500)
+    except (sqlite3.DatabaseError, RuntimeError) as e:
+        return _error("store_error", str(e), 500)
+
+
+def _draw(request: Request) -> Response:
+    params = request.query_params
+    try:
+        topic = int(params["topic"]) if "topic" in params else None
+        n = int(params.get("n", "10"))
+    except ValueError:
+        return _error("invalid_text", "topic and n are whole numbers")
+    return _quiz(
+        request,
+        lambda store, progress: JSONResponse({"questions": quiz.draw(store, progress, topic, n)}),
+    )
+
+
+def _is_id(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+async def _submit(request: Request) -> Response:
+    origin = request.headers.get("origin")
+    if origin != f"{request.url.scheme}://{request.headers.get('host')}":
+        return _error("forbidden", "a test is submitted from this page only", 403)
+    if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
+        return _error("unsupported", "the body is JSON", 415)
+    try:
+        body = json.loads(await request.body())
+    except ValueError:
+        return _error("invalid_body", "the body is not valid JSON")
+    if (
+        not isinstance(body, dict)
+        or not isinstance(body.get("token"), str)
+        or not _TOKEN.fullmatch(body["token"])
+        or not (body.get("topic_id") is None or _is_id(body["topic_id"]))
+        or not isinstance(body.get("answers"), list)
+    ):
+        return _error("invalid_body", "expected {token, topic_id, answers}")
+
+    def submit(store: SubjectStore, progress: ProgressStore) -> Response:
+        attempt_id = quiz.submit_attempt(
+            store, progress, body["token"], body["topic_id"], body["answers"]
+        )
+        return JSONResponse({"id": attempt_id}, status_code=201)
+
+    return _quiz(request, submit)
+
+
+def _history(request: Request) -> Response:
+    return _quiz(
+        request, lambda store, progress: JSONResponse(quiz.attempt_history(store, progress))
+    )
+
+
+def _result(request: Request) -> Response:
+    def read(store: SubjectStore, progress: ProgressStore) -> Response:
+        result = quiz.attempt_result(store, progress, request.path_params["id"])
+        if result is None:
+            return _error("unknown_attempt", "no such attempt", 404)
+        return JSONResponse(result)
+
+    return _quiz(request, read)
+
+
 def create_app() -> Starlette:
     return Starlette(
         routes=[
             Route("/", _html),
             Mount("/static", StaticFiles(directory=_WEB / "static")),
             Route("/s/{subject}", _subject_page),
+            Route("/s/{subject}/test", _subject_page),
+            Route("/s/{subject}/attempts/{id:int}", _subject_page),
             Route("/api/subjects", _subjects),
             Route("/api/subjects/{subject}/tree", _tree),
+            Route("/api/subjects/{subject}/test", _draw),
+            Route("/api/subjects/{subject}/attempts", _submit, methods=["POST"]),
+            Route("/api/subjects/{subject}/attempts", _history),
+            Route("/api/subjects/{subject}/attempts/{id:int}", _result),
             Route("/s/{subject}/materials/{id:int}", _material),
         ],
         middleware=[Middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])],
