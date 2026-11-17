@@ -496,3 +496,13 @@ def test_a_version_1_store_still_shows_its_map(client, seeded):
     )
     (node,) = client.get("/api/subjects/PDSS/tree").json()["tree"]
     assert node["title"] == "Locks" and node["progress"]["state"] == "not_started"
+
+
+def test_result_sources_say_whether_their_pdf_opens(client, seeded):
+    _, (q, *_) = _bank(seeded)
+    attempt = _post(client, _attempt(q, _key(q))).json()["id"]
+    (answer,) = client.get(f"/api/subjects/PDSS/attempts/{attempt}").json()["answers"]
+    assert answer["sources"][0]["pdf"] is False  # extra.pdf is indexed but its file is not stored
+    (Subject("PDSS").materials_dir / "extra.pdf").write_bytes(PDF_BYTES)
+    (answer,) = client.get(f"/api/subjects/PDSS/attempts/{attempt}").json()["answers"]
+    assert answer["sources"][0]["pdf"] is True

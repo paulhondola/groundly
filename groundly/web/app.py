@@ -218,8 +218,12 @@ def _result(request: Request) -> Response:
         result = quiz.attempt_result(store, progress, request.path_params["id"])
         if result is None:
             return _error("unknown_attempt", "no such attempt", 404)
+        for answer in result["answers"]:
+            for src in answer["sources"]:
+                src["pdf"] = _stored_pdf(subject, src["filename"]) is not None
         return JSONResponse(result)
 
+    subject = _open_subject(request.path_params["subject"])
     return _quiz(request, read)
 
 
