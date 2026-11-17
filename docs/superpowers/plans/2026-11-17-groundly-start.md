@@ -48,25 +48,36 @@ def test_groundly_localhost_host_header_is_accepted(client, seeded):
     r = client.get("/api/subjects", headers={"Host": "groundly.localhost:8765"})
     assert r.status_code == 200
 
+
 def test_submit_accepts_the_groundly_localhost_origin(client, seeded):
     # same draw + body as test_submit_grades_and_the_result_shows_the_key_and_source
     # (tests/web/test_app.py:325), sent with these headers instead of ORIGIN
     h = {"Host": "groundly.localhost:8765", "Origin": "http://groundly.localhost:8765"}
     # assert the POST returns 201
 
+
 @pytest.fixture
 def start_client(seeded):
     from groundly.mcp.server import mcp
     from groundly.web.app import HOSTS
+
     mcp_app = mcp.http_app(path="/mcp", host_origin_protection="auto", allowed_hosts=HOSTS)
     with TestClient(create_app(mcp_app), base_url="http://groundly.localhost:8765") as c:
         yield c
 
-INIT = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-    "protocolVersion": "2025-06-18", "capabilities": {},
-    "clientInfo": {"name": "t", "version": "1"}}}
-MCP_HEADERS = {"Accept": "application/json, text/event-stream",
-               "Content-Type": "application/json"}
+
+INIT = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "t", "version": "1"},
+    },
+}
+MCP_HEADERS = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+
 
 def test_start_app_serves_page_and_mcp(start_client):
     page = start_client.get("/")
@@ -75,11 +86,20 @@ def test_start_app_serves_page_and_mcp(start_client):
     assert r.status_code == 200
     assert "content-security-policy" not in r.headers
 
+
 def test_start_app_mcp_refuses_foreign_host_and_origin(start_client):
-    assert start_client.post("/mcp", json=INIT,
-        headers={**MCP_HEADERS, "Host": "evil.com"}).status_code == 400
-    assert start_client.post("/mcp", json=INIT,
-        headers={**MCP_HEADERS, "Origin": "http://evil.com"}).status_code == 403
+    assert (
+        start_client.post(
+            "/mcp", json=INIT, headers={**MCP_HEADERS, "Host": "evil.com"}
+        ).status_code
+        == 400
+    )
+    assert (
+        start_client.post(
+            "/mcp", json=INIT, headers={**MCP_HEADERS, "Origin": "http://evil.com"}
+        ).status_code
+        == 403
+    )
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -121,8 +141,10 @@ def test_start_binds_loopback_opens_page_and_prints_both_urls(monkeypatch):
     assert "http://groundly.localhost:8765/mcp" in result.output
     assert "http://127.0.0.1:8765/" in result.output  # fallback when *.localhost won't resolve
 
-def test_start_names_a_busy_port_and_the_flag(monkeypatch):
-    ...  # same as test_serve_names_a_busy_port_and_the_flag with ["start", "--port", ...]
+
+def test_start_names_a_busy_port_and_the_flag(
+    monkeypatch,
+): ...  # same as test_serve_names_a_busy_port_and_the_flag with ["start", "--port", ...]
 ```
 Update the existing `serve` tests: `opened == ["http://groundly.localhost:<port>/"]`, and output still contains `http://127.0.0.1:<port>/`.
 
