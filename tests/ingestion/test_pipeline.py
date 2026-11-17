@@ -19,19 +19,62 @@ def test_unsupported_extension_reported_skipped(subject, course, stub_embedder, 
     assert ".xyz" in results[0].detail
 
 
-def test_docling_suffixes_are_a_subset_of_supported_suffixes():
-    from groundly.ingestion.formats import DOCLING_FORMATS, DOCLING_SUFFIXES, SUPPORTED_SUFFIXES
+def test_docling_suffixes_are_supported(tmp_path):
+    from groundly.ingestion.formats import DOCLING_FORMATS, is_supported_file
 
-    assert DOCLING_SUFFIXES <= SUPPORTED_SUFFIXES
     assert all(suffix.startswith(".") and suffix == suffix.lower() for suffix in DOCLING_FORMATS)
+    for suffix in DOCLING_FORMATS:
+        f = tmp_path / f"sample{suffix}"
+        f.write_bytes(b"\x00\x01")
+        assert is_supported_file(f)
 
 
 def test_new_plain_text_format_indexes(subject, course, stub_embedder, stub_extractor):
     subj = Subject(subject)
     pipe = IngestionPipeline(subject=subj, extractor=stub_extractor(), embedder=stub_embedder())
     (course / "config.yaml").write_text("course: Deadlock Theory\nweek: 3\n")
-    results = pipe.run([course / "config.yaml"])
-    assert results[0].status == Status.INDEXED
+    (course / "Page.svelte").write_text("<script>let x = 1;</script>\n")
+    (course / "Layout.astro").write_text("---\nconst title = 'Lab';\n---\n")
+    (course / "Makefile").write_text("all:\n\tpytest\n")
+    results = pipe.run(
+        [
+            course / "config.yaml",
+            course / "Page.svelte",
+            course / "Layout.astro",
+            course / "Makefile",
+        ]
+    )
+    assert [r.status for r in results] == [Status.INDEXED] * 4
+
+
+@pytest.mark.parametrize(
+    "name,content,expected_in_detail",
+    [
+        ("uv.lock", b"version = 1\n", ".lock"),
+        ("diagram.svg", b"<svg></svg>", ".svg"),
+        ("bundle.js.map", b'{"version": 3}', ".map"),
+        ("invalid_utf8.txt", b"\xff\xfe\xfd", ".txt"),
+        ("binary_no_ext", b"ELF\x00\x01\x02", "binary_no_ext"),
+    ],
+)
+def test_skipped_text_suffixes_and_binary_files_are_unsupported(
+    subject, course, stub_embedder, stub_extractor, name, content, expected_in_detail
+):
+    target = course / name
+    target.write_bytes(content)
+    subj = Subject(subject)
+    pipe = IngestionPipeline(subject=subj, extractor=stub_extractor(), embedder=stub_embedder())
+    [result] = pipe.run([target])
+    assert result.status == Status.SKIPPED_UNSUPPORTED
+    assert expected_in_detail in result.detail
+
+
+def test_utf8_multibyte_char_split_across_probe_boundary_is_supported(tmp_path):
+    from groundly.ingestion.formats import PLAIN_TEXT_PROBE_BYTES, is_supported_file
+
+    f = tmp_path / "notes.custom"
+    f.write_bytes(b"a" * (PLAIN_TEXT_PROBE_BYTES - 1) + "ă".encode() + b"\n")
+    assert is_supported_file(f)
 
 
 def test_ocr_lang_reaches_extract(subject, course, stub_embedder, stub_extractor):

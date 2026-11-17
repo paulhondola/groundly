@@ -74,13 +74,15 @@ def test_no_ocr_lang_keeps_default_langs(monkeypatch):
     assert ocr_options.lang == RapidOcrOptions(backend="onnxruntime").lang
 
 
-def test_image_suffixes_route_to_docling():
+def test_image_suffixes_route_to_docling(tmp_path):
     """Standalone image extensions land on the docling allowlist and map to the
     'image' format, so main() routes them to _extract_docling."""
-    from groundly.ingestion.formats import DOCLING_FORMATS, DOCLING_SUFFIXES, SUPPORTED_SUFFIXES
+    from groundly.ingestion.formats import DOCLING_FORMATS, DOCLING_SUFFIXES, is_supported_file
 
     for suffix in (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"):
-        assert suffix in SUPPORTED_SUFFIXES
+        img = tmp_path / f"slide{suffix}"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n\x00")
+        assert is_supported_file(img)
         assert suffix in DOCLING_SUFFIXES
         assert DOCLING_FORMATS[suffix] == "image"
 

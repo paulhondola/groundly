@@ -129,7 +129,7 @@ Live decisions only, one line each where possible. Gaps in the numbering are ret
 8. **Frameworks**: FastMCP (the tool surface) only. Starlette and uvicorn serve the topic-tree page (decision 41); they are not a second tool-surface framework.
 11. **Pilot subjects: two** — apd (Parallel & Distributed Algorithms) and passc (Software Architecture).
 12. **Timeline**: defense June/July 2027.
-13. **Expanded ingest formats** (2026-07-16): all docling-native text formats plus a wider plain-text set; notebooks since decision 43.
+13. **Expanded ingest formats** (2026-07-16): all docling-native formats, notebooks (decision 43), and any other file that probes as UTF-8 plain text (no NUL bytes, minus a small noisy-text deny-list: `.lock`, `.svg`, `.map`).
 14. **OCR enabled** (2026-07-17): docling's bundled RapidOCR is local, offline and zero-key; scanned course PDFs are common.
 15. **Per-subject OCR language** (2026-07-17): `--ocr-lang` recorded in the manifest; changing it later requires re-indexing and is refused with a specific message.
 16. **`.groundlyignore`** (2026-07-19): a built-in junk-dir deny-list plus an optional per-root ignore file.

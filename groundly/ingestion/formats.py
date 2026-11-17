@@ -1,6 +1,9 @@
-"""Format tables shared by the pipeline and the extraction worker. Stdlib-only:
-extract_worker imports this at module load, before it decides whether it even
+"""Format tables and plain-text probe shared by the pipeline and the extraction worker.
+Stdlib-only: extract_worker imports this at module load, before it decides whether it even
 needs docling — pulling in a heavier module here would defeat that."""
+
+import codecs
+from pathlib import Path
 
 DOCLING_FORMATS = {
     ".pdf": "pdf",
@@ -33,32 +36,31 @@ IMAGE_FORMATS = {
 DOCLING_FORMATS.update(IMAGE_FORMATS)
 IMAGE_SUFFIXES = set(IMAGE_FORMATS)  # exported for extract.py's OCR failure-message branch
 DOCLING_SUFFIXES = set(DOCLING_FORMATS)
-# Everything else on the pipeline allowlist (txt + source code) is read as plain
-# text and chunked by token windows — docling's converter does not accept it.
-PLAIN_TEXT_SUFFIXES = {
-    ".txt",
-    ".py",
-    ".c",
-    ".cpp",
-    ".h",
-    ".hpp",
-    ".java",
-    ".js",
-    ".ts",
-    ".rs",
-    ".go",
-    ".rst",
-    ".json",
-    ".yaml",
-    ".yml",
-    ".toml",
-    ".sh",
-    ".sql",
-    ".cs",
-    ".rb",
-    ".kt",
-    ".swift",
-}
 # Rendered to Markdown from their cells, then chunked by docling like any .md.
 NOTEBOOK_SUFFIXES = {".ipynb"}
-SUPPORTED_SUFFIXES = DOCLING_SUFFIXES | PLAIN_TEXT_SUFFIXES | NOTEBOOK_SUFFIXES
+# Machine-generated or vector text formats that decode as UTF-8 but are noise in a course index.
+SKIPPED_TEXT_SUFFIXES = {".lock", ".svg", ".map"}
+PLAIN_TEXT_PROBE_BYTES = 8192
+
+
+def is_supported_file(path: Path) -> bool:
+    """True when `path` is a known Docling/notebook format or probes as UTF-8 plain text."""
+    suffix = path.suffix.lower()
+    if suffix in DOCLING_SUFFIXES or suffix in NOTEBOOK_SUFFIXES:
+        return True
+    if suffix in SKIPPED_TEXT_SUFFIXES:
+        return False
+    try:
+        with open(path, "rb") as f:
+            chunk = f.read(PLAIN_TEXT_PROBE_BYTES)
+    except OSError:
+        return False
+    if b"\x00" in chunk:
+        return False
+    try:
+        codecs.getincrementaldecoder("utf-8")().decode(
+            chunk, final=len(chunk) < PLAIN_TEXT_PROBE_BYTES
+        )
+    except UnicodeDecodeError:
+        return False
+    return True
