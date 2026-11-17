@@ -5,7 +5,15 @@ from typing import Annotated
 
 import typer
 
-from groundly.cli.app import _fail, _safe, _store_checked, _subject_checked, app, console
+from groundly.cli.app import (
+    _fail,
+    _only_match,
+    _safe,
+    _store_checked,
+    _subject_checked,
+    app,
+    console,
+)
 
 
 @app.command()
@@ -52,12 +60,7 @@ def search(
     if material is not None:
         # only indexed rows are searchable; a failed row may share the filename
         matches = [m for m in store_obj.find_materials(material) if m["status"] == "indexed"]
-        if not matches:
-            _fail(f"no material {material!r} in {subject} — see: groundly list {subject}")
-        if len(matches) > 1:
-            candidates = ", ".join(f"{m['filename']} ({m['sha256'][:8]})" for m in matches)
-            _fail(f"{material!r} is ambiguous — candidates: {candidates}; use a sha256 prefix")
-        material_id = matches[0]["id"]
+        material_id = _only_match(matches, material, subject)["id"]
     try:
         hits = search_fn(subject, query, k=k, rerank=rerank, material_id=material_id)
     except ModelDownloadError as exc:

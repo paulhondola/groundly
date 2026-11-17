@@ -3,13 +3,14 @@ env-driven image-pixel cap."""
 
 import pytest
 
+from groundly.core.config import IngestionSettings
 from groundly.ingestion.extract import ExtractionFailure, SubprocessExtractor
 
 
 def test_file_size_guard_rejects_before_spawn(tmp_path):
     big = tmp_path / "huge.pdf"
     big.write_bytes(b"x" * 2048)  # 2 KB
-    extractor = SubprocessExtractor(max_file_size_mb=0.001)  # ~1 KB limit
+    extractor = SubprocessExtractor(IngestionSettings(max_file_size_mb=0.001))  # ~1 KB limit
     with pytest.raises(ExtractionFailure, match="file too large"):
         extractor.extract(big)
 
@@ -19,7 +20,7 @@ def test_no_limit_when_unset(tmp_path):
     # different error, so a non-"too large" failure proves the guard was skipped)
     f = tmp_path / "x.pdf"
     f.write_bytes(b"x" * 2048)
-    extractor = SubprocessExtractor(max_file_size_mb=None, timeout=30)
+    extractor = SubprocessExtractor(IngestionSettings(timeout_seconds=30))
     with pytest.raises(ExtractionFailure) as exc:
         extractor.extract(f)
     assert "file too large" not in str(exc.value)

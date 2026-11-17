@@ -100,27 +100,15 @@ def _structural_rejections(
         if not isinstance(node, dict):
             rejections.append(_rejection(path, "invalid_text", "a topic must be an object"))
             return
-        title, summary = node.get("title"), node.get("summary")
-        if not isinstance(title, str) or not title.strip():
-            rejections.append(_rejection(path, "invalid_text", "title must be non-empty text"))
-        elif len(title) > MAX_TITLE_CHARS:
-            rejections.append(
-                _rejection(
-                    path,
-                    "invalid_text",
-                    f"title is {len(title)} characters; the limit is {MAX_TITLE_CHARS}",
+        for name, limit in (("title", MAX_TITLE_CHARS), ("summary", MAX_SUMMARY_CHARS)):
+            text = node.get(name)
+            if not isinstance(text, str) or not text.strip():
+                rejections.append(
+                    _rejection(path, "invalid_text", f"{name} must be non-empty text")
                 )
-            )
-        if not isinstance(summary, str) or not summary.strip():
-            rejections.append(_rejection(path, "invalid_text", "summary must be non-empty text"))
-        elif len(summary) > MAX_SUMMARY_CHARS:
-            rejections.append(
-                _rejection(
-                    path,
-                    "invalid_text",
-                    f"summary is {len(summary)} characters; the limit is {MAX_SUMMARY_CHARS}",
-                )
-            )
+            elif len(text) > limit:
+                detail = f"{name} is {len(text)} characters; the limit is {limit}"
+                rejections.append(_rejection(path, "invalid_text", detail))
 
         topic_id = node.get("id")
         if topic_id is not None:

@@ -3,15 +3,13 @@ carry query text and chunk ids (layer-3 data), so no file exists for export code
 reason about.
 
 Attached to the root logger so third-party records still reach it, but root stays at
-WARNING: only the named loggers get `setLevel`, so third-party DEBUG records are never
+WARNING: only the `groundly` logger gets `setLevel`, so third-party DEBUG records are never
 created.
 """
 
 import logging
 import os
 import sys
-
-_LOGGER_NAMES = ("groundly",)
 
 _configured = False
 
@@ -33,8 +31,7 @@ def setup_logging(debug: bool = False) -> bool:
             raise ValueError(f"invalid GROUNDLY_LOG_LEVEL {env!r} — valid names: {valid}")
         level = mapping[env.upper()]
 
-    for name in _LOGGER_NAMES:
-        logging.getLogger(name).setLevel(level)
+    logging.getLogger("groundly").setLevel(level)
 
     if not _configured:
         handler = logging.StreamHandler(stream=sys.stderr)

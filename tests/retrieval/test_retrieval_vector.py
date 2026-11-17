@@ -2,10 +2,11 @@
 
 import pytest
 
+from groundly.core.config import RetrievalSettings
 from groundly.core.manifest import EMBEDDING_DIM
 from groundly.core.paths import subject_dir
 from groundly.core.store import SubjectStore
-from groundly.retrieval.vector import TOP_K, VectorRetriever, rrf, search
+from groundly.retrieval.vector import VectorRetriever, rrf, search
 
 
 class QueryEmbedder:
@@ -149,7 +150,7 @@ def test_search_returns_ranked_nodes_and_writes_nothing_to_progress(retrievable_
     before = db.read_bytes()
 
     hits = search(retrievable_subject, "deadlock", embedder=_near_embedder(), rerank=False)
-    assert hits and len(hits) <= TOP_K
+    assert hits and len(hits) <= RetrievalSettings().top_k
 
     assert db.read_bytes() == before
 

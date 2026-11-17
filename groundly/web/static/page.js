@@ -29,6 +29,10 @@ function pageURL(subject, rest) {
   return "/s/" + encodeURIComponent(subject) + (rest || "");
 }
 
+function testQuery(topicId, n) {
+  return "/test?" + (topicId != null ? "topic=" + topicId + "&" : "") + "n=" + n;
+}
+
 function button(text, cls, onClick) {
   const b = el("button", text, cls);
   b.type = "button";
@@ -86,7 +90,7 @@ async function showSubjects() {
   for (const s of subjects) {
     const item = el("li");
     const link = el("a", s.title || s.subject);
-    link.href = "/s/" + encodeURIComponent(s.subject);
+    link.href = pageURL(s.subject);
     const status = s.error ? s.error : s.has_tree ? "topic map ready" : "no map yet";
     item.append(link, el("span", " — " + (s.title ? s.subject + " · " : "") + status, "muted"));
     list.append(item);
@@ -100,8 +104,8 @@ function sourceItem(subject, src) {
   const label = filename + (src.page != null ? " · p." + Number(src.page) : "");
   if (src.pdf === true) {
     const link = el("a", label);
-    link.href = "/s/" + encodeURIComponent(subject) + "/materials/" + Number(src.material_id) +
-      (src.page != null ? "#page=" + Number(src.page) : "");
+    link.href = pageURL(subject, "/materials/" + Number(src.material_id) +
+      (src.page != null ? "#page=" + Number(src.page) : ""));
     link.target = "_blank";
     link.rel = "noopener";
     item.append(link);
@@ -131,7 +135,7 @@ function testChooser(subject, topicId, questions) {
   label.append(select);
   const start = el("a", "Start test", "primary");
   const update = () => {
-    start.href = pageURL(subject, "/test?" + (topicId != null ? "topic=" + topicId + "&" : "") + "n=" + select.value);
+    start.href = pageURL(subject, testQuery(topicId, select.value));
   };
   select.addEventListener("change", update);
   update();
@@ -140,9 +144,7 @@ function testChooser(subject, topicId, questions) {
 }
 
 function renderPanel(panel, subject, node, onClose) {
-  const close = el("button", "Close", "close");
-  close.type = "button";
-  close.addEventListener("click", onClose);
+  const close = button("Close", "close", onClose);
   const head = el("div", undefined, "panel-head");
   head.append(el("h2", node.title), close);
   panel.replaceChildren(head, el("p", progressLine(node.progress), "muted"));
@@ -175,7 +177,7 @@ function renderPanel(panel, subject, node, onClose) {
 async function showTree(subject) {
   document.title = subject + " · Groundly";
   let tree, title;
-  try { ({ tree, title } = await getJSON("/api/subjects/" + encodeURIComponent(subject) + "/tree")); }
+  try { ({ tree, title } = await getJSON(api(subject, "/tree"))); }
   catch (e) {
     showError(e.message);
     app.prepend(backLink());
@@ -339,7 +341,7 @@ async function showTest(subject) {
   if (!test || test.n !== n || !Array.isArray(test.questions)) {
     let drawn;
     try {
-      drawn = await getJSON(api(subject, "/test?" + (topicId != null ? "topic=" + topicId + "&" : "") + "n=" + n));
+      drawn = await getJSON(api(subject, testQuery(topicId, n)));
     } catch (e) { showError(e.message); app.prepend(back); return; }
     test = {
       n,
@@ -505,15 +507,14 @@ function answerView(subject, a, i) {
   card.append(el("p", a.stem, "stem"));
   if (a.code) card.append(el("pre", a.code, "code"));
   if (a.kind === "open") {
-    card.append(el("h4", "Your answer"), el("p", a.text && a.text.trim() ? a.text : "No answer", "said"));
+    card.append(el("h4", "Your answer"), el("p", a.text && a.text.trim() ? a.text : "No answer", "said"),
+      el("h4", "Reference answer"), el("p", a.reference_answer, "said"));
     if (a.state === "awaiting") {
-      card.append(el("h4", "Reference answer"), el("p", a.reference_answer, "said"));
       const wait = el("p", "Awaiting review — say ", "muted");
       wait.append(el("code", "grade my test"), " to your agent.");
       card.append(wait);
-    } else {
-      card.append(el("h4", "Reference answer"), el("p", a.reference_answer, "said"));
-      if (a.comment) card.append(el("h4", "Review"), el("p", a.comment, "said"));
+    } else if (a.comment) {
+      card.append(el("h4", "Review"), el("p", a.comment, "said"));
     }
   } else {
     const yours = a.options.filter((o) => o.selected).map((o) => o.text);

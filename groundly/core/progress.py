@@ -117,14 +117,13 @@ def connect(path: Path) -> sqlite3.Connection:
 
 def _answer(row: sqlite3.Row) -> dict:
     out = dict(row)
-    out.pop("position", None)
     out["response"] = json.loads(out["response"])
     out["correct"] = None if out["correct"] is None else bool(out["correct"])
     return out
 
 
 _ANSWER_COLUMNS = (
-    "id, attempt_id, position, question_id, topic_id, kind, response, correct, comment, reviewed_at"
+    "id, attempt_id, question_id, topic_id, kind, response, correct, comment, reviewed_at"
 )
 
 

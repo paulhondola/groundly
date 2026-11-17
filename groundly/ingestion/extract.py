@@ -12,10 +12,10 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from groundly.core.config import IngestionSettings
 from groundly.ingestion import extract_worker
 from groundly.ingestion.formats import IMAGE_SUFFIXES
 
-EXTRACT_TIMEOUT_SECONDS = 360
 STDERR_TAIL_BYTES = 4096
 MAX_EXTRACTION_JSON_BYTES = 200 * 1024 * 1024  # far beyond any real textbook
 
@@ -53,15 +53,11 @@ def _stderr_tail(path: Path) -> str:
 class SubprocessExtractor:
     """Extracts document content using a separate worker subprocess (Docling, RapidOCR)."""
 
-    def __init__(
-        self,
-        timeout: float = EXTRACT_TIMEOUT_SECONDS,
-        max_image_pixels: int = extract_worker.MAX_IMAGE_PIXELS,
-        max_file_size_mb: float | None = None,
-    ) -> None:
-        self.timeout = timeout
-        self.max_image_pixels = max_image_pixels
-        self.max_file_size_mb = max_file_size_mb
+    def __init__(self, settings: IngestionSettings | None = None) -> None:
+        settings = settings or IngestionSettings()
+        self.timeout = settings.timeout_seconds
+        self.max_image_pixels = settings.max_image_pixels
+        self.max_file_size_mb = settings.max_file_size_mb
 
     def extract(self, path: Path, ocr_lang: str | None = None) -> Extraction:
         if self.max_file_size_mb:  # None/0 = no limit

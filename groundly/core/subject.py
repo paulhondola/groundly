@@ -14,27 +14,11 @@ class Subject:
 
     def __init__(self, name: str) -> None:
         self.name = name
-        self._root_dir = subject_dir(name)
-
-    @property
-    def root_dir(self) -> Path:
-        return self._root_dir
-
-    @property
-    def materials_dir(self) -> Path:
-        return self._root_dir / "materials"
-
-    @property
-    def store_db_path(self) -> Path:
-        return self._root_dir / "store.db"
-
-    @property
-    def progress_db_path(self) -> Path:
-        return self._root_dir / "progress.db"
-
-    @property
-    def manifest_path(self) -> Path:
-        return self._root_dir / "manifest.json"
+        self.root_dir = subject_dir(name)
+        self.materials_dir = self.root_dir / "materials"
+        self.store_db_path = self.root_dir / "store.db"
+        self.progress_db_path = self.root_dir / "progress.db"
+        self.manifest_path = self.root_dir / "manifest.json"
 
     def exists(self) -> bool:
         # lexists: a dangling manifest is a damaged subject, not a free name to initialize over

@@ -114,7 +114,7 @@ def import_(
             bundle.check_tree(tmp_dir / "store.db")
             bundle.check_questions(tmp_dir / "store.db")
 
-            if not bundle.pin_matches(manifest):
+            if manifest.embedding != Embedding():
                 if not yes:
                     typer.confirm(
                         "embedding pin mismatch — re-embed locally now? (free, takes a few "

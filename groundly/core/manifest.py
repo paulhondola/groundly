@@ -104,11 +104,18 @@ class Manifest(BaseModel):
         tmp.replace(path)
 
 
+def store_counts(conn: sqlite3.Connection) -> Counts:
+    """What store.db holds: indexed materials and chunks."""
+    return Counts(
+        materials=conn.execute(
+            "SELECT COUNT(*) FROM materials WHERE status = 'indexed'"
+        ).fetchone()[0],
+        chunks=conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0],
+    )
+
+
 def sync_counts(conn: sqlite3.Connection, manifest_path: Path) -> None:
     """Keep manifest counts in sync after every mutation (UC-03 acceptance)."""
     manifest = Manifest.load(manifest_path)
-    manifest.counts.materials = conn.execute(
-        "SELECT COUNT(*) FROM materials WHERE status = 'indexed'"
-    ).fetchone()[0]
-    manifest.counts.chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+    manifest.counts = store_counts(conn)
     manifest.save(manifest_path)

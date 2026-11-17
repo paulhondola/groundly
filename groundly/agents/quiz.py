@@ -27,12 +27,12 @@ class QuizError(Exception):
         self.reason, self.detail = reason, detail
 
 
-def _topics(tree: list[dict]) -> tuple[list[dict], dict[int, list[int]], dict[int, str]]:
-    """(top-level nodes, parent id -> subtopic ids, id -> title), in tree order."""
+def _topics(tree: list[dict]) -> tuple[dict[int, list[int]], dict[int, str]]:
+    """(parent id -> subtopic ids, id -> title), in tree order."""
     children = {node["id"]: [s["id"] for s in node["subtopics"]] for node in tree}
     titles = {node["id"]: node["title"] for node in tree}
     titles.update({s["id"]: s["title"] for node in tree for s in node["subtopics"]})
-    return tree, children, titles
+    return children, titles
 
 
 def _leaves_in_order(tree: list[dict]) -> list[int]:
@@ -48,8 +48,10 @@ def mastery(
     MASTERY_WINDOW graded answers, with at least that many; a parent when all its subtopics are.
     Answers awaiting review do not count; answers to removed questions do. Pass the `tree`
     the caller shows, so the states are keyed by exactly its nodes."""
-    tree, children, _ = _topics(store.tree(with_sources=False) if tree is None else tree)
-    counts = store.question_counts()
+    if tree is None:
+        tree = store.tree(with_sources=False)
+    children, _ = _topics(tree)
+    bank = store.question_ids_by_topic()
     graded: dict[int, list[bool]] = {}
     for a in progress.answers():
         if a["correct"] is not None:
@@ -67,7 +69,7 @@ def mastery(
         else:
             state = "in_progress"
         out[leaf] = {
-            "questions": counts.get(leaf, 0),
+            "questions": len(bank.get(leaf, [])),
             "answered": len(history),
             "recent": len(recent),
             "recent_correct": right,
@@ -99,7 +101,8 @@ def mastery(
 
 
 def _scope_leaves(store: SubjectStore, topic_id: int | None) -> list[int]:
-    tree, children, titles = _topics(store.tree(with_sources=False))
+    tree = store.tree(with_sources=False)
+    children, titles = _topics(tree)
     if topic_id is None:
         return _leaves_in_order(tree)
     if topic_id not in titles:
@@ -258,7 +261,7 @@ def attempt_result(store: SubjectStore, progress: ProgressStore, attempt_id: int
         )
     score = _score([a["state"] for a in answers])
     tree = store.tree(with_sources=False)
-    _, _, titles = _topics(tree)
+    _, titles = _topics(tree)
     states = mastery(store, progress, tree)
     topics = []
     for tid in dict.fromkeys(a["topic_id"] for a in attempt["answers"]):
@@ -281,7 +284,7 @@ def attempt_history(store: SubjectStore, progress: ProgressStore) -> list[dict]:
     states: dict[int, list[str]] = {}
     for a in progress.answers():
         states.setdefault(a["attempt_id"], []).append(_state(a, a["question_id"] not in existing))
-    _, _, titles = _topics(store.tree(with_sources=False))
+    _, titles = _topics(store.tree(with_sources=False))
     out = []
     for attempt in progress.attempts():
         score = _score(states.get(attempt["id"], []))

@@ -17,15 +17,11 @@ def config(ctx: typer.Context) -> None:
 
     console.print(f"Config: {config_path()}", soft_wrap=True)
 
-    s = load_settings()
-    console.print(f"  ingestion.timeout_seconds  = {s.ingestion.timeout_seconds}")
-    console.print(f"  ingestion.max_image_pixels = {s.ingestion.max_image_pixels}")
-    console.print(
-        f"  ingestion.max_file_size_mb = "
-        f"{s.ingestion.max_file_size_mb if s.ingestion.max_file_size_mb else '(unlimited)'}"
-    )
-    console.print(f"  retrieval.top_k            = {s.retrieval.top_k}")
-    console.print(f"  retrieval.rerank           = {s.retrieval.rerank}")
+    for section, values in load_settings():
+        for key, value in values:
+            if key == "max_file_size_mb" and not value:
+                value = "(unlimited)"
+            console.print(f"  {section + '.' + key:<26} = {value}")
 
 
 @config_app.command(name="set")
@@ -75,25 +71,19 @@ def install(
 ) -> None:
     """Download the bge-m3 embedding model and the bge-reranker-v2-m3 cross-encoder
     into the local Hugging Face cache."""
-    from groundly.core.manifest import EMBEDDING_MODEL
     from groundly.llm import embeddings
-    from groundly.llm.rerank import RERANKER_HF_REVISION, RERANKER_MODEL
 
-    embed_cached = embeddings.cached_snapshot() is not None
-    rerank_cached = embeddings.cached_snapshot(RERANKER_MODEL, RERANKER_HF_REVISION) is not None
-    if not force and embed_cached and rerank_cached:
-        console.print(
-            f"{EMBEDDING_MODEL} and {RERANKER_MODEL} already cached — "
-            "Nothing to do (use --force to re-verify)"
-        )
+    names = " and ".join(model for model, _ in _models())
+    if not force and all(embeddings.cached_snapshot(m, r) for m, r in _models()):
+        console.print(f"{names} already cached — Nothing to do (use --force to re-verify)")
         return
 
     try:
-        embeddings.ensure_downloaded(force=force)
-        embeddings.ensure_downloaded(RERANKER_MODEL, RERANKER_HF_REVISION, force=force)
+        for model, revision in _models():
+            embeddings.ensure_downloaded(model, revision, force=force)
     except embeddings.ModelDownloadError as exc:
         _fail(str(exc))
-    console.print(f"{EMBEDDING_MODEL} and {RERANKER_MODEL} ready")
+    console.print(f"{names} ready")
 
 
 @models_app.command()

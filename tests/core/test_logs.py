@@ -16,7 +16,7 @@ def _reset_logging(monkeypatch):
     monkeypatch.setattr(logs, "_configured", False)
     root = logging.getLogger()
     before_handlers = list(root.handlers)
-    before_levels = {name: logging.getLogger(name).level for name in (*logs._LOGGER_NAMES, "httpx")}
+    before_levels = {name: logging.getLogger(name).level for name in ("groundly", "httpx")}
     yield
     for handler in list(root.handlers):
         if handler not in before_handlers:
