@@ -8,24 +8,13 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Hit:
+    """`score` is the retriever's own: a cross-encoder score or a fused RRF weight. The two
+    scales differ, so compare scores only between hits from one retrieval mode: the topic
+    gate does, against its cutoff, and only with reranking on."""
+
     chunk_id: int
     text: str
     filename: str
     page: int | None
     heading_path: str | None
     score: float
-
-
-def hit_from_row(row, score: float) -> Hit:
-    """One `chunk_details`/`all_chunks` row plus the retriever's own score — a
-    cross-encoder score or a fused RRF weight. The two scales differ, so compare scores
-    only between hits from one retrieval mode: the topic gate does, against its cutoff,
-    and only with reranking on."""
-    return Hit(
-        chunk_id=row["chunk_id"],
-        text=row["text"],
-        filename=row["filename"],
-        page=row["page"],
-        heading_path=row["heading_path"],
-        score=float(score),
-    )

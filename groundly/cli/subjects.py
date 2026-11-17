@@ -11,6 +11,7 @@ from rich.text import Text
 from groundly.cli.app import (
     _fail,
     _manifest_checked,
+    _only_match,
     _safe,
     _store_checked,
     _subject_checked,
@@ -73,22 +74,18 @@ def index(
         subj.initialize()
     manifest = _manifest_checked(subj)
     recorded = manifest.ocr.lang[0] if manifest.ocr.lang else None
-    if ocr_lang and recorded and ocr_lang != recorded:
+    if ocr_lang and ocr_lang != recorded:
         # The recorded lang shaped every OCR'd chunk already stored, so changing it would
         # mix corpora (decision 15). With nothing indexed there is nothing to mix, which
         # lets a mistyped lang (it stores no rows) be corrected.
-        if manifest.counts.materials > 0:
+        if recorded and manifest.counts.materials > 0:
             _fail(
                 f"OCR language already set to {recorded!r} for this subject; changing it "
                 "requires re-indexing (remove and re-index scanned materials)"
             )
         manifest.ocr.lang = [ocr_lang]
         subj.save_manifest(manifest)
-    elif ocr_lang and not recorded:
-        manifest.ocr.lang = [ocr_lang]
-        subj.save_manifest(manifest)
-    elif not ocr_lang:
-        ocr_lang = recorded
+    ocr_lang = ocr_lang or recorded
 
     labels = {
         Status.INDEXED: "[green]indexed[/green]",
@@ -243,6 +240,7 @@ def remove(
     """Remove materials and all their indexed data. Every name is resolved before anything
     is deleted; to delete a whole subject, use `groundly drop`."""
     import sqlite3
+    from contextlib import closing
 
     from groundly.core.manifest import sync_counts
 
@@ -252,13 +250,8 @@ def remove(
     try:
         targets = {}  # row id -> row: a material named twice is removed once
         for ident in material:
-            matches = store_obj.find_materials(ident)
-            if not matches:
-                _fail(f"no material {ident!r} in {subject} — see: groundly list {subject}")
-            if len(matches) > 1:
-                candidates = ", ".join(f"{m['filename']} ({m['sha256'][:8]})" for m in matches)
-                _fail(f"{ident!r} is ambiguous — candidates: {candidates}; use a sha256 prefix")
-            targets[matches[0]["id"]] = matches[0]
+            match = _only_match(store_obj.find_materials(ident), ident, subject)
+            targets[match["id"]] = match
         if not yes:
             names = ", ".join(_visible(t["filename"]) for t in targets.values())
             typer.confirm(
@@ -273,11 +266,8 @@ def remove(
                 if stored:
                     stored.unlink()
             console.print(f"Removed [bold]{_safe(target['filename'])}[/bold] from {subject}")
-        conn = store_obj.connect()
-        try:
+        with closing(store_obj.connect()) as conn:
             sync_counts(conn, subj.manifest_path)
-        finally:
-            conn.close()
     except sqlite3.OperationalError as exc:
         _fail(f"store.db is corrupt or incomplete: {exc}")
 

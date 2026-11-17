@@ -7,27 +7,17 @@ import os
 import shutil
 import sqlite3
 from collections.abc import Callable
+from contextlib import closing
 from pathlib import Path
 
+from groundly.core.config import load_settings
 from groundly.core.manifest import sync_counts
 from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
 from groundly.ingestion.extract import ExtractionFailure, ModelUnavailable, SubprocessExtractor
 from groundly.ingestion.formats import SUPPORTED_SUFFIXES
 from groundly.ingestion.results import FileResult, OnEvent, Status
-from groundly.llm.embeddings import BgeM3Embedder, Embedder
-
-
-def _default_extractor() -> SubprocessExtractor:
-    from groundly.core.config import load_settings
-
-    s = load_settings().ingestion
-    return SubprocessExtractor(
-        timeout=s.timeout_seconds,
-        max_image_pixels=s.max_image_pixels,
-        max_file_size_mb=s.max_file_size_mb,
-    )
-
+from groundly.llm.embeddings import BgeM3Embedder
 
 DEFAULT_IGNORED_DIRS = {
     ".git",
@@ -47,12 +37,8 @@ def _load_ignore_patterns(root: Path) -> list[str]:
     ignore_file = root / ".groundlyignore"
     if not ignore_file.is_file():
         return []
-    patterns = []
-    for line in ignore_file.read_text().splitlines():
-        line = line.strip()
-        if line and not line.startswith("#"):
-            patterns.append(line)
-    return patterns
+    lines = (line.strip() for line in ignore_file.read_text().splitlines())
+    return [line for line in lines if line and not line.startswith("#")]
 
 
 def _ignored(rel_posix: str, name: str, patterns: list[str]) -> bool:
@@ -113,15 +99,14 @@ class IngestionPipeline:
     def __init__(
         self,
         subject: Subject,
-        store: SubjectStore | None = None,
         extractor: SubprocessExtractor | None = None,
-        embedder: Embedder | None = None,
+        embedder=None,
         on_event: OnEvent | None = None,
         on_discovered: Callable[[int], None] | None = None,
     ) -> None:
         self.subject = subject
-        self.store = store or SubjectStore(subject.store_db_path)
-        self.extractor = extractor or _default_extractor()
+        self.store = SubjectStore(subject.store_db_path)
+        self.extractor = extractor or SubprocessExtractor(load_settings().ingestion)
         self.embedder = embedder or BgeM3Embedder()
         self.on_event = on_event or (lambda path, stage: None)
         self.on_discovered = on_discovered or (lambda total: None)
@@ -190,11 +175,8 @@ class IngestionPipeline:
             results.append(result)
             if result.status in (Status.INDEXED, Status.EXTRACTION_FAILED):
                 known[sha] = result.status  # a same-content sibling this run is a skip
-            conn = self.store.connect()
-            try:
+            with closing(self.store.connect()) as conn:
                 sync_counts(conn, self.subject.manifest_path)
-            finally:
-                conn.close()
         return results
 
     def _index_one(self, path: Path, sha: str, ocr_lang: str | None) -> FileResult:
@@ -248,7 +230,7 @@ class IngestionPipeline:
 def index_paths(
     subject: str,
     paths: list[Path],
-    embedder: Embedder | None = None,
+    embedder=None,
     on_event: OnEvent | None = None,
     on_discovered: Callable[[int], None] | None = None,
     ocr_lang: str | None = None,

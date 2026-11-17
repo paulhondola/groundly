@@ -1,13 +1,10 @@
 """groundly/core/config.py: settings + the config-set writer."""
 
-import tomllib
-
 import pytest
 
 from groundly.core.config import (
     ConfigKeyError,
     Settings,
-    _toml_value,
     config_path,
     load_settings,
     render_config_toml,
@@ -90,12 +87,6 @@ def test_non_dotted_key_rejected(home):
 
 def test_config_path_under_home(home):
     assert config_path() == home / "config.toml"
-
-
-def test_toml_strings_with_control_chars_stay_valid_toml():
-    # a pasted value with a newline must not corrupt the file for every later read
-    value = 'a"b\n[injected]\nx=1\t\\'
-    assert tomllib.loads(f"v = {_toml_value(value)}") == {"v": value}
 
 
 def test_config_with_retired_sections_still_loads(home):

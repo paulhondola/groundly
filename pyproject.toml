@@ -14,7 +14,6 @@ dependencies = [
 	"typer>=0.12",
 	"rich>=13",
 	"pydantic>=2.7",
-	"pydantic-settings>=2.3",
 	"fastmcp>=2.0",
 	"starlette>=1.0",
 	"uvicorn>=0.30",

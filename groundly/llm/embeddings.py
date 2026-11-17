@@ -8,7 +8,6 @@ import os
 import sys
 from collections.abc import Iterator, Sequence
 from pathlib import Path
-from typing import Protocol
 
 from groundly.core.manifest import EMBEDDING_MODEL, HF_REVISION
 
@@ -17,13 +16,6 @@ from groundly.core.manifest import EMBEDDING_MODEL, HF_REVISION
 os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
 
 SparseWeights = dict[int, float]
-
-
-class Embedder(Protocol):
-    def encode(self, texts: list[str]) -> tuple[list[list[float]], list[SparseWeights]]: ...
-    def encode_stream(
-        self, texts: list[str], batch_size: int = ...
-    ) -> Iterator[tuple[Sequence[float], SparseWeights]]: ...
 
 
 class ModelDownloadError(Exception):
@@ -74,18 +66,15 @@ def ensure_downloaded(
     return Path(local)
 
 
-def remove_cached(model: str = EMBEDDING_MODEL) -> bool:
-    """Delete `model` from the local Hugging Face cache. Returns True if anything was removed."""
+def remove_cached(model: str = EMBEDDING_MODEL) -> None:
+    """Delete `model` from the local Hugging Face cache."""
     import shutil
 
     from huggingface_hub import scan_cache_dir
 
-    removed = False
     for repo in scan_cache_dir().repos:
         if repo.repo_id == model:
             shutil.rmtree(repo.repo_path, ignore_errors=True)
-            removed = True
-    return removed
 
 
 class BgeM3Embedder:

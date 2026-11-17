@@ -13,7 +13,7 @@ def _reset_logging():
 
     root = logging.getLogger()
     before_handlers = list(root.handlers)
-    before_levels = {name: logging.getLogger(name).level for name in logs_mod._LOGGER_NAMES}
+    before_levels = {name: logging.getLogger(name).level for name in ("groundly",)}
     yield
     for handler in list(root.handlers):
         if handler not in before_handlers:

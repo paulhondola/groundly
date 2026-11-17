@@ -8,6 +8,10 @@ from groundly.core.manifest import EMBEDDING_DIM, Manifest, sync_counts
 from groundly.core.store import StaleTopicError, SubjectStore, TopicWrite
 
 
+def _counts(s: SubjectStore) -> dict[int, int]:
+    return {topic: len(ids) for topic, ids in s.question_ids_by_topic().items()}
+
+
 @pytest.fixture
 def db(tmp_path):
     path = tmp_path / "store.db"
@@ -552,7 +556,7 @@ def test_add_questions_round_trips_options_and_sources(bank):
     assert [(x["chunk_id"], x["filename"], x["page"]) for x in first["sources"]] == [
         (bank["c1"], "a.pdf", 1)
     ]
-    assert s.question_counts() == {bank["leaf"]: 2}
+    assert _counts(s) == {bank["leaf"]: 2}
     assert s.question_stems(bank["leaf"]) == ["Pick two", "What does a deadlock need?"]
     assert [g["id"] for g in s.questions(topic_ids=[bank["lone"]])] == []
 
@@ -576,7 +580,7 @@ def test_remove_questions_with_an_unknown_id_removes_nothing(bank):
     s = bank["store"]
     (real,) = s.add_questions(bank["leaf"], [_single([bank["c1"]])])
     assert s.remove_questions([real, 9999]) == [9999]
-    assert s.question_counts() == {bank["leaf"]: 1}
+    assert _counts(s) == {bank["leaf"]: 1}
 
 
 def test_removing_a_material_deletes_a_question_left_without_citations(bank):
@@ -607,7 +611,7 @@ def test_a_deleted_topic_takes_its_questions_with_it(bank):
             conn.execute("DELETE FROM topics WHERE id = ?", (bank["leaf"],))
     finally:
         conn.close()
-    assert s.questions() == [] and s.question_counts() == {}
+    assert s.questions() == [] and _counts(s) == {}
 
 
 def _downgrade_to_v1(path):
@@ -625,7 +629,7 @@ def test_a_version_1_store_is_upgraded_in_place_keeping_its_rows(bank, db, tmp_p
     db.close()
     _downgrade_to_v1(tmp_path / "store.db")
 
-    assert s.question_counts() == {}
+    assert _counts(s) == {}
     conn = s.connect()
     try:
         assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
@@ -655,7 +659,7 @@ def test_replace_tree_refuses_to_drop_a_topic_that_gained_questions(bank):
     before = s.tree()
     with pytest.raises(StaleTopicError, match="holds questions"):
         s.replace_tree([TopicWrite(bank["parent"], "Deadlock", "d", [bank["c1"]])])
-    assert s.tree() == before and s.question_counts() == {bank["lone"]: 1}
+    assert s.tree() == before and _counts(s) == {bank["lone"]: 1}
 
 
 def test_replace_tree_refuses_to_subdivide_a_topic_that_gained_questions(bank):
@@ -682,4 +686,4 @@ def test_add_questions_refuses_a_topic_that_gained_subtopics_or_was_removed(bank
         s.add_questions(bank["parent"], [_single([bank["c1"]])])
     with pytest.raises(StaleTopicError, match="no longer a topic without subtopics"):
         s.add_questions(9999, [_single([bank["c1"]])])
-    assert s.question_counts() == {}
+    assert _counts(s) == {}

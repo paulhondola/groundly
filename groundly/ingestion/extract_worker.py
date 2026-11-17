@@ -32,6 +32,11 @@ EXIT_INPUT_TOO_LARGE = 5
 # ~100 MP (10000×10000), far above any course image: bounds decompression-bomb memory
 # before docling rasterizes an image.
 MAX_IMAGE_PIXELS = 100_000_000
+# CPU threads for docling's models — RapidOCR dominates a scanned page. One worker runs at a
+# time, so it may take every performance core; a thread on an efficiency core (Apple Silicon)
+# or a hyper-thread sibling makes the whole pool wait on it, which measured slower than
+# docling's default of 4.
+INFERENCE_THREADS = 8
 
 
 def _bge_m3_tokenizer():
@@ -51,14 +56,6 @@ def _model_step(fn):
     except Exception as exc:  # noqa: BLE001 - any load failure is the retryable exit
         print(f"model unavailable: {exc}", file=sys.stderr)
         sys.exit(EXIT_MODEL_UNAVAILABLE)
-
-
-def _inference_threads() -> int:
-    """CPU threads for docling's models — RapidOCR dominates a scanned page. One worker
-    runs at a time, so it may take every performance core; a thread on an efficiency
-    core (Apple Silicon) or a hyper-thread sibling makes the whole pool wait on it,
-    which measured slower than docling's default of 4."""
-    return 8
 
 
 def _first_frame(path: Path) -> Path:
@@ -116,7 +113,7 @@ def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
     pipeline_options = PdfPipelineOptions(
         do_ocr=True,
         ocr_options=ocr_options,
-        accelerator_options=AcceleratorOptions(num_threads=_inference_threads()),
+        accelerator_options=AcceleratorOptions(num_threads=INFERENCE_THREADS),
     )
     # IMAGE needs the same options, or docling's auto OCR picks a different engine (ocrmac,
     # easyocr) than the pinned RapidOCR (decision 14).

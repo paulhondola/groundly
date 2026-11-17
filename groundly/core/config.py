@@ -19,25 +19,19 @@ logger = logging.getLogger(__name__)
 
 
 class IngestionSettings(BaseModel):
-    timeout_seconds: float = 300  # EXTRACT_TIMEOUT_SECONDS — ingestion/extract.py
+    timeout_seconds: float = 300  # per-file extraction wall-clock
     max_image_pixels: int = 100_000_000  # MAX_IMAGE_PIXELS — ingestion/extract_worker.py
     max_file_size_mb: float | None = None  # None/0 = no limit (unchanged default behavior)
 
 
 class RetrievalSettings(BaseModel):
-    top_k: int = 8  # TOP_K — retrieval/vector.py
+    top_k: int = 8  # chunks returned per search
     rerank: bool = True
 
 
 class Settings(BaseModel):
     ingestion: IngestionSettings = IngestionSettings()
     retrieval: RetrievalSettings = RetrievalSettings()
-
-
-_SETTINGS_SECTIONS: dict[str, type[BaseModel]] = {
-    "ingestion": IngestionSettings,
-    "retrieval": RetrievalSettings,
-}
 
 
 class ConfigKeyError(Exception):
@@ -54,22 +48,14 @@ def _load_raw() -> dict:
     data = tomllib.loads(path.read_text()) if path.exists() else {}
     # Retired sections are ignored, never rejected: this file is the student's own
     # deployed state, and may still carry the provider/graph settings of older versions.
-    retired = sorted(set(data) - set(_SETTINGS_SECTIONS))
+    retired = sorted(set(data) - set(Settings.model_fields))
     if retired:
         logger.debug("config.toml: ignoring retired sections %s", retired)
     return data
 
 
-def _settings_from_raw(data: dict) -> Settings:
-    """One construction site for both readers (load_settings and set_key's rewrite) —
-    a section added to only one of them would be silently dropped on the next write."""
-    return Settings(
-        **{name: model(**data.get(name, {})) for name, model in _SETTINGS_SECTIONS.items()}
-    )
-
-
 def load_settings() -> Settings:
-    return _settings_from_raw(_load_raw())
+    return Settings.model_validate(_load_raw())  # unknown keys are ignored, as retired ones must be
 
 
 def _valid_fields(model: type[BaseModel]) -> str:
@@ -77,7 +63,7 @@ def _valid_fields(model: type[BaseModel]) -> str:
 
 
 # plain-language names for `config set` errors, keyed by field type
-_EXPECTED = {int: "an integer", float: "a number", bool: "true or false", str: "text"}
+_EXPECTED = {int: "an integer", float: "a number", bool: "true or false"}
 
 
 def _coerce(model: type[BaseModel], field: str, value: str, section: str):
@@ -107,35 +93,22 @@ def set_key(dotted_key: str, value: str) -> None:
         raise ConfigKeyError(
             f"key must be dotted, e.g. ingestion.timeout_seconds (got {dotted_key!r})"
         )
-    if section not in _SETTINGS_SECTIONS:
-        valid = ", ".join(_SETTINGS_SECTIONS)
+    if section not in Settings.model_fields:
+        valid = ", ".join(Settings.model_fields)
         raise ConfigKeyError(f"unknown config section '{section}' — valid: {valid}")
     data = _load_raw()
-    data.setdefault(section, {})[field] = _coerce(
-        _SETTINGS_SECTIONS[section], field, value, section
-    )
+    model = Settings.model_fields[section].annotation
+    data.setdefault(section, {})[field] = _coerce(model, field, value, section)
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_config_toml(_settings_from_raw(data)))
+    path.write_text(render_config_toml(Settings.model_validate(data)))
 
 
 def _toml_value(v) -> str:
+    # ponytail: every setting is a bool or a number; a text setting needs TOML string escaping
     if isinstance(v, bool):  # bool before int: bool is an int subclass
         return "true" if v else "false"
-    if isinstance(v, (int, float)):
-        return str(v)
-    # Escape TOML basic-string specials incl. newlines/tabs — a stray control char
-    # (e.g. a pasted value with a newline) would otherwise emit invalid TOML that
-    # breaks every later read, not just this write.
-    escaped = (
-        str(v)
-        .replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")
-    )
-    return f'"{escaped}"'
+    return str(v)
 
 
 def render_config_toml(settings: Settings) -> str:

@@ -5,14 +5,13 @@ behind `groundly search` and the MCP `search` tool."""
 import logging
 
 from groundly.core.store import SubjectStore
-from groundly.retrieval.hits import Hit, hit_from_row
+from groundly.retrieval.hits import Hit
 
 logger = logging.getLogger(__name__)
 
 CHANNEL_K = 50  # candidates pulled per channel before fusion
 RRF_K = 60  # standard reciprocal-rank-fusion constant
 RERANK_POOL = 20  # fused candidates handed to the cross-encoder
-TOP_K = 8  # default number of hits returned
 
 
 def rrf(rankings: list[list[int]], k: int = RRF_K) -> list[tuple[int, float]]:
@@ -41,7 +40,6 @@ class VectorRetriever:
         embedder=None,
         reranker=None,
         rerank: bool | None = None,
-        channel_k: int = CHANNEL_K,
         rerank_pool: int = RERANK_POOL,
         top_k: int | None = None,
     ) -> None:
@@ -54,7 +52,6 @@ class VectorRetriever:
             top_k = settings.top_k if top_k is None else top_k
         self.store = store
         self.rerank = rerank
-        self.channel_k = channel_k
         self.rerank_pool = rerank_pool
         self.top_k = top_k
         self._embedder = embedder
@@ -80,10 +77,9 @@ class VectorRetriever:
         """Ranked hits for `query`; `material_id` scopes every channel to one material."""
         dense, sparse = self.embedder.encode([query])  # one pass feeds both channels
 
-        dense_ids = self.store.dense_search(dense[0], self.channel_k, material_id)
-        sparse_ids = self.store.sparse_search(sparse[0], self.channel_k, material_id)
-        bm25_ids = self.store.bm25_search(query, self.channel_k, material_id)
-        stages = ["dense", "sparse", "bm25", "rrf"]
+        dense_ids = self.store.dense_search(dense[0], CHANNEL_K, material_id)
+        sparse_ids = self.store.sparse_search(sparse[0], CHANNEL_K, material_id)
+        bm25_ids = self.store.bm25_search(query, CHANNEL_K, material_id)
         logger.debug(
             "channel hits: dense=%d sparse=%d bm25=%d",
             len(dense_ids),
@@ -101,7 +97,6 @@ class VectorRetriever:
         details = {row["chunk_id"]: row for row in self.store.chunk_details(fused_ids)}
 
         if self.rerank:
-            stages.append("rerank")
             live_ids = [cid for cid in fused_ids if cid in details]  # scores align with these
             pairs = [(query, details[cid]["text"]) for cid in live_ids]
             scores = self.reranker.compute_score(pairs)
@@ -115,8 +110,17 @@ class VectorRetriever:
             if row is None:  # removed between fusion and detail lookup — skip, don't crash
                 logger.debug("chunk %s vanished between fusion and detail lookup", chunk_id)
                 continue
-            hits.append(hit_from_row(row, score))
-        logger.debug("stages=%s top=%s", stages, [(h.chunk_id, h.score) for h in hits])
+            hits.append(
+                Hit(
+                    chunk_id=chunk_id,
+                    text=row["text"],
+                    filename=row["filename"],
+                    page=row["page"],
+                    heading_path=row["heading_path"],
+                    score=float(score),
+                )
+            )
+        logger.debug("top=%s", [(h.chunk_id, h.score) for h in hits])
         return hits
 
 

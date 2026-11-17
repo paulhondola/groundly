@@ -8,13 +8,14 @@ import re
 import stat
 import zipfile
 from collections.abc import Callable
+from contextlib import closing
 from pathlib import Path, PurePosixPath
 
 import sqlite_vec
 from pydantic import ValidationError
 
 from groundly.core import store
-from groundly.core.manifest import FORMAT_VERSION, Embedding, Manifest
+from groundly.core.manifest import FORMAT_VERSION, Manifest, store_counts
 
 OnFile = Callable[[str], None]
 OnStep = Callable[[int, int], None]  # re_embed callback: (done, total) chunks re-embedded so far
@@ -129,22 +130,12 @@ def extract_bundle(bundle_path: Path, dest_dir: Path, on_file: OnFile | None = N
     return manifest
 
 
-def pin_matches(manifest: Manifest) -> bool:
-    return manifest.embedding == Embedding()
-
-
 def check_counts(store_db_path: Path, manifest: Manifest) -> None:
     """Opens via store.connect (runs the user_version refusal); compares manifest
     counts to actual row counts."""
-    conn = store.connect(store_db_path)
-    try:
-        materials = conn.execute(
-            "SELECT COUNT(*) FROM materials WHERE status = 'indexed'"
-        ).fetchone()[0]
-        chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
-    finally:
-        conn.close()
-    if materials != manifest.counts.materials or chunks != manifest.counts.chunks:
+    with closing(store.connect(store_db_path)) as conn:
+        found = store_counts(conn)
+    if found != manifest.counts:
         raise BundleError("bundle is damaged — manifest counts do not match store.db contents")
 
 

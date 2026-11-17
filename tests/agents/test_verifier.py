@@ -11,6 +11,10 @@ from groundly.core.paths import subject_dir
 from groundly.core.store import SubjectStore, TopicWrite
 
 
+def _counts(store) -> dict[int, int]:
+    return {topic: len(ids) for topic, ids in store.question_ids_by_topic().items()}
+
+
 class AlignedEmbedder:
     """Returns one fixed (dense, sparse) pair for every text — aim it at a specific
     chunk of the retrievable_subject fixture (chunk 1: dense [1,0,...], sparse {1:...};
@@ -151,7 +155,7 @@ def test_structural_faults_are_rejected_and_nothing_is_stored(gate, change, reas
     assert result["accepted"] == []
     assert [(r["index"], r["reason"]) for r in result["rejected"]] == [(0, reason)]
     assert result["rejected"][0]["detail"]
-    assert store.question_counts() == {}
+    assert _counts(store) == {}
 
 
 def test_a_question_that_is_not_an_object_is_invalid_text(gate):
@@ -196,7 +200,7 @@ def test_a_question_that_does_not_retrieve_its_citation_is_rejected(gate, monkey
     result = _submit(store, leaf, [SINGLE], embedder=_chunk2_embedder())
     assert result["rejected"][0]["reason"] == "not_answerable_from_chunks"
     assert "re-retriev" in result["rejected"][0]["detail"]
-    assert store.question_counts() == {}
+    assert _counts(store) == {}
 
 
 class _Recording(AlignedEmbedder):
@@ -224,7 +228,7 @@ def test_a_mixed_batch_stores_the_good_and_reports_the_bad_by_index(gate):
     result = _submit(store, leaf, [SINGLE, {**MULTIPLE, "kind": "essay"}, OPEN])
     assert [a["index"] for a in result["accepted"]] == [0, 2]
     assert [(r["index"], r["reason"]) for r in result["rejected"]] == [(1, "unknown_kind")]
-    assert store.question_counts() == {leaf: 2}
+    assert _counts(store) == {leaf: 2}
 
 
 def test_a_stem_already_stored_or_repeated_in_the_batch_is_a_duplicate(gate):
@@ -234,7 +238,7 @@ def test_a_stem_already_stored_or_repeated_in_the_batch_is_a_duplicate(gate):
     assert [(r["index"], r["reason"]) for r in first["rejected"]] == [(1, "duplicate_question")]
     second = _submit(store, leaf, [again])
     assert second["rejected"][0]["reason"] == "duplicate_question"
-    assert store.question_counts() == {leaf: 1}
+    assert _counts(store) == {leaf: 1}
 
 
 @pytest.mark.parametrize(
@@ -248,7 +252,7 @@ def test_a_parent_topic_and_an_unknown_topic_refuse_the_whole_call(gate, topic, 
         "accepted": [],
         "rejected": [{"index": None, "reason": reason, "detail": result["rejected"][0]["detail"]}],
     }
-    assert store.question_counts() == {}
+    assert _counts(store) == {}
 
 
 @pytest.mark.parametrize("questions", [[], "a question", None])
@@ -263,7 +267,7 @@ def test_more_than_fifty_questions_refuses_the_whole_call(gate):
     batch = [{**SINGLE, "stem": f"Question {i}?"} for i in range(51)]
     result = _submit(store, leaf, batch)
     assert [(r["index"], r["reason"]) for r in result["rejected"]] == [(None, "too_large")]
-    assert store.question_counts() == {}
+    assert _counts(store) == {}
 
 
 def test_items_past_the_topic_limit_are_bank_full(gate, monkeypatch):

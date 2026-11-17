@@ -92,6 +92,16 @@ def _store_checked(subj):
         _fail(str(exc))
 
 
+def _only_match(matches: list, ident: str, subject: str):
+    """The one material row `ident` names, or fail saying there is none or which ones it fits."""
+    if not matches:
+        _fail(f"no material {ident!r} in {subject} — see: groundly list {subject}")
+    if len(matches) > 1:
+        candidates = ", ".join(f"{m['filename']} ({m['sha256'][:8]})" for m in matches)
+        _fail(f"{ident!r} is ambiguous — candidates: {candidates}; use a sha256 prefix")
+    return matches[0]
+
+
 def _print_version(value: bool) -> None:
     if value:
         typer.echo(_package_version("groundly"))

@@ -7,7 +7,7 @@ share the file. Keep progress.db accessors out of this module: that file never s
 import json
 import sqlite3
 from collections.abc import Iterable, Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -290,22 +290,21 @@ def schema_problem(conn: sqlite3.Connection) -> str | None:
     return None
 
 
-def shipped_schema() -> dict[tuple[str, str], tuple[str, str | None]]:
+def _fresh() -> sqlite3.Connection:
+    """An in-memory store built from the shipped schema: what a store is compared against."""
     conn = connect(Path(":memory:"), create=True)
-    try:
-        conn.executescript(_SCHEMA)
+    conn.executescript(_SCHEMA)
+    return conn
+
+
+def shipped_schema() -> dict[tuple[str, str], tuple[str, str | None]]:
+    with closing(_fresh()) as conn:
         return schema(conn)
-    finally:
-        conn.close()
 
 
 def shipped_programs() -> set[tuple[str, str, str]]:
-    conn = connect(Path(":memory:"), create=True)
-    try:
-        conn.executescript(_SCHEMA)
+    with closing(_fresh()) as conn:
         return programs(conn)
-    finally:
-        conn.close()
 
 
 def create_store(path: Path) -> None:
@@ -515,15 +514,10 @@ class SubjectStore:
             )
             material_id = cur.lastrowid
             for chunk, (vec, weights) in zip(chunks, vectors, strict=True):
-                c_text = chunk.text
-                c_page = chunk.page
-                c_heading_path = chunk.heading_path
-                c_token_count = chunk.token_count
-
                 cid = conn.execute(
                     "INSERT INTO chunks (material_id, page, heading_path, text, token_count) "
                     "VALUES (?, ?, ?, ?, ?)",
-                    (material_id, c_page, c_heading_path, c_text, c_token_count),
+                    (material_id, chunk.page, chunk.heading_path, chunk.text, chunk.token_count),
                 ).lastrowid
                 conn.execute(
                     "INSERT INTO vectors (rowid, embedding) VALUES (?, ?)",
@@ -557,16 +551,6 @@ class SubjectStore:
                 for r in conn.execute(
                     "SELECT id FROM topics WHERE id NOT IN "
                     "(SELECT parent_id FROM topics WHERE parent_id IS NOT NULL)"
-                )
-            }
-
-    def question_counts(self) -> dict[int, int]:
-        """Stored questions per topic id; a topic with none is absent."""
-        with self._open() as conn:
-            return {
-                r["topic_id"]: r["n"]
-                for r in conn.execute(
-                    "SELECT topic_id, COUNT(*) AS n FROM questions GROUP BY topic_id"
                 )
             }
 
