@@ -23,7 +23,7 @@ def _patch(monkeypatch, probe_free=True):
 
     runs: list[dict] = []
     opened: list[str] = []
-    monkeypatch.setattr(uvicorn, "run", lambda app_, **kw: runs.append(kw))
+    monkeypatch.setattr(uvicorn, "run", lambda app_, **kw: runs.append({**kw, "app": app_}))
     monkeypatch.setattr("groundly.cli.serve._open_browser", opened.append)
     if probe_free:  # the default port may be held by a real `groundly serve` on this machine
         monkeypatch.setattr(socket.socket, "bind", lambda self, address: None)
@@ -38,6 +38,7 @@ def test_serve_binds_loopback_and_opens_browser(monkeypatch):
     assert runs[0]["proxy_headers"] is False
     assert opened == ["http://groundly.localhost:8765/"]
     assert "http://127.0.0.1:8765/" in result.output  # fallback when *.localhost won't resolve
+    assert runs[0]["app"].state.runner.mcp_url is None  # a page run starts its own Groundly
 
 
 def test_start_binds_loopback_opens_page_and_prints_both_urls(monkeypatch):
@@ -53,6 +54,8 @@ def test_start_binds_loopback_opens_page_and_prints_both_urls(monkeypatch):
     # MCP clients get the IP: they use the OS resolver, which may send *.localhost upstream
     assert "groundly.localhost:8765/mcp" not in result.output
     # one unwrapped line, so it pastes as a command at any terminal width
+    # a page run shares this process's model load through its own /mcp
+    assert runs[0]["app"].state.runner.mcp_url == "http://127.0.0.1:8765/mcp"
     connect = "claude mcp add --transport http groundly http://127.0.0.1:8765/mcp"
     assert connect in result.output.splitlines()[-1]
     assert "http://127.0.0.1:8765/" in result.output  # fallback when *.localhost won't resolve

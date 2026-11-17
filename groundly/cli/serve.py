@@ -73,7 +73,7 @@ def start(port: _PORT = 8765) -> None:
     # Linux setups forwards *.localhost to upstream DNS that could point it elsewhere.
     mcp_url = f"http://127.0.0.1:{port}/mcp"
     _run(
-        create_app(mcp_app),
+        create_app(mcp_app, mcp_url=mcp_url),
         port,
         [
             _page_line(port),

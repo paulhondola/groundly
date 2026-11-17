@@ -4,7 +4,9 @@ Titles, summaries, questions and chunk text come from stores that an imported bu
 written. The page writes one thing, a submitted test attempt to the student's `progress.db`,
 through `agents/quiz.py`, and only from a JSON POST carrying the page's own Origin; it never
 writes store.db and loads no model; under `groundly start` the same process also serves
-the MCP tools at `/mcp`, whose first search loads the models. A stored filename is never trusted as a path: a material is
+the MCP tools at `/mcp`, whose first search loads the models. Two more page POSTs start
+and stop a run of the student's own Claude Code (`runs.py`); that run writes only through the
+MCP gates, never through this module. A stored filename is never trusted as a path: a material is
 addressed by id and its file must resolve inside the subject's materials dir.
 """
 
@@ -12,9 +14,11 @@ import json
 import re
 import sqlite3
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from starlette.applications import Starlette
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware import Middleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import Request
@@ -27,6 +31,7 @@ from groundly.core.paths import discover_subjects
 from groundly.core.progress import ProgressStore
 from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
+from groundly.web.runs import TARGET_QUESTIONS, RunError, Runner, availability, build_prompt
 
 _WEB = Path(__file__).parent
 _PAGE = (_WEB / "page.html").read_text(encoding="utf-8")
@@ -198,19 +203,27 @@ async def _read_body(request: Request) -> bytes | None:
     return body
 
 
-async def _submit(request: Request) -> Response:
+async def _page_json(request: Request, forbidden: str) -> object | Response:
+    """The JSON body of a write from this page, or the refusal. The page's own Origin and a JSON
+    content type keep other sites out: a cross-site JSON POST needs a preflight we never grant."""
     origin = request.headers.get("origin")
     if origin != f"{request.url.scheme}://{request.headers.get('host')}":
-        return _error("forbidden", "a test is submitted from this page only", 403)
+        return _error("forbidden", forbidden, 403)
     if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
         return _error("unsupported", "the body is JSON", 415)
     raw = await _read_body(request)
     if raw is None:
         return _error("too_large", "the body is larger than a test can be", 413)
     try:
-        body = json.loads(raw)
+        return json.loads(raw)
     except (ValueError, RecursionError):
         return _error("invalid_body", "the body is not valid JSON")
+
+
+async def _submit(request: Request) -> Response:
+    body = await _page_json(request, "a test is submitted from this page only")
+    if isinstance(body, Response):
+        return body
     if (
         not isinstance(body, dict)
         or not isinstance(body.get("token"), str)
@@ -252,13 +265,79 @@ def _result(request: Request) -> Response:
     return _quiz(request, read)
 
 
+def _runs(request: Request) -> JSONResponse:
+    _, reason = availability()
+    return JSONResponse(
+        {"available": reason is None, "reason": reason, "run": request.app.state.runner.view()}
+    )
+
+
+async def _start_run(request: Request) -> Response:
+    """Start one of the two chores. The body carries ids only; the prompt is Groundly's own."""
+    body = await _page_json(request, "a run is started from this page only")
+    if isinstance(body, Response):
+        return body
+    kind = body.get("kind") if isinstance(body, dict) else None
+    if not (kind == "grade" or (kind == "write" and quiz.is_id(body.get("topic_id")))):
+        return _error("invalid_body", 'expected {kind: "write", topic_id} or {kind: "grade"}')
+    name = request.path_params["subject"]
+    runner: Runner = request.app.state.runner
+
+    def start(store: SubjectStore, progress: ProgressStore) -> Response:
+        topic_id, big = None, False
+        if kind == "write":
+            tree = store.tree(with_sources=False)
+            nodes = [n for root in tree for n in (root, *root["subtopics"])]
+            node = next((n for n in nodes if n["id"] == body["topic_id"]), None)
+            if node is None:
+                return _error("unknown_topic", "no such topic in this subject", 404)
+            states = quiz.mastery(store, progress, tree)
+            leaves = [sub["id"] for sub in node["subtopics"]] or [node["id"]]
+            if all(states[leaf]["questions"] >= TARGET_QUESTIONS for leaf in leaves):
+                detail = f"every topic in scope has {TARGET_QUESTIONS} or more questions"
+                return _error("nothing_to_write", detail)
+            topic_id, big = node["id"], bool(node["subtopics"])
+        elif not quiz.pending_reviews(store, progress)["awaiting"]:
+            return _error("nothing_to_grade", "no written answer is awaiting review")
+        try:
+            run = runner.start(kind, name, topic_id, build_prompt(kind, name, topic_id, big))
+        except RunError as e:
+            return _error(e.reason, e.detail, e.status)
+        return JSONResponse(run, status_code=202)
+
+    return _quiz(request, start)
+
+
+async def _stop_run(request: Request) -> Response:
+    body = await _page_json(request, "a run is stopped from this page only")
+    if isinstance(body, Response):
+        return body
+    # Stopping waits for the process to exit; off the event loop, which may be serving the
+    # run's own /mcp calls under `groundly start`.
+    return JSONResponse({"run": await run_in_threadpool(request.app.state.runner.stop)})
+
+
 # The names the page answers to; the Host check against DNS rebinding. Fixed, never configurable.
 HOSTS = ["127.0.0.1", "localhost", "groundly.localhost"]
 
 
-def create_app(mcp_app: Starlette | None = None) -> Starlette:
-    """The page; with `mcp_app` (FastMCP's HTTP app, routed at `/mcp`) mounted after it."""
-    return Starlette(
+def create_app(mcp_app: Starlette | None = None, mcp_url: str | None = None) -> Starlette:
+    """The page; with `mcp_app` (FastMCP's HTTP app, routed at `/mcp`) mounted after it, and
+    `mcp_url` its address, which a page run uses instead of starting its own Groundly."""
+    runner = Runner(mcp_url)
+
+    @asynccontextmanager
+    async def lifespan(app: Starlette):
+        try:
+            if mcp_app is None:
+                yield
+            else:  # the mounted app's session manager runs in its lifespan
+                async with mcp_app.lifespan(app):
+                    yield
+        finally:
+            runner.shutdown()  # no `claude` outlives the page
+
+    app = Starlette(
         routes=[
             Route("/", _html),
             Mount("/static", StaticFiles(directory=_WEB / "static")),
@@ -272,11 +351,15 @@ def create_app(mcp_app: Starlette | None = None) -> Starlette:
             Route("/api/subjects/{subject}/attempts", _history),
             Route("/api/subjects/{subject}/attempts/{id:int}", _result),
             Route("/s/{subject}/materials/{id:int}", _material),
+            Route("/api/runs", _runs),
+            Route("/api/subjects/{subject}/runs", _start_run, methods=["POST"]),
+            Route("/api/runs/stop", _stop_run, methods=["POST"]),
             # A Route, not Mount(""): a catch-all mount would answer wrong-method page requests
             # with 404 instead of their 405. FastMCP's own Host/Origin guard still runs inside.
             *([Route("/mcp", mcp_app)] if mcp_app else []),
         ],
-        # The mounted app's session manager runs in its lifespan; the parent must run it.
-        lifespan=mcp_app.lifespan if mcp_app else None,
+        lifespan=lifespan,
         middleware=[Middleware(TrustedHostMiddleware, allowed_hosts=HOSTS)],
     )
+    app.state.runner = runner
+    return app
