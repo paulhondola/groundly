@@ -292,15 +292,19 @@ _QUESTION_REFERENCES = [
     ("question_citations", "chunk_id", "chunks"),
 ]
 
-# kind -> (fewest options, most options, fewest correct)
-_QUESTION_SHAPES = {"single": (2, 6, 1), "multiple": (3, 8, 2)}
-
 
 def check_questions(store_db_path: Path) -> None:
     """Refuse a question bank the question gate would not have stored. An import never passes
     through the gate, so its structure checks and limits are repeated here; grounding is not,
     since import loads no model. Runs after `check_tree`, so the tree is already sound."""
     conn = store.connect(store_db_path)
+    # The gate's own notion of blank: SQL TRIM strips spaces only, Python strips all whitespace.
+    conn.create_function(
+        "stripped_len",
+        1,
+        lambda v: len(v.strip()) if isinstance(v, str) else None,
+        deterministic=True,
+    )
     try:
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if not _QUESTION_TABLES <= tables:
@@ -318,10 +322,11 @@ def check_questions(store_db_path: Path) -> None:
         for row in conn.execute(
             """
             SELECT q.id, q.kind,
-                   typeof(q.stem) AS stem_type, LENGTH(TRIM(q.stem)) AS stem_trim,
+                   typeof(q.stem) AS stem_type, stripped_len(q.stem) AS stem_trim,
                    LENGTH(q.stem) AS stem_len,
                    typeof(q.code) AS code_type, LENGTH(q.code) AS code_len,
-                   typeof(q.reference_answer) AS ref_type, LENGTH(TRIM(q.reference_answer)) AS ref_trim,
+                   stripped_len(q.code) AS code_trim,
+                   typeof(q.reference_answer) AS ref_type, stripped_len(q.reference_answer) AS ref_trim,
                    LENGTH(q.reference_answer) AS ref_len,
                    EXISTS (SELECT 1 FROM topics t WHERE t.parent_id = q.topic_id) AS on_parent,
                    (SELECT COUNT(*) FROM question_citations c WHERE c.question_id = q.id) AS cites,
@@ -335,7 +340,7 @@ def check_questions(store_db_path: Path) -> None:
                      WHERE o.question_id = q.id AND typeof(o.text) != 'text') AS untyped_options,
                    (SELECT MAX(LENGTH(o.text)) FROM question_options o
                      WHERE o.question_id = q.id) AS longest_option,
-                   (SELECT MIN(LENGTH(TRIM(o.text))) FROM question_options o
+                   (SELECT MIN(stripped_len(o.text)) FROM question_options o
                      WHERE o.question_id = q.id) AS shortest_option
             FROM questions q ORDER BY q.id
             """
@@ -348,15 +353,10 @@ def check_questions(store_db_path: Path) -> None:
         conn.close()
 
 
-def _same(text: str) -> str:
-    """How the gate compares two stems or two options; text lengths are checked by now."""
-    return text.strip().casefold()
-
-
 def _check_duplicates(conn) -> None:
     seen: set[tuple[int, str]] = set()
     for r in conn.execute("SELECT question_id, text FROM question_options ORDER BY id"):
-        key = (r[0], _same(r[1]))
+        key = (r[0], store.text_key(r[1]))
         if key in seen:
             raise BundleError(
                 f"bundle question {r[0]} has two options with the same text — rejected"
@@ -364,7 +364,7 @@ def _check_duplicates(conn) -> None:
         seen.add(key)
     seen.clear()
     for r in conn.execute("SELECT topic_id, stem FROM questions ORDER BY id"):
-        key = (r[0], _same(r[1]))
+        key = (r[0], store.text_key(r[1]))
         if key in seen:
             raise BundleError(
                 f"bundle topic {r[0]} has two questions with the same stem — rejected"
@@ -421,6 +421,8 @@ def _question_problem(row) -> str | None:
             return "is an open question with code"
         if row["code_type"] != "text":
             return "has code that is not text"
+        if not row["code_trim"]:
+            return "has empty code"
         if row["code_len"] > store.MAX_CODE_CHARS:
             return f"has code of {row['code_len']} characters; the limit is {store.MAX_CODE_CHARS}"
     if not row["cites"]:
@@ -448,7 +450,7 @@ def _question_problem(row) -> str | None:
             f"has an option of {row['longest_option']} characters; the limit is "
             f"{store.MAX_OPTION_CHARS}"
         )
-    fewest, most, fewest_correct = _QUESTION_SHAPES[kind]
+    fewest, most, fewest_correct = store.QUESTION_SHAPES[kind]
     if not fewest <= row["options"] <= most:
         return f"has {row['options']} options; a {kind} question needs {fewest} to {most}"
     if kind == "single" and row["correct"] != 1:

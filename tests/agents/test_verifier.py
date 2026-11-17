@@ -296,3 +296,10 @@ def test_a_code_block_keeps_its_indentation(gate):
     result = _submit(store, leaf, [{**CODE_READING, "code": code}])
     (stored,) = store.questions(ids=[result["accepted"][0]["id"]])
     assert stored["code"] == "    if x:\n        y()"
+
+
+def test_code_is_capped_at_the_length_it_is_stored_with():
+    """Indentation is kept, so it counts: import refuses stored code over the limit."""
+    with pytest.raises(verifier_mod._Reject) as err:
+        verifier_mod._structure({**CODE_READING, "code": "\t" * 30 + "x" * 1990})
+    assert err.value.reason == "invalid_text" and "2020 characters" in err.value.detail

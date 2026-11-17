@@ -397,7 +397,7 @@ def test_a_removed_question_refusal_reaches_the_page_with_its_cause(client, seed
     assert r.json()["error"] == "unknown_question" and "removed" in r.json()["detail"]
 
 
-def test_a_busy_progress_db_is_a_503_naming_it(client, seeded, monkeypatch):
+def test_a_busy_database_is_a_503_naming_it(client, seeded, monkeypatch):
     import sqlite3
 
     from groundly.agents import quiz
@@ -409,7 +409,7 @@ def test_a_busy_progress_db_is_a_503_naming_it(client, seeded, monkeypatch):
 
     monkeypatch.setattr(quiz, "submit_attempt", locked)
     r = _post(client, _attempt(q, _key(q)))
-    assert r.status_code == 503 and "progress.db is busy" in r.json()["detail"]
+    assert r.status_code == 503 and "database is busy" in r.json()["detail"]
 
 
 def test_the_same_token_twice_returns_the_same_attempt(client, seeded):
@@ -540,3 +540,16 @@ def test_an_oversized_body_is_refused_before_it_is_read(client, seeded):
         headers={**ORIGIN, "Content-Type": "application/json"},
     )
     assert r.status_code == 413
+
+
+def test_a_body_without_topic_id_is_a_whole_course_attempt(client, seeded):
+    _, (q, *_) = _bank(seeded)
+    body = _attempt(q, _key(q))
+    del body["topic_id"]
+    assert _post(client, body).status_code == 201
+
+
+def test_the_map_still_shows_when_progress_db_is_unreadable(client, seeded):
+    (subject_dir("PDSS") / "progress.db").unlink()
+    r = client.get("/api/subjects/PDSS/tree")
+    assert r.status_code == 200 and r.json()["tree"][0]["progress"] is None

@@ -337,6 +337,7 @@ def test_a_tree_that_drops_a_topic_holding_questions_is_rejected(with_questions)
     rejection = result["rejections"][0]
     assert rejection["path"] == [held["title"]]
     assert "2 questions" in rejection["detail"] and "remove_questions" in rejection["detail"]
+    assert str([q["id"] for q in store.questions()]) in rejection["detail"]
     assert store.tree() == before and reranker.calls == 0
     assert store.question_counts() == {held["id"]: 2}
 
@@ -366,3 +367,12 @@ def test_a_topic_holding_questions_may_move_under_another_parent(with_questions)
     tree = [_node("Semaphores", "Counting locks", id=other["id"], subtopics=[_node(id=held["id"])])]
     assert _submit(store, tree)["accepted"] is True
     assert store.question_counts() == {held["id"]: 2}
+
+
+def test_an_unhashable_id_on_a_subdivided_node_is_a_rejection(with_questions):
+    store, held, other = with_questions
+    tree = [
+        _node(id=[held["id"]], subtopics=[_node("Detection", "Finding the cycle")]),
+        _node("Semaphores", "Counting locks", id=other["id"]),
+    ]
+    assert "unknown_topic_id" in _reasons(_submit(store, tree))

@@ -14,6 +14,7 @@ TEST_LENGTHS = (5, 10, 20)
 MAX_TEST_QUESTIONS = max(TEST_LENGTHS)
 MAX_OPEN_ANSWER_CHARS = 4000
 MAX_COMMENT_CHARS = 1000
+MAX_REVIEW_BATCH = 20  # awaiting answers handed to the host per call, oldest first
 
 _REMOVED = "a question in this test was removed — start a new test"
 
@@ -26,9 +27,8 @@ class QuizError(Exception):
         self.reason, self.detail = reason, detail
 
 
-def _topics(store: SubjectStore) -> tuple[list[dict], dict[int, list[int]], dict[int, str]]:
+def _topics(tree: list[dict]) -> tuple[list[dict], dict[int, list[int]], dict[int, str]]:
     """(top-level nodes, parent id -> subtopic ids, id -> title), in tree order."""
-    tree = store.tree()
     children = {node["id"]: [s["id"] for s in node["subtopics"]] for node in tree}
     titles = {node["id"]: node["title"] for node in tree}
     titles.update({s["id"]: s["title"] for node in tree for s in node["subtopics"]})
@@ -41,11 +41,14 @@ def _leaves_in_order(tree: list[dict]) -> list[int]:
     ]
 
 
-def mastery(store: SubjectStore, progress: ProgressStore) -> dict[int, dict]:
+def mastery(
+    store: SubjectStore, progress: ProgressStore, tree: list[dict] | None = None
+) -> dict[int, dict]:
     """Every topic's state. A leaf is mastered at MASTERY_CORRECT or more correct of its last
     MASTERY_WINDOW graded answers, with at least that many; a parent when all its subtopics are.
-    Answers awaiting review do not count; answers to removed questions do."""
-    tree, children, _ = _topics(store)
+    Answers awaiting review do not count; answers to removed questions do. Pass the `tree`
+    the caller shows, so the states are keyed by exactly its nodes."""
+    tree, children, _ = _topics(store.tree(with_sources=False) if tree is None else tree)
     counts = store.question_counts()
     graded: dict[int, list[bool]] = {}
     for a in progress.answers():
@@ -96,7 +99,7 @@ def mastery(store: SubjectStore, progress: ProgressStore) -> dict[int, dict]:
 
 
 def _scope_leaves(store: SubjectStore, topic_id: int | None) -> list[int]:
-    tree, children, titles = _topics(store)
+    tree, children, titles = _topics(store.tree(with_sources=False))
     if topic_id is None:
         return _leaves_in_order(tree)
     if topic_id not in titles:
@@ -126,7 +129,7 @@ def draw(store: SubjectStore, progress: ProgressStore, topic_id: int | None, n: 
         return (1 if correct is False else 2, index, q["id"])
 
     queues: dict[int, list[dict]] = {leaf: [] for leaf in leaves}
-    for q in store.questions(topic_ids=leaves):
+    for q in store.questions(topic_ids=leaves, with_sources=False):
         queues[q["topic_id"]].append(q)
     for queue in queues.values():
         queue.sort(key=priority, reverse=True)  # pop() takes from the end
@@ -149,7 +152,7 @@ def draw(store: SubjectStore, progress: ProgressStore, topic_id: int | None, n: 
     return drawn
 
 
-def _is_int(value: object) -> bool:
+def is_id(value: object) -> bool:
     """An id SQLite can bind: an int (not a bool) within 64 bits."""
     return isinstance(value, int) and not isinstance(value, bool) and -(2**63) <= value < 2**63
 
@@ -167,7 +170,7 @@ def _grade(q: dict, answer: dict) -> AnswerWrite:
             q["id"], q["topic_id"], "open", text, False if not text.strip() else None
         )
     selected = answer.get("selected")
-    if not isinstance(selected, list) or not all(map(_is_int, selected)) or "text" in answer:
+    if not isinstance(selected, list) or not all(map(is_id, selected)) or "text" in answer:
         raise QuizError("invalid_text", f"question {q['id']} takes chosen option ids")
     chosen = set(selected)
     options = {o["id"] for o in q["options"]}
@@ -191,17 +194,17 @@ def submit_attempt(
     answers: list[dict],
 ) -> int:
     """Grade the choice answers against store.db and save the attempt in one transaction.
-    Every answer is checked before anything is written; the same token twice is one attempt."""
+    Every answer is checked before anything is written; the same token twice is one attempt.
+    `topic_id` is the scope the test was drawn for, kept as a label: a re-map may have removed
+    it since the draw, and that must not cost the student their answers."""
     if not answers or len(answers) > MAX_TEST_QUESTIONS:
         raise QuizError("too_large", f"a test has 1 to {MAX_TEST_QUESTIONS} answers")
     ids = [a.get("question_id") if isinstance(a, dict) else None for a in answers]
-    if not all(map(_is_int, ids)):
+    if not all(map(is_id, ids)):
         raise QuizError("invalid_text", "every answer names its question id")
     if len(set(ids)) != len(ids):
         raise QuizError("invalid_text", "a question is answered twice")
-    if topic_id is not None:
-        _scope_leaves(store, topic_id)
-    questions = {q["id"]: q for q in store.questions(ids=ids)}
+    questions = {q["id"]: q for q in store.questions(ids=ids, with_sources=False)}
     if len(questions) != len(ids):
         raise QuizError("unknown_question", _REMOVED)
     graded = [_grade(questions[a["question_id"]], a) for a in answers]
@@ -254,8 +257,9 @@ def attempt_result(store: SubjectStore, progress: ProgressStore, attempt_id: int
             }
         )
     score = _score([a["state"] for a in answers])
-    _, _, titles = _topics(store)
-    states = mastery(store, progress)
+    tree = store.tree(with_sources=False)
+    _, _, titles = _topics(tree)
+    states = mastery(store, progress, tree)
     topics = []
     for tid in dict.fromkeys(a["topic_id"] for a in attempt["answers"]):
         if tid in titles:
@@ -277,7 +281,7 @@ def attempt_history(store: SubjectStore, progress: ProgressStore) -> list[dict]:
     states: dict[int, list[str]] = {}
     for a in progress.answers():
         states.setdefault(a["attempt_id"], []).append(_state(a, a["question_id"] not in existing))
-    _, _, titles = _topics(store)
+    _, _, titles = _topics(store.tree(with_sources=False))
     out = []
     for attempt in progress.attempts():
         score = _score(states.get(attempt["id"], []))
@@ -286,7 +290,9 @@ def attempt_history(store: SubjectStore, progress: ProgressStore) -> list[dict]:
                 "id": attempt["id"],
                 "submitted_at": attempt["submitted_at"],
                 "scope_topic_id": attempt["scope_topic_id"],
-                "scope_title": titles.get(attempt["scope_topic_id"]),
+                "scope_title": None
+                if attempt["scope_topic_id"] is None
+                else titles.get(attempt["scope_topic_id"], "Removed topic"),
                 "score": score,
                 "provisional": score["awaiting"] > 0,
             }
@@ -296,7 +302,8 @@ def attempt_history(store: SubjectStore, progress: ProgressStore) -> list[dict]:
 
 def progress_report(store: SubjectStore, progress: ProgressStore) -> list[dict]:
     """The topic tree with each node's mastery entry; `subtopics` holds the child nodes."""
-    states = mastery(store, progress)
+    tree = store.tree(with_sources=False)
+    states = mastery(store, progress, tree)
 
     def node(n: dict) -> dict:
         return {
@@ -306,30 +313,44 @@ def progress_report(store: SubjectStore, progress: ProgressStore) -> list[dict]:
             "subtopics": [node(s) for s in n["subtopics"]],
         }
 
-    return [node(n) for n in store.tree()]
+    return [node(n) for n in tree]
 
 
-def pending_reviews(store: SubjectStore, progress: ProgressStore) -> list[dict]:
-    """Open answers awaiting the host's verdict whose question still exists, oldest first,
-    each with what judging it needs: the stem, the reference answer and the cited chunks."""
-    awaiting = [a for a in progress.answers() if a["kind"] == "open" and a["correct"] is None]
-    questions = {q["id"]: q for q in store.questions(ids=[a["question_id"] for a in awaiting])}
+def _awaiting(store: SubjectStore, progress: ProgressStore) -> list[dict]:
+    """Open answers awaiting the host's verdict whose question still exists, oldest first."""
+    existing = store.question_ids()
     return [
-        {
-            "answer_id": a["id"],
-            "attempt_id": a["attempt_id"],
-            "question_id": a["question_id"],
-            "stem": q["stem"],
-            "reference_answer": q["reference_answer"],
-            "answer": a["response"],
-            "sources": [
-                {k: src[k] for k in ("filename", "page", "heading_path", "text")}
-                for src in q["sources"]
-            ],
-        }
-        for a in awaiting
-        if (q := questions.get(a["question_id"])) is not None
+        a
+        for a in progress.answers()
+        if a["kind"] == "open" and a["correct"] is None and a["question_id"] in existing
     ]
+
+
+def pending_reviews(store: SubjectStore, progress: ProgressStore) -> dict:
+    """The oldest MAX_REVIEW_BATCH answers awaiting review, each with what judging it needs
+    (the stem, the reference answer and the cited chunks), and how many more remain."""
+    awaiting = _awaiting(store, progress)
+    batch = awaiting[:MAX_REVIEW_BATCH]
+    questions = {q["id"]: q for q in store.questions(ids=[a["question_id"] for a in batch])}
+    return {
+        "awaiting": [
+            {
+                "answer_id": a["id"],
+                "attempt_id": a["attempt_id"],
+                "question_id": a["question_id"],
+                "stem": q["stem"],
+                "reference_answer": q["reference_answer"],
+                "answer": a["response"],
+                "sources": [
+                    {k: src[k] for k in ("filename", "page", "heading_path", "text")}
+                    for src in q["sources"]
+                ],
+            }
+            for a in batch
+            if (q := questions.get(a["question_id"])) is not None
+        ],
+        "remaining": len(awaiting) - len(batch),
+    }
 
 
 def record_reviews(store: SubjectStore, progress: ProgressStore, reviews: list[dict]) -> list[int]:
@@ -340,7 +361,7 @@ def record_reviews(store: SubjectStore, progress: ProgressStore, reviews: list[d
     rows = []
     for r in reviews:
         answer_id = r.get("answer_id") if isinstance(r, dict) else None
-        if not _is_int(answer_id):
+        if not is_id(answer_id):
             raise QuizError("invalid_text", "every verdict names its answer_id")
         if not isinstance(r.get("correct"), bool):
             raise QuizError("invalid_text", f"answer {answer_id}: correct is true or false")
@@ -356,7 +377,7 @@ def record_reviews(store: SubjectStore, progress: ProgressStore, reviews: list[d
         raise QuizError("invalid_text", "an answer has two verdicts")
     # An awaiting answer whose question is gone is not pending, so it is unknown to review;
     # the store itself refuses ids that are unknown, not open, or already reviewed.
-    pending = {p["answer_id"] for p in pending_reviews(store, progress)}
+    pending = {a["id"] for a in _awaiting(store, progress)}
     awaiting = {a["id"] for a in progress.answers() if a["correct"] is None}
     try:
         for answer_id in ids:

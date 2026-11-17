@@ -61,21 +61,22 @@ def _rejection(path, reason, detail, score=None, nearest=None) -> dict:
     return {"path": path, "reason": reason, "detail": detail, "score": score, "nearest": nearest}
 
 
-def _has_questions(path, count: int, change: str) -> dict:
-    noun = "question" if count == 1 else "questions"
+def _has_questions(path, ids: list[int], change: str) -> dict:
+    noun = "question" if len(ids) == 1 else "questions"
     return _rejection(
         path,
         "topic_has_questions",
-        f"this topic holds {count} {noun} and the tree {change} — keep it as a topic "
-        "without subtopics under its id, or remove its questions first with remove_questions",
+        f"this topic holds {len(ids)} {noun} (ids {ids}) and the tree {change} — keep it as a "
+        "topic without subtopics under its id, or remove those questions first with "
+        "remove_questions",
     )
 
 
 def _structural_rejections(
-    tree, known_ids: set[int], held: dict[int, tuple[str, int]]
+    tree, known_ids: set[int], held: dict[int, tuple[str, list[int]]]
 ) -> list[dict]:
     """Every free check over the whole tree, so the slow search only runs on a tree that
-    can be stored. `held` maps each topic holding questions to its stored title and count:
+    can be stored. `held` maps each topic holding questions to its stored title and question ids:
     such a topic must come back, and without subtopics, or its questions would be lost."""
     if not isinstance(tree, list) or not tree:
         return [_rejection([], "empty_tree", "the tree needs at least one big topic")]
@@ -141,7 +142,7 @@ def _structural_rejections(
         subtopics = node.get("subtopics") or []
         if not isinstance(subtopics, list):
             rejections.append(_rejection(path, "invalid_text", "subtopics must be a list"))
-        elif subtopics and topic_id in held and type(topic_id) is int:
+        elif subtopics and type(topic_id) is int and topic_id in held:
             rejections.append(_has_questions(path, held[topic_id][1], "gives it subtopics"))
         elif level == 1 and subtopics:
             rejections.append(
@@ -153,9 +154,9 @@ def _structural_rejections(
 
     for i, node in enumerate(tree):
         check(node, [_label(node, i)], 0)
-    for topic_id, (title, count) in held.items():
+    for topic_id, (title, ids) in held.items():
         if topic_id not in seen_ids:
-            rejections.append(_has_questions([title], count, "leaves it out"))
+            rejections.append(_has_questions([title], ids, "leaves it out"))
     return rejections
 
 
@@ -170,9 +171,13 @@ def submit_tree(store: SubjectStore, tree: list[dict], *, embedder=None, reranke
     Structural checks run first and skip the search. Then each node is retrieved on its
     title and summary with the reranker always on (whatever `retrieval.rerank` says), and
     its sources are the hits scoring at least TOPIC_RELEVANCE_CUTOFF."""
-    counts = store.question_counts()
-    titles = {n["id"]: n["title"] for big in store.tree() for n in (big, *big["subtopics"])}
-    held = {topic_id: (titles[topic_id], count) for topic_id, count in counts.items()}
+    bank = store.question_ids_by_topic()
+    titles = {
+        n["id"]: n["title"]
+        for big in store.tree(with_sources=False)
+        for n in (big, *big["subtopics"])
+    }
+    held = {topic_id: (titles[topic_id], ids) for topic_id, ids in bank.items()}
     rejections = _structural_rejections(tree, store.topic_ids(), held)
     if rejections:
         return {"accepted": False, "rejections": rejections}

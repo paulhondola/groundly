@@ -90,11 +90,12 @@ def _tree(request: Request) -> Response:
         return JSONResponse({"error": f"unknown subject {name!r}"}, status_code=404)
 
     def read(store: SubjectStore) -> dict:
-        return {
-            "title": subject.display_title(),
-            "tree": store.tree(),
-            "progress": quiz.mastery(store, ProgressStore(subject.progress_db_path)),
-        }
+        tree = store.tree()
+        try:
+            states = quiz.mastery(store, ProgressStore(subject.progress_db_path), tree)
+        except (sqlite3.DatabaseError, RuntimeError):
+            states = {}  # an unreadable progress.db costs the progress lines, not the map
+        return {"title": subject.display_title(), "tree": tree, "progress": states}
 
     result = _read(subject, read)
     if isinstance(result, Response):
@@ -107,7 +108,7 @@ def _tree(request: Request) -> Response:
 
     def flag(nodes: list[dict]) -> None:
         for node in nodes:
-            node["progress"] = states[node["id"]]
+            node["progress"] = states.get(node["id"])
             for src in node["sources"]:
                 if src["material_id"] not in openable:
                     openable[src["material_id"]] = _stored_pdf(subject, src["filename"]) is not None
@@ -156,7 +157,12 @@ def _quiz(request: Request, call: Callable[[SubjectStore, ProgressStore], Respon
         return _error(e.reason, e.detail)
     except sqlite3.OperationalError as e:
         if "locked" in str(e) or "busy" in str(e):
-            return _error("busy", "progress.db is busy — try Submit again", 503)
+            return _error(
+                "busy",
+                "the subject's database is busy — another groundly process is writing; "
+                "try again in a moment",
+                503,
+            )
         return _error("store_error", str(e), 500)
     except (sqlite3.DatabaseError, RuntimeError) as e:
         return _error("store_error", str(e), 500)
@@ -173,11 +179,6 @@ def _draw(request: Request) -> Response:
         request,
         lambda store, progress: JSONResponse({"questions": quiz.draw(store, progress, topic, n)}),
     )
-
-
-def _is_id(value: object) -> bool:
-    """An id SQLite can bind: an int (not a bool) within 64 bits."""
-    return isinstance(value, int) and not isinstance(value, bool) and -(2**63) <= value < 2**63
 
 
 # 20 answers of at most 4000 characters, with room for option ids and JSON escapes.
@@ -213,14 +214,14 @@ async def _submit(request: Request) -> Response:
         not isinstance(body, dict)
         or not isinstance(body.get("token"), str)
         or not _TOKEN.fullmatch(body["token"])
-        or not (body.get("topic_id") is None or _is_id(body["topic_id"]))
+        or not (body.get("topic_id") is None or quiz.is_id(body["topic_id"]))
         or not isinstance(body.get("answers"), list)
     ):
         return _error("invalid_body", "expected {token, topic_id, answers}")
 
     def submit(store: SubjectStore, progress: ProgressStore) -> Response:
         attempt_id = quiz.submit_attempt(
-            store, progress, body["token"], body["topic_id"], body["answers"]
+            store, progress, body["token"], body.get("topic_id"), body["answers"]
         )
         return JSONResponse({"id": attempt_id}, status_code=201)
 
@@ -236,7 +237,9 @@ def _history(request: Request) -> Response:
 def _result(request: Request) -> Response:
     def read(store: SubjectStore, progress: ProgressStore) -> Response:
         attempt_id = request.path_params["id"]
-        result = quiz.attempt_result(store, progress, attempt_id) if _is_id(attempt_id) else None
+        result = (
+            quiz.attempt_result(store, progress, attempt_id) if quiz.is_id(attempt_id) else None
+        )
         if result is None:
             return _error("unknown_attempt", "no such attempt", 404)
         for answer in result["answers"]:

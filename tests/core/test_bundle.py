@@ -1040,6 +1040,9 @@ def test_the_export_statement_names_the_question_bank(tmp_path, monkeypatch):
         ("UPDATE question_options SET text = printf('%.*c', 301, 'x')", "option of 301 characters"),
         ("UPDATE questions SET code = printf('%.*c', 2001, 'x')", "code of 2001 characters"),
         ("UPDATE questions SET reference_answer = 'r'", "reference answer"),
+        ("UPDATE questions SET stem = char(9, 10)", "empty stem"),
+        ("UPDATE question_options SET text = char(10)", "empty option"),
+        ("UPDATE questions SET code = char(10, 9)", "empty code"),
     ],
 )
 def test_import_refuses_a_malformed_question_bank(tmp_path, monkeypatch, statement, phrase):

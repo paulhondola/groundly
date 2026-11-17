@@ -33,6 +33,13 @@ MAX_OPTION_CHARS = 300
 MAX_REFERENCE_CHARS = 1000
 MAX_QUESTION_CITATIONS = 5
 MAX_QUESTIONS_PER_TOPIC = 200
+# kind -> (fewest options, most options, fewest correct)
+QUESTION_SHAPES = {"single": (2, 6, 1), "multiple": (3, 8, 2)}
+
+
+def text_key(text: str) -> str:
+    """How two stems or two options are compared for sameness, by the gate and by import."""
+    return text.strip().casefold()
 
 
 @dataclass
@@ -563,6 +570,14 @@ class SubjectStore:
                 )
             }
 
+    def question_ids_by_topic(self) -> dict[int, list[int]]:
+        """Stored question ids per topic id, in id order; a topic with none is absent."""
+        with self._open() as conn:
+            out: dict[int, list[int]] = {}
+            for r in conn.execute("SELECT topic_id, id FROM questions ORDER BY id"):
+                out.setdefault(r["topic_id"], []).append(r["id"])
+            return out
+
     def question_ids(self) -> set[int]:
         with self._open() as conn:
             return {r["id"] for r in conn.execute("SELECT id FROM questions")}
@@ -621,10 +636,15 @@ class SubjectStore:
             return unknown
 
     def questions(
-        self, *, ids: list[int] | None = None, topic_ids: list[int] | None = None
+        self,
+        *,
+        ids: list[int] | None = None,
+        topic_ids: list[int] | None = None,
+        with_sources: bool = True,
     ) -> list[dict]:
         """Stored questions in id order, each with its options in position order and its
-        sources in the shape `tree()` gives a node. With neither filter, every question."""
+        sources in the shape `tree()` gives a node (left empty with `with_sources=False`,
+        which skips loading chunk text). With neither filter, every question."""
         where, params = "", []
         for column, values in (("q.id", ids), ("q.topic_id", topic_ids)):
             if values is not None:
@@ -647,6 +667,8 @@ class SubjectStore:
                 out[r["question_id"]]["options"].append(
                     {"id": r["id"], "text": r["text"], "correct": bool(r["correct"])}
                 )
+            if not with_sources:
+                return list(out.values())
             for r in conn.execute(
                 f"""
                 SELECT qc.question_id, c.id AS chunk_id, c.material_id, m.filename, c.page,
@@ -693,12 +715,14 @@ class SubjectStore:
                 )
             }
 
-    def tree(self) -> list[dict]:
-        """The topic tree in position order, each node's sources in rank order."""
+    def tree(self, with_sources: bool = True) -> list[dict]:
+        """The topic tree in position order, each node's sources in rank order. With
+        `with_sources=False` every node's sources are empty and no chunk text is loaded."""
         with self._open() as conn:
             sources: dict[int, list[dict]] = {}
-            for r in conn.execute(
-                """
+            for r in (
+                conn.execute(
+                    """
                 SELECT tc.topic_id, c.id AS chunk_id, c.material_id, m.filename, c.page,
                        c.heading_path, c.text
                 FROM topic_citations tc
@@ -706,6 +730,9 @@ class SubjectStore:
                 JOIN materials m ON m.id = c.material_id
                 ORDER BY tc.topic_id, tc.rank
                 """
+                )
+                if with_sources
+                else ()
             ):
                 sources.setdefault(r["topic_id"], []).append(
                     {

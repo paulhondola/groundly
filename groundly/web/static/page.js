@@ -290,7 +290,8 @@ async function showHistory(subject) {
 // The scope's title for a test or result header: the whole course, or a topic in the tree.
 async function scopeInfo(subject, topicId) {
   const { tree, title } = await getJSON(api(subject, "/tree"));
-  let scope = "Whole course";
+  // A scope a later re-map removed is still a topic test, never the whole course.
+  let scope = topicId == null ? "Whole course" : "Removed topic";
   for (const t of tree) {
     for (const n of [t, ...t.subtopics]) if (n.id === topicId) scope = n.title;
   }

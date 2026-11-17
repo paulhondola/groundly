@@ -100,14 +100,17 @@ def connect(path: Path) -> sqlite3.Connection:
             f"understands (max {PROGRESS_USER_VERSION}) — upgrade groundly"
         )
     if version < PROGRESS_USER_VERSION:
-        conn.execute("BEGIN IMMEDIATE")
         try:
-            if conn.execute("PRAGMA user_version").fetchone()[0] < PROGRESS_USER_VERSION:
-                _create_tables(conn)
-            conn.execute("COMMIT")
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                if conn.execute("PRAGMA user_version").fetchone()[0] < PROGRESS_USER_VERSION:
+                    _create_tables(conn)
+                conn.execute("COMMIT")
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
         except BaseException:
-            conn.execute("ROLLBACK")
-            conn.close()
+            conn.close()  # a lock timeout on BEGIN must not leak the connection either
             raise
     return conn
 

@@ -726,7 +726,7 @@ def _awaiting_open_answer(subject):
     quiz.submit_attempt(
         store, progress, "token-0001", None, [{"question_id": qid, "text": "Waiting."}]
     )
-    return quiz.pending_reviews(store, progress)[0]["answer_id"]
+    return quiz.pending_reviews(store, progress)["awaiting"][0]["answer_id"]
 
 
 async def test_review_answers_lists_then_records(retrievable_subject):
@@ -742,7 +742,11 @@ async def test_review_answers_lists_then_records(retrievable_subject):
                 "reviews": [{"answer_id": answer_id, "correct": True, "comment": "Right."}],
             },
         )
-        assert recorded.structured_content == {"recorded": [answer_id], "awaiting": []}
+        assert recorded.structured_content == {
+            "recorded": [answer_id],
+            "awaiting": [],
+            "remaining": 0,
+        }
         again = await client.call_tool(
             "review_answers",
             {

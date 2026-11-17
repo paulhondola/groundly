@@ -8,7 +8,7 @@ Layers: clients (`cli/`, `mcp/`, `web/`) → services (`agents/`, `retrieval/`, 
 
 - Dependencies point one way; **nothing imports the client layer** — enforced by the import-linter contract in `pyproject.toml` (`uv run lint-imports`); a new subpackage must be placed in a layer there.
 - `agents` may call `retrieval` (the verifier re-retrieves); `retrieval` never calls `agents`.
-- Three writers touch `store.db`: `ingestion` (materials, chunks, vectors), the topic gate in `agents/topics.py` (the tree, reached from `submit_tree`) and the question gate in `agents/verifier.py` (the question bank, written through the gate from `submit_questions`; `remove_questions` takes questions out). `ingestion` never serves queries. `web/` never writes `store.db`; its one write is a submitted test attempt to `progress.db`, made through `agents/quiz.py` (decision 44).
+- Three writers touch `store.db`: `ingestion` (materials, chunks, vectors), the topic gate in `agents/topics.py` (the tree, reached from `submit_tree`) and the question gate in `agents/verifier.py` (the question bank, written through the gate from `submit_questions`; `remove_questions` takes questions out). `ingestion` never serves queries. `web/` writes no rows to `store.db`; its one write is a submitted test attempt to `progress.db`, made through `agents/quiz.py` (decision 44). Any opener of a version-1 `store.db` or `progress.db`, the page and read-only tools included, adds that file's empty tables once (the in-place upgrade below).
 
 ## No LLM, no key (hard rule)
 

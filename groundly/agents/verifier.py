@@ -15,8 +15,10 @@ from groundly.core.store import (
     MAX_QUESTIONS_PER_TOPIC,
     MAX_REFERENCE_CHARS,
     MAX_STEM_CHARS,
+    QUESTION_SHAPES,
     QuestionWrite,
     SubjectStore,
+    text_key,
 )
 from groundly.retrieval.vector import VectorRetriever
 
@@ -37,18 +39,10 @@ REJECTION_REASONS = (
 MAX_QUESTIONS_PER_CALL = 50
 VERIFY_TOP_K = 20  # re-retrieval pool checked for membership of a cited chunk id
 
-# kind -> (fewest options, most options)
-_OPTION_COUNTS = {"single": (2, 6), "multiple": (3, 8)}
-
 
 class _Reject(Exception):
     def __init__(self, reason: str, detail: str) -> None:
         self.reason, self.detail = reason, detail
-
-
-def _key(text: str) -> str:
-    """How two stems or two options are compared for sameness."""
-    return text.strip().casefold()
 
 
 def _text(value, name: str, limit: int) -> str:
@@ -72,7 +66,7 @@ def _options(kind: str, raw) -> list[tuple[str, bool]]:
         options.append(
             (_text(option.get("text"), f"option {i + 1}", MAX_OPTION_CHARS), option["correct"])
         )
-    fewest, most = _OPTION_COUNTS[kind]
+    fewest, most, fewest_correct = QUESTION_SHAPES[kind]
     if not fewest <= len(options) <= most:
         raise _Reject(
             "wrong_answer_key",
@@ -84,13 +78,13 @@ def _options(kind: str, raw) -> list[tuple[str, bool]]:
             "wrong_answer_key",
             f"a single question needs exactly one correct option; this one has {correct}",
         )
-    if kind == "multiple" and (correct < 2 or correct == len(options)):
+    if kind == "multiple" and (correct < fewest_correct or correct == len(options)):
         raise _Reject(
             "wrong_answer_key",
             "a multiple question needs at least two correct options and at least one wrong "
             f"one; this one has {correct} correct of {len(options)}",
         )
-    if len({_key(text) for text, _ in options}) != len(options):
+    if len({text_key(text) for text, _ in options}) != len(options):
         raise _Reject("duplicate_option", "two options have the same text")
     return options
 
@@ -114,7 +108,11 @@ def _structure(question) -> QuestionWrite:
     if code is not None:
         # Leading spaces are the code's own indentation: keep them, trim only blank lines.
         _text(code, "code", MAX_CODE_CHARS)
-        code = code.strip("\n")
+        code = code.strip("\r\n")
+        if len(code) > MAX_CODE_CHARS:  # the stored value is what import checks
+            raise _Reject(
+                "invalid_text", f"code is {len(code)} characters; the limit is {MAX_CODE_CHARS}"
+            )
 
     if kind == "open":
         if question.get("options"):
@@ -180,7 +178,7 @@ def submit_questions(
             f"{len(questions)} questions in one call; the limit is {MAX_QUESTIONS_PER_CALL}",
         )
 
-    stems = {_key(s) for s in store.question_stems(topic_id)}
+    stems = {text_key(s) for s in store.question_stems(topic_id)}
     stored = len(stems)
     retriever = VectorRetriever(store, embedder=embedder, rerank=False, top_k=VERIFY_TOP_K)
     passed: list[tuple[int, QuestionWrite]] = []
@@ -189,7 +187,7 @@ def submit_questions(
     for index, raw in enumerate(questions):
         try:
             question = _structure(raw)
-            if _key(question.stem) in stems:
+            if text_key(question.stem) in stems:
                 raise _Reject(
                     "duplicate_question", "this topic already has a question with the same stem"
                 )
@@ -217,7 +215,7 @@ def submit_questions(
         except _Reject as fault:
             rejected.append({"index": index, "reason": fault.reason, "detail": fault.detail})
             continue
-        stems.add(_key(question.stem))
+        stems.add(text_key(question.stem))
         passed.append((index, question))
 
     ids = store.add_questions(topic_id, [q for _, q in passed]) if passed else []

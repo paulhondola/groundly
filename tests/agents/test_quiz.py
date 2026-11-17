@@ -393,14 +393,16 @@ def _open_attempt(bank, text="Threads wait on each other.", leaf=0):
     qid = bank.ids[bank.leaf(leaf)][4]
     attempt = bank.submit([{"question_id": qid, "text": text}])
     (pending,) = [
-        p for p in quiz.pending_reviews(bank.store, bank.progress) if p["attempt_id"] == attempt
+        p
+        for p in quiz.pending_reviews(bank.store, bank.progress)["awaiting"]
+        if p["attempt_id"] == attempt
     ]
     return attempt, pending["answer_id"], qid
 
 
 def test_pending_reviews_carry_the_stem_reference_answer_and_sources(bank):
     attempt, answer_id, qid = _open_attempt(bank)
-    (p,) = quiz.pending_reviews(bank.store, bank.progress)
+    (p,) = quiz.pending_reviews(bank.store, bank.progress)["awaiting"]
     assert p == {
         "answer_id": answer_id,
         "attempt_id": attempt,
@@ -430,7 +432,7 @@ def test_a_verdict_makes_the_score_final_and_counts_toward_mastery(bank):
     assert result["score"] == {"correct": 1, "graded": 1, "awaiting": 0}
     assert result["answers"][0]["state"] == "correct"
     assert quiz.mastery(bank.store, bank.progress)[bank.leaf()]["answered"] == 1
-    assert quiz.pending_reviews(bank.store, bank.progress) == []
+    assert quiz.pending_reviews(bank.store, bank.progress)["awaiting"] == []
 
 
 def test_the_comment_is_returned_on_the_result_unchanged(bank):
@@ -467,7 +469,7 @@ def test_one_bad_verdict_records_none(bank):
                 {"answer_id": 9999, "correct": True, "comment": "ok"},
             ],
         )
-    assert len(quiz.pending_reviews(bank.store, bank.progress)) == 1
+    assert len(quiz.pending_reviews(bank.store, bank.progress)["awaiting"]) == 1
 
 
 @pytest.mark.parametrize(
@@ -483,7 +485,7 @@ def test_a_malformed_verdict_is_invalid_text(bank, review):
     with pytest.raises(QuizError) as err:
         quiz.record_reviews(bank.store, bank.progress, [review])
     assert err.value.reason == "invalid_text"
-    assert len(quiz.pending_reviews(bank.store, bank.progress)) == 1
+    assert len(quiz.pending_reviews(bank.store, bank.progress)["awaiting"]) == 1
 
 
 def test_an_empty_or_repeated_review_list_is_invalid_text(bank):
@@ -498,7 +500,7 @@ def test_an_empty_or_repeated_review_list_is_invalid_text(bank):
 def test_an_unreviewable_answer_is_not_listed_and_cannot_be_reviewed(bank):
     _, answer_id, qid = _open_attempt(bank)
     bank.store.remove_questions([qid])
-    assert quiz.pending_reviews(bank.store, bank.progress) == []
+    assert quiz.pending_reviews(bank.store, bank.progress)["awaiting"] == []
     with pytest.raises(QuizError) as err:
         quiz.record_reviews(
             bank.store, bank.progress, [{"answer_id": answer_id, "correct": True, "comment": "ok"}]
@@ -548,3 +550,20 @@ def test_the_history_does_not_load_question_sources(bank, monkeypatch):
     original = bank.store.questions
     monkeypatch.setattr(bank.store, "questions", unfiltered)
     assert len(quiz.attempt_history(bank.store, bank.progress)) == 1
+
+
+def test_an_attempt_keeps_a_scope_a_re_map_removed(bank):
+    qid = bank.ids[bank.leaf()][0]
+    attempt = bank.submit([{"question_id": qid, "selected": bank.key(qid)}], topic_id=9999)
+    (entry,) = quiz.attempt_history(bank.store, bank.progress)
+    assert entry["id"] == attempt and entry["scope_title"] == "Removed topic"
+
+
+def test_answers_awaiting_review_come_in_batches_oldest_first(bank, monkeypatch):
+    monkeypatch.setattr(quiz, "MAX_REVIEW_BATCH", 1)
+    first, second = bank.ids[bank.leaf(0)][4], bank.ids[bank.leaf(1)][4]
+    bank.submit([{"question_id": first, "text": "a"}])
+    bank.submit([{"question_id": second, "text": "b"}])
+    pending = quiz.pending_reviews(bank.store, bank.progress)
+    assert [p["question_id"] for p in pending["awaiting"]] == [first]
+    assert pending["remaining"] == 1
