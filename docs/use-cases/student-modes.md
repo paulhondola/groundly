@@ -26,7 +26,7 @@ A roadmap-style map of a subject: big topics in course order, subtopics under ea
 - **A3 — Subject indexed before the tree tables:** search still works. Tree calls and the page report SQLite's own "no such table" message; no guard or migration is added (decision 41), and the fix is `groundly drop` then re-index once.
 - **A4 — Imported bundle:** the tree arrives with `store.db`. Import refuses a bundle with no tree tables (exported by an older Groundly) or with dangling references or a tree deeper than two levels. Titles, summaries and chunk text are layer-3 data.
 
-**Out of scope for this release:** progress (every node reads "Not started"; no progress tables, nothing written to `progress.db`), a generate-quiz button and deep links into the host (quizzes, sub-project 3), Codex and Claude Desktop setup, and any work at index time. The gate shows a topic is in the course; it never shows a summary is true, and nothing may call a summary verified.
+**Out of scope for this release:** progress (every node read "Not started" until tests on the page added mastery, decision 44), a generate-quiz button and deep links into the host, Codex and Claude Desktop setup, and any work at index time. The gate shows a topic is in the course; it never shows a summary is true, and nothing may call a summary verified.
 
 **Acceptance criteria**
 
@@ -48,13 +48,52 @@ A roadmap-style map of a subject: big topics in course order, subtopics under ea
 
 Criteria 1, 12, 13 and the end-to-end half of 11 are manual and recorded above. The rest have tests; criterion 10 is checked as "the page has no HTML-inserting sink", not by rendering a hostile bundle.
 
-## Planned
+## Tests on the local page (sub-project 3, in progress)
 
-Each gets its own spec, with acceptance criteria written here, before implementation.
+**Actor:** host agent (`submit_questions`, `remove_questions`, `review_answers`, `progress`) writing and reviewing; student (`groundly serve`) taking the test. Decision 44; full design in [`2026-11-16-tests-on-the-page-design.md`](../superpowers/specs/2026-11-16-tests-on-the-page-design.md).
+**Preconditions:** the subject has a topic tree.
 
-| Use case | Sub-project | Note |
-|---|---|---|
-| **Verified quizzes + mastery** | 3 | Multiple-choice and open questions per topic, submitted through the verifier gate; answer-key and distractor checks are structural (no provider). Answers are recorded in `progress.db`, never exported. A topic is mastered at ≥90% correct over its last 10 answers (at least 10 answered); a parent is mastered when all its subtopics are. Code questions are refused at the door. |
+**Main flow**
+
+1. **Write.** The student asks the host for questions on a topic. The host searches the topic and writes single-answer, multiple-answer, code-reading (a choice question with a code block) or open questions, each citing 1 to 5 chunk ids.
+2. **Gate.** `submit_questions(subject, topic_id, questions)` checks each question on its own: structure first, then that the cited ids resolve and that re-retrieving the question's own text finds one of them. Passing questions are stored; the rest come back with a machine-readable reason. Only a topic without subtopics takes questions.
+3. **Take.** On the page the student picks a subtopic, a big topic or the whole course and a length of 5, 10 or 20. Groundly draws from the bank, unanswered and last-wrong questions first, and shows one question per screen with no answer key in the browser.
+4. **Submit.** One request grades the choice questions and saves the attempt to `progress.db`. The result shows the score, each right answer and its source page. An open answer waits for review.
+5. **Review.** The student says "grade my test". The host reads the answers awaiting review with `review_answers`, judges each against its reference answer and cited chunks, and records a verdict and a comment that the result then shows.
+6. **Mastery.** A topic is mastered at 9 or more correct of its last 10 graded answers, with at least 10. A big topic is mastered when all its subtopics are. The map shows each node's state.
+
+**Alternate / error flows**
+
+- **A1 — No questions in scope:** the page shows the sentence to say to the host.
+- **A2 — A cited material is removed:** a question left without citations is deleted; one that still cites another material stays.
+- **A3 — A re-map would drop or subdivide a topic holding questions:** `submit_tree` rejects it with `topic_has_questions`; the host keeps the topic or removes its questions first.
+- **A4 — A wrong question:** the result shows each question's number; the host removes it with `remove_questions`. Recorded answers stay.
+- **A5 — A question removed while an open answer awaits review:** the answer becomes "cannot be reviewed" and counts nowhere.
+- **A6 — Subject indexed before the question tables:** opening its `store.db` adds the empty tables in place.
+
+**Out of scope:** live coding (code questions the student answers by writing code are refused at the door), a quiz asked in the chat, fixed tests written by the host, timers, partial credit. The gate shows a question is well formed and about its cited chunks; it never shows an answer key is right, and nothing may call a key verified.
+
+**Acceptance criteria** (1–12, 5a, 5b and 14–16 met; 13 and 17 await Paul)
+
+1. A well-formed question of each kind citing real chunks is stored; each structural fault is rejected with its reason and nothing is stored for that item.
+2. A question citing an unknown chunk, or whose text does not retrieve any cited chunk, is rejected with `not_answerable_from_chunks`.
+3. A batch with good and bad items stores the good ones and reports the bad ones.
+4. A `code` kind is refused; a question on a parent topic is refused.
+5. Removing a material removes each question whose only citations were in it and keeps a question that still cites another material.
+5a. A version-1 `store.db` with a tree opens, gains the empty question tables, and keeps its materials, chunks and tree unchanged; the map page still shows it.
+5b. A `submit_tree` that drops or subdivides a topic holding questions is rejected with `topic_has_questions` and its count, and nothing is written; after `remove_questions` the same tree is accepted.
+6. The bank survives export and import; import refuses a bundle with dangling question references or a malformed question; `progress.db` is not in the bundle.
+7. A drawn test contains no key and no reference answer anywhere in the response.
+8. Submitting grades single and multiple answers correctly, including a multiple answer that is right only when the set matches exactly, and writes one attempt in one transaction.
+9. A `POST` with a foreign or missing `Origin`, a non-JSON body, an unknown question id or an option from another question is refused and writes nothing.
+10. The draw prefers unanswered, then last-wrong questions, and spreads across subtopics.
+11. Mastery holds at its boundaries: 9 graded answers, 10 with 8 correct, 10 with 9 correct, a parent with one subtopic not mastered.
+12. The page still loads no model and writes no rows to `store.db`; a stem, option or code block containing `<script>` renders as text.
+13. **Human review:** Paul sits a 10-question test on apd in a desktop and a phone-width window and reports it reads well.
+14. An open answer is saved as awaiting review, is excluded from the score and from mastery, and the result is marked provisional.
+15. A recorded verdict appears on the result with its comment as text, the score stops being provisional, and mastery now counts the answer.
+16. A second verdict for the same answer and an unknown answer id are refused, and a call with one bad verdict records none.
+17. **End to end on Claude Code:** "write me ten questions on OpenMP reductions", then a test on the page, then "grade my test", with no other instruction.
 
 ## Ideas, not planned
 

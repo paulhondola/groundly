@@ -308,3 +308,71 @@ def test_outline_heading_without_a_page_is_the_text_alone(store):
         conn.execute("UPDATE chunks SET page = NULL WHERE id = 2")
     (material,) = outline(store)["materials"]
     assert "Intro > Sync" in material["headings"]
+
+
+# --- a re-map never destroys questions silently --------------------------------------
+
+
+def _question(stem="What does a deadlock need?"):
+    from groundly.core.store import QuestionWrite
+
+    return QuestionWrite("single", stem, None, None, [("a", True), ("b", False)], [1])
+
+
+@pytest.fixture
+def with_questions(store):
+    """A stored tree of two big topics; the first holds two questions."""
+    _submit(store, [_node(), _node("Semaphores", "Counting locks")])
+    held, other = store.tree()
+    store.add_questions(held["id"], [_question(), _question("Second?")])
+    return store, held, other
+
+
+def test_a_tree_that_drops_a_topic_holding_questions_is_rejected(with_questions):
+    store, held, other = with_questions
+    before = store.tree()
+    reranker = _FnReranker(_by_query)
+    result = _submit(store, [_node("Semaphores", "Counting locks", id=other["id"])], reranker)
+    assert _reasons(result) == ["topic_has_questions"]
+    rejection = result["rejections"][0]
+    assert rejection["path"] == [held["title"]]
+    assert "2 questions" in rejection["detail"] and "remove_questions" in rejection["detail"]
+    assert str([q["id"] for q in store.questions()]) in rejection["detail"]
+    assert store.tree() == before and reranker.calls == 0
+    assert store.question_counts() == {held["id"]: 2}
+
+
+def test_a_tree_that_subdivides_a_topic_holding_questions_is_rejected(with_questions):
+    store, held, other = with_questions
+    tree = [
+        _node(id=held["id"], subtopics=[_node("Detection", "Finding the cycle")]),
+        _node("Semaphores", "Counting locks", id=other["id"]),
+    ]
+    result = _submit(store, tree)
+    assert _reasons(result) == ["topic_has_questions"]
+    assert result["rejections"][0]["path"] == [ON_TOPIC]
+    assert store.question_counts() == {held["id"]: 2}
+
+
+def test_the_same_tree_is_accepted_after_the_questions_are_removed(with_questions):
+    store, _, other = with_questions
+    tree = [_node("Semaphores", "Counting locks", id=other["id"])]
+    assert _reasons(_submit(store, tree)) == ["topic_has_questions"]
+    store.remove_questions([q["id"] for q in store.questions()])
+    assert _submit(store, tree)["accepted"] is True
+
+
+def test_a_topic_holding_questions_may_move_under_another_parent(with_questions):
+    store, held, other = with_questions
+    tree = [_node("Semaphores", "Counting locks", id=other["id"], subtopics=[_node(id=held["id"])])]
+    assert _submit(store, tree)["accepted"] is True
+    assert store.question_counts() == {held["id"]: 2}
+
+
+def test_an_unhashable_id_on_a_subdivided_node_is_a_rejection(with_questions):
+    store, held, other = with_questions
+    tree = [
+        _node(id=[held["id"]], subtopics=[_node("Detection", "Finding the cycle")]),
+        _node("Semaphores", "Counting locks", id=other["id"]),
+    ]
+    assert "unknown_topic_id" in _reasons(_submit(store, tree))

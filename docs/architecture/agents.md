@@ -16,8 +16,8 @@ flowchart LR
         search[search]
         page[get_page or citation resource]
         outline[outline]
-        submit["submit_tree; quiz submit_* planned"]
-        verify[Gates: topic, verifier]
+        submit["submit_tree, submit_questions"]
+        verify[Gates: topic, question]
         stores[(Subject stores)]
     end
 
@@ -44,17 +44,20 @@ A source cannot be invented or be a real-but-wrong slide, because the host never
 
 `outline(subject)` is the read side: each indexed material with its page count and page headings, how many of its chunks the tree cites, and the current tree with ids. It is computed per call from existing columns, returns no chunk text or ids, and loads no model.
 
-## The verifier gate
+## The question gate
 
-Every generated quiz item entering `store.db` passes, in fail-fast order (no tool calls it until verified quizzes, sub-project 3):
+`submit_questions(subject, topic_id, questions)` (decision 44) judges each question on its own and stores those that pass; the rest come back by position with a machine-readable reason (`REJECTION_REASONS` in `agents/verifier.py`). A fault in the call itself (an unknown topic, a topic with subtopics, more than 50 questions) has no position and stores nothing. Checks run cheapest first, and no structural fault loads the embedder:
 
-1. **Citations present** — an item with no `chunk_ids` is rejected.
-2. **Citations resolve** — each id must name a chunk in this subject; unresolvable ids are named in the rejection; the quiz tables (sub-project 3) will enforce it a second time with an FK.
-3. **Answerable by re-retrieval** — re-retrieving the item's own text must surface at least one cited chunk within `VERIFY_TOP_K`.
+1. **Kind** — `single`, `multiple` or `open`. A question answered by writing code is refused at the door (`code_questions_unsupported`); a choice question may carry a `code` block to ask about code.
+2. **Structure** — text lengths (stem 500, code 2000, option 300, reference answer 1000); a `single` has 2 to 6 options and exactly one correct, a `multiple` 3 to 8 with at least two correct and one wrong, an `open` a reference answer and no options; options are distinct; the stem is not already stored for the topic; the topic holds fewer than 200 questions.
+3. **Citations resolve** — 1 to 5 chunk ids, each naming a chunk in this subject; unresolvable ids are named in the rejection. The `question_citations` FK enforces it a second time, and a question that loses its last citation is deleted by a trigger.
+4. **Answerable by re-retrieval** — re-retrieving the stem, its code and the correct options (or the reference answer) must surface at least one cited chunk within `VERIFY_TOP_K` (20).
 
-Rejections are machine-readable (`REJECTION_REASONS`), so a host regenerates conversationally without a human in the loop. Verification is **zero-key**: it touches only the local embedder.
+**The gate shows a question is well formed and about its cited chunks, not that its answer key is right**: that needs a model Groundly does not have, so nothing may call a key verified. A wrong question leaves the bank through `remove_questions`. Verification is **zero-key**: it touches only the local embedder.
 
-Planned: structural answer-key and distractor checks for MCQs (sub-project 3). Subprocess execution of code answers is an idea, not planned (spec §3); until a runner exists, no code question may be stored — the guarantee is unbuilt, not weakened.
+A re-map cannot strand questions: `submit_tree` rejects, before any search, a tree that leaves out or subdivides a topic holding questions (`topic_has_questions`).
+
+Subprocess execution of code answers is an idea, not planned (spec §3); until a runner exists, no question answered by writing code may be stored — the guarantee is unbuilt, not weakened.
 
 ## Trust layers
 
@@ -70,4 +73,4 @@ Titles and summaries a host submits, and the chunk text the topic page shows, ar
 
 ## Observability
 
-Nothing is traced. **`progress.db`** (personal, never exported) holds no tables yet: `search` is read-only, and verifier verdicts are no longer logged (decision 33). Study progress arrives with verified quizzes (sub-project 3); the topic tree records none.
+Nothing is traced. **`progress.db`** (personal, never exported) holds the student's submitted test attempts and their answers, and the host's verdicts and comments on written answers recorded through `review_answers` (decision 44); `search`, the topic tree and the question gate write nothing to it, and gate verdicts are not logged (decision 33).

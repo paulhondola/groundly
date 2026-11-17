@@ -5,7 +5,7 @@ The thesis's guarantees (docs/architecture/agents.md, docs/infrastructure/securi
 ## Grounding
 
 - Every chunk `search` returns carries its citation fields (document, page, heading path); a result that cannot be cited is a bug.
-- Every stored question cites chunk ids that resolve to document + page. Unresolvable citations are rejected at the gate and again by an FK on the question tables (sub-project 3) — never stored.
+- Every stored question cites chunk ids that resolve to document + page. Unresolvable citations are rejected at the gate and again by an FK on the question tables — never stored. A question that loses its last citation is deleted with it.
 - Citations resolve to verbatim chunks only; anything that summarizes has no page and is never a citation target.
 - `search` is honest best-effort: **the host composes**. Never claim enforced grounding for host-composed answers — the enforced pipeline was measured and removed (decision 33).
 
@@ -19,7 +19,9 @@ The thesis's guarantees (docs/architecture/agents.md, docs/infrastructure/securi
 ## Verification gate
 
 - **Nothing unverified enters the question bank**: cited ids must resolve, and re-retrieving the item's own text must surface at least one of them.
-- Planned with verified quizzes: structural answer-key/distractor checks. Code questions need execution **in a subprocess** (timeout + tempdir, argv exec, output cap) — an idea, not planned; until that runner exists, code questions are refused at the door rather than stored unverified — the guarantee is unbuilt, never weakened.
+- Structural checks run first (kind, lengths, the shape of the answer key, distinct options, no duplicate stem). **The gate shows a question is well formed and about its cited chunks. Never call an answer key verified.**
+- A re-map never destroys questions silently: `submit_tree` rejects a tree that drops or subdivides a topic holding questions (`topic_has_questions`).
+- Code questions need execution **in a subprocess** (timeout + tempdir, argv exec, output cap) — an idea, not planned; until that runner exists, code questions are refused at the door rather than stored unverified — the guarantee is unbuilt, never weakened.
 - Rejections return machine-readable reasons.
 
 ## Trust layers (prompt assembly)

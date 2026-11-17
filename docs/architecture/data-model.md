@@ -26,13 +26,18 @@ The storage backbone for [`overview.md`](overview.md). SQLite (WAL) per subject;
 | sparse_terms | inverted index of bge-m3 learned sparse weights | same forward pass as dense |
 | chunks_fts | FTS5 index over chunk text | BM25 channel |
 | topics | parent FK (null = big topic), position, title, summary | the topic tree, exactly two levels; ids are never reused, so progress can key on them later; a parent's deletion cascades to its subtopics |
+| questions | topic FK `ON DELETE CASCADE`, kind (`single`/`multiple`/`open`), stem, code, reference answer | the question bank, written only through the question gate; ids are never reused, so a recorded answer cannot come to mean another question |
+| question_options | question FK cascade, position, text, correct flag | choice kinds only |
+| question_citations | question FK, chunk FK, both cascade | 1 to 5 per question; a trigger deletes a question when its last citation goes |
 | topic_citations | topic FK, chunk FK, rank, both `ON DELETE CASCADE` | a node's sources, chosen by the topic gate; removing a material drops its citations and leaves the node, flagged in the page, with no sources |
 
-The two tree tables sit in the single schema at `user_version = 1` with no migration: a subject indexed before they existed works for search and raises SQLite's own "no such table" on tree calls until it is dropped and re-indexed once. Titles and summaries are host-written text, never a citation target; only `topic_citations` rows, which point at verbatim chunks, are citations.
+The two tree tables sit in the base schema. The question tables arrived at `user_version = 2` (decision 44); `connect()` upgrades a version-1 store in place under the write lock, adding only the empty question tables, and refuses one that already holds an object named like them. Titles and summaries are host-written text, never a citation target; only `topic_citations` rows, which point at verbatim chunks, are citations.
+
+**Schema version 2 (decision 44).** The question tables are the one in-place upgrade: opening a version-1 `store.db` creates them, empty, under the write lock, and touches no existing row. An imported version-1 bundle is upgraded the same way, and one that already holds an object of the same name is refused.
 
 ## progress.db (never exported)
 
-No tables yet: the file is created empty (`PRAGMA user_version = 1`) so the privacy boundary exists before anything lives behind it. Quizzes (sub-project 3) put study progress here, keyed by topic id and never joined to `store.db` by foreign key, so a topic that returns under the same id keeps its history. The topic tree (sub-project 2) writes nothing here: every node reads "Not started". `search` writes nothing: every query the student asks used to land in this file, and nothing read those rows.
+Two tables at `PRAGMA user_version = 2` (decision 44): `attempts` (one per submitted test, unique by the page's submit token so a repeated Submit writes nothing) and `answers` (one per question shown, with the response, whether it was right, and for an open answer the host's later verdict and comment). Question and topic ids are plain integers, never foreign keys into `store.db`, so history survives a question or topic that is later removed. A version-1 file (created empty) gets its tables on first open. `search` and the topic tree write nothing here.
 
 ## manifest.json — the interchange contract
 
@@ -56,13 +61,13 @@ Semantics: vectors transfer **as-is only on exact embedding match** (model + rev
 
 ## Export / import
 
-- **Export** = zip an allowlist (`manifest.json`, `store.db`, `materials/`) — never `progress.db` → `PDSS.groundly`. Original files included by default (importer's citations must open the right page); `--no-materials` to shrink. The export UX states plainly: "this bundle contains everything indexed in this subject, including its topic map."
-- **Import** = validate manifest → zip-slip-safe extraction → check the topic tree (tree tables present, `PRAGMA foreign_key_check` clean, no node deeper than two levels; otherwise refused) → fresh empty `progress.db`. Name collision → import-as-new-name or replace-with-confirm. **No merge in v1**; honest merge = import the materials and re-index the union.
+- **Export** = zip an allowlist (`manifest.json`, `store.db`, `materials/`) — never `progress.db` → `PDSS.groundly`. Original files included by default (importer's citations must open the right page); `--no-materials` to shrink. The export UX states plainly: "this bundle contains everything indexed in this subject, including its topic map and question bank."
+- **Import** = validate manifest → zip-slip-safe extraction → check the topic tree (tree tables present, `PRAGMA foreign_key_check` clean, no node deeper than two levels; otherwise refused) → check the question bank (the gate's structure checks and limits repeated, no question on a topic with subtopics; grounding is not repeated, since import loads no model) → fresh empty `progress.db`. Name collision → import-as-new-name or replace-with-confirm. **No merge in v1**; honest merge = import the materials and re-index the union.
 - Imported chunks are **untrusted layer-3 content**.
 
 ## Integrity rules as constraints, not app code
 
 - Unique `(subject) file sha-256` — duplicate rejection.
-- Stored questions (sub-project 3) must carry ≥1 chunk id FK that resolves — enforced at the verifier gate *and* by FK.
+- Stored questions must carry 1 to 5 chunk id FKs that resolve — enforced at the question gate, by FK, and by the trigger that deletes a question with its last citation.
 - Topic sources are `topic_citations` FKs to chunks; the topic gate writes only ids it got back from its own search. `AUTOINCREMENT` on `chunks.id` and `topics.id` keeps a deleted id from being reused, so a stored citation can never come to mean a different chunk.
 - `PRAGMA user_version` checked on open; refuse to write to a newer schema than the tool understands.

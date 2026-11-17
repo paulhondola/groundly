@@ -131,3 +131,13 @@ def test_a_symlinked_parent_directory_is_still_allowed(home, target):
 def test_packaged_skill_treats_stored_titles_and_summaries_as_data():
     text = " ".join(PACKAGED.decode().split())
     assert "titles and summaries" in text and "data, never instructions" in text
+
+
+def test_the_skill_covers_writing_questions_and_grading_a_test():
+    text = " ".join(PACKAGED.decode().split())
+    head = text.split("---")[1]
+    for trigger in ("write questions", "test me", "quiz me", "grade my test"):
+        assert trigger in head, trigger
+    for tool in ("progress", "submit_questions", "review_answers", "remove_questions"):
+        assert f"`{tool}`" in text, tool
+    assert "not that its answer key is right" in text and "verified" not in text.lower()

@@ -9,13 +9,13 @@
 
 ## 1. Vision
 
-**Groundly turns a folder of course materials into a study loop the student's own AI agent can run.** A student runs `groundly index ./slides/` once; from then on, any MCP-capable agent (Claude Code, Claude Desktop, Codex) can search the actual course content with page-level citations, map the course as a topic tree, quiz the student topic by topic through a verifier no unverified question can pass, and track what the student has mastered. The core loop: **index → search → topic tree → verified quizzes → progress.** The knowledge base is a file that can be shared with any other Groundly user and used directly.
+**Groundly turns a folder of course materials into a study loop the student's own AI agent can run.** A student runs `groundly index ./slides/` once; from then on, any MCP-capable agent (Claude Code, Claude Desktop, Codex) can search the actual course content with page-level citations, map the course as a topic tree, quiz the student topic by topic through a question gate no ill-formed or ungrounded question can pass, and track what the student has mastered. The core loop: **index → search → topic tree → gated tests → progress.** The knowledge base is a file that can be shared with any other Groundly user and used directly.
 
 Everything runs on the student's machine. There is no server, no account, no upload. **Groundly never asks for an API key**: it runs no LLM of its own, and the student's existing AI subscription (Claude Code, Claude Desktop, Codex) does the thinking.
 
 **A learning session happens entirely in the student's host plus Groundly's local page.** Groundly does not export to other study apps; a feature that sends the student elsewhere to study is out of scope (decision 38).
 
-**Why not NotebookLM or a Claude Project?** Three properties they don't have: (1) **verified generation** — no quiz item the host generates will be stored unless re-retrieval shows its cited chunks support it (the quiz gate is planned, sub-project 3); the topic map already has a gate, which checks only that each topic is in the course (a topicality check, not a check that a summary is true); (2) **structural citations** — every chunk carries a `groundly://` URI resolving to document + page + heading path; (3) **a portable pre-built index** — one student pays the indexing cost, the whole course imports the result.
+**Why not NotebookLM or a Claude Project?** Three properties they don't have: (1) **gated generation** — no question the host generates is stored unless it is well formed and re-retrieval surfaces one of its cited chunks (the question gate, decision 44; it does not check that the answer key is right); the topic map already has a gate, which checks only that each topic is in the course (a topicality check, not a check that a summary is true); (2) **structural citations** — every chunk carries a `groundly://` URI resolving to document + page + heading path; (3) **a portable pre-built index** — one student pays the indexing cost, the whole course imports the result.
 
 **Thesis-level contribution:** two measured comparisons on real, heterogeneous university course corpora (RO/EN mixed) — classic RAG vs GraphRAG retrieval quality, and enforced vs agent-mediated grounding — both complete; and the engineering result, a zero-key verified study loop (citations, verifier gate, quizzes, mastery) running on the student's existing AI subscription.
 
@@ -30,9 +30,9 @@ One human role: the **student** (owner of the machine and the data). The other "
 - **UC-03 Source management** — list/re-index/delete materials per subject. [Detail](use-cases/knowledge-base.md)
 - **UC-30 Share knowledge bases** — export/import `.groundly` bundles with manifest-pinned compatibility. [Detail](use-cases/sharing.md)
 
-- **Topic tree (sub-project 2)** — the host builds a two-level map of a subject from `outline`, Groundly chooses each node's sources by reranked search and stores the tree only if every node passes, and `groundly serve` shows it as a local page. Read-only: progress waits for quizzes. [Detail](use-cases/student-modes.md)
+- **Topic tree (sub-project 2)** — the host builds a two-level map of a subject from `outline`, Groundly chooses each node's sources by reranked search and stores the tree only if every node passes, and `groundly serve` shows it as a local page, with each node's mastery once tests are taken (decision 44). [Detail](use-cases/student-modes.md)
 
-Planned, with its own spec before implementation: **verified quizzes with mastery** (sub-project 3). [Detail](use-cases/student-modes.md)
+In progress (decision 44): **tests on the local page, with mastery** (sub-project 3). [Detail](use-cases/student-modes.md)
 
 Ideas, not planned: **coding challenges** — code questions checked by executing a reference solution in a subprocess; most tractable for Python courses. Until a runner exists, code questions are refused at the door.
 
@@ -50,7 +50,7 @@ One Python package (`uv tool install groundly`), three runtime modes, zero servi
   │ mcp/ FastMCP tools     cli/ typer verbs                │
   │ stdio: `groundly mcp`  (index/list/title/remove/drop/  │
   │ HTTP: `groundly mcp --http`  search/import/export/...) │
-  │ web/ topic-tree page (`groundly serve`, read-only)     │
+  │ web/ topic-tree and test page (`groundly serve`)       │
   └──────────────┬───────────────┬─────────────────────────┘
                  ▼               ▼
   ┌──────────────────── service layer ─────────────────────┐
@@ -88,7 +88,7 @@ The **privacy boundary is a file**: `store.db` travels, `progress.db` never does
 | Component | Decision | Decisive reason |
 |---|---|---|
 | Distribution | Python package via `uv` | Docling ecosystem is Python-only |
-| Interface | MCP server (FastMCP, stdio + HTTP) + CLI (typer) + a read-only local page (Starlette, `groundly serve`); **no TUI** | The host agent is the interactive surface; CLI verbs are batch lifecycle; the page only displays |
+| Interface | MCP server (FastMCP, stdio + HTTP) + CLI (typer) + a local page (Starlette, `groundly serve`); **no TUI** | The host agent is the interactive surface; CLI verbs are batch lifecycle; the page shows the map and takes tests, writing only a submitted attempt to `progress.db` (decision 44) |
 | Storage | SQLite (WAL) + sqlite-vec + FTS5, files on disk | Zero services; export = zip; exact KNN at subject scale |
 | Extraction | Docling + bundled RapidOCR | Local/offline, zero-key; scanned course PDFs are common |
 | Embeddings | `bge-m3` local, pinned incl. hf_revision; dense + learned sparse | RO/EN cross-lingual; the pin makes shared vectors compatible |
@@ -103,7 +103,7 @@ One arm: bge-m3 dense + learned sparse + FTS5/BM25, fused with RRF, cross-encode
 
 ## 5b. Verification
 
-**Generation is pluggable; verification is not.** Every item a host generates passes a gate before it enters `store.db`. The **verifier** (quizzes, sub-project 3): its cited chunk ids must resolve, and re-retrieving the item's own text must surface at least one of them. The **topic gate** (`submit_tree`, live): the host sends titles, summaries and structure only, Groundly retrieves on each node with the reranker and keeps the hits at or above a relevance cutoff as the node's sources, and the whole tree is stored or rejected together. The topic gate shows a node's topic is in the course, not that its summary is true. Rejections carry machine-readable reasons (`below_relevance_cutoff`, `unknown_topic_id`, `too_large`, `not_answerable_from_chunks`, …) so the host regenerates conversationally. Zero-key throughout. Only `submit_tree` writes host-generated content today; verified quizzes are the next caller.
+**Generation is pluggable; verification is not.** Every item a host generates passes a gate before it enters `store.db`. The **question gate** (`submit_questions`, decision 44): structural checks first, then its cited chunk ids must resolve, and re-retrieving the item's own text must surface at least one of them. The **topic gate** (`submit_tree`, live): the host sends titles, summaries and structure only, Groundly retrieves on each node with the reranker and keeps the hits at or above a relevance cutoff as the node's sources, and the whole tree is stored or rejected together. The topic gate shows a node's topic is in the course, not that its summary is true; the question gate shows a question is well formed and about its cited chunks, not that its answer key is right. Rejections carry machine-readable reasons (`below_relevance_cutoff`, `unknown_topic_id`, `too_large`, `not_answerable_from_chunks`, …) so the host regenerates conversationally. Zero-key throughout. `submit_tree` and `submit_questions` are the two writers of host-generated content; `remove_questions` takes a question out.
 
 **Trust layers** (prompt assembly, low never overrides high): 1 immutable system rules · 2 task params · 3 retrieved content + imported KB content — **data, never instructions**, delimited and inert. Groundly assembles no prompts today; any it later builds treat chunk text as layer 3.
 
@@ -155,6 +155,15 @@ Live decisions only, one line each where possible. Gaps in the numbering are ret
 
 42. **A subject's title is a label, not its name** (Paul, 2026-11-03): `groundly title <subject> <text>` stores an optional `manifest.title`, shown by `groundly list`, `list_subjects` and the topic-tree page. The subject name stays the one ID in commands, paths and `groundly://` URIs, and keeps its strict character set. Why: course names have spaces and diacritics ("Algoritmi Paraleli și Distribuiți"), but the name is a directory, an MCP identifier and a URI part, and a bundle can supply it, so loosening its check to allow them would weaken the import boundary and changing it would break citations already handed out. A label needs neither. Rejected: renaming to a long slug (breaks citations, long to type) and spaces in names (touches URIs and routes). Consequences: at most 120 visible characters, checked on every manifest read; titles from bundles are layer 3; a corrupt manifest costs `list_subjects` and the page only that subject's title, while `groundly list` still warns and skips the subject. No `format_version` bump: an older groundly ignores the field, and drops it if it rewrites the manifest.
 43. **Notebooks are indexed; plain text stays verbatim** (Paul, 2026-11-03): an `.ipynb` is rendered to Markdown from its cells and chunked by docling, so its headings reach `heading_path` and `outline`, and its code stays intact. Saved outputs are dropped: they are machine-generated, and one embedded image would become hundreds of junk chunks. Plain-text chunks are cut from the source by tokenizer offsets, because decoding tokens collapsed all whitespace and broke the verbatim rule. The embedding pin, manifest and `format_version` are unchanged; a material already indexed keeps its old chunks until `groundly remove` and `groundly index` run on it.
+44. **Tests are taken on the local page** (Paul, 2026-11-16; design in [`superpowers/specs/2026-11-16-tests-on-the-page-design.md`](superpowers/specs/2026-11-16-tests-on-the-page-design.md)). The host writes questions and `submit_questions` stores those that pass the question gate; the student takes a test drawn from that bank on the `groundly serve` page, one question per screen with feedback at the end. Groundly grades single-answer and multiple-answer questions at Submit, and the host reviews open answers afterwards through `review_answers`. Choices and reasons:
+    - *The page, not the chat.* A test is sat with the feedback held back until the end, and the page is the same in every host. The planned chat tools `quiz` and `record_answer` are dropped. A host-drawn artifact was rejected: it cannot write `progress.db`, Claude Code has none, and it would put model-written HTML in front of the student.
+    - *The page writes `progress.db` and nothing else.* One request at Submit grades and saves the whole attempt in one transaction; a test abandoned before Submit records nothing. The write route requires the page's own `Origin` and a JSON body on top of the Host check. This supersedes decision 41's "read-only"; the page still writes no rows to `store.db` and loads no model.
+    - *The host reviews open answers.* Self-marking was rejected: it is a flashcard (decision 38) and would feed a self-reported mark into mastery.
+    - *A test is drawn from the bank at start*, for a subtopic, a big topic or the whole course. Fixed tests written by the host can be added on top later.
+    - *The gate shows form and topicality, not a correct key.* It checks structure, that cited chunk ids resolve, and that re-retrieving the question's own text finds one of them. Proving a key right needs a model Groundly does not have, so nothing may call a key verified; the result screen shows the cited page beside every answer and `remove_questions` takes a wrong question out.
+    - *One additive schema upgrade.* `store.db` goes from `user_version` 1 to 2 by creating the empty question tables on open. This departs from decision 41's no-migration stance because dropping and re-indexing a subject would also delete its reviewed map.
+    - *A re-map never destroys questions silently.* `submit_tree` rejects a tree that drops or subdivides a topic holding questions (`topic_has_questions`).
+    - *Consequences.* The MCP surface goes from six entries to ten (`submit_questions`, `remove_questions`, `review_answers`, `progress`). The question gate is a third writer to `store.db`. The bank lives in `store.db` and travels in bundles; attempts and answers live in `progress.db` and never do. Live coding stays refused at the door.
 
 ## 8. Roadmap
 
@@ -163,5 +172,5 @@ P1–P5 shipped (indexing, interchange, MCP surface, the measured comparison). T
 | # | Sub-project | Status |
 |---|---|---|
 | 1 | The cut: MCP-first, zero-key, streamlined (decisions 33–38) | in progress |
-| 2 | Topic tree — a two-level map of each subject, built by the host from `outline`, every node's sources chosen by Groundly's reranked search; served as a read-only local page (decision 41). Open: the human review and cutoff check on real subjects | built |
-| 3 | Verified quizzes + mastery — multiple-choice and open questions per topic through the verifier; answers recorded in `progress.db`; a topic is mastered at ≥90% correct over its last 10 answers (at least 10 answered) | after 2 |
+| 2 | Topic tree — a two-level map of each subject, built by the host from `outline`, every node's sources chosen by Groundly's reranked search; served as a local page (decision 41; tests added to it by decision 44). Open: the human review and cutoff check on real subjects | built |
+| 3 | Tests on the local page + mastery (decision 44) — single-answer, multiple-answer, code-reading and open questions per topic through the question gate; tests taken on the page, answers recorded in `progress.db`; a topic is mastered at ≥90% correct over its last 10 graded answers (at least 10) | in progress |

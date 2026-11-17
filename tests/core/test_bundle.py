@@ -107,13 +107,10 @@ def test_export_import_roundtrip_preserves_data_and_resets_progress(tmp_path, mo
 
     # fresh empty progress.db: never derived from the bundle's own (garbage) state
     assert subj_b.progress_db_path.read_bytes() != b"private study state"
-    import sqlite3
+    from groundly.core.progress import ProgressStore
 
-    conn = sqlite3.connect(subj_b.progress_db_path)
-    try:
-        assert conn.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()[0] == 0
-    finally:
-        conn.close()
+    progress_b = ProgressStore(subj_b.progress_db_path)
+    assert progress_b.attempts() == [] and progress_b.answers() == []
 
 
 def test_export_excludes_orphan_material_with_no_store_row(tmp_path, monkeypatch):
@@ -364,10 +361,13 @@ def test_import_refuses_dangling_references_in_a_store_that_declares_no_keys(
     init_subject("PDSS")
     _seed("PDSS")
     _tamper("PDSS", *_NO_FK_TOPICS, extra)
+    # The anti-joins stand behind the schema comparison, which refuses such a store first.
+    with pytest.raises(bundle.BundleError, match=f"{phrase}.*no matching"):
+        bundle.check_tree(subject_dir("PDSS") / "store.db")
 
     result = _export_then_import(tmp_path, monkeypatch)
 
-    _assert_refused(result, phrase, "no matching")
+    _assert_refused(result, "a changed table", "groundly does not ship")
 
 
 def test_import_names_hostile_table_names_without_printing_them_raw(tmp_path, monkeypatch):
@@ -385,7 +385,7 @@ def test_import_names_hostile_table_names_without_printing_them_raw(tmp_path, mo
 
     assert result.exit_code != 0
     assert "\x1b" not in result.output
-    assert "dangling reference" in result.output
+    assert "groundly does not ship" in result.output
 
 
 def test_import_names_a_hostile_schema_and_removes_the_temp_dir(tmp_path, monkeypatch):
@@ -402,7 +402,7 @@ def test_import_names_a_hostile_schema_and_removes_the_temp_dir(tmp_path, monkey
 
     result = _export_then_import(tmp_path, monkeypatch)
 
-    _assert_refused(result, "foreign key mismatch")
+    _assert_refused(result, "a changed table 'topic_citations'")
 
 
 # --- Bundles from before the graph was dropped -------------------------------------
@@ -896,7 +896,7 @@ def test_import_refuses_a_materials_table_missing_a_column(tmp_path, monkeypatch
 
     result = _export_then_import(tmp_path, monkeypatch)
 
-    _assert_refused(result, "error")
+    _assert_refused(result, "a changed table 'materials'")
 
 
 @pytest.mark.parametrize("lang", ["\x1b]52;c;cHduZWQ=\x07", "[/nosuch]"])
@@ -947,3 +947,330 @@ def test_export_survives_markup_in_a_material_path(tmp_path, monkeypatch):
     result = runner.invoke(app, ["export", "PDSS", "-o", str(bundle_path)])
 
     assert result.exit_code == 0, result.output
+
+
+# --- Question bank: import repeats the gate's structure checks -----------------------
+
+
+def _seed_bank(name="PDSS"):
+    """The tree from _seed_tree (leaf 'Conditions' is topic 2, citing chunk 2) with one
+    single-answer question on the leaf."""
+    _seed_tree(name)
+    SubjectStore(subject_dir(name) / "store.db").add_questions(
+        2,
+        [
+            store.QuestionWrite(
+                "single",
+                "What does a deadlock need?",
+                None,
+                None,
+                [("mutual exclusion", True), ("a GPU", False)],
+                [2],
+            )
+        ],
+    )
+
+
+def _edit_bundled_store(bundle_path, scratch, *statements):
+    """Rewrite the store.db inside a bundle with raw SQL, foreign keys off: a bundle
+    `groundly export` could not have produced, since export opens and upgrades the store."""
+    import sqlite3
+
+    db = scratch / "edited-store.db"
+
+    def edit(contents):
+        db.write_bytes(contents["store.db"])
+        conn = sqlite3.connect(db)
+        try:
+            conn.executescript(";".join(statements))
+        finally:
+            conn.close()
+        contents["store.db"] = db.read_bytes()
+
+    _rewrite_zip(bundle_path, edit)
+
+
+def _shipped_trigger_sql():
+    (sql,) = [
+        sql for kind, name, sql in store.shipped_programs() if name == "question_citations_ad"
+    ]
+    return sql
+
+
+_DOWNGRADE = (
+    "DROP TRIGGER question_citations_ad",
+    "DROP TABLE question_citations",
+    "DROP TABLE question_options",
+    "DROP TABLE questions",
+    "PRAGMA user_version = 1",
+)
+
+
+def test_the_question_bank_survives_export_and_import(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_bank()
+    (subject_dir("PDSS") / "progress.db").write_bytes(b"private study state")
+    bank_a = SubjectStore(subject_dir("PDSS") / "store.db").questions()
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    assert result.exit_code == 0, result.output
+    assert SubjectStore(Subject("PDSS").store_db_path).questions() == bank_a
+    with zipfile.ZipFile(tmp_path / "PDSS.groundly") as zf:
+        assert "progress.db" not in zf.namelist()
+
+
+def test_the_export_statement_names_the_question_bank(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_bank()
+    result = runner.invoke(app, ["export", "PDSS", "-o", str(tmp_path / "PDSS.groundly")])
+    assert "including its topic map and question bank." in " ".join(result.output.split())
+
+
+@pytest.mark.parametrize(
+    ("statement", "phrase"),
+    [
+        ("UPDATE question_options SET correct = 0", "exactly one correct option"),
+        ("UPDATE questions SET kind = 'open'", "an open question"),
+        ("UPDATE questions SET topic_id = 1", "topic that has subtopics"),
+        ("UPDATE questions SET stem = zeroblob(10)", "stem that is not text"),
+        ("UPDATE questions SET stem = printf('%.*c', 501, 'x')", "stem of 501 characters"),
+        ("UPDATE question_options SET text = printf('%.*c', 301, 'x')", "option of 301 characters"),
+        ("UPDATE questions SET code = printf('%.*c', 2001, 'x')", "code of 2001 characters"),
+        ("UPDATE questions SET reference_answer = 'r'", "reference answer"),
+        ("UPDATE questions SET stem = char(9, 10)", "empty stem"),
+        ("UPDATE question_options SET text = char(10)", "empty option"),
+        ("UPDATE questions SET code = char(10, 9)", "empty code"),
+    ],
+)
+def test_import_refuses_a_malformed_question_bank(tmp_path, monkeypatch, statement, phrase):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_bank()
+    _tamper("PDSS", statement)
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "bundle question 1", phrase)
+
+
+def test_import_refuses_a_question_citing_a_chunk_that_does_not_exist(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_bank()
+    _tamper("PDSS", "INSERT INTO question_citations (question_id, chunk_id) VALUES (1, 99999)")
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "'question_citations'", "no matching 'chunks'")
+
+
+def test_import_refuses_a_question_without_citations(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_bank()
+    bundle_path = _export(tmp_path)
+    # The trigger would delete the question with its last citation: drop it first.
+    _edit_bundled_store(
+        bundle_path,
+        tmp_path,
+        "DROP TRIGGER question_citations_ad",
+        "DELETE FROM question_citations",
+    )
+    _use_home(monkeypatch, tmp_path / "b")
+
+    result = runner.invoke(app, ["import", str(bundle_path)])
+
+    _assert_refused(result, "views or triggers groundly does not ship")
+
+
+def test_import_refuses_a_question_citing_more_than_five_chunks(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_tree("PDSS", n_chunks=6)
+    SubjectStore(subject_dir("PDSS") / "store.db").add_questions(
+        2,
+        [store.QuestionWrite("single", "Q?", None, None, [("a", True), ("b", False)], [2])],
+    )
+    _tamper(
+        "PDSS",
+        *(
+            f"INSERT INTO question_citations (question_id, chunk_id) VALUES (1, {i})"
+            for i in (1, 3, 4, 5, 6)
+        ),
+    )
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "bundle question 1 cites 6 chunks", "limit is 5")
+
+
+def test_import_refuses_a_topic_holding_more_than_the_question_limit(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_bank()
+    monkeypatch.setattr(store, "MAX_QUESTIONS_PER_TOPIC", 0)
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "bundle topic 2 holds 1 questions", "limit is 0")
+
+
+def test_a_version_1_bundle_is_upgraded_on_import(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_tree("PDSS")
+    tree_a = SubjectStore(subject_dir("PDSS") / "store.db").tree()
+    bundle_path = _export(tmp_path)
+    _edit_bundled_store(bundle_path, tmp_path, *_DOWNGRADE)
+    _use_home(monkeypatch, tmp_path / "b")
+
+    result = runner.invoke(app, ["import", str(bundle_path)])
+
+    assert result.exit_code == 0, result.output
+    imported = SubjectStore(Subject("PDSS").store_db_path)
+    assert imported.tree() == tree_a and imported.questions() == []
+    conn = imported.connect()
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == store.STORE_USER_VERSION
+    finally:
+        conn.close()
+
+
+def test_a_version_1_bundle_with_its_own_questions_table_is_refused(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_tree("PDSS")
+    bundle_path = _export(tmp_path)
+    _edit_bundled_store(bundle_path, tmp_path, *_DOWNGRADE, "CREATE TABLE questions (x)")
+    _use_home(monkeypatch, tmp_path / "b")
+
+    result = runner.invoke(app, ["import", str(bundle_path)])
+
+    _assert_refused(result, "could not be upgraded", "tables groundly did not write")
+    assert "Traceback" not in result.output
+
+
+def test_import_refuses_duplicate_options_in_a_question(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_bank()
+    _tamper("PDSS", "UPDATE question_options SET text = ' Mutual Exclusion' WHERE position = 1")
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "bundle question 1 has two options with the same text")
+
+
+def test_import_refuses_duplicate_stems_in_a_topic(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_bank()
+    SubjectStore(subject_dir("PDSS") / "store.db").add_questions(
+        2, [store.QuestionWrite("single", "Other?", None, None, [("a", True), ("b", False)], [2])]
+    )
+    _tamper("PDSS", "UPDATE questions SET stem = 'WHAT does a deadlock need? ' WHERE id = 2")
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "bundle topic 2 has two questions with the same stem")
+
+
+@pytest.mark.parametrize(
+    "statements",
+    [
+        # questions without AUTOINCREMENT: a removed question's id could be reused
+        (
+            "DROP TRIGGER question_citations_ad",
+            "ALTER TABLE questions RENAME TO q_old",
+            (
+                "CREATE TABLE questions (id INTEGER PRIMARY KEY, topic_id INTEGER NOT NULL, "
+                "kind TEXT NOT NULL, stem TEXT NOT NULL, code TEXT, reference_answer TEXT)"
+            ),
+            "INSERT INTO questions SELECT * FROM q_old",
+            "DROP TABLE q_old",
+            _shipped_trigger_sql(),
+        ),
+        # an index groundly does not ship
+        ("CREATE INDEX extra ON questions(stem)",),
+    ],
+)
+def test_import_refuses_question_tables_declared_differently(tmp_path, monkeypatch, statements):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_bank()
+    bundle_path = _export(tmp_path)
+    _edit_bundled_store(bundle_path, tmp_path, *statements)
+    _use_home(monkeypatch, tmp_path / "b")
+
+    result = runner.invoke(app, ["import", str(bundle_path)])
+
+    _assert_refused(result, "groundly does not ship")
+
+
+@pytest.mark.parametrize(
+    "statements",
+    [
+        # a generated column that would make the first length check allocate gigabytes
+        (
+            "DROP TRIGGER question_citations_ad",
+            "ALTER TABLE questions RENAME TO q_old",
+            (
+                "CREATE TABLE questions (id INTEGER PRIMARY KEY AUTOINCREMENT, topic_id INTEGER, "
+                "kind TEXT, stem TEXT GENERATED ALWAYS AS (printf('%.*c', 600, 'x')) VIRTUAL, "
+                "code TEXT, reference_answer TEXT)"
+            ),
+            "DROP TABLE q_old",
+            _shipped_trigger_sql(),
+        ),
+        # a dropped index that turns the bank check quadratic
+        ("DROP INDEX idx_question_options_question",),
+        # a table groundly never writes
+        ("CREATE TABLE extra (x)",),
+    ],
+)
+def test_import_refuses_tables_and_indexes_groundly_does_not_ship(
+    tmp_path, monkeypatch, statements
+):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_bank()
+    bundle_path = _export(tmp_path)
+    _edit_bundled_store(bundle_path, tmp_path, *statements)
+    _use_home(monkeypatch, tmp_path / "b")
+
+    result = runner.invoke(app, ["import", str(bundle_path)])
+
+    _assert_refused(result, "groundly does not ship")
+
+
+def test_a_locked_version_1_store_names_the_lock_not_a_foreign_table(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "store.db"
+    store.create_store(path)
+    raw = sqlite3.connect(path)
+    raw.executescript(";".join(_DOWNGRADE))
+    raw.close()
+    holder = sqlite3.connect(path, timeout=0)
+    holder.execute("BEGIN IMMEDIATE")
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="locked") as raised:
+            store.connect(path)
+        assert not isinstance(raised.value, store.SchemaUpgradeError)
+    finally:
+        holder.rollback()
+        holder.close()
+
+
+def test_import_refuses_a_bank_whose_cited_text_is_too_large(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed_bank()
+    monkeypatch.setattr(store, "MAX_BANK_SOURCE_BYTES", 10)
+
+    result = _export_then_import(tmp_path, monkeypatch)
+
+    _assert_refused(result, "bundle questions cite", "limit is 10")

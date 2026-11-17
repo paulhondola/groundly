@@ -29,7 +29,7 @@ setup:
 }
 ```
 
-Verify with `/mcp` inside Claude Code — `groundly` should list five tools (`list_subjects`, `search`, `get_page`, `outline`, `submit_tree`).
+Verify with `/mcp` inside Claude Code — `groundly` should list nine tools (`list_subjects`, `search`, `get_page`, `outline`, `submit_tree`, `submit_questions`, `remove_questions`, `progress`, `review_answers`).
 
 ### Map a course (topic tree)
 
@@ -44,15 +44,23 @@ Order matters: **connect first, then install the skill.**
 
    It copies one file to `~/.claude/skills/groundly/` and never edits Claude Code's config, which is why connecting stays a separate step. Re-running it is the upgrade path; it asks before replacing a different copy (`-y` skips the question). `groundly skill` shows whether the skill is installed or out of date, and `groundly skill uninstall` removes it.
 3. In Claude Code, say *"map my course"* (naming the subject). The skill reads `outline`, drafts a two-level tree and calls `submit_tree`. If a node is rejected as not matching the course, Claude rewords it in the course's own terms and submits again.
-4. Run `groundly serve` and open the printed URL (default `http://127.0.0.1:8765/`; `--port N` to change it) to see the map. The page is read-only; every node reads "Not started" until quizzes arrive.
+4. Run `groundly serve` and open the printed URL (default `http://127.0.0.1:8765/`; `--port N` to change it) to see the map. Each node shows its mastery; ask your agent to write questions on a topic, then take a test from the node's panel.
 
 If the skill is installed but the server is not connected, it prints the connect command instead of failing. A subject indexed before the topic tree existed answers searches but fails tree calls with a "no such table" error: `groundly drop <SUBJECT>` and index it again once.
 
 The check on each node shows that its topic appears in your course materials; it does not show that Claude's summary is correct.
 
+### Tests (decision 44)
+
+5. Say *"write me ten questions on OpenMP reductions"* (naming the subject). The skill picks the topic from `progress`, writes questions from `search` results citing their chunks, and calls `submit_questions`; rejected items are rewritten from their reason and resubmitted.
+6. On the page, open the topic and press **Start test** (5, 10 or 20 questions), or **Test the whole course**. Choice questions are graded when you submit; written answers wait for review.
+7. Say *"grade my test"*. The skill reads the written answers with `review_answers`, judges each against its reference answer and cited slides, and records a verdict and a comment that the result page then shows. A verdict is final.
+
+The question check shows a question is well formed and about its cited slides, not that its answer key is right. A wrong question can be removed by the number its result shows: ask Claude to remove it.
+
 ## Codex
 
-The five tools work here, but there is no skill setup for Codex yet, so building a topic tree is Claude Code only for now.
+The tools work here, but there is no skill setup for Codex yet, so building a topic tree and writing questions are Claude Code only for now.
 
 Add to `~/.codex/config.toml`:
 

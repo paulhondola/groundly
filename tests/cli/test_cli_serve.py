@@ -95,3 +95,36 @@ def test_page_loads_nothing_external():
 def test_page_links_a_source_only_when_the_server_says_it_is_a_stored_pdf():
     assert "src.pdf === true" in PAGE
     assert '.endsWith(".pdf")' not in PAGE
+
+
+def test_the_page_tells_the_student_how_to_get_questions_and_a_review():
+    assert "Write questions on" in PAGE and "grade my test" in PAGE
+
+
+def test_the_page_never_calls_a_key_verified():
+    assert "verified" not in PAGE.lower()
+
+
+def test_the_page_keeps_a_test_in_session_storage_and_sends_a_random_token():
+    assert "sessionStorage" in PAGE and "crypto.randomUUID()" in PAGE
+
+
+def test_serve_ignores_forwarded_headers(monkeypatch):
+    """The write route compares Origin with the request's own scheme and host; a forwarded
+    header must not be able to change either."""
+    runs, _ = _patch(monkeypatch)
+    assert runner.invoke(app, ["serve"]).exit_code == 0
+    assert runs[0]["proxy_headers"] is False
+
+
+def test_the_page_drops_a_test_whose_question_was_removed():
+    assert '"unknown_question"' in PAGE
+
+
+def test_the_suggested_host_sentence_quotes_the_topic_title():
+    """A title may come from an imported bundle: it reaches the host quoted, as data."""
+    assert '"Write questions on \\"" + title + "\\" for "' in PAGE
+
+
+def test_a_test_dropped_for_a_removed_question_is_never_saved_again():
+    assert "function store() { if (!dead) saveTest(key, test); }" in PAGE

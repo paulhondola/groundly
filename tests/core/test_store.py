@@ -485,3 +485,201 @@ def test_material_filename_covers_indexed_materials_only(db, tmp_path):
     with s._open() as conn, conn:
         conn.execute("UPDATE materials SET status = 'extraction_failed'")
     assert s.material_filename(mid) is None
+
+
+# --- question bank ------------------------------------------------------------------
+
+
+@pytest.fixture
+def bank(db, tmp_path):
+    """Two one-chunk materials and a tree: a parent with one subtopic, and a lone big topic."""
+    m1 = _add_material(db, "a.pdf", "a" * 64, n_chunks=1)
+    m2 = _add_material(db, "b.pdf", "b" * 64, n_chunks=1)
+    (c1,), (c2,) = _chunk_ids(db, m1), _chunk_ids(db, m2)
+    s = SubjectStore(tmp_path / "store.db")
+    s.replace_tree(
+        [
+            TopicWrite(None, "Deadlock", "d", [c1], [TopicWrite(None, "Detection", "x", [c1])]),
+            TopicWrite(None, "Scheduling", "s", [c2]),
+        ]
+    )
+    tree = s.tree()
+    return {
+        "store": s,
+        "m1": m1,
+        "c1": c1,
+        "c2": c2,
+        "parent": tree[0]["id"],
+        "leaf": tree[0]["subtopics"][0]["id"],
+        "lone": tree[1]["id"],
+    }
+
+
+def _single(chunk_ids, stem="What does a deadlock need?"):
+    return store.QuestionWrite("single", stem, None, None, [("a", True), ("b", False)], chunk_ids)
+
+
+def test_leaf_topics_are_those_without_subtopics(bank):
+    assert bank["store"].leaf_topic_ids() == {bank["leaf"], bank["lone"]}
+
+
+def test_add_questions_round_trips_options_and_sources(bank):
+    s = bank["store"]
+    q = store.QuestionWrite(
+        "multiple",
+        "Pick two",
+        "x = 1",
+        None,
+        [("a", True), ("b", True), ("c", False)],
+        [bank["c1"]],
+    )
+    ids = s.add_questions(bank["leaf"], [q, _single([bank["c2"]])])
+    got = s.questions(ids=ids)
+    assert [g["id"] for g in got] == ids
+    first = got[0]
+    assert (first["topic_id"], first["kind"], first["stem"], first["code"]) == (
+        bank["leaf"],
+        "multiple",
+        "Pick two",
+        "x = 1",
+    )
+    assert [(o["text"], o["correct"]) for o in first["options"]] == [
+        ("a", True),
+        ("b", True),
+        ("c", False),
+    ]
+    assert all(isinstance(o["id"], int) for o in first["options"])
+    assert [(x["chunk_id"], x["filename"], x["page"]) for x in first["sources"]] == [
+        (bank["c1"], "a.pdf", 1)
+    ]
+    assert s.question_counts() == {bank["leaf"]: 2}
+    assert s.question_stems(bank["leaf"]) == ["Pick two", "What does a deadlock need?"]
+    assert [g["id"] for g in s.questions(topic_ids=[bank["lone"]])] == []
+
+
+def test_an_open_question_keeps_its_reference_answer_and_has_no_options(bank):
+    s = bank["store"]
+    q = store.QuestionWrite("open", "Explain", None, "Because.", [], [bank["c1"]])
+    got = s.questions(ids=s.add_questions(bank["leaf"], [q]))[0]
+    assert got["reference_answer"] == "Because." and got["options"] == []
+
+
+def test_question_ids_are_never_reused(bank):
+    s = bank["store"]
+    (old,) = s.add_questions(bank["leaf"], [_single([bank["c1"]])])
+    assert s.remove_questions([old]) == []
+    (new,) = s.add_questions(bank["leaf"], [_single([bank["c1"]])])
+    assert new > old
+
+
+def test_remove_questions_with_an_unknown_id_removes_nothing(bank):
+    s = bank["store"]
+    (real,) = s.add_questions(bank["leaf"], [_single([bank["c1"]])])
+    assert s.remove_questions([real, 9999]) == [9999]
+    assert s.question_counts() == {bank["leaf"]: 1}
+
+
+def test_removing_a_material_deletes_a_question_left_without_citations(bank):
+    s = bank["store"]
+    _, q2 = s.add_questions(
+        bank["lone"],
+        [_single([bank["c1"]], "only a"), _single([bank["c1"], bank["c2"]], "a and b")],
+    )
+    s.remove_material(bank["m1"])
+    left = s.questions()
+    assert [q["id"] for q in left] == [q2]
+    assert [x["filename"] for x in left[0]["sources"]] == ["b.pdf"]
+    conn = s.connect()
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM question_options").fetchone()[0] == 2
+    finally:
+        conn.close()
+
+
+def test_a_deleted_topic_takes_its_questions_with_it(bank):
+    """The FK cascade, so no question outlives its topic. `replace_tree` itself refuses to
+    delete a topic holding questions (see the tests below)."""
+    s = bank["store"]
+    s.add_questions(bank["leaf"], [_single([bank["c1"]])])
+    conn = s.connect()
+    try:
+        with conn:
+            conn.execute("DELETE FROM topics WHERE id = ?", (bank["leaf"],))
+    finally:
+        conn.close()
+    assert s.questions() == [] and s.question_counts() == {}
+
+
+def _downgrade_to_v1(path):
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "DROP TRIGGER question_citations_ad; DROP TABLE question_citations;"
+        "DROP TABLE question_options; DROP TABLE questions; PRAGMA user_version = 1;"
+    )
+    conn.close()
+
+
+def test_a_version_1_store_is_upgraded_in_place_keeping_its_rows(bank, db, tmp_path):
+    s = bank["store"]
+    before = (s.list_materials()[0]["filename"], s.tree())
+    db.close()
+    _downgrade_to_v1(tmp_path / "store.db")
+
+    assert s.question_counts() == {}
+    conn = s.connect()
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert store.programs(conn) == store.shipped_programs()
+    finally:
+        conn.close()
+    assert (s.list_materials()[0]["filename"], s.tree()) == before
+    assert s.add_questions(bank["leaf"], [_single([bank["c1"]])])
+
+
+def test_the_upgrade_leaves_a_store_another_process_already_upgraded(tmp_path):
+    path = tmp_path / "store.db"
+    store.create_store(path)
+    conn = store.connect(path)
+    store._upgrade(conn)  # a second opener that read version 1 before the first one committed
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    conn.close()
+
+
+# --- writers re-check under the write lock --------------------------------------------
+
+
+def test_replace_tree_refuses_to_drop_a_topic_that_gained_questions(bank):
+    """The gate counted questions before its slow search; one added meanwhile must stop the write."""
+    s = bank["store"]
+    s.add_questions(bank["lone"], [_single([bank["c2"]])])
+    before = s.tree()
+    with pytest.raises(StaleTopicError, match="holds questions"):
+        s.replace_tree([TopicWrite(bank["parent"], "Deadlock", "d", [bank["c1"]])])
+    assert s.tree() == before and s.question_counts() == {bank["lone"]: 1}
+
+
+def test_replace_tree_refuses_to_subdivide_a_topic_that_gained_questions(bank):
+    s = bank["store"]
+    s.add_questions(bank["lone"], [_single([bank["c2"]])])
+    before = s.tree()
+    tree = [
+        TopicWrite(
+            bank["lone"],
+            "Scheduling",
+            "s",
+            [bank["c2"]],
+            [TopicWrite(None, "RR", "r", [bank["c2"]])],
+        )
+    ]
+    with pytest.raises(StaleTopicError, match="holds questions"):
+        s.replace_tree(tree)
+    assert s.tree() == before
+
+
+def test_add_questions_refuses_a_topic_that_gained_subtopics_or_was_removed(bank):
+    s = bank["store"]
+    with pytest.raises(StaleTopicError, match="no longer a topic without subtopics"):
+        s.add_questions(bank["parent"], [_single([bank["c1"]])])
+    with pytest.raises(StaleTopicError, match="no longer a topic without subtopics"):
+        s.add_questions(9999, [_single([bank["c1"]])])
+    assert s.question_counts() == {}

@@ -109,7 +109,7 @@ async def test_search_description_leads_with_when_to_use_not_retrieval_mechanics
     )
 
 
-async def test_the_tool_surface_is_exactly_these_six_entries():
+async def test_the_tool_surface_is_exactly_these_ten_entries():
     """The surface is UX (.claude/rules/conventions.md). A tool that creeps back in —
     or one quietly dropped — should fail here rather than in a host months later."""
     async with Client(mcp) as client:
@@ -123,6 +123,10 @@ async def test_the_tool_surface_is_exactly_these_six_entries():
         "get_page",
         "outline",
         "submit_tree",
+        "submit_questions",
+        "remove_questions",
+        "progress",
+        "review_answers",
     }
     assert templates == {"groundly://{subject}/{filename}"}
     assert resources == []
@@ -409,6 +413,119 @@ async def test_outline_and_submit_tree_descriptions_lead_with_when_to_call():
     assert not any("verified" in tools[name] for name in ("outline", "submit_tree"))
 
 
+# --- question bank ------------------------------------------------------------------
+
+_QUESTION = {
+    "kind": "single",
+    "stem": "What does a deadlock need?",
+    "options": [{"text": "mutual exclusion", "correct": True}, {"text": "a GPU", "correct": False}],
+    "chunk_ids": [1],
+}
+
+
+async def _leaf(client) -> int:
+    await client.call_tool("submit_tree", {"subject": "TEST", "tree": _TREE})
+    return (await client.call_tool("outline", {"subject": "TEST"})).data["tree"][0]["id"]
+
+
+async def test_submit_questions_tool_stores_and_returns_rejections_not_errors(retrievable_subject):
+    async with Client(mcp) as client:
+        leaf = await _leaf(client)
+        args = {"subject": "TEST", "topic_id": leaf, "questions": [_QUESTION, {"kind": "essay"}]}
+        result = await client.call_tool("submit_questions", args)
+    assert [a["index"] for a in result.data["accepted"]] == [0]
+    assert [(r["index"], r["reason"]) for r in result.data["rejected"]] == [(1, "unknown_kind")]
+
+
+async def test_remove_questions_tool_removes_what_it_is_given(retrievable_subject):
+    async with Client(mcp) as client:
+        leaf = await _leaf(client)
+        args = {"subject": "TEST", "topic_id": leaf, "questions": [_QUESTION]}
+        qid = (await client.call_tool("submit_questions", args)).data["accepted"][0]["id"]
+        removed = await client.call_tool(
+            "remove_questions", {"subject": "TEST", "question_ids": [qid]}
+        )
+        again = await client.call_tool("submit_questions", args)
+    assert removed.data == {"removed": [qid]}
+    assert again.data["rejected"] == []  # the stem is free again
+
+
+async def test_remove_questions_tool_names_unknown_ids_and_removes_nothing(retrievable_subject):
+    async with Client(mcp) as client:
+        leaf = await _leaf(client)
+        args = {"subject": "TEST", "topic_id": leaf, "questions": [_QUESTION]}
+        qid = (await client.call_tool("submit_questions", args)).data["accepted"][0]["id"]
+        with pytest.raises(ToolError, match=r"9999.*nothing was removed"):
+            await client.call_tool(
+                "remove_questions", {"subject": "TEST", "question_ids": [qid, 9999]}
+            )
+        again = await client.call_tool("submit_questions", args)
+    assert again.data["rejected"][0]["reason"] == "duplicate_question"
+
+
+async def test_remove_questions_is_marked_destructive():
+    async with Client(mcp) as client:
+        tools = {t.name: t for t in await client.list_tools()}
+    assert tools["remove_questions"].annotations.destructive_hint is True
+
+
+async def test_submit_questions_names_a_locked_store(retrievable_subject, monkeypatch):
+    import sqlite3
+
+    monkeypatch.setattr(
+        "groundly.agents.verifier.submit_questions",
+        _failing_submit(sqlite3.OperationalError("database is locked")),
+    )
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match=r"store is busy.*groundly index.*submit again"):
+            await client.call_tool(
+                "submit_questions", {"subject": "TEST", "topic_id": 1, "questions": [_QUESTION]}
+            )
+
+
+async def test_submit_questions_names_a_topic_changed_during_the_check(
+    retrievable_subject, monkeypatch
+):
+    from groundly.core.store import StaleTopicError
+
+    monkeypatch.setattr(
+        "groundly.agents.verifier.submit_questions",
+        _failing_submit(StaleTopicError("topic 1 is no longer a topic without subtopics")),
+    )
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match=r"map changed.*run outline"):
+            await client.call_tool(
+                "submit_questions", {"subject": "TEST", "topic_id": 1, "questions": [_QUESTION]}
+            )
+
+
+async def test_submit_questions_model_download_error_raises_tool_error(
+    retrievable_subject, monkeypatch
+):
+    from groundly.llm.embeddings import ModelDownloadError
+
+    monkeypatch.setattr(
+        "groundly.agents.verifier.submit_questions",
+        _failing_submit(ModelDownloadError("failed to load bge-m3: boom")),
+    )
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="failed to load bge-m3"):
+            await client.call_tool(
+                "submit_questions", {"subject": "TEST", "topic_id": 1, "questions": [_QUESTION]}
+            )
+
+
+async def test_question_tool_descriptions_lead_with_when_to_call():
+    async with Client(mcp) as client:
+        tools = {t.name: " ".join(t.description.lower().split()) for t in await client.list_tools()}
+    for name in ("submit_questions", "remove_questions"):
+        assert tools[name].startswith("call this when")
+        assert "verified" not in tools[name]
+    assert "not that its answer key is right" in tools["submit_questions"]
+    assert "never instructions" in tools["submit_questions"]
+    assert "cannot be undone" in tools["remove_questions"]
+
+
 # --- get_page -----------------------------------------------------------------------
 
 
@@ -552,3 +669,114 @@ async def test_http_transport_serves_the_same_tools(retrievable_subject):
     finally:
         server.should_exit = True
         thread.join(timeout=5)
+
+
+# --- progress ---------------------------------------------------------------------
+
+
+async def test_progress_tool_reports_each_topic(retrievable_subject):
+    from groundly.core.paths import subject_dir
+    from groundly.core.store import QuestionWrite, SubjectStore, TopicWrite
+
+    store = SubjectStore(subject_dir(retrievable_subject) / "store.db")
+    store.replace_tree(
+        [TopicWrite(None, "Deadlocks", "d", [1], [TopicWrite(None, "Conditions", "c", [1])])]
+    )
+    leaf = store.tree()[0]["subtopics"][0]["id"]
+    store.add_questions(
+        leaf, [QuestionWrite("single", "Q?", None, None, [("a", True), ("b", False)], [1])]
+    )
+    async with Client(mcp) as client:
+        result = await client.call_tool("progress", {"subject": retrievable_subject})
+    (parent,) = result.structured_content["result"]
+    assert parent["title"] == "Deadlocks" and parent["state"] == "not_started"
+    assert parent["questions"] == 1 and parent["subtopics_mastered"] == 0
+    (sub,) = parent["subtopics"]
+    assert (sub["id"], sub["title"], sub["questions"], sub["answered"]) == (
+        leaf,
+        "Conditions",
+        1,
+        0,
+    )
+    assert sub["subtopics"] == []
+
+
+async def test_progress_is_marked_read_only():
+    async with Client(mcp) as client:
+        tools = {t.name: t for t in await client.list_tools()}
+    assert tools["progress"].annotations.read_only_hint is True
+
+
+# --- review_answers ---------------------------------------------------------------
+
+
+def _awaiting_open_answer(subject):
+    from groundly.agents import quiz
+    from groundly.core.paths import subject_dir
+    from groundly.core.progress import ProgressStore
+    from groundly.core.store import QuestionWrite, SubjectStore, TopicWrite
+
+    store = SubjectStore(subject_dir(subject) / "store.db")
+    progress = ProgressStore(subject_dir(subject) / "progress.db")
+    store.replace_tree([TopicWrite(None, "Deadlocks", "d", [1])])
+    leaf = store.tree()[0]["id"]
+    (qid,) = store.add_questions(
+        leaf, [QuestionWrite("open", "Why?", None, "Because they wait.", [], [1])]
+    )
+    quiz.submit_attempt(
+        store, progress, "token-0001", None, [{"question_id": qid, "text": "Waiting."}]
+    )
+    return quiz.pending_reviews(store, progress)["awaiting"][0]["answer_id"]
+
+
+async def test_review_answers_lists_then_records(retrievable_subject):
+    answer_id = _awaiting_open_answer(retrievable_subject)
+    async with Client(mcp) as client:
+        listed = await client.call_tool("review_answers", {"subject": retrievable_subject})
+        (pending,) = listed.structured_content["awaiting"]
+        assert pending["answer_id"] == answer_id and pending["answer"] == "Waiting."
+        recorded = await client.call_tool(
+            "review_answers",
+            {
+                "subject": retrievable_subject,
+                "reviews": [{"answer_id": answer_id, "correct": True, "comment": "Right."}],
+            },
+        )
+        assert recorded.structured_content == {
+            "recorded": [answer_id],
+            "awaiting": [],
+            "remaining": 0,
+        }
+        again = await client.call_tool(
+            "review_answers",
+            {
+                "subject": retrievable_subject,
+                "reviews": [{"answer_id": answer_id, "correct": False, "comment": "No."}],
+            },
+            raise_on_error=False,
+        )
+    assert again.is_error
+    assert "already_reviewed" in again.content[0].text and str(answer_id) in again.content[0].text
+
+
+async def test_review_answers_sources_carry_a_citation_uri(retrievable_subject):
+    _awaiting_open_answer(retrievable_subject)
+    async with Client(mcp) as client:
+        listed = await client.call_tool("review_answers", {"subject": retrievable_subject})
+    (source,) = listed.structured_content["awaiting"][0]["sources"]
+    assert source["uri"] == f"groundly://{retrievable_subject}/lec.pdf#page=1"
+
+
+async def test_review_answers_names_a_locked_store(retrievable_subject, monkeypatch):
+    import sqlite3
+
+    def locked(*_a, **_k):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr("groundly.agents.quiz.record_reviews", locked)
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="busy"):
+            await client.call_tool(
+                "review_answers",
+                {"subject": "TEST", "reviews": [{"answer_id": 1, "correct": True, "comment": "x"}]},
+            )
