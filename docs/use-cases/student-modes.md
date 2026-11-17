@@ -59,12 +59,12 @@ Criteria 1, 12, 13 and the end-to-end half of 11 are manual and recorded above. 
 2. **Gate.** `submit_questions(subject, topic_id, questions)` checks each question on its own: structure first, then that the cited ids resolve and that re-retrieving the question's own text finds one of them. Passing questions are stored; the rest come back with a machine-readable reason. Only a topic without subtopics takes questions.
 3. **Take.** On the page the student picks a subtopic, a big topic or the whole course and a length of 5, 10 or 20. Groundly draws from the bank, unanswered and last-wrong questions first, and shows one question per screen with no answer key in the browser.
 4. **Submit.** One request grades the choice questions and saves the attempt to `progress.db`. The result shows the score, each right answer and its source page. An open answer waits for review.
-5. **Review.** The student says "grade my test". The host reads the answers awaiting review with `review_answers`, judges each against its reference answer and cited chunks, and records a verdict and a comment that the result then shows.
+5. **Review.** The student says "grade my test" (or presses **Grade now** on the result, below). The host reads the answers awaiting review with `review_answers`, judges each against its reference answer and cited chunks, and records a verdict and a comment that the result then shows.
 6. **Mastery.** A topic is mastered at 9 or more correct of its last 10 graded answers, with at least 10. A big topic is mastered when all its subtopics are. The map shows each node's state.
 
 **Alternate / error flows**
 
-- **A1 — No questions in scope:** the page shows the sentence to say to the host.
+- **A1 — No questions in scope:** the page shows the sentence to say to the host, or, with Claude Code on PATH, a **Write questions** button (below).
 - **A2 — A cited material is removed:** a question left without citations is deleted; one that still cites another material stays.
 - **A3 — A re-map would drop or subdivide a topic holding questions:** `submit_tree` rejects it with `topic_has_questions`; the host keeps the topic or removes its questions first.
 - **A4 — A wrong question:** the result shows each question's number; the host removes it with `remove_questions`. Recorded answers stay.
@@ -94,6 +94,48 @@ Criteria 1, 12, 13 and the end-to-end half of 11 are manual and recorded above. 
 15. A recorded verdict appears on the result with its comment as text, the score stops being provisional, and mastery now counts the answer.
 16. A second verdict for the same answer and an unknown answer id are refused, and a call with one bad verdict records none.
 17. **End to end on Claude Code:** "write me ten questions on OpenMP reductions", then a test on the page, then "grade my test", with no other instruction.
+
+## Page chores (decision 46)
+
+**Actor:** student (`groundly serve` or `groundly start`) pressing a button; the student's own Claude Code, started headless by the page, doing the work through Groundly's tools. Full design in [`2026-11-17-page-chores-design.md`](../superpowers/specs/2026-11-17-page-chores-design.md).
+**Preconditions:** the subject has a topic tree; `claude` is on PATH and logged in; macOS or Linux.
+
+**Main flow**
+
+1. **Write.** In a topic's panel the student presses **Write questions** (on a subtopic) or **Write questions for its subtopics** (on a big topic). The button shows only while that subtopic, or one of the big topic's subtopics, has fewer than 10 questions.
+2. **Run.** The page starts one isolated `claude -p` run with Groundly's tools only and a fixed prompt naming the subject and topic id. The run follows the skill's "Write questions for a topic" flow and stores what passes `submit_questions`, bringing each thin subtopic in scope to 10.
+3. **Watch.** A strip at the top of the view shows the run's steps in plain words and a **Stop** button; every run button is disabled meanwhile. A reload re-attaches to the running run.
+4. **End.** The strip shows the run's summary (at most three sentences, as text) and the view re-reads the map, so the panel shows the new question count.
+5. **Grade.** On a result awaiting review the student presses **Grade now**. One run reviews every written answer in the subject that awaits review through `review_answers`, until `remaining` is 0, and the result re-reads with the verdicts.
+
+**Alternate / error flows**
+
+- **A1 — No `claude` on PATH, or Windows:** no button shows and the page shows the phrases to say to the host, as before (`no_host`, `unsupported_platform`).
+- **A2 — A run in progress:** a second start answers `run_in_progress` and spawns nothing; the page shows the reason in the strip.
+- **A3 — The isolation check fails:** the init event lists a tool not prefixed `mcp__groundly__` or a server other than a connected `groundly`; the run is killed before its first turn and ends `failed` with `isolation_failed`, naming what appeared (`groundly_not_connected` when Groundly's server did not connect).
+- **A4 — Not logged in, or Claude Code fails:** the run ends `failed`, with the error result's text or the exit code and the last of stderr.
+- **A5 — Stop, or the 20-minute timeout:** the run ends `stopped` or `failed` (`timeout`); what the gates already stored stays.
+- **A6 — Nothing to do:** a Write on a scope where every subtopic has 10 or more questions answers `nothing_to_write`; a Grade with nothing awaiting review answers `nothing_to_grade`.
+
+**Out of scope:** chat on the page or free text into a run, a Map button, a whole-course button or a queue of runs, hosts other than Claude Code, stored run history. Nothing calls a run's questions or verdicts verified.
+
+**Acceptance criteria** (1–12 met by tests and a browser check with a fake `claude`; 13 awaits Paul)
+
+Tests use a fake `claude` executable put on PATH that prints canned `stream-json`. No test calls a model.
+
+1. With `claude` available, a thin subtopic's panel shows **Write questions**. A click starts one run, and the page shows its steps and then its summary. The panel then shows the new question count.
+2. On a big topic, the run's prompt names the big topic. A big topic whose subtopics all have 10 or more questions shows no button, and the route refuses it with `nothing_to_write`.
+3. A provisional result shows **Grade now**. When the run ends, the result re-fetches. The prompt asks for `review_answers` until `remaining` is 0.
+4. With `claude` not on PATH, `available` is false, no run button shows, and the phrases show as today. The start route answers `no_host`.
+5. A start while a run is running answers `run_in_progress` and spawns nothing.
+6. The start route refuses each of these and spawns nothing: a foreign or missing `Origin`, a non-JSON body, an unknown subject, an unknown topic, a kind other than `write` or `grade`, a `topic_id` that is not an integer.
+7. The spawned argv holds `--tools ""`, `--setting-sources ""`, `--strict-mcp-config`, `--permission-mode dontAsk`, the flow's allowlist (a write run's lacks `remove_questions`, `submit_tree` and `review_answers`) and the packaged `SKILL.md` path. It is exec'd with no shell. A topic titled `<script>` or "ignore previous instructions" does not appear in the prompt.
+8. Under `start`, the MCP config is `/mcp` on the process's own port. Under `serve`, it is the same installation's `groundly mcp`.
+9. A fake `claude` whose init event lists a built-in tool (e.g. `Bash`), or an MCP server other than `groundly`, is killed before its first turn and ends `failed` with `isolation_failed`. On Windows, `available` is false with `unsupported_platform`.
+10. **Stop** ends the run with status `stopped`. A run over the timeout ends `failed` with a cause that names the timeout. A non-zero exit ends `failed` with the exit's message.
+11. Steps, a summary and an error containing `<script>` render as text.
+12. The page still loads no model and writes no rows to `store.db`.
+13. **End to end on Claude Code (human):** on apd, **Write questions for its subtopics** on one big topic fills its thin subtopics, then a test is taken, then **Grade now** records verdicts, with nothing typed into a chat.
 
 ## Ideas, not planned
 

@@ -75,6 +75,7 @@ Everything needs only the local models: no path reaches a provider, and none nee
 | Optional HTTP | `groundly mcp --http` | user-run; MCP over Streamable HTTP; binds **127.0.0.1 only**; exists so multiple hosts share one bge-m3 load |
 | Page + HTTP MCP | `groundly start` | user-run; one process, **127.0.0.1 only**, default 8765: the page at `/` and MCP over Streamable HTTP at `/mcp`, reachable as `groundly.localhost`; every host session shares one model load (decision 45) |
 | Topic-tree page | `groundly serve` | user-run; Starlette on uvicorn, **127.0.0.1 only**, all subjects from one process, reads per request; **loads no model and writes no rows to `store.db`**; its one write is a submitted test attempt to `progress.db`, graded in `agents/quiz.py` |
+| Page run | the student's `claude -p`, spawned by `serve` or `start` | at most one at a time, from a Write questions or Grade now click; ends with its result, **Stop**, a 20-minute timeout or the page process exiting; sees only Groundly's tools, reached at `/mcp` under `start` or through its own `groundly mcp` under `serve` (decision 46) |
 
 Multiple processes may open the same `store.db` (an `index` run while a host-spawned MCP process answers). Rules: **WAL + busy_timeout** on every connection; **lazy model loading** (never at MCP spawn — hosts expect fast handshakes).
 
@@ -86,3 +87,4 @@ Multiple processes may open the same `store.db` (an `index` run while a host-spa
 - **A gate checks every write of host-generated content**: the topic gate for the tree, the question gate for questions, whoever generated it.
 - **The page shows; it never decides.** Grading and mastery are `agents/quiz.py`'s, never the browser's, and a drawn test carries no key. Titles, summaries, questions and chunk text are layer 3 and are inserted as text only.
 - **The host composes answers.** Groundly returns cited chunks and verifies what comes back; it runs no answer-generation loop of its own (decision 33).
+- **The page may start the host, never be it.** A Write questions or Grade now click spawns the student's own Claude Code with Groundly's tools only and the init event checked fail-closed; Groundly passes it no key, no model and no layer-3 text, and the run writes through the same gates as a chat session (decision 46).

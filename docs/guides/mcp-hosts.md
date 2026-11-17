@@ -58,6 +58,15 @@ The check on each node shows that its topic appears in your course materials; it
 
 The question check shows a question is well formed and about its cited slides, not that its answer key is right. A wrong question can be removed by the number its result shows: ask Claude to remove it.
 
+### Buttons instead of phrases (decision 46)
+
+When `claude` is on your PATH (macOS or Linux), the page does steps 5 and 7 for you: **Write questions** in a subtopic's panel brings it to 10 questions, **Write questions for its subtopics** on a big topic brings each of its subtopics below 10 up to 10, and **Grade now** on a result reviews every written answer awaiting review. The page starts your own Claude Code in the background with Groundly's tools only (none of your hooks, plugins, CLAUDE.md or other servers), shows its steps with a **Stop** button, then its summary, and reloads the map or result. Mapping and explaining stay in the chat.
+
+- **Each click uses your Claude plan**, like asking in the chat. One run at a time; Stop keeps what was already stored.
+- **The model** is Claude Code's built-in default; your `model` setting is not read. For a cheaper model, start Groundly with `ANTHROPIC_MODEL` set, e.g. `ANTHROPIC_MODEL=sonnet groundly start`.
+- **No buttons** without `claude` on the PATH Groundly was started with, or on Windows: the page shows the phrases to say instead.
+- A run that fails names why: not logged in, Groundly's server not connecting, the isolation check, or the 20-minute limit.
+
 ## Codex
 
 The tools work here, but there is no skill setup for Codex yet, so building a topic tree and writing questions are Claude Code only for now.
