@@ -11,8 +11,8 @@ function el(tag, text, cls) {
 
 const app = document.getElementById("app");
 
-async function getJSON(url) {
-  const res = await fetch(url);
+async function getJSON(url, init) {
+  const res = await fetch(url, init);
   let body = null;
   try { body = await res.json(); } catch (_) { /* non-JSON failure body */ }
   if (!res.ok || (body && body.error)) {
@@ -38,6 +38,137 @@ function button(text, cls, onClick) {
   b.type = "button";
   if (onClick) b.addEventListener("click", onClick);
   return b;
+}
+
+function postJSON(url, body) {
+  return getJSON(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+}
+
+// A page run is the student's own Claude Code, started headless for one chore (decision 46).
+// One strip serves the whole page: each view places it, the poll updates it in place, and the
+// run's steps, summary and error reach it as text only.
+const TARGET = 10; // a topic with fewer questions than this is worth a Write click
+const POLL_MS = 2000;
+const KIND_WORDS = { write: "Writing questions", grade: "Grading written answers" };
+// `watched` is the run this tab started or re-attached to; `message` is the last outcome shown.
+const host = { available: false, run: null, watched: null, starting: false, message: null, onEnd: null, timer: null };
+
+const strip = el("section", undefined, "run");
+strip.setAttribute("aria-label", "Agent run");
+const stripTitle = el("h2");
+const stripBar = el("progress"); // indeterminate while the run works; not a live region
+stripBar.setAttribute("aria-label", "Working");
+const stripSteps = el("ol", undefined, "steps");
+const stripStop = button("Stop", "", stopRun);
+const stripOutcome = el("p", "", "outcome");
+stripOutcome.setAttribute("role", "status"); // announces the outcome once, politely
+strip.append(stripTitle, stripBar, stripSteps, stripStop, stripOutcome);
+
+// The run state, or null when the page server cannot be reached.
+async function runInfo() {
+  try { return await getJSON("/api/runs"); } catch (_) { return null; }
+}
+
+function busy() {
+  return host.starting || Boolean(host.run && host.run.status === "running");
+}
+
+function watchedRun() {
+  return host.run && host.run.id === host.watched ? host.run : null;
+}
+
+function renderStrip() {
+  const r = watchedRun();
+  const working = r ? r.status === "running" : host.starting;
+  strip.hidden = !r && !host.starting && !host.message;
+  stripTitle.textContent = r ? KIND_WORDS[r.kind] + " · " + r.subject : host.starting ? "Starting your agent" : "Agent run";
+  stripBar.hidden = !working;
+  stripStop.hidden = !(r && working);
+  stripSteps.replaceChildren(...(r ? r.steps.slice(-6).map((s) => el("li", s)) : []));
+  for (const b of document.querySelectorAll("button.run-action")) b.disabled = busy();
+}
+
+function showOutcome(text) {
+  host.message = text;
+  stripOutcome.textContent = text;
+  renderStrip();
+}
+
+function outcomeText(r) {
+  if (r.status === "done") return r.summary || "Done.";
+  if (r.status === "stopped") return "Stopped. What was already stored stays.";
+  return "Failed: " + (r.error ? r.error.detail : "the run ended without a result");
+}
+
+function poll(delay = POLL_MS) {
+  clearTimeout(host.timer);
+  host.timer = setTimeout(async () => {
+    const info = await runInfo();
+    if (!info) {
+      host.run = null;
+      return showOutcome("Lost the page server — reload the page when it is back.");
+    }
+    host.run = info.run;
+    const r = watchedRun();
+    if (r && r.status === "running") { renderStrip(); return poll(); }
+    renderStrip();
+    // Re-render first, so the outcome lands in a status region that is already on the page.
+    if (host.onEnd) await host.onEnd();
+    showOutcome(r ? outcomeText(r) : "Lost track of the run — the page server restarted.");
+  }, delay);
+}
+
+// Places the strip for a view: `info` is runInfo()'s answer, `onEnd` re-renders the view when
+// the run ends. A run that is working when the view loads is re-attached to.
+function runStrip(info, onEnd) {
+  host.available = Boolean(info && info.available);
+  host.onEnd = onEnd;
+  if (info) host.run = info.run;
+  if (info && info.run && info.run.status === "running" && info.run.id !== host.watched) {
+    host.watched = info.run.id;
+    poll();
+  }
+  renderStrip();
+  return strip;
+}
+
+async function startRun(subject, body) {
+  host.starting = true;
+  host.watched = null;
+  host.message = null;
+  stripOutcome.textContent = "";
+  renderStrip();
+  try {
+    host.run = await postJSON(api(subject, "/runs"), body);
+    host.watched = host.run.id;
+    poll();
+  } catch (e) {
+    host.message = "Could not start: " + e.message;
+    stripOutcome.textContent = host.message;
+  }
+  host.starting = false;
+  renderStrip();
+}
+
+async function stopRun() {
+  stripStop.disabled = true;
+  try { await postJSON("/api/runs/stop", {}); } catch (e) { showOutcome("Could not stop: " + e.message); }
+  stripStop.disabled = false;
+  poll(0);
+}
+
+function runButton(text, subject, body) {
+  const b = button(text, "run-action", () => startRun(subject, body));
+  b.disabled = busy();
+  return b;
+}
+
+// Write is offered while any topic in scope (a leaf, or a big topic's subtopics) is thin.
+function writeButton(subject, node) {
+  const leaves = node.subtopics.length ? node.subtopics : [node];
+  if (!host.available || !leaves.some((l) => (l.progress ? l.progress.questions : 0) < TARGET)) return null;
+  const label = node.subtopics.length ? "Write questions for its subtopics" : "Write questions";
+  return runButton(label, subject, { kind: "write", topic_id: node.id });
 }
 
 // How far a topic has got, in words. A parent counts its mastered subtopics; a leaf its last
@@ -151,9 +282,10 @@ function renderPanel(panel, subject, node, onClose) {
   const count = node.progress ? node.progress.questions : 0;
   if (count) {
     panel.append(el("p", count + (count === 1 ? " question" : " questions")), testChooser(subject, node.id, count));
-  } else {
-    panel.append(askForQuestions(node.title, subject));
   }
+  const write = writeButton(subject, node);
+  if (write) panel.append(write);
+  else if (!count) panel.append(askForQuestions(node.title, subject));
   if (node.summary) panel.append(el("p", node.summary, "summary"));
   panel.append(el("h3", "Sources"));
   if (!node.sources.length) {
@@ -174,7 +306,8 @@ function renderPanel(panel, subject, node, onClose) {
   panel.append(list);
 }
 
-async function showTree(subject) {
+// `reopen` is the id of a topic whose panel opens again, after a run's end re-renders the map.
+async function showTree(subject, reopen) {
   document.title = subject + " · Groundly";
   let tree, title;
   try { ({ tree, title } = await getJSON(api(subject, "/tree"))); }
@@ -183,11 +316,14 @@ async function showTree(subject) {
     app.prepend(backLink());
     return;
   }
+  let openId = null;
+  const runBox = runStrip(await runInfo(), () => showTree(subject, openId));
 
   document.title = (title || subject) + " · Groundly";
   app.replaceChildren(backLink(), el("h1", title || subject));
   // A bundle chooses its own title, so the page always names the subject it really is.
   if (title) app.append(el("p", subject, "muted"));
+  app.append(runBox);
   if (tree.some((t) => t.progress && t.progress.questions)) {
     const whole = el("a", "Test the whole course", "primary");
     whole.href = pageURL(subject, "/test?n=10");
@@ -214,6 +350,7 @@ async function showTree(subject) {
   function closePanel() {
     const node = selected;
     selected = null;
+    openId = null;
     node.setAttribute("aria-pressed", "false");
     panel.classList.remove("open");
     panel.replaceChildren(placeholder);
@@ -223,8 +360,10 @@ async function showTree(subject) {
     if (e.key === "Escape" && selected) closePanel();
   });
 
+  let reopened = null;
   function node(n, cls) {
     const b = el("button", n.title, "node " + cls + (n.sources.length ? "" : " nosrc"));
+    if (n.id === reopen) reopened = b;
     if (!n.sources.length) b.append(el("span", "sources removed", "flag"));
     if (n.progress && n.progress.state !== "not_started") {
       b.append(el("span", progressLine(n.progress), "flag state-" + n.progress.state));
@@ -234,6 +373,7 @@ async function showTree(subject) {
     b.addEventListener("click", () => {
       if (selected) selected.setAttribute("aria-pressed", "false");
       selected = b;
+      openId = n.id;
       b.setAttribute("aria-pressed", "true");
       renderPanel(panel, subject, n, closePanel);
       panel.classList.add("open");
@@ -270,6 +410,7 @@ async function showTree(subject) {
   const layout = el("div", undefined, "layout");
   layout.append(spine, panel);
   app.append(layout);
+  if (reopened) reopened.click();
   showHistory(subject);
 }
 
@@ -494,7 +635,8 @@ async function showTest(subject) {
 
 const STATE_WORDS = { correct: "Correct", wrong: "Wrong", awaiting: "Awaiting review", unreviewable: "Not reviewed" };
 
-function answerView(subject, a, i) {
+// With `canGrade`, the result offers Grade now, so an awaiting card needs no phrase to say.
+function answerView(subject, a, i, canGrade) {
   const card = el("article", undefined, "answer state-" + a.state);
   const head = el("div", undefined, "answer-head");
   head.append(el("strong", (i + 1) + ". " + STATE_WORDS[a.state]), el("span", "Question #" + a.question_id, "muted"));
@@ -510,9 +652,11 @@ function answerView(subject, a, i) {
     card.append(el("h4", "Your answer"), el("p", a.text && a.text.trim() ? a.text : "No answer", "said"),
       el("h4", "Reference answer"), el("p", a.reference_answer, "said"));
     if (a.state === "awaiting") {
-      const wait = el("p", "Awaiting review — say ", "muted");
-      wait.append(el("code", "grade my test"), " to your agent.");
-      card.append(wait);
+      if (!canGrade) {
+        const wait = el("p", "Awaiting review — say ", "muted");
+        wait.append(el("code", "grade my test"), " to your agent.");
+        card.append(wait);
+      }
     } else if (a.comment) {
       card.append(el("h4", "Review"), el("p", a.comment, "said"));
     }
@@ -538,12 +682,19 @@ async function showResult(subject, attemptId) {
     result = await getJSON(api(subject, "/attempts/" + attemptId));
     info = await scopeInfo(subject, result.scope_topic_id);
   } catch (e) { showError(e.message); app.prepend(back); return; }
+  const runBox = runStrip(await runInfo(), () => showResult(subject, attemptId));
   document.title = "Result · " + info.course + " · Groundly";
   const s = result.score;
   const parts = [back, el("h1", info.course), el("p", info.scope + " · " + result.submitted_at, "muted"),
-    el("p", s.correct + " / " + s.graded + " correct", "score")];
-  if (result.provisional) parts.push(el("p", "provisional, " + s.awaiting + " awaiting review", "muted"));
-  result.answers.forEach((a, i) => parts.push(answerView(subject, a, i)));
+    runBox, el("p", s.correct + " / " + s.graded + " correct", "score")];
+  const canGrade = result.provisional && host.available;
+  if (result.provisional) {
+    const row = el("div", undefined, "start");
+    row.append(el("p", "provisional, " + s.awaiting + " awaiting review", "muted"));
+    if (canGrade) row.append(runButton("Grade now", subject, { kind: "grade" }));
+    parts.push(row);
+  }
+  result.answers.forEach((a, i) => parts.push(answerView(subject, a, i, canGrade)));
   if (result.topics.length) {
     const list = el("ul", undefined, "history");
     for (const t of result.topics) {

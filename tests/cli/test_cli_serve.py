@@ -152,3 +152,12 @@ def test_the_suggested_host_sentence_quotes_the_topic_title():
 
 def test_a_test_dropped_for_a_removed_question_is_never_saved_again():
     assert "function store() { if (!dead) saveTest(key, test); }" in PAGE
+
+
+def test_page_starts_runs_through_the_api_only():
+    assert "/api/runs" in PAGE and '"/runs"' in PAGE and "/api/runs/stop" in PAGE
+    assert "Write questions for its subtopics" in PAGE and "Grade now" in PAGE
+
+
+def test_page_keeps_the_phrases_as_the_fallback():
+    assert "Say to your agent" in PAGE and "grade my test" in PAGE
