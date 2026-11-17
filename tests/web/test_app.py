@@ -553,3 +553,62 @@ def test_the_map_still_shows_when_progress_db_is_unreadable(client, seeded):
     (subject_dir("PDSS") / "progress.db").unlink()
     r = client.get("/api/subjects/PDSS/tree")
     assert r.status_code == 200 and r.json()["tree"][0]["progress"] is None
+
+
+def test_groundly_localhost_host_header_is_accepted(client, seeded):
+    r = client.get("/api/subjects", headers={"Host": "groundly.localhost:8765"})
+    assert r.status_code == 200
+
+
+def test_submit_accepts_the_groundly_localhost_origin(client, seeded):
+    _, (q, *_) = _bank(seeded)
+    headers = {"Host": "groundly.localhost:8765", "Origin": "http://groundly.localhost:8765"}
+    assert _post(client, _attempt(q, _key(q)), headers=headers).status_code == 201
+
+
+# `groundly start`: the page with the MCP app mounted after it, as the CLI composes them.
+INIT = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "t", "version": "1"},
+    },
+}
+MCP_HEADERS = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+
+
+@pytest.fixture
+def start_client(seeded):
+    from groundly.mcp.server import mcp
+    from groundly.web.app import HOSTS
+
+    mcp_app = mcp.http_app(path="/mcp", host_origin_protection="auto", allowed_hosts=HOSTS)
+    with TestClient(create_app(mcp_app), base_url="http://groundly.localhost:8765") as c:
+        yield c
+
+
+def test_start_app_serves_page_and_mcp(start_client):
+    page = start_client.get("/")
+    assert page.status_code == 200 and "content-security-policy" in page.headers
+    r = start_client.post("/mcp", json=INIT, headers=MCP_HEADERS)
+    assert r.status_code == 200
+    assert "content-security-policy" not in r.headers
+
+
+def test_start_app_mcp_refuses_foreign_host_and_origin(start_client):
+    foreign_host = {**MCP_HEADERS, "Host": "evil.com"}
+    foreign_origin = {**MCP_HEADERS, "Origin": "http://evil.com"}
+    assert start_client.post("/mcp", json=INIT, headers=foreign_host).status_code == 400
+    assert start_client.post("/mcp", json=INIT, headers=foreign_origin).status_code == 403
+
+
+def test_start_app_keeps_the_page_405s(start_client):
+    """The mounted MCP app must not take over wrong-method requests on page routes."""
+    for path in ("/", "/api/subjects", "/api/subjects/PDSS/tree"):
+        for method in ("post", "put", "patch", "delete"):
+            assert getattr(start_client, method)(path).status_code == 405, (method, path)
+    for method in ("put", "patch", "delete"):
+        assert getattr(start_client, method)("/api/subjects/PDSS/attempts").status_code == 405

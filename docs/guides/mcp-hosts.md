@@ -44,7 +44,7 @@ Order matters: **connect first, then install the skill.**
 
    It copies one file to `~/.claude/skills/groundly/` and never edits Claude Code's config, which is why connecting stays a separate step. Re-running it is the upgrade path; it asks before replacing a different copy (`-y` skips the question). `groundly skill` shows whether the skill is installed or out of date, and `groundly skill uninstall` removes it.
 3. In Claude Code, say *"map my course"* (naming the subject). The skill reads `outline`, drafts a two-level tree and calls `submit_tree`. If a node is rejected as not matching the course, Claude rewords it in the course's own terms and submits again.
-4. Run `groundly serve` and open the printed URL (default `http://127.0.0.1:8765/`; `--port N` to change it) to see the map. Each node shows its mastery; ask your agent to write questions on a topic, then take a test from the node's panel.
+4. Run `groundly serve` (or `groundly start`, below) and open the printed URL (default `http://groundly.localhost:8765/`, or `http://127.0.0.1:8765/`; `--port N` to change it) to see the map. Each node shows its mastery; ask your agent to write questions on a topic, then take a test from the node's panel.
 
 If the skill is installed but the server is not connected, it prints the connect command instead of failing. A subject indexed before the topic tree existed answers searches but fails tree calls with a "no such table" error: `groundly drop <SUBJECT>` and index it again once.
 
@@ -72,6 +72,22 @@ args = ["mcp"]
 
 (Newer Codex CLI versions also accept `codex mcp add groundly -- groundly
 mcp`.)
+
+## Several sessions: `groundly start`
+
+Each stdio connection spawns its own Groundly, and each loads the models on its first search. When several Claude Code sessions use Groundly at once (say, one per subject), run one process for all of them instead:
+
+```sh
+groundly start                   # page at http://groundly.localhost:8765/, MCP at http://127.0.0.1:8765/mcp
+```
+
+It binds 127.0.0.1 only, opens the page, and prints the connect command:
+
+```sh
+claude mcp add --transport http groundly http://127.0.0.1:8765/mcp
+```
+
+Keep it running while you work; the tools fail while it is stopped. If the page's `groundly.localhost` address does not open, use the printed `127.0.0.1` one. The MCP URL uses the IP on purpose: Claude Code looks names up through the operating system, which on some Linux setups asks outside DNS about `*.localhost`.
 
 ## HTTP transport (`groundly mcp --http`)
 

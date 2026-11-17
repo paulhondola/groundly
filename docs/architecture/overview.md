@@ -9,7 +9,7 @@ There is no server to deploy. The product is a local **core library** with three
 ```
 groundly/
 ├── cli/         # typer verbs: index, list, title, remove, drop, search, import, export,
-│             #   config, models, skill, mcp (stdio, or --http), serve
+│             #   config, models, skill, mcp (stdio, or --http), serve, start
 ├── mcp/         # FastMCP tool definitions over the core (stdio + streamable HTTP)
 ├── web/         # Starlette app + one HTML file: the topic-tree and test page
 ├── agents/      # the gates — the topic gate (submit_tree) and the question gate (submit_questions); nothing unchecked enters store.db
@@ -73,6 +73,7 @@ Everything needs only the local models: no path reaches a provider, and none nee
 | CLI verbs | `groundly index/search/import/export/...` | one-shot, core in-process, exits |
 | MCP stdio | `groundly mcp` | **spawned and killed by the host agent** |
 | Optional HTTP | `groundly mcp --http` | user-run; MCP over Streamable HTTP; binds **127.0.0.1 only**; exists so multiple hosts share one bge-m3 load |
+| Page + HTTP MCP | `groundly start` | user-run; one process, **127.0.0.1 only**, default 8765: the page at `/` and MCP over Streamable HTTP at `/mcp`, reachable as `groundly.localhost`; every host session shares one model load (decision 45) |
 | Topic-tree page | `groundly serve` | user-run; Starlette on uvicorn, **127.0.0.1 only**, all subjects from one process, reads per request; **loads no model and writes no rows to `store.db`**; its one write is a submitted test attempt to `progress.db`, graded in `agents/quiz.py` |
 
 Multiple processes may open the same `store.db` (an `index` run while a host-spawned MCP process answers). Rules: **WAL + busy_timeout** on every connection; **lazy model loading** (never at MCP spawn — hosts expect fast handshakes).

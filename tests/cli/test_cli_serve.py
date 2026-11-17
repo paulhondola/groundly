@@ -4,6 +4,7 @@ import errno
 import socket
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from groundly.cli import app
@@ -34,8 +35,27 @@ def test_serve_binds_loopback_and_opens_browser(monkeypatch):
     result = runner.invoke(app, ["serve"])
     assert result.exit_code == 0, result.output
     assert [(r["host"], r["port"]) for r in runs] == [("127.0.0.1", 8765)]
-    assert opened == ["http://127.0.0.1:8765/"]
-    assert "http://127.0.0.1:8765/" in result.output
+    assert runs[0]["proxy_headers"] is False
+    assert opened == ["http://groundly.localhost:8765/"]
+    assert "http://127.0.0.1:8765/" in result.output  # fallback when *.localhost won't resolve
+
+
+def test_start_binds_loopback_opens_page_and_prints_both_urls(monkeypatch):
+    from groundly.cli.app import console
+
+    runs, opened = _patch(monkeypatch)
+    monkeypatch.setattr(console, "width", 60)  # narrower than the connect line
+    result = runner.invoke(app, ["start"])
+    assert result.exit_code == 0, result.output
+    assert [(r["host"], r["port"]) for r in runs] == [("127.0.0.1", 8765)]
+    assert runs[0]["proxy_headers"] is False
+    assert opened == ["http://groundly.localhost:8765/"]
+    # MCP clients get the IP: they use the OS resolver, which may send *.localhost upstream
+    assert "groundly.localhost:8765/mcp" not in result.output
+    # one unwrapped line, so it pastes as a command at any terminal width
+    connect = "claude mcp add --transport http groundly http://127.0.0.1:8765/mcp"
+    assert connect in result.output.splitlines()[-1]
+    assert "http://127.0.0.1:8765/" in result.output  # fallback when *.localhost won't resolve
 
 
 def test_serve_port_flag(monkeypatch):
@@ -43,16 +63,17 @@ def test_serve_port_flag(monkeypatch):
     result = runner.invoke(app, ["serve", "--port", "9123"])
     assert result.exit_code == 0, result.output
     assert runs[0]["port"] == 9123
-    assert opened == ["http://127.0.0.1:9123/"]
+    assert opened == ["http://groundly.localhost:9123/"]
 
 
-def test_serve_names_a_busy_port_and_the_flag(monkeypatch):
+@pytest.mark.parametrize("verb", ["serve", "start"])
+def test_a_busy_port_is_named_with_the_flag(monkeypatch, verb):
     runs, opened = _patch(monkeypatch, probe_free=False)
     with socket.socket() as held:
         held.bind(("127.0.0.1", 0))
         held.listen()
         port = held.getsockname()[1]
-        result = runner.invoke(app, ["serve", "--port", str(port)])
+        result = runner.invoke(app, [verb, "--port", str(port)])
     assert result.exit_code == 1
     assert str(port) in result.output and "--port" in result.output
     assert "Traceback" not in result.output
