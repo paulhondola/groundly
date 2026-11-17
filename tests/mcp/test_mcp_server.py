@@ -126,6 +126,7 @@ async def test_the_tool_surface_is_exactly_these_ten_entries():
         "submit_questions",
         "remove_questions",
         "progress",
+        "review_answers",
     }
     assert templates == {"groundly://{subject}/{filename}"}
     assert resources == []
@@ -704,3 +705,59 @@ async def test_progress_is_marked_read_only():
     async with Client(mcp) as client:
         tools = {t.name: t for t in await client.list_tools()}
     assert tools["progress"].annotations.read_only_hint is True
+
+
+# --- review_answers ---------------------------------------------------------------
+
+
+def _awaiting_open_answer(subject):
+    from groundly.agents import quiz
+    from groundly.core.paths import subject_dir
+    from groundly.core.progress import ProgressStore
+    from groundly.core.store import QuestionWrite, SubjectStore, TopicWrite
+
+    store = SubjectStore(subject_dir(subject) / "store.db")
+    progress = ProgressStore(subject_dir(subject) / "progress.db")
+    store.replace_tree([TopicWrite(None, "Deadlocks", "d", [1])])
+    leaf = store.tree()[0]["id"]
+    (qid,) = store.add_questions(
+        leaf, [QuestionWrite("open", "Why?", None, "Because they wait.", [], [1])]
+    )
+    quiz.submit_attempt(
+        store, progress, "token-0001", None, [{"question_id": qid, "text": "Waiting."}]
+    )
+    return quiz.pending_reviews(store, progress)[0]["answer_id"]
+
+
+async def test_review_answers_lists_then_records(retrievable_subject):
+    answer_id = _awaiting_open_answer(retrievable_subject)
+    async with Client(mcp) as client:
+        listed = await client.call_tool("review_answers", {"subject": retrievable_subject})
+        (pending,) = listed.structured_content["awaiting"]
+        assert pending["answer_id"] == answer_id and pending["answer"] == "Waiting."
+        recorded = await client.call_tool(
+            "review_answers",
+            {
+                "subject": retrievable_subject,
+                "reviews": [{"answer_id": answer_id, "correct": True, "comment": "Right."}],
+            },
+        )
+        assert recorded.structured_content == {"recorded": [answer_id], "awaiting": []}
+        again = await client.call_tool(
+            "review_answers",
+            {
+                "subject": retrievable_subject,
+                "reviews": [{"answer_id": answer_id, "correct": False, "comment": "No."}],
+            },
+            raise_on_error=False,
+        )
+    assert again.is_error
+    assert "already_reviewed" in again.content[0].text and str(answer_id) in again.content[0].text
+
+
+async def test_review_answers_sources_carry_a_citation_uri(retrievable_subject):
+    _awaiting_open_answer(retrievable_subject)
+    async with Client(mcp) as client:
+        listed = await client.call_tool("review_answers", {"subject": retrievable_subject})
+    (source,) = listed.structured_content["awaiting"][0]["sources"]
+    assert source["uri"] == f"groundly://{retrievable_subject}/lec.pdf#page=1"

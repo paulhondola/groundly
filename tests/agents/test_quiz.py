@@ -384,3 +384,123 @@ def test_quiz_loads_no_model(bank, monkeypatch):
         [{"question_id": q["id"], "selected": []} for q in drawn if q["kind"] != "open"]
     )
     assert quiz.attempt_result(bank.store, bank.progress, attempt)
+
+
+# --- host review of open answers -------------------------------------------------------
+
+
+def _open_attempt(bank, text="Threads wait on each other.", leaf=0):
+    qid = bank.ids[bank.leaf(leaf)][4]
+    attempt = bank.submit([{"question_id": qid, "text": text}])
+    (pending,) = [
+        p for p in quiz.pending_reviews(bank.store, bank.progress) if p["attempt_id"] == attempt
+    ]
+    return attempt, pending["answer_id"], qid
+
+
+def test_pending_reviews_carry_the_stem_reference_answer_and_sources(bank):
+    attempt, answer_id, qid = _open_attempt(bank)
+    (p,) = quiz.pending_reviews(bank.store, bank.progress)
+    assert p == {
+        "answer_id": answer_id,
+        "attempt_id": attempt,
+        "question_id": qid,
+        "stem": bank.questions[qid]["stem"],
+        "reference_answer": "The reference.",
+        "answer": "Threads wait on each other.",
+        "sources": [
+            {
+                "filename": "lec.pdf",
+                "page": 1,
+                "heading_path": "Intro > Deadlocks",
+                "text": "deadlock needs mutual exclusion to occur",
+            }
+        ],
+    }
+
+
+def test_a_verdict_makes_the_score_final_and_counts_toward_mastery(bank):
+    attempt, answer_id, _ = _open_attempt(bank)
+    assert quiz.attempt_result(bank.store, bank.progress, attempt)["provisional"] is True
+    assert quiz.record_reviews(
+        bank.store, bank.progress, [{"answer_id": answer_id, "correct": True, "comment": "Yes."}]
+    ) == [answer_id]
+    result = quiz.attempt_result(bank.store, bank.progress, attempt)
+    assert result["provisional"] is False
+    assert result["score"] == {"correct": 1, "graded": 1, "awaiting": 0}
+    assert result["answers"][0]["state"] == "correct"
+    assert quiz.mastery(bank.store, bank.progress)[bank.leaf()]["answered"] == 1
+    assert quiz.pending_reviews(bank.store, bank.progress) == []
+
+
+def test_the_comment_is_returned_on_the_result_unchanged(bank):
+    attempt, answer_id, _ = _open_attempt(bank)
+    quiz.record_reviews(
+        bank.store,
+        bank.progress,
+        [{"answer_id": answer_id, "correct": False, "comment": "<b>x</b>"}],
+    )
+    answer = quiz.attempt_result(bank.store, bank.progress, attempt)["answers"][0]
+    assert answer["comment"] == "<b>x</b>" and answer["state"] == "wrong"
+
+
+def test_a_second_verdict_and_an_unknown_id_are_refused(bank):
+    _, answer_id, _ = _open_attempt(bank)
+    review = {"answer_id": answer_id, "correct": True, "comment": "ok"}
+    quiz.record_reviews(bank.store, bank.progress, [review])
+    with pytest.raises(QuizError) as err:
+        quiz.record_reviews(bank.store, bank.progress, [review])
+    assert err.value.reason == "already_reviewed" and str(answer_id) in err.value.detail
+    with pytest.raises(QuizError) as err:
+        quiz.record_reviews(bank.store, bank.progress, [{**review, "answer_id": 9999}])
+    assert err.value.reason == "unknown_answer_id"
+
+
+def test_one_bad_verdict_records_none(bank):
+    _, first, _ = _open_attempt(bank)
+    with pytest.raises(QuizError):
+        quiz.record_reviews(
+            bank.store,
+            bank.progress,
+            [
+                {"answer_id": first, "correct": True, "comment": "ok"},
+                {"answer_id": 9999, "correct": True, "comment": "ok"},
+            ],
+        )
+    assert len(quiz.pending_reviews(bank.store, bank.progress)) == 1
+
+
+@pytest.mark.parametrize(
+    "review",
+    [
+        {"answer_id": 1, "correct": "true", "comment": "ok"},
+        {"answer_id": 1, "correct": True, "comment": "x" * 1001},
+        {"answer_id": 1, "correct": True, "comment": None},
+    ],
+)
+def test_a_malformed_verdict_is_invalid_text(bank, review):
+    _open_attempt(bank)
+    with pytest.raises(QuizError) as err:
+        quiz.record_reviews(bank.store, bank.progress, [review])
+    assert err.value.reason == "invalid_text"
+    assert len(quiz.pending_reviews(bank.store, bank.progress)) == 1
+
+
+def test_an_empty_or_repeated_review_list_is_invalid_text(bank):
+    _, answer_id, _ = _open_attempt(bank)
+    review = {"answer_id": answer_id, "correct": True, "comment": "ok"}
+    for reviews in ([], [review, review]):
+        with pytest.raises(QuizError) as err:
+            quiz.record_reviews(bank.store, bank.progress, reviews)
+        assert err.value.reason == "invalid_text"
+
+
+def test_an_unreviewable_answer_is_not_listed_and_cannot_be_reviewed(bank):
+    _, answer_id, qid = _open_attempt(bank)
+    bank.store.remove_questions([qid])
+    assert quiz.pending_reviews(bank.store, bank.progress) == []
+    with pytest.raises(QuizError) as err:
+        quiz.record_reviews(
+            bank.store, bank.progress, [{"answer_id": answer_id, "correct": True, "comment": "ok"}]
+        )
+    assert err.value.reason == "unknown_answer_id"

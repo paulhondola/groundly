@@ -5,7 +5,7 @@ Answer keys and reference answers never leave this module in a drawn test; gradi
 keys from store.db at submit time. Loads no model: everything here is SQL and set arithmetic.
 """
 
-from groundly.core.progress import AnswerWrite, ProgressStore
+from groundly.core.progress import AnswerWrite, ProgressStore, ReviewError
 from groundly.core.store import SubjectStore
 
 MASTERY_WINDOW = 10
@@ -13,6 +13,7 @@ MASTERY_CORRECT = 9
 TEST_LENGTHS = (5, 10, 20)
 MAX_TEST_QUESTIONS = max(TEST_LENGTHS)
 MAX_OPEN_ANSWER_CHARS = 4000
+MAX_COMMENT_CHARS = 1000
 
 _REMOVED = "a question in this test was removed — start a new test"
 
@@ -301,3 +302,62 @@ def progress_report(store: SubjectStore, progress: ProgressStore) -> list[dict]:
         }
 
     return [node(n) for n in store.tree()]
+
+
+def pending_reviews(store: SubjectStore, progress: ProgressStore) -> list[dict]:
+    """Open answers awaiting the host's verdict whose question still exists, oldest first,
+    each with what judging it needs: the stem, the reference answer and the cited chunks."""
+    awaiting = [a for a in progress.answers() if a["kind"] == "open" and a["correct"] is None]
+    questions = {q["id"]: q for q in store.questions(ids=[a["question_id"] for a in awaiting])}
+    return [
+        {
+            "answer_id": a["id"],
+            "attempt_id": a["attempt_id"],
+            "question_id": a["question_id"],
+            "stem": q["stem"],
+            "reference_answer": q["reference_answer"],
+            "answer": a["response"],
+            "sources": [
+                {k: src[k] for k in ("filename", "page", "heading_path", "text")}
+                for src in q["sources"]
+            ],
+        }
+        for a in awaiting
+        if (q := questions.get(a["question_id"])) is not None
+    ]
+
+
+def record_reviews(store: SubjectStore, progress: ProgressStore, reviews: list[dict]) -> list[int]:
+    """Record the host's verdicts on open answers, all or none; returns the recorded ids. An
+    answer whose question was removed cannot be reviewed, and a verdict cannot be changed."""
+    if not reviews:
+        raise QuizError("invalid_text", "give at least one verdict")
+    rows = []
+    for r in reviews:
+        answer_id = r.get("answer_id") if isinstance(r, dict) else None
+        if not _is_int(answer_id):
+            raise QuizError("invalid_text", "every verdict names its answer_id")
+        if not isinstance(r.get("correct"), bool):
+            raise QuizError("invalid_text", f"answer {answer_id}: correct is true or false")
+        comment = r.get("comment")
+        if not isinstance(comment, str) or len(comment) > MAX_COMMENT_CHARS:
+            raise QuizError(
+                "invalid_text",
+                f"answer {answer_id}: a comment is text of at most {MAX_COMMENT_CHARS} characters",
+            )
+        rows.append((answer_id, r["correct"], comment))
+    ids = [row[0] for row in rows]
+    if len(set(ids)) != len(ids):
+        raise QuizError("invalid_text", "an answer has two verdicts")
+    # An awaiting answer whose question is gone is not pending, so it is unknown to review;
+    # the store itself refuses ids that are unknown, not open, or already reviewed.
+    pending = {p["answer_id"] for p in pending_reviews(store, progress)}
+    awaiting = {a["id"] for a in progress.answers() if a["correct"] is None}
+    try:
+        for answer_id in ids:
+            if answer_id in awaiting and answer_id not in pending:
+                raise ReviewError("unknown_answer_id", answer_id)
+        progress.record_reviews(rows)
+    except ReviewError as e:
+        raise QuizError(e.reason, f"answer {e.answer_id}") from e
+    return ids
