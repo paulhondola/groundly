@@ -8,10 +8,18 @@ text reach the run through tools, as data. The page learns what the run did from
 and counts, never from model text, except the final summary, which it shows as text.
 """
 
+import contextlib
 import json
+import os
 import shutil
+import signal
+import subprocess
 import sys
+import threading
+from datetime import UTC, datetime
 from importlib.resources import files
+
+from groundly.core.paths import groundly_home
 
 TARGET_QUESTIONS = 10  # a subtopic is filled to the mastery window
 RUN_TIMEOUT_S = 20 * 60
@@ -215,3 +223,169 @@ def summary_of(event: dict) -> tuple[str | None, tuple[str, str] | None]:
     if event.get("is_error") or event.get("subtype") != "success":
         return None, ("host_error", text or str(event.get("subtype") or "the run failed"))
     return text, None
+
+
+_UNAVAILABLE = {
+    "no_host": "Claude Code (`claude`) is not on PATH",
+    "unsupported_platform": "page runs need macOS or Linux",
+}
+_MAX_LINE_BYTES = 1_000_000  # a longer line is read in pieces, none of which parses
+_STDERR_TAIL = 500
+
+
+def _limit_words(seconds: float) -> str:
+    if seconds >= 60:
+        return f"{seconds / 60:g} minute"
+    return f"{seconds:g} second"
+
+
+def _kill(proc: subprocess.Popen) -> None:
+    """End the run's whole process group: `claude` and the stdio `groundly mcp` it started."""
+    if proc.poll() is not None:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+        proc.wait(5)
+    except ProcessLookupError:
+        return
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
+
+
+class Runner:
+    """At most one run at a time across the page. State lives in memory only."""
+
+    def __init__(self, mcp_url: str | None = None) -> None:
+        self.mcp_url = mcp_url
+        self._lock = threading.Lock()
+        self._run: dict | None = None
+        self._proc: subprocess.Popen | None = None
+        self._next_id = 1
+
+    def view(self) -> dict | None:
+        with self._lock:
+            return self._snapshot()
+
+    def _snapshot(self) -> dict | None:
+        if self._run is None:
+            return None
+        error = self._run["error"]
+        return {**self._run, "steps": list(self._run["steps"]), "error": error and dict(error)}
+
+    def start(self, kind: str, subject: str, topic_id: int | None, prompt: str) -> dict:
+        claude, reason = availability()
+        if reason:
+            raise RunError(reason, _UNAVAILABLE[reason], 503)
+        with self._lock:
+            if self._run is not None and self._run["status"] == "running":
+                raise RunError("run_in_progress", "a run is already working — wait or stop it", 409)
+            # One fixed cwd: Claude Code makes a folder per working directory under
+            # ~/.claude/projects, so a fresh tempdir per run would leave one per click.
+            run_dir = groundly_home() / ".host-run"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            with open(run_dir / "stderr.log", "wb") as stderr:
+                proc = subprocess.Popen(
+                    build_argv(claude, kind, prompt, self.mcp_url),
+                    cwd=run_dir,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=stderr,
+                    start_new_session=True,  # its own process group, so Stop reaches children
+                )
+            run = {
+                "id": self._next_id,
+                "kind": kind,
+                "subject": subject,
+                "topic_id": topic_id,
+                "status": "running",
+                "steps": [],
+                "summary": None,
+                "error": None,
+                "started_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            }
+            self._next_id += 1
+            self._run, self._proc = run, proc
+            snapshot = self._snapshot()
+        timer = threading.Timer(
+            RUN_TIMEOUT_S,
+            self._end,
+            (
+                proc,
+                run,
+                "failed",
+                ("timeout", f"the run passed the {_limit_words(RUN_TIMEOUT_S)} limit"),
+            ),
+        )
+        timer.daemon = True
+        timer.start()
+        threading.Thread(target=self._read, args=(proc, run, run_dir, timer), daemon=True).start()
+        return snapshot
+
+    def _end(self, proc, run, status, error=None) -> None:
+        """Settle a running run (first settlement wins), then end its process."""
+        with self._lock:
+            if run["status"] == "running":
+                run["status"] = status
+                run["error"] = error and {"reason": error[0], "detail": error[1]}
+        _kill(proc)
+
+    def _read(self, proc, run, run_dir, timer) -> None:
+        steps = Steps()
+        checked = False
+        for raw in iter(lambda: proc.stdout.readline(_MAX_LINE_BYTES), b""):
+            try:
+                event = json.loads(raw)
+            except ValueError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            if not checked:
+                # The init event must come first and list the run's tools; anything else
+                # before it is a run whose isolation cannot be shown.
+                is_init = event.get("type") == "system" and event.get("subtype") == "init"
+                fault = check_init(event) if is_init else None
+                if is_init and fault is None:
+                    checked = True
+                    continue
+                if not is_init and event.get("type") not in ("assistant", "user", "result"):
+                    continue  # other system events (e.g. hooks) carry no tool use
+                self._end(
+                    proc,
+                    run,
+                    "failed",
+                    fault or ("isolation_failed", "the run did not report its tools first"),
+                )
+                break
+            new = steps.feed(event)
+            with self._lock:
+                if new and run["status"] == "running":
+                    run["steps"] = (run["steps"] + new)[-MAX_STEPS:]
+                if event.get("type") == "result" and run["status"] == "running":
+                    summary, error = summary_of(event)
+                    run["summary"] = summary
+                    run["status"] = "failed" if error else "done"
+                    run["error"] = error and {"reason": error[0], "detail": error[1]}
+        proc.stdout.close()
+        code = proc.wait()
+        timer.cancel()
+        with self._lock:
+            if run["status"] == "running":
+                tail = (run_dir / "stderr.log").read_bytes()[-_STDERR_TAIL:]
+                tail = tail.decode("utf-8", "replace").strip()
+                detail = f"claude exited with code {code}" + (f": {tail}" if tail else "")
+                run["status"] = "failed"
+                run["error"] = {"reason": "host_exit", "detail": detail}
+
+    def stop(self) -> dict | None:
+        """Stop the running run, if any; what the gates already stored stays."""
+        with self._lock:
+            run, proc = self._run, self._proc
+        if run is not None and proc is not None:
+            self._end(proc, run, "stopped")
+        return self.view()
+
+    def shutdown(self) -> None:
+        """The page process is exiting: leave no `claude` behind."""
+        self.stop()

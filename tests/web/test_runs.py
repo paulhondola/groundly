@@ -7,7 +7,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from groundly.web import runs
+from tests.web.conftest import INIT as FAKE_INIT
+from tests.web.conftest import gone, success, use, wait_until_ended
 
 
 def test_python_dash_m_groundly_runs_the_cli():
@@ -176,3 +180,158 @@ def test_summary_of_success_and_error():
         "result": "Please run /login",
     }
     assert runs.summary_of(login) == (None, ("host_error", "Please run /login"))
+
+
+# --- the Runner: one process, read on a thread, fail closed ---------------------------------
+
+
+def _start(runner, kind="write"):
+    return runner.start(kind, "PDSS", 7, "the prompt")
+
+
+def test_a_run_reads_steps_and_summary_then_ends_done(fake_claude, tmp_path):
+    fake_claude.script([FAKE_INIT, use("t1", "mcp__groundly__search"), success("Stored 10.")])
+    runner = runs.Runner()
+    started = _start(runner)
+    assert started["status"] == "running" and started["kind"] == "write"
+    run = wait_until_ended(runner.view)
+    assert (run["status"], run["steps"], run["summary"], run["error"]) == (
+        "done",
+        ["Reading the course"],
+        "Stored 10.",
+        None,
+    )
+    (call,) = fake_claude.calls()
+    assert Path(call["cwd"]).resolve() == (tmp_path / "home" / ".host-run").resolve()
+    assert call["argv"][call["argv"].index("-p") + 1] == "the prompt"
+
+
+def test_a_second_start_while_running_raises_run_in_progress(fake_claude):
+    fake_claude.script([FAKE_INIT, "SLEEP"])
+    fake_claude.record_pids()
+    runner = runs.Runner()
+    _start(runner)
+    fake_claude.pids()  # the fake has written its argv
+    try:
+        with pytest.raises(runs.RunError) as e:
+            _start(runner, "grade")
+        assert (e.value.reason, e.value.status) == ("run_in_progress", 409)
+        assert len(fake_claude.calls()) == 1
+    finally:
+        runner.shutdown()
+
+
+def test_no_claude_on_path_raises_no_host(monkeypatch):
+    monkeypatch.setattr(runs.shutil, "which", lambda name: None)
+    with pytest.raises(runs.RunError) as e:
+        _start(runs.Runner())
+    assert (e.value.reason, e.value.status) == ("no_host", 503)
+
+
+def test_bash_in_init_kills_the_run_before_any_turn(fake_claude):
+    hostile = {**FAKE_INIT, "tools": FAKE_INIT["tools"] + ["Bash"]}
+    fake_claude.script([hostile, "SLEEP", use("t1", "mcp__groundly__search"), success()])
+    runner = runs.Runner()
+    _start(runner)
+    run = wait_until_ended(runner.view)
+    assert run["status"] == "failed"
+    assert run["error"] == {
+        "reason": "isolation_failed",
+        "detail": "the run had tools other than Groundly's: Bash",
+    }
+    assert run["steps"] == [] and run["summary"] is None
+
+
+def test_a_tool_call_before_init_fails_closed(fake_claude):
+    fake_claude.script([use("t1", "mcp__groundly__search"), success()])
+    runner = runs.Runner()
+    _start(runner)
+    run = wait_until_ended(runner.view)
+    assert run["status"] == "failed" and run["error"]["reason"] == "isolation_failed"
+
+
+def test_groundly_not_connected_fails_the_run(fake_claude):
+    down = {**FAKE_INIT, "mcp_servers": [{"name": "groundly", "status": "failed"}]}
+    fake_claude.script([down, "SLEEP"])
+    runner = runs.Runner()
+    _start(runner)
+    run = wait_until_ended(runner.view)
+    assert run["error"]["reason"] == "groundly_not_connected"
+
+
+def test_exit_without_result_fails_with_code_and_stderr_tail(fake_claude):
+    fake_claude.script([FAKE_INIT, use("t1", "mcp__groundly__search")], exit_code=3, stderr="boom")
+    runner = runs.Runner()
+    _start(runner)
+    run = wait_until_ended(runner.view)
+    assert run["status"] == "failed"
+    assert run["error"] == {"reason": "host_exit", "detail": "claude exited with code 3: boom"}
+    assert run["steps"] == ["Reading the course"]
+
+
+def test_a_login_error_result_is_the_error_shown(fake_claude):
+    login = {
+        "type": "result",
+        "subtype": "success",
+        "is_error": True,
+        "result": "Please run /login",
+    }
+    fake_claude.script([FAKE_INIT, login], exit_code=1)
+    runner = runs.Runner()
+    _start(runner)
+    run = wait_until_ended(runner.view)
+    assert run["status"] == "failed"
+    assert run["error"] == {"reason": "host_error", "detail": "Please run /login"}
+
+
+def test_junk_and_oversized_lines_are_skipped(fake_claude):
+    lines = [FAKE_INIT, "not json", "x" * 3_000_000, "[1, 2]"]
+    for i in range(200):
+        lines.append(use(f"s{i}", "mcp__groundly__search"))
+        lines.append(use(f"g{i}", "mcp__groundly__get_page"))
+    fake_claude.script([*lines, success("Done.")])
+    runner = runs.Runner()
+    _start(runner)
+    run = wait_until_ended(runner.view)
+    assert run["status"] == "done" and run["summary"] == "Done."
+    assert len(run["steps"]) == runs.MAX_STEPS
+
+
+def test_stop_ends_running_as_stopped(fake_claude):
+    fake_claude.script([FAKE_INIT, use("t1", "mcp__groundly__search"), "SLEEP"])
+    fake_claude.record_pids()
+    runner = runs.Runner()
+    _start(runner)
+    claude_pid, _ = fake_claude.pids()
+    stopped = runner.stop()
+    assert stopped["status"] == "stopped"
+    assert gone(claude_pid)
+    assert wait_until_ended(runner.view)["status"] == "stopped"
+
+
+def test_stop_with_nothing_running_returns_the_last_run(fake_claude):
+    runner = runs.Runner()
+    assert runner.stop() is None
+    _start(runner)
+    done = wait_until_ended(runner.view)
+    assert runner.stop() == done
+
+
+def test_timeout_fails_naming_the_timeout(fake_claude, monkeypatch):
+    monkeypatch.setattr(runs, "RUN_TIMEOUT_S", 0.5)
+    fake_claude.script([FAKE_INIT, "SLEEP"])
+    runner = runs.Runner()
+    _start(runner)
+    run = wait_until_ended(runner.view)
+    assert run["status"] == "failed" and run["error"]["reason"] == "timeout"
+    assert "limit" in run["error"]["detail"]
+
+
+def test_shutdown_kills_claude_and_its_children(fake_claude):
+    fake_claude.script([FAKE_INIT, "SLEEP"])
+    fake_claude.record_pids()
+    runner = runs.Runner()
+    _start(runner)
+    claude_pid, child_pid = fake_claude.pids()
+    runner.shutdown()
+    assert gone(claude_pid) and gone(child_pid)
