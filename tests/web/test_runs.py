@@ -120,6 +120,24 @@ def test_init_check_names_a_groundly_server_that_did_not_connect():
     assert runs.check_init({**INIT, "mcp_servers": []})[0] == "groundly_not_connected"
 
 
+@pytest.mark.parametrize(
+    "init",
+    [
+        {k: v for k, v in INIT.items() if k != "tools"},
+        {**INIT, "tools": None},
+        {k: v for k, v in INIT.items() if k != "mcp_servers"},
+        {**INIT, "mcp_servers": ["groundly"]},
+    ],
+    ids=["no tools", "null tools", "no servers", "servers not objects"],
+)
+def test_init_check_fails_closed_on_an_init_it_cannot_read(init):
+    # A build that reports its tools differently must not pass the check vacuously.
+    assert runs.check_init(init) == (
+        "isolation_failed",
+        "the run's init event did not list its tools and MCP servers",
+    )
+
+
 def _text(text):
     return {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
 
@@ -282,6 +300,33 @@ def test_a_login_error_result_is_the_error_shown(fake_claude):
     run = wait_until_ended(runner.view)
     assert run["status"] == "failed"
     assert run["error"] == {"reason": "host_error", "detail": "Please run /login"}
+
+
+def test_an_event_of_an_unexpected_shape_fails_the_run_instead_of_hanging(fake_claude):
+    fake_claude.script([FAKE_INIT, {"type": "assistant", "message": "not an object"}, "SLEEP"])
+    runner = runs.Runner()
+    _start(runner)
+    run = wait_until_ended(runner.view)
+    assert run["status"] == "failed" and run["error"]["reason"] == "host_error"
+    assert run["error"]["detail"].startswith("unreadable output from claude")
+
+
+def test_a_deeply_nested_line_is_skipped(fake_claude):
+    fake_claude.script([FAKE_INIT, "[" * 100_000, success("Done.")])
+    runner = runs.Runner()
+    _start(runner)
+    run = wait_until_ended(runner.view)
+    assert (run["status"], run["summary"]) == ("done", "Done.")
+
+
+def test_claude_stderr_goes_to_no_file(fake_claude, tmp_path):
+    # Debug output is never a Groundly-written file (docs/infrastructure/security.md §5).
+    fake_claude.script([FAKE_INIT], exit_code=3, stderr="boom")
+    runner = runs.Runner()
+    _start(runner)
+    run = wait_until_ended(runner.view)
+    assert run["error"]["detail"] == "claude exited with code 3: boom"
+    assert list((tmp_path / "home" / ".host-run").iterdir()) == []
 
 
 def test_junk_and_oversized_lines_are_skipped(fake_claude):

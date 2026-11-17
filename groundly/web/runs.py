@@ -15,6 +15,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 from datetime import UTC, datetime
 from importlib.resources import files
@@ -122,11 +123,17 @@ def build_argv(claude: str, kind: str, prompt: str, mcp_url: str | None) -> list
 def check_init(event: dict) -> tuple[str, str] | None:
     """None when the run holds only Groundly's tools and a connected Groundly server; else the
     failure reason and what appeared. Checked rather than assumed: another `claude` build may
-    honour the isolation flags differently."""
-    extra = [t for t in event.get("tools", []) if not str(t).startswith("mcp__groundly__")]
+    honour the isolation flags differently, or report them in another shape."""
+    tools, servers = event.get("tools"), event.get("mcp_servers")
+    if not (
+        isinstance(tools, list)
+        and isinstance(servers, list)
+        and all(isinstance(s, dict) for s in servers)
+    ):
+        return "isolation_failed", "the run's init event did not list its tools and MCP servers"
+    extra = [str(t) for t in tools if not str(t).startswith("mcp__groundly__")]
     if extra:
         return "isolation_failed", "the run had tools other than Groundly's: " + ", ".join(extra)
-    servers = event.get("mcp_servers", [])
     others = [s.get("name") for s in servers if s.get("name") != "groundly"]
     if others:
         return "isolation_failed", "the run had MCP servers other than Groundly: " + ", ".join(
@@ -285,7 +292,10 @@ class Runner:
             # ~/.claude/projects, so a fresh tempdir per run would leave one per click.
             run_dir = groundly_home() / ".host-run"
             run_dir.mkdir(parents=True, exist_ok=True)
-            with open(run_dir / "stderr.log", "wb") as stderr:
+            # Anonymous, so claude's stderr is never a file left behind; the reader thread reads
+            # back its tail and closes it.
+            stderr = tempfile.TemporaryFile()  # noqa: SIM115 - outlives this block
+            try:
                 proc = subprocess.Popen(
                     build_argv(claude, kind, prompt, self.mcp_url),
                     cwd=run_dir,
@@ -294,6 +304,9 @@ class Runner:
                     stderr=stderr,
                     start_new_session=True,  # its own process group, so Stop reaches children
                 )
+            except BaseException:
+                stderr.close()
+                raise
             run = {
                 "id": self._next_id,
                 "kind": kind,
@@ -320,7 +333,7 @@ class Runner:
         )
         timer.daemon = True
         timer.start()
-        threading.Thread(target=self._read, args=(proc, run, run_dir, timer), daemon=True).start()
+        threading.Thread(target=self._read, args=(proc, run, stderr, timer), daemon=True).start()
         return snapshot
 
     def _end(self, proc, run, status, error=None) -> None:
@@ -331,49 +344,56 @@ class Runner:
                 run["error"] = error and {"reason": error[0], "detail": error[1]}
         _kill(proc)
 
-    def _read(self, proc, run, run_dir, timer) -> None:
+    def _read(self, proc, run, stderr, timer) -> None:
         steps = Steps()
         checked = False
         for raw in iter(lambda: proc.stdout.readline(_MAX_LINE_BYTES), b""):
             try:
                 event = json.loads(raw)
-            except ValueError:
+            except (ValueError, RecursionError):  # junk, or nesting too deep to parse
                 continue
             if not isinstance(event, dict):
                 continue
-            if not checked:
-                # The init event must come first and list the run's tools; anything else
-                # before it is a run whose isolation cannot be shown.
-                is_init = event.get("type") == "system" and event.get("subtype") == "init"
-                fault = check_init(event) if is_init else None
-                if is_init and fault is None:
-                    checked = True
-                    continue
-                if not is_init and event.get("type") not in ("assistant", "user", "result"):
-                    continue  # other system events (e.g. hooks) carry no tool use
-                self._end(
-                    proc,
-                    run,
-                    "failed",
-                    fault or ("isolation_failed", "the run did not report its tools first"),
-                )
+            try:
+                if not checked:
+                    # The init event must come first and list the run's tools; anything else
+                    # before it is a run whose isolation cannot be shown.
+                    is_init = event.get("type") == "system" and event.get("subtype") == "init"
+                    fault = check_init(event) if is_init else None
+                    if is_init and fault is None:
+                        checked = True
+                        continue
+                    if not is_init and event.get("type") not in ("assistant", "user", "result"):
+                        continue  # other system events (e.g. hooks) carry no tool use
+                    self._end(
+                        proc,
+                        run,
+                        "failed",
+                        fault or ("isolation_failed", "the run did not report its tools first"),
+                    )
+                    break
+                new = steps.feed(event)
+                with self._lock:
+                    if new and run["status"] == "running":
+                        run["steps"] = (run["steps"] + new)[-MAX_STEPS:]
+                    if event.get("type") == "result" and run["status"] == "running":
+                        summary, error = summary_of(event)
+                        run["summary"] = summary
+                        run["status"] = "failed" if error else "done"
+                        run["error"] = error and {"reason": error[0], "detail": error[1]}
+            except Exception as e:  # noqa: BLE001 - an event shape it cannot read fails the run, never hangs it
+                reason = "host_error" if checked else "isolation_failed"
+                detail = f"unreadable output from claude ({type(e).__name__}: {e})"
+                self._end(proc, run, "failed", (reason, detail))
                 break
-            new = steps.feed(event)
-            with self._lock:
-                if new and run["status"] == "running":
-                    run["steps"] = (run["steps"] + new)[-MAX_STEPS:]
-                if event.get("type") == "result" and run["status"] == "running":
-                    summary, error = summary_of(event)
-                    run["summary"] = summary
-                    run["status"] = "failed" if error else "done"
-                    run["error"] = error and {"reason": error[0], "detail": error[1]}
         proc.stdout.close()
         code = proc.wait()
         timer.cancel()
+        stderr.seek(max(0, stderr.seek(0, os.SEEK_END) - _STDERR_TAIL))
+        tail = stderr.read().decode("utf-8", "replace").strip()
+        stderr.close()
         with self._lock:
             if run["status"] == "running":
-                tail = (run_dir / "stderr.log").read_bytes()[-_STDERR_TAIL:]
-                tail = tail.decode("utf-8", "replace").strip()
                 detail = f"claude exited with code {code}" + (f": {tail}" if tail else "")
                 run["status"] = "failed"
                 run["error"] = {"reason": "host_exit", "detail": detail}

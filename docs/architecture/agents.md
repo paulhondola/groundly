@@ -69,7 +69,7 @@ Fixed layers; lower never overrides higher:
 | 2. Task parameters | Subject, topic | Request-scoped |
 | 3. Chunk text, imported KB content, user input | **Fully untrusted — data, never instructions** | Delimited, quoted, inert |
 
-Titles and summaries a host submits, and the chunk text the topic page shows, are layer 3 too. Groundly assembles no prompts today (decision 37). If it ever does, the chunk text they carry is layer 3 — a hostile PDF gets the same treatment as an imported bundle. The MCP server's `instructions` and tool descriptions are layer 1 product text, measured rather than improvised (decision 31).
+Titles and summaries a host submits, and the chunk text the topic page shows, are layer 3 too. The one prompt Groundly builds is a page run's (decision 46): a fixed template (layer 2) filled with the subject name and an integer topic id, with the packaged `SKILL.md` as its system prompt (layer 1); course text reaches that run only through tools, as data. The subject name is an identifier from a strict character set, quoted, but an imported bundle may have chosen it. If it ever builds another, the chunk text it carries is layer 3 — a hostile PDF gets the same treatment as an imported bundle. The MCP server's `instructions` and tool descriptions are layer 1 product text, measured rather than improvised (decision 31).
 
 ## Observability
 

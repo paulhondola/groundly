@@ -3,6 +3,7 @@ tools at `/mcp` in one process, so every host session shares one model load. Laz
 wrappers — the web app and server load only when a verb runs; the page itself loads no model."""
 
 import errno
+import signal
 import socket
 import threading
 import webbrowser
@@ -43,6 +44,10 @@ def _run(asgi_app: object, port: int, lines: list[str]) -> None:
     for line in lines:
         console.print(line, highlight=False, soft_wrap=True)  # a wrapped command will not paste
     _open_browser(f"http://groundly.localhost:{port}/")
+    # uvicorn shuts down gracefully, so the page stops a running `claude`, on SIGINT and
+    # SIGTERM only; closing the terminal sends SIGHUP, which takes the SIGTERM path.
+    if hasattr(signal, "SIGHUP"):
+        signal.signal(signal.SIGHUP, lambda *_: signal.raise_signal(signal.SIGTERM))
     # proxy_headers=False: the write route's Origin check compares against the socket's own
     # scheme and host, which an X-Forwarded-* header must not be able to change.
     uvicorn.run(asgi_app, host="127.0.0.1", port=port, log_level="warning", proxy_headers=False)

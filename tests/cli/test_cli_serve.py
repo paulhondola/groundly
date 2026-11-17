@@ -41,6 +41,25 @@ def test_serve_binds_loopback_and_opens_browser(monkeypatch):
     assert runs[0]["app"].state.runner.mcp_url is None  # a page run starts its own Groundly
 
 
+def test_a_terminal_hangup_shuts_the_page_down_like_ctrl_c(monkeypatch):
+    # uvicorn shuts down (and the page kills a running `claude`) on SIGINT/SIGTERM only;
+    # closing the terminal sends SIGHUP.
+    import signal
+
+    _patch(monkeypatch)
+    raised = []
+    monkeypatch.setattr(signal, "raise_signal", raised.append)
+    previous = signal.getsignal(signal.SIGHUP)
+    try:
+        assert runner.invoke(app, ["serve"]).exit_code == 0
+        handler = signal.getsignal(signal.SIGHUP)
+        assert callable(handler)
+        handler(signal.SIGHUP, None)
+    finally:
+        signal.signal(signal.SIGHUP, previous)
+    assert raised == [signal.SIGTERM]
+
+
 def test_start_binds_loopback_opens_page_and_prints_both_urls(monkeypatch):
     from groundly.cli.app import console
 
