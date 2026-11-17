@@ -75,25 +75,37 @@
 
 ```python
 STORE_USER_VERSION = 2
-MAX_STEM_CHARS = 500; MAX_CODE_CHARS = 2000; MAX_OPTION_CHARS = 300
-MAX_REFERENCE_CHARS = 1000; MAX_QUESTION_CITATIONS = 5; MAX_QUESTIONS_PER_TOPIC = 200
+MAX_STEM_CHARS = 500
+MAX_CODE_CHARS = 2000
+MAX_OPTION_CHARS = 300
+MAX_REFERENCE_CHARS = 1000
+MAX_QUESTION_CITATIONS = 5
+MAX_QUESTIONS_PER_TOPIC = 200
+
 
 @dataclass
 class QuestionWrite:
-    kind: str                          # "single" | "multiple" | "open"
+    kind: str  # "single" | "multiple" | "open"
     stem: str
     code: str | None
-    reference_answer: str | None       # open only
-    options: list[tuple[str, bool]]    # (text, correct), in submitted order; [] for open
+    reference_answer: str | None  # open only
+    options: list[tuple[str, bool]]  # (text, correct), in submitted order; [] for open
     chunk_ids: list[int]
 
+
 class SubjectStore:
-    def leaf_topic_ids(self) -> set[int]: ...           # topics that have no subtopics
-    def question_counts(self) -> dict[int, int]: ...    # topic_id -> stored questions
+    def leaf_topic_ids(self) -> set[int]: ...  # topics that have no subtopics
+    def question_counts(self) -> dict[int, int]: ...  # topic_id -> stored questions
     def question_stems(self, topic_id: int) -> list[str]: ...
-    def add_questions(self, topic_id: int, questions: list[QuestionWrite]) -> list[int]: ...  # one transaction
-    def remove_questions(self, ids: list[int]) -> list[int]: ...  # returns unknown ids; deletes only if none
-    def questions(self, *, ids: list[int] | None = None, topic_ids: list[int] | None = None) -> list[dict]: ...
+    def add_questions(
+        self, topic_id: int, questions: list[QuestionWrite]
+    ) -> list[int]: ...  # one transaction
+    def remove_questions(
+        self, ids: list[int]
+    ) -> list[int]: ...  # returns unknown ids; deletes only if none
+    def questions(
+        self, *, ids: list[int] | None = None, topic_ids: list[int] | None = None
+    ) -> list[dict]: ...
 ```
 
 `questions()` returns, per question, `{"id", "topic_id", "kind", "stem", "code", "reference_answer", "options": [{"id", "text", "correct"}], "sources": [...]}` with `sources` in the same shape `tree()` gives a node, and options in position order.
@@ -101,28 +113,41 @@ class SubjectStore:
 - [ ] **Step 1: Write the failing tests** in `tests/core/test_store.py` (build a store with `create_store`, one material with two chunks via `add_indexed`, and a tree via `replace_tree`):
 
 ```python
-def test_add_questions_round_trips_options_and_sources(store_with_tree): ...
+def test_add_questions_round_trips_options_and_sources(store_with_tree):
+    ...
     # ids = add_questions(leaf, [QuestionWrite("single", "Q?", None, None, [("a", True), ("b", False)], [c1])])
     # q = questions(ids=ids)[0]; q["options"] == [{"id": ANY, "text": "a", "correct": True}, {..."b", False}]
     # q["sources"][0]["chunk_id"] == c1
 
-def test_question_ids_are_never_reused(store_with_tree): ...
+
+def test_question_ids_are_never_reused(store_with_tree):
+    ...
     # add, remove_questions(ids) == [], add again -> new id > old id
 
-def test_remove_questions_with_an_unknown_id_removes_nothing(store_with_tree): ...
+
+def test_remove_questions_with_an_unknown_id_removes_nothing(store_with_tree):
+    ...
     # remove_questions([real, 9999]) == [9999]; question_counts() unchanged
 
-def test_removing_a_material_deletes_a_question_left_without_citations(store_with_tree): ...
+
+def test_removing_a_material_deletes_a_question_left_without_citations(store_with_tree):
+    ...
     # q1 cites only material A's chunk, q2 cites A's and B's; remove_material(A)
     # questions() ids == [q2]; q2 sources name only B
 
+
 def test_removing_a_topic_removes_its_questions(store_with_tree): ...
 
-def test_a_version_1_store_is_upgraded_in_place_keeping_its_rows(tmp_path): ...
+
+def test_a_version_1_store_is_upgraded_in_place_keeping_its_rows(tmp_path):
+    ...
     # build a v2 store, then DROP the three tables and the trigger and set user_version = 1
     # SubjectStore(path).question_counts() == {}; user_version == 2; materials, chunks, tree unchanged
 
-def test_a_newer_store_is_still_refused(tmp_path): ...   # user_version = 3 -> RuntimeError "upgrade groundly"
+
+def test_a_newer_store_is_still_refused(
+    tmp_path,
+): ...  # user_version = 3 -> RuntimeError "upgrade groundly"
 ```
 
 - [ ] **Step 2: Run** `uv run pytest tests/core/test_store.py -q`. Expected: the new tests fail (`QuestionWrite` undefined).
@@ -180,14 +205,25 @@ END;
 
 ```python
 REJECTION_REASONS = (
-    "unknown_topic_id", "not_a_leaf_topic", "too_large", "bank_full", "unknown_kind",
-    "code_questions_unsupported", "invalid_text", "wrong_answer_key", "duplicate_option",
-    "duplicate_question", "not_answerable_from_chunks",
+    "unknown_topic_id",
+    "not_a_leaf_topic",
+    "too_large",
+    "bank_full",
+    "unknown_kind",
+    "code_questions_unsupported",
+    "invalid_text",
+    "wrong_answer_key",
+    "duplicate_option",
+    "duplicate_question",
+    "not_answerable_from_chunks",
 )
 MAX_QUESTIONS_PER_CALL = 50
 VERIFY_TOP_K = 20
 
-def submit_questions(store: SubjectStore, topic_id: int, questions: list[dict], *, embedder=None) -> dict:
+
+def submit_questions(
+    store: SubjectStore, topic_id: int, questions: list[dict], *, embedder=None
+) -> dict:
     """{"accepted": [{"index": int, "id": int}], "rejected": [{"index": int | None, "reason": str, "detail": str}]}"""
 ```
 
@@ -196,39 +232,67 @@ def submit_questions(store: SubjectStore, topic_id: int, questions: list[dict], 
 - [ ] **Step 1: Write the failing tests** (reuse `AlignedEmbedder`, `_chunk1_embedder`, `_chunk2_embedder`; give `retrievable_subject` a one-leaf tree first with `replace_tree`). Parametrize the structural cases so each asserts `result["accepted"] == []`, the reason, and `store.question_counts() == {}`:
 
 ```python
-SINGLE = {"kind": "single", "stem": "What does a deadlock need?",
-          "options": [{"text": "mutual exclusion", "correct": True}, {"text": "a GPU", "correct": False}],
-          "chunk_ids": [1]}
+SINGLE = {
+    "kind": "single",
+    "stem": "What does a deadlock need?",
+    "options": [{"text": "mutual exclusion", "correct": True}, {"text": "a GPU", "correct": False}],
+    "chunk_ids": [1],
+}
+
 
 def test_rejection_reasons_are_the_canonical_eleven(): ...
-def test_a_good_question_of_each_kind_is_stored(retrievable_subject): ...   # single, multiple, open, single with code
+def test_a_good_question_of_each_kind_is_stored(
+    retrievable_subject,
+): ...  # single, multiple, open, single with code
 
-@pytest.mark.parametrize(("change", "reason"), [
-    ({"kind": "code"}, "code_questions_unsupported"),
-    ({"kind": "essay"}, "unknown_kind"),
-    ({"stem": " "}, "invalid_text"),
-    ({"stem": "x" * 501}, "invalid_text"),
-    ({"code": "x" * 2001}, "invalid_text"),
-    ({"options": [{"text": "a", "correct": True}]}, "wrong_answer_key"),                       # 1 option
-    ({"options": [{"text": "a", "correct": True}, {"text": "b", "correct": True}]}, "wrong_answer_key"),  # single, 2 keys
-    ({"options": [{"text": "A ", "correct": True}, {"text": "a", "correct": False}]}, "duplicate_option"),
-    ({"chunk_ids": []}, "not_answerable_from_chunks"),
-    ({"chunk_ids": [1, 2, 3, 1, 2, 3]}, "invalid_text"),                                         # more than 5
-    ({"chunk_ids": [999]}, "not_answerable_from_chunks"),
-])
-def test_structural_faults_are_rejected_and_nothing_is_stored(retrievable_subject, change, reason): ...
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        ({"kind": "code"}, "code_questions_unsupported"),
+        ({"kind": "essay"}, "unknown_kind"),
+        ({"stem": " "}, "invalid_text"),
+        ({"stem": "x" * 501}, "invalid_text"),
+        ({"code": "x" * 2001}, "invalid_text"),
+        ({"options": [{"text": "a", "correct": True}]}, "wrong_answer_key"),  # 1 option
+        (
+            {"options": [{"text": "a", "correct": True}, {"text": "b", "correct": True}]},
+            "wrong_answer_key",
+        ),  # single, 2 keys
+        (
+            {"options": [{"text": "A ", "correct": True}, {"text": "a", "correct": False}]},
+            "duplicate_option",
+        ),
+        ({"chunk_ids": []}, "not_answerable_from_chunks"),
+        ({"chunk_ids": [1, 2, 3, 1, 2, 3]}, "invalid_text"),  # more than 5
+        ({"chunk_ids": [999]}, "not_answerable_from_chunks"),
+    ],
+)
+def test_structural_faults_are_rejected_and_nothing_is_stored(
+    retrievable_subject, change, reason
+): ...
+
 
 def test_multiple_needs_two_keys_and_one_wrong_option(retrievable_subject): ...
 def test_open_needs_a_reference_answer_and_no_options(retrievable_subject): ...
-def test_unresolvable_chunk_ids_are_named_in_the_detail(retrievable_subject): ...   # "999" in detail
-def test_a_question_that_does_not_retrieve_its_citation_is_rejected(retrievable_subject, monkeypatch): ...
+def test_unresolvable_chunk_ids_are_named_in_the_detail(retrievable_subject): ...  # "999" in detail
+def test_a_question_that_does_not_retrieve_its_citation_is_rejected(
+    retrievable_subject, monkeypatch
+):
+    ...
     # cite chunk 2, embedder aimed at chunk 1, VERIFY_TOP_K patched to 1
+
+
 def test_a_mixed_batch_stores_the_good_and_reports_the_bad_by_index(retrievable_subject): ...
 def test_a_stem_already_stored_or_repeated_in_the_batch_is_a_duplicate(retrievable_subject): ...
 def test_a_parent_topic_and_an_unknown_topic_refuse_the_whole_call(retrievable_subject): ...
 def test_more_than_fifty_questions_refuses_the_whole_call(retrievable_subject): ...
-def test_items_past_two_hundred_in_a_topic_are_bank_full(retrievable_subject, monkeypatch): ...  # patch the limit to 1
-def test_structural_rejections_never_touch_the_embedder(retrievable_subject): ...   # embedder that raises on encode
+def test_items_past_two_hundred_in_a_topic_are_bank_full(
+    retrievable_subject, monkeypatch
+): ...  # patch the limit to 1
+def test_structural_rejections_never_touch_the_embedder(
+    retrievable_subject,
+): ...  # embedder that raises on encode
 ```
 
 - [ ] **Step 2: Run** `uv run pytest tests/agents/test_verifier.py -q`. Expected: fail on import.
@@ -249,18 +313,27 @@ def test_structural_rejections_never_touch_the_embedder(retrievable_subject): ..
 
 ```python
 # tests/agents/test_topics.py
-def test_a_tree_that_drops_a_topic_holding_questions_is_rejected(retrievable_subject): ...
+def test_a_tree_that_drops_a_topic_holding_questions_is_rejected(retrievable_subject):
+    ...
     # reason == "topic_has_questions"; "2 questions" in detail; store.tree() unchanged; reranker.calls == 0
+
+
 def test_a_tree_that_subdivides_a_topic_holding_questions_is_rejected(retrievable_subject): ...
 def test_the_same_tree_is_accepted_after_the_questions_are_removed(retrievable_subject): ...
-def test_keeping_the_topic_as_a_leaf_under_its_id_is_accepted(retrievable_subject): ...   # even moved under another parent
+def test_keeping_the_topic_as_a_leaf_under_its_id_is_accepted(
+    retrievable_subject,
+): ...  # even moved under another parent
+
 
 # tests/mcp/test_mcp_server.py
-async def test_the_tool_surface_is_exactly_these_ten_entries(): ...   # rename; at this task: 7 tools + 1 template
+async def test_the_tool_surface_is_exactly_these_ten_entries(): ...  # rename; at this task: 7 tools + 1 template
 async def test_submit_questions_tool_returns_rejections_not_errors(retrievable_subject): ...
 async def test_remove_questions_tool_names_unknown_ids_and_removes_nothing(retrievable_subject): ...
-async def test_submit_questions_names_a_locked_store(retrievable_subject, monkeypatch): ...   # as submit_tree's test
-async def test_question_tool_descriptions_lead_with_when_to_call(): ...
+async def test_submit_questions_names_a_locked_store(
+    retrievable_subject, monkeypatch
+): ...  # as submit_tree's test
+async def test_question_tool_descriptions_lead_with_when_to_call():
+    ...
     # each description starts with "Call this when"; neither contains "verified"
 ```
 
@@ -286,19 +359,25 @@ It repeats, in SQL, what the gate guarantees and an import bypasses: anti-joins 
 
 ```python
 def test_the_question_bank_survives_export_and_import(tmp_path, monkeypatch): ...
-def test_progress_db_is_still_not_in_the_bundle(tmp_path, monkeypatch): ...   # zip namelist
+def test_progress_db_is_still_not_in_the_bundle(tmp_path, monkeypatch): ...  # zip namelist
 
-@pytest.mark.parametrize("statement", [
-    "UPDATE question_options SET correct = 0",                          # single with no key
-    "UPDATE questions SET kind = 'open'",                               # open with options, no reference
-    "INSERT INTO question_citations VALUES (1, 99999)",                 # dangling chunk (FKs off)
-    "UPDATE questions SET stem = zeroblob(10)",                         # not text
-    "UPDATE questions SET stem = printf('%.*c', 501, 'x')",             # over the limit
-])
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "UPDATE question_options SET correct = 0",  # single with no key
+        "UPDATE questions SET kind = 'open'",  # open with options, no reference
+        "INSERT INTO question_citations VALUES (1, 99999)",  # dangling chunk (FKs off)
+        "UPDATE questions SET stem = zeroblob(10)",  # not text
+        "UPDATE questions SET stem = printf('%.*c', 501, 'x')",  # over the limit
+    ],
+)
 def test_import_refuses_a_malformed_question_bank(tmp_path, monkeypatch, statement): ...
 
+
 def test_a_version_1_bundle_is_upgraded_on_import(tmp_path, monkeypatch): ...
-def test_a_version_1_bundle_with_its_own_questions_table_is_a_bundle_error(tmp_path, monkeypatch): ...
+def test_a_version_1_bundle_with_its_own_questions_table_is_a_bundle_error(tmp_path, monkeypatch):
+    ...
     # CREATE TABLE questions (x) in a v1 store -> BundleError, no traceback, nothing imported
 ```
 
@@ -324,24 +403,33 @@ def test_a_version_1_bundle_with_its_own_questions_table_is_a_bundle_error(tmp_p
 ```python
 PROGRESS_USER_VERSION = 2
 
+
 @dataclass
 class AnswerWrite:
     question_id: int
     topic_id: int
     kind: str
-    response: list[int] | str      # chosen option ids, or the open text
-    correct: bool | None           # None = awaiting review
+    response: list[int] | str  # chosen option ids, or the open text
+    correct: bool | None  # None = awaiting review
+
 
 class ReviewError(Exception):
-    reason: str                    # "unknown_answer_id" | "already_reviewed"
+    reason: str  # "unknown_answer_id" | "already_reviewed"
     answer_id: int
+
 
 class ProgressStore:
     def __init__(self, db_path: Path) -> None: ...
-    def add_attempt(self, token: str, scope_topic_id: int | None, answers: list[AnswerWrite]) -> int: ...
-    def attempts(self) -> list[dict]: ...            # newest first: id, submitted_at, scope_topic_id, question_count
-    def attempt(self, attempt_id: int) -> dict | None: ...   # the row plus "answers" in position order
-    def answers(self) -> list[dict]: ...             # every answer, oldest first
+    def add_attempt(
+        self, token: str, scope_topic_id: int | None, answers: list[AnswerWrite]
+    ) -> int: ...
+    def attempts(
+        self,
+    ) -> list[dict]: ...  # newest first: id, submitted_at, scope_topic_id, question_count
+    def attempt(
+        self, attempt_id: int
+    ) -> dict | None: ...  # the row plus "answers" in position order
+    def answers(self) -> list[dict]: ...  # every answer, oldest first
     def record_reviews(self, reviews: list[tuple[int, bool, str]]) -> None: ...
 ```
 
@@ -356,9 +444,14 @@ def test_a_newer_progress_file_is_refused(tmp_path): ...
 def test_add_attempt_round_trips_choice_and_open_answers(tmp_path): ...
 def test_the_same_token_returns_the_first_attempt_and_writes_nothing(tmp_path): ...
 def test_record_reviews_sets_verdict_comment_and_time(tmp_path): ...
-def test_one_bad_review_records_none(tmp_path): ...
+def test_one_bad_review_records_none(tmp_path):
+    ...
     # [(open_id, True, "ok"), (9999, True, "x")] -> ReviewError("unknown_answer_id"); open answer still None
-def test_a_reviewed_or_a_choice_answer_cannot_be_reviewed(tmp_path): ...   # already_reviewed / unknown_answer_id
+
+
+def test_a_reviewed_or_a_choice_answer_cannot_be_reviewed(
+    tmp_path,
+): ...  # already_reviewed / unknown_answer_id
 def test_every_connection_is_wal_with_a_busy_timeout(tmp_path): ...
 ```
 
@@ -377,15 +470,22 @@ def test_every_connection_is_wal_with_a_busy_timeout(tmp_path): ...
 **Produces:**
 
 ```python
-MASTERY_WINDOW = 10; MASTERY_CORRECT = 9
-TEST_LENGTHS = (5, 10, 20); MAX_OPEN_ANSWER_CHARS = 4000
+MASTERY_WINDOW = 10
+MASTERY_CORRECT = 9
+TEST_LENGTHS = (5, 10, 20)
+MAX_OPEN_ANSWER_CHARS = 4000
+
 
 class QuizError(Exception):
-    reason: str; detail: str
+    reason: str
+    detail: str
+
 
 def mastery(store: SubjectStore, progress: ProgressStore) -> dict[int, dict]: ...
 def draw(store, progress, topic_id: int | None, n: int) -> list[dict]: ...
-def submit_attempt(store, progress, token: str, topic_id: int | None, answers: list[dict]) -> int: ...
+def submit_attempt(
+    store, progress, token: str, topic_id: int | None, answers: list[dict]
+) -> int: ...
 def attempt_result(store, progress, attempt_id: int) -> dict | None: ...
 def attempt_history(store, progress) -> list[dict]: ...
 ```
@@ -399,40 +499,69 @@ def attempt_history(store, progress) -> list[dict]: ...
 - [ ] **Step 1: Write the failing tests** (a fixture builds a store with a parent of two leaves, four choice questions and one open per leaf, and an empty `ProgressStore`):
 
 ```python
-@pytest.mark.parametrize(("graded", "correct_in_last_ten", "state"), [
-    (0, 0, "not_started"), (9, 9, "in_progress"), (10, 8, "in_progress"), (10, 9, "mastered"), (12, 9, "mastered"),
-])
+@pytest.mark.parametrize(
+    ("graded", "correct_in_last_ten", "state"),
+    [
+        (0, 0, "not_started"),
+        (9, 9, "in_progress"),
+        (10, 8, "in_progress"),
+        (10, 9, "mastered"),
+        (12, 9, "mastered"),
+    ],
+)
 def test_leaf_mastery_at_its_boundaries(bank, graded, correct_in_last_ten, state): ...
-def test_only_the_last_ten_answers_count(bank): ...            # 10 wrong then 10 right -> mastered
+def test_only_the_last_ten_answers_count(bank): ...  # 10 wrong then 10 right -> mastered
 def test_an_awaiting_answer_does_not_count(bank): ...
-def test_a_parent_is_mastered_only_when_every_subtopic_is(bank): ...   # also subtopics_mastered == 1, subtopics == 2
+def test_a_parent_is_mastered_only_when_every_subtopic_is(
+    bank,
+): ...  # also subtopics_mastered == 1, subtopics == 2
 def test_answers_to_a_removed_question_keep_counting(bank): ...
 
-def test_a_drawn_test_carries_no_key_and_no_reference_answer(bank): ...
+
+def test_a_drawn_test_carries_no_key_and_no_reference_answer(bank):
+    ...
     # "correct" not in json.dumps(draw(...)) and "reference_answer" not in it
+
+
 def test_the_draw_prefers_unanswered_then_last_wrong(bank): ...
-def test_a_parent_scope_is_spread_across_its_subtopics(bank): ...     # n=5 over two leaves -> 3 and 2
+def test_a_parent_scope_is_spread_across_its_subtopics(bank): ...  # n=5 over two leaves -> 3 and 2
 def test_the_draw_returns_what_the_bank_has_when_it_is_short(bank): ...
 def test_a_length_outside_5_10_20_and_an_unknown_topic_are_refused(bank): ...
 
-def test_a_multiple_answer_is_right_only_when_the_set_matches(bank): ...   # subset and superset both wrong
+
+def test_a_multiple_answer_is_right_only_when_the_set_matches(
+    bank,
+): ...  # subset and superset both wrong
 def test_an_unanswered_question_is_recorded_as_wrong(bank): ...
 def test_a_blank_open_answer_is_wrong_not_awaiting(bank): ...
 def test_an_open_answer_is_saved_awaiting_and_the_result_is_provisional(bank): ...
 
-@pytest.mark.parametrize(("answers", "reason"), [
-    ([], "too_large"), ("twenty_one", "too_large"), ("repeated_question", "invalid_text"),
-    ("unknown_question", "unknown_question"), ("option_of_another_question", "invalid_text"),
-    ("two_selected_on_a_single", "invalid_text"), ("open_text_4001", "invalid_text"),
-])
+
+@pytest.mark.parametrize(
+    ("answers", "reason"),
+    [
+        ([], "too_large"),
+        ("twenty_one", "too_large"),
+        ("repeated_question", "invalid_text"),
+        ("unknown_question", "unknown_question"),
+        ("option_of_another_question", "invalid_text"),
+        ("two_selected_on_a_single", "invalid_text"),
+        ("open_text_4001", "invalid_text"),
+    ],
+)
 def test_a_bad_attempt_is_refused_and_nothing_is_written(bank, answers, reason): ...
-def test_the_removed_question_refusal_names_the_cause(bank): ...       # "removed" in err.detail
+def test_the_removed_question_refusal_names_the_cause(bank): ...  # "removed" in err.detail
 def test_the_same_token_twice_records_one_attempt(bank): ...
+
 
 def test_the_result_shows_keys_sources_and_topic_mastery(bank): ...
 def test_a_question_removed_after_the_attempt_shows_as_removed(bank): ...
-def test_an_awaiting_answer_whose_question_is_removed_is_unreviewable(bank): ...   # provisional is False
-def test_quiz_loads_no_model(bank, monkeypatch): ...   # shared_embedder patched to raise; draw/submit/result still work
+def test_an_awaiting_answer_whose_question_is_removed_is_unreviewable(
+    bank,
+): ...  # provisional is False
+def test_quiz_loads_no_model(
+    bank, monkeypatch
+): ...  # shared_embedder patched to raise; draw/submit/result still work
 ```
 
 - [ ] **Step 2: Run** `uv run pytest tests/agents/test_quiz.py -q`. Expected: fail on import.
@@ -465,15 +594,22 @@ def test_quiz_loads_no_model(bank, monkeypatch): ...   # shared_embedder patched
 ```python
 ORIGIN = {"Origin": "http://127.0.0.1"}
 
-def test_a_drawn_test_holds_no_key(client, seeded): ...                 # "correct" not in r.text
+
+def test_a_drawn_test_holds_no_key(client, seeded): ...  # "correct" not in r.text
 def test_submit_grades_and_the_result_shows_the_key_and_source(client, seeded): ...
 def test_tree_nodes_carry_bank_size_and_mastery(client, seeded): ...
 
-@pytest.mark.parametrize(("headers", "status"), [
-    ({}, 403), ({"Origin": "http://evil.example"}, 403), ({"Origin": "null"}, 403),
-])
+
+@pytest.mark.parametrize(
+    ("headers", "status"),
+    [
+        ({}, 403),
+        ({"Origin": "http://evil.example"}, 403),
+        ({"Origin": "null"}, 403),
+    ],
+)
 def test_a_submit_from_elsewhere_is_refused_and_writes_nothing(client, seeded, headers, status): ...
-def test_a_form_encoded_submit_is_refused(client, seeded): ...           # 415
+def test_a_form_encoded_submit_is_refused(client, seeded): ...  # 415
 def test_a_malformed_body_or_token_is_a_400(client, seeded): ...
 def test_a_removed_question_refusal_reaches_the_page_with_its_cause(client, seeded): ...
 def test_a_busy_progress_db_is_a_503_naming_it(client, seeded, monkeypatch): ...
@@ -481,12 +617,15 @@ def test_the_same_token_twice_returns_the_same_attempt(client, seeded): ...
 def test_history_lists_attempts_newest_first(client, seeded): ...
 def test_an_unknown_attempt_is_404(client, seeded): ...
 def test_test_and_result_pages_serve_the_shell_under_the_csp(client, seeded): ...
-def test_the_page_writes_no_rows_to_store_db(client, seeded): ...        # total_changes / row counts equal before and after a full test
+def test_the_page_writes_no_rows_to_store_db(
+    client, seeded
+): ...  # total_changes / row counts equal before and after a full test
 def test_serving_a_test_loads_no_model(client, seeded, monkeypatch): ...
+
 
 # tests/mcp/test_mcp_server.py
 async def test_progress_tool_reports_each_topic(retrievable_subject): ...
-async def test_the_tool_surface_is_exactly_these_ten_entries(): ...      # now 8 tools + 1 template
+async def test_the_tool_surface_is_exactly_these_ten_entries(): ...  # now 8 tools + 1 template
 ```
 
 - [ ] **Step 2: Run** both files. Expected: new tests fail.
@@ -519,8 +658,10 @@ def test_the_page_never_inserts_html():
     for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write"):
         assert sink not in PAGE
 
+
 def test_the_page_tells_the_student_how_to_get_questions_and_a_review():
     assert "Write questions on" in PAGE and "grade my test" in PAGE
+
 
 def test_the_page_never_calls_a_key_verified():
     assert "verified" not in PAGE.lower()
@@ -554,8 +695,11 @@ def test_the_page_never_calls_a_key_verified():
 ```python
 MAX_COMMENT_CHARS = 1000
 
+
 def pending_reviews(store, progress) -> list[dict]: ...
-def record_reviews(store, progress, reviews: list[dict]) -> list[int]: ...   # the recorded answer ids
+def record_reviews(
+    store, progress, reviews: list[dict]
+) -> list[int]: ...  # the recorded answer ids
 ```
 
 `pending_reviews` lists open answers with `correct is None` whose question still exists, oldest first: `{"answer_id", "attempt_id", "question_id", "stem", "reference_answer", "answer", "sources": [{"filename", "page", "heading_path", "text"}]}`. `record_reviews` takes `[{"answer_id": int, "correct": bool, "comment": str}]`; it raises `QuizError` and records nothing when the list is empty, `correct` is not a `bool`, the comment is not text or exceeds 1000 characters (`invalid_text`), an id is repeated (`invalid_text`), or the store raises `ReviewError` (its reason; an unreviewable answer is `unknown_answer_id`). The MCP tool `review_answers(subject: str, reviews: list[dict] | None = None) -> dict` returns `{"awaiting": [...]}` (each source also carrying its `groundly://` uri from `_citation_uri`) when `reviews` is `None`, and `{"recorded": [ids], "awaiting": [...]}` otherwise; a `QuizError` becomes a `ToolError` naming the reason and the answer id.
@@ -565,20 +709,26 @@ def record_reviews(store, progress, reviews: list[dict]) -> list[int]: ...   # t
 ```python
 def test_pending_reviews_carry_the_stem_reference_answer_and_sources(bank): ...
 def test_a_verdict_makes_the_score_final_and_counts_toward_mastery(bank): ...
-def test_the_comment_is_returned_on_the_result_unchanged(bank): ...      # "<b>x</b>" comes back verbatim
+def test_the_comment_is_returned_on_the_result_unchanged(
+    bank,
+): ...  # "<b>x</b>" comes back verbatim
 def test_a_second_verdict_and_an_unknown_id_are_refused(bank): ...
 def test_one_bad_verdict_records_none(bank): ...
-@pytest.mark.parametrize("review", [
-    {"answer_id": 1, "correct": "true", "comment": "ok"},
-    {"answer_id": 1, "correct": True, "comment": "x" * 1001},
-    {"answer_id": 1, "correct": True, "comment": None},
-])
+@pytest.mark.parametrize(
+    "review",
+    [
+        {"answer_id": 1, "correct": "true", "comment": "ok"},
+        {"answer_id": 1, "correct": True, "comment": "x" * 1001},
+        {"answer_id": 1, "correct": True, "comment": None},
+    ],
+)
 def test_a_malformed_verdict_is_invalid_text(bank, review): ...
 def test_an_unreviewable_answer_is_not_listed_and_cannot_be_reviewed(bank): ...
 
+
 async def test_review_answers_lists_then_records(retrievable_subject): ...
 async def test_review_answers_sources_carry_a_citation_uri(retrievable_subject): ...
-async def test_the_tool_surface_is_exactly_these_ten_entries(): ...      # final: 9 tools + 1 template
+async def test_the_tool_surface_is_exactly_these_ten_entries(): ...  # final: 9 tools + 1 template
 ```
 
 - [ ] **Step 2: Run** the two files. Expected: new tests fail.
