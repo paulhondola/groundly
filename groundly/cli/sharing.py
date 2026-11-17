@@ -42,7 +42,8 @@ def export(
 
     console.print(f"exported [bold]{subject}[/bold] to {out_path}")
     console.print(
-        "this bundle contains everything indexed in this subject, including its topic map."
+        "this bundle contains everything indexed in this subject, including its topic map and "
+        "question bank."
     )
 
 
@@ -111,6 +112,7 @@ def import_(
             bundle.check_store_shape(tmp_dir / "store.db")
             bundle.check_counts(tmp_dir / "store.db", manifest)
             bundle.check_tree(tmp_dir / "store.db")
+            bundle.check_questions(tmp_dir / "store.db")
 
             if not bundle.pin_matches(manifest):
                 if not yes:

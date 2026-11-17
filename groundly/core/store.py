@@ -59,6 +59,11 @@ class QuestionWrite:
     chunk_ids: list[int]
 
 
+class SchemaUpgradeError(RuntimeError):
+    """A version-1 store could not gain the question tables: it already holds an object of
+    the same name, which groundly never writes there. Nothing was changed."""
+
+
 class StaleTopicError(Exception):
     """A submitted tree keeps a topic id that no longer exists: another submit dropped it
     after the caller read the ids. Raised before anything is written."""
@@ -198,7 +203,13 @@ def connect(path: Path, create: bool = False) -> sqlite3.Connection:
             f"understands (max {STORE_USER_VERSION}) — upgrade groundly"
         )
     if version == 1:
-        _upgrade(conn)
+        try:
+            _upgrade(conn)
+        except sqlite3.Error as exc:
+            conn.close()
+            raise SchemaUpgradeError(
+                f"{path.name} could not be upgraded to schema {STORE_USER_VERSION} — {exc}"
+            ) from exc
     return conn
 
 

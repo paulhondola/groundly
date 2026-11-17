@@ -153,8 +153,14 @@ def check_store_shape(store_db_path: Path) -> None:
     not ship, which would answer these checks with one thing and later reads with another, or
     a row outside a field's fixed shape. A filename is joined to the materials dir, so it must
     stay one path component. Free text (`error`, chunk text, heading paths, and any other
-    character the filesystem allows in a filename) is made inert where it is shown."""
-    conn = store.connect(store_db_path)
+    character the filesystem allows in a filename) is made inert where it is shown. This is
+    the first open, so a version-1 store is upgraded here."""
+    try:
+        conn = store.connect(store_db_path)
+    except store.SchemaUpgradeError as exc:
+        raise BundleError(
+            "bundle store.db could not be upgraded — it holds tables groundly did not write"
+        ) from exc
     try:
         if store.programs(conn) != store.shipped_programs():
             raise BundleError("bundle store.db holds views or triggers groundly does not ship")
@@ -268,6 +274,147 @@ def _check_tree_cost(conn) -> None:
             f"bundle topics cite {cited} bytes of chunk text; the limit is "
             f"{store.MAX_TREE_SOURCE_BYTES} — rejected"
         )
+
+
+_QUESTION_TABLES = {"questions", "question_options", "question_citations"}
+
+# (column checked, table its value must exist in)
+_QUESTION_REFERENCES = [
+    ("questions", "topic_id", "topics"),
+    ("question_options", "question_id", "questions"),
+    ("question_citations", "question_id", "questions"),
+    ("question_citations", "chunk_id", "chunks"),
+]
+
+# kind -> (fewest options, most options, fewest correct)
+_QUESTION_SHAPES = {"single": (2, 6, 1), "multiple": (3, 8, 2)}
+
+
+def check_questions(store_db_path: Path) -> None:
+    """Refuse a question bank the question gate would not have stored. An import never passes
+    through the gate, so its structure checks and limits are repeated here; grounding is not,
+    since import loads no model. Runs after `check_tree`, so the tree is already sound."""
+    conn = store.connect(store_db_path)
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not _QUESTION_TABLES <= tables:
+            raise BundleError("bundle has no question bank tables — rejected")
+        for table, column, parent in _QUESTION_REFERENCES:
+            if conn.execute(
+                f"SELECT 1 FROM {table} x LEFT JOIN {parent} p ON p.id = x.{column} "
+                f"WHERE p.id IS NULL LIMIT 1"
+            ).fetchone():
+                raise BundleError(
+                    f"bundle is damaged — {table}.{column} has a value with no matching {parent}"
+                )
+        _check_question_counts(conn)
+        for row in conn.execute(
+            """
+            SELECT q.id, q.kind,
+                   typeof(q.stem) AS stem_type, LENGTH(TRIM(q.stem)) AS stem_trim,
+                   LENGTH(q.stem) AS stem_len,
+                   typeof(q.code) AS code_type, LENGTH(q.code) AS code_len,
+                   typeof(q.reference_answer) AS ref_type, LENGTH(TRIM(q.reference_answer)) AS ref_trim,
+                   LENGTH(q.reference_answer) AS ref_len,
+                   EXISTS (SELECT 1 FROM topics t WHERE t.parent_id = q.topic_id) AS on_parent,
+                   (SELECT COUNT(*) FROM question_citations c WHERE c.question_id = q.id) AS cites,
+                   (SELECT COUNT(*) FROM question_options o WHERE o.question_id = q.id) AS options,
+                   (SELECT COUNT(*) FROM question_options o
+                     WHERE o.question_id = q.id AND o.correct = 1) AS correct,
+                   (SELECT COUNT(*) FROM question_options o
+                     WHERE o.question_id = q.id AND NOT (typeof(o.correct) = 'integer'
+                       AND o.correct IN (0, 1))) AS bad_flags,
+                   (SELECT COUNT(*) FROM question_options o
+                     WHERE o.question_id = q.id AND typeof(o.text) != 'text') AS untyped_options,
+                   (SELECT MAX(LENGTH(o.text)) FROM question_options o
+                     WHERE o.question_id = q.id) AS longest_option,
+                   (SELECT MIN(LENGTH(TRIM(o.text))) FROM question_options o
+                     WHERE o.question_id = q.id) AS shortest_option
+            FROM questions q ORDER BY q.id
+            """
+        ):
+            problem = _question_problem(row)
+            if problem:
+                raise BundleError(f"bundle question {row['id']} {problem} — rejected")
+    finally:
+        conn.close()
+
+
+def _check_question_counts(conn) -> None:
+    row = conn.execute(
+        "SELECT topic_id, COUNT(*) FROM questions GROUP BY topic_id ORDER BY COUNT(*) DESC LIMIT 1"
+    ).fetchone()
+    if row and row[1] > store.MAX_QUESTIONS_PER_TOPIC:
+        raise BundleError(
+            f"bundle topic {row[0]} holds {row[1]} questions; the limit is "
+            f"{store.MAX_QUESTIONS_PER_TOPIC} — rejected"
+        )
+
+
+def _text_problem(name: str, kind: str, length: int | None, trimmed: int | None, limit: int):
+    if kind != "text":
+        return f"has a {name} that is not text"
+    if not trimmed:
+        return f"has an empty {name}"
+    if length > limit:
+        return f"has a {name} of {length} characters; the limit is {limit}"
+    return None
+
+
+def _question_problem(row) -> str | None:
+    kind = row["kind"]
+    if kind not in ("single", "multiple", "open"):
+        return "has an unknown kind"
+    if row["on_parent"]:
+        return "is on a topic that has subtopics"
+    problem = _text_problem(
+        "stem", row["stem_type"], row["stem_len"], row["stem_trim"], store.MAX_STEM_CHARS
+    )
+    if problem:
+        return problem
+    if row["code_type"] != "null":
+        if kind == "open":
+            return "is an open question with code"
+        if row["code_type"] != "text":
+            return "has code that is not text"
+        if row["code_len"] > store.MAX_CODE_CHARS:
+            return f"has code of {row['code_len']} characters; the limit is {store.MAX_CODE_CHARS}"
+    if not row["cites"]:
+        return "cites no chunk"
+    if row["cites"] > store.MAX_QUESTION_CITATIONS:
+        return f"cites {row['cites']} chunks; the limit is {store.MAX_QUESTION_CITATIONS}"
+    if kind == "open":
+        if row["options"]:
+            return "is an open question with options"
+        return _text_problem(
+            "reference answer",
+            row["ref_type"],
+            row["ref_len"],
+            row["ref_trim"],
+            store.MAX_REFERENCE_CHARS,
+        )
+    if row["ref_type"] != "null":
+        return f"is a {kind} question with a reference answer"
+    if row["bad_flags"] or row["untyped_options"]:
+        return "has an option that is not text with a true or false flag"
+    if not row["shortest_option"]:
+        return "has an empty option"
+    if row["longest_option"] > store.MAX_OPTION_CHARS:
+        return (
+            f"has an option of {row['longest_option']} characters; the limit is "
+            f"{store.MAX_OPTION_CHARS}"
+        )
+    fewest, most, fewest_correct = _QUESTION_SHAPES[kind]
+    if not fewest <= row["options"] <= most:
+        return f"has {row['options']} options; a {kind} question needs {fewest} to {most}"
+    if kind == "single" and row["correct"] != 1:
+        return f"has {row['correct']} correct options; a single question needs exactly one correct option"
+    if kind == "multiple" and not (fewest_correct <= row["correct"] < row["options"]):
+        return (
+            f"has {row['correct']} correct of {row['options']} options; a multiple question "
+            "needs at least two correct and one wrong"
+        )
+    return None
 
 
 def re_embed(store_db_path: Path, embedder, on_step: OnStep | None = None) -> None:

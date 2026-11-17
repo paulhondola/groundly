@@ -12,7 +12,7 @@ groundly/
 │             #   config, models, skill, mcp (stdio, or --http), serve
 ├── mcp/         # FastMCP tool definitions over the core (stdio + streamable HTTP)
 ├── web/         # Starlette app + one HTML file: the read-only topic-tree page
-├── agents/      # the gates — the topic gate (submit_tree) and the verifier; nothing unchecked enters store.db
+├── agents/      # the gates — the topic gate (submit_tree) and the question gate (submit_questions); nothing unchecked enters store.db
 ├── retrieval/   # dense + sparse + BM25, RRF fusion, cross-encoder rerank
 ├── ingestion/   # docling subprocess → HybridChunker → embed → stores
 ├── llm/         # local models: bge-m3 embedder + reranker, lazy-loaded (no LLM client)
@@ -24,8 +24,8 @@ groundly/
 
 - **clients → services → foundations**, one direction: `cli`/`mcp`/`web` call `agents`/`retrieval`/`ingestion`/`core` (`web` only reads, through `core`); those call only `llm`/`core`. **Nothing imports the client layer.** Enforced by the import-linter `layers` contract in `pyproject.toml` (`lint-imports`, run in CI).
 - Model loading lives **only** in `llm/`. Groundly constructs no LLM client anywhere (decision 37).
-- `agents` calls `retrieval` (the verifier re-retrieves). `retrieval` never calls `agents`.
-- Two writers touch `store.db`: `ingestion` (materials, chunks, vectors) and the topic gate in `agents` (the tree, reached from `submit_tree`). `ingestion` never serves queries; `web` never writes. It marks each source `pdf` only when the stored file resolves inside the materials dir, so the page never links a PDF an export left out.
+- `agents` calls `retrieval` (the question gate re-retrieves). `retrieval` never calls `agents`.
+- Three writers touch `store.db`: `ingestion` (materials, chunks, vectors), the topic gate in `agents` (the tree, reached from `submit_tree`) and the question gate in `agents` (the question bank, reached from `submit_questions` and `remove_questions`). `ingestion` never serves queries; `web` never writes. It marks each source `pdf` only when the stored file resolves inside the materials dir, so the page never links a PDF an export left out.
 
 ## System context
 
@@ -80,6 +80,6 @@ Multiple processes may open the same `store.db` (an `index` run while a host-spa
 - **Citations are structural**: retrieval returns chunk ids; the core resolves them to document/page (+ heading path). 
 - **Subject scoping is filesystem layout** — a query physically cannot cross subjects.
 - **The privacy boundary is a file**: `store.db` exports; `progress.db` never does.
-- **A gate checks every write of host-generated content**: the topic gate for the tree, the verifier for quiz questions (sub-project 3), whoever generated it.
+- **A gate checks every write of host-generated content**: the topic gate for the tree, the question gate for questions, whoever generated it.
 - **The page shows; it never decides.** Titles, summaries and chunk text are layer 3 and are inserted as text only.
 - **The host composes answers.** Groundly returns cited chunks and verifies what comes back; it runs no answer-generation loop of its own (decision 33).
