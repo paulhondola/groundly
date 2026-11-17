@@ -107,13 +107,10 @@ def test_export_import_roundtrip_preserves_data_and_resets_progress(tmp_path, mo
 
     # fresh empty progress.db: never derived from the bundle's own (garbage) state
     assert subj_b.progress_db_path.read_bytes() != b"private study state"
-    import sqlite3
+    from groundly.core.progress import ProgressStore
 
-    conn = sqlite3.connect(subj_b.progress_db_path)
-    try:
-        assert conn.execute("SELECT COUNT(*) FROM sqlite_master").fetchone()[0] == 0
-    finally:
-        conn.close()
+    progress_b = ProgressStore(subj_b.progress_db_path)
+    assert progress_b.attempts() == [] and progress_b.answers() == []
 
 
 def test_export_excludes_orphan_material_with_no_store_row(tmp_path, monkeypatch):
