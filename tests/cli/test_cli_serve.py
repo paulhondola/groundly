@@ -107,3 +107,20 @@ def test_the_page_never_calls_a_key_verified():
 
 def test_the_page_keeps_a_test_in_session_storage_and_sends_a_random_token():
     assert "sessionStorage" in PAGE and "crypto.randomUUID()" in PAGE
+
+
+def test_serve_ignores_forwarded_headers(monkeypatch):
+    """The write route compares Origin with the request's own scheme and host; a forwarded
+    header must not be able to change either."""
+    runs, _ = _patch(monkeypatch)
+    assert runner.invoke(app, ["serve"]).exit_code == 0
+    assert runs[0]["proxy_headers"] is False
+
+
+def test_the_page_drops_a_test_whose_question_was_removed():
+    assert '"unknown_question"' in PAGE
+
+
+def test_the_suggested_host_sentence_quotes_the_topic_title():
+    """A title may come from an imported bundle: it reaches the host quoted, as data."""
+    assert '"Write questions on \\"" + title + "\\" for "' in PAGE

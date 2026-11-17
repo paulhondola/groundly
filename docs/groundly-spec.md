@@ -30,7 +30,7 @@ One human role: the **student** (owner of the machine and the data). The other "
 - **UC-03 Source management** — list/re-index/delete materials per subject. [Detail](use-cases/knowledge-base.md)
 - **UC-30 Share knowledge bases** — export/import `.groundly` bundles with manifest-pinned compatibility. [Detail](use-cases/sharing.md)
 
-- **Topic tree (sub-project 2)** — the host builds a two-level map of a subject from `outline`, Groundly chooses each node's sources by reranked search and stores the tree only if every node passes, and `groundly serve` shows it as a local page. Read-only: progress waits for quizzes. [Detail](use-cases/student-modes.md)
+- **Topic tree (sub-project 2)** — the host builds a two-level map of a subject from `outline`, Groundly chooses each node's sources by reranked search and stores the tree only if every node passes, and `groundly serve` shows it as a local page, with each node's mastery once tests are taken (decision 44). [Detail](use-cases/student-modes.md)
 
 In progress (decision 44): **tests on the local page, with mastery** (sub-project 3). [Detail](use-cases/student-modes.md)
 
@@ -50,7 +50,7 @@ One Python package (`uv tool install groundly`), three runtime modes, zero servi
   │ mcp/ FastMCP tools     cli/ typer verbs                │
   │ stdio: `groundly mcp`  (index/list/title/remove/drop/  │
   │ HTTP: `groundly mcp --http`  search/import/export/...) │
-  │ web/ topic-tree page (`groundly serve`, read-only)     │
+  │ web/ topic-tree and test page (`groundly serve`)       │
   └──────────────┬───────────────┬─────────────────────────┘
                  ▼               ▼
   ┌──────────────────── service layer ─────────────────────┐
@@ -88,7 +88,7 @@ The **privacy boundary is a file**: `store.db` travels, `progress.db` never does
 | Component | Decision | Decisive reason |
 |---|---|---|
 | Distribution | Python package via `uv` | Docling ecosystem is Python-only |
-| Interface | MCP server (FastMCP, stdio + HTTP) + CLI (typer) + a read-only local page (Starlette, `groundly serve`); **no TUI** | The host agent is the interactive surface; CLI verbs are batch lifecycle; the page only displays |
+| Interface | MCP server (FastMCP, stdio + HTTP) + CLI (typer) + a local page (Starlette, `groundly serve`); **no TUI** | The host agent is the interactive surface; CLI verbs are batch lifecycle; the page shows the map and takes tests, writing only a submitted attempt to `progress.db` (decision 44) |
 | Storage | SQLite (WAL) + sqlite-vec + FTS5, files on disk | Zero services; export = zip; exact KNN at subject scale |
 | Extraction | Docling + bundled RapidOCR | Local/offline, zero-key; scanned course PDFs are common |
 | Embeddings | `bge-m3` local, pinned incl. hf_revision; dense + learned sparse | RO/EN cross-lingual; the pin makes shared vectors compatible |
@@ -172,5 +172,5 @@ P1–P5 shipped (indexing, interchange, MCP surface, the measured comparison). T
 | # | Sub-project | Status |
 |---|---|---|
 | 1 | The cut: MCP-first, zero-key, streamlined (decisions 33–38) | in progress |
-| 2 | Topic tree — a two-level map of each subject, built by the host from `outline`, every node's sources chosen by Groundly's reranked search; served as a read-only local page (decision 41). Open: the human review and cutoff check on real subjects | built |
+| 2 | Topic tree — a two-level map of each subject, built by the host from `outline`, every node's sources chosen by Groundly's reranked search; served as a local page (decision 41; tests added to it by decision 44). Open: the human review and cutoff check on real subjects | built |
 | 3 | Tests on the local page + mastery (decision 44) — single-answer, multiple-answer, code-reading and open questions per topic through the question gate; tests taken on the page, answers recorded in `progress.db`; a topic is mastered at ≥90% correct over its last 10 graded answers (at least 10) | in progress |

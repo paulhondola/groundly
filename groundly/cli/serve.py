@@ -44,4 +44,6 @@ def serve(
     url = f"http://127.0.0.1:{port}/"
     console.print(f"Serving the topic tree at {url}")
     _open_browser(url)
-    uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="warning")
+    # proxy_headers=False: the write route's Origin check compares against the socket's own
+    # scheme and host, which an X-Forwarded-* header must not be able to change.
+    uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="warning", proxy_headers=False)

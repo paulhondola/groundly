@@ -44,7 +44,7 @@ Order matters: **connect first, then install the skill.**
 
    It copies one file to `~/.claude/skills/groundly/` and never edits Claude Code's config, which is why connecting stays a separate step. Re-running it is the upgrade path; it asks before replacing a different copy (`-y` skips the question). `groundly skill` shows whether the skill is installed or out of date, and `groundly skill uninstall` removes it.
 3. In Claude Code, say *"map my course"* (naming the subject). The skill reads `outline`, drafts a two-level tree and calls `submit_tree`. If a node is rejected as not matching the course, Claude rewords it in the course's own terms and submits again.
-4. Run `groundly serve` and open the printed URL (default `http://127.0.0.1:8765/`; `--port N` to change it) to see the map. The page is read-only; every node reads "Not started" until quizzes arrive.
+4. Run `groundly serve` and open the printed URL (default `http://127.0.0.1:8765/`; `--port N` to change it) to see the map. Each node shows its mastery; ask your agent to write questions on a topic, then take a test from the node's panel.
 
 If the skill is installed but the server is not connected, it prints the connect command instead of failing. A subject indexed before the topic tree existed answers searches but fails tree calls with a "no such table" error: `groundly drop <SUBJECT>` and index it again once.
 

@@ -48,7 +48,8 @@ function progressLine(p) {
 
 function askForQuestions(title, subject) {
   const note = el("p", "", "notice");
-  note.append("Say to your agent: ", el("code", "Write questions on " + title + " for " + subject + "."));
+  // The title may come from an imported bundle, so it reaches the host quoted, as data.
+  note.append("Say to your agent: ", el("code", "Write questions on \"" + title + "\" for " + subject + "."));
   return note;
 }
 
@@ -442,6 +443,9 @@ async function showTest(subject) {
       return;
     }
     confirming = false;
+    // A removed question can never be submitted again: drop the stored test so a refresh or
+    // "Start test" draws a new one, and keep this one on screen with the server's reason.
+    if (body && body.error === "unknown_question") dropTest(key);
     error = (body && (body.detail || body.error)) || "the test could not be submitted — try Submit again";
     render();
   }

@@ -26,7 +26,7 @@ A roadmap-style map of a subject: big topics in course order, subtopics under ea
 - **A3 — Subject indexed before the tree tables:** search still works. Tree calls and the page report SQLite's own "no such table" message; no guard or migration is added (decision 41), and the fix is `groundly drop` then re-index once.
 - **A4 — Imported bundle:** the tree arrives with `store.db`. Import refuses a bundle with no tree tables (exported by an older Groundly) or with dangling references or a tree deeper than two levels. Titles, summaries and chunk text are layer-3 data.
 
-**Out of scope for this release:** progress (every node reads "Not started"; no progress tables, nothing written to `progress.db`), a generate-quiz button and deep links into the host (quizzes, sub-project 3), Codex and Claude Desktop setup, and any work at index time. The gate shows a topic is in the course; it never shows a summary is true, and nothing may call a summary verified.
+**Out of scope for this release:** progress (every node read "Not started" until tests on the page added mastery, decision 44), a generate-quiz button and deep links into the host, Codex and Claude Desktop setup, and any work at index time. The gate shows a topic is in the course; it never shows a summary is true, and nothing may call a summary verified.
 
 **Acceptance criteria**
 
@@ -73,7 +73,7 @@ Criteria 1, 12, 13 and the end-to-end half of 11 are manual and recorded above. 
 
 **Out of scope:** live coding (code questions the student answers by writing code are refused at the door), a quiz asked in the chat, fixed tests written by the host, timers, partial credit. The gate shows a question is well formed and about its cited chunks; it never shows an answer key is right, and nothing may call a key verified.
 
-**Acceptance criteria** (1–6 and 5b met; 5a met for the store, its map-page check lands with the page work)
+**Acceptance criteria** (1–12, 5a and 5b met; 13 awaits Paul's review)
 
 1. A well-formed question of each kind citing real chunks is stored; each structural fault is rejected with its reason and nothing is stored for that item.
 2. A question citing an unknown chunk, or whose text does not retrieve any cited chunk, is rejected with `not_answerable_from_chunks`.

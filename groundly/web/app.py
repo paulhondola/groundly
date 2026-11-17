@@ -176,7 +176,24 @@ def _draw(request: Request) -> Response:
 
 
 def _is_id(value: object) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
+    """An id SQLite can bind: an int (not a bool) within 64 bits."""
+    return isinstance(value, int) and not isinstance(value, bool) and -(2**63) <= value < 2**63
+
+
+# 20 answers of at most 4000 characters, with room for option ids and JSON escapes.
+MAX_BODY_BYTES = 256 * 1024
+
+
+async def _read_body(request: Request) -> bytes | None:
+    """The request body, or None once it passes MAX_BODY_BYTES; never buffers more."""
+    if int(request.headers.get("content-length") or 0) > MAX_BODY_BYTES:
+        return None
+    body = b""
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > MAX_BODY_BYTES:
+            return None
+    return body
 
 
 async def _submit(request: Request) -> Response:
@@ -185,9 +202,12 @@ async def _submit(request: Request) -> Response:
         return _error("forbidden", "a test is submitted from this page only", 403)
     if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
         return _error("unsupported", "the body is JSON", 415)
+    raw = await _read_body(request)
+    if raw is None:
+        return _error("too_large", "the body is larger than a test can be", 413)
     try:
-        body = json.loads(await request.body())
-    except ValueError:
+        body = json.loads(raw)
+    except (ValueError, RecursionError):
         return _error("invalid_body", "the body is not valid JSON")
     if (
         not isinstance(body, dict)
@@ -215,7 +235,8 @@ def _history(request: Request) -> Response:
 
 def _result(request: Request) -> Response:
     def read(store: SubjectStore, progress: ProgressStore) -> Response:
-        result = quiz.attempt_result(store, progress, request.path_params["id"])
+        attempt_id = request.path_params["id"]
+        result = quiz.attempt_result(store, progress, attempt_id) if _is_id(attempt_id) else None
         if result is None:
             return _error("unknown_attempt", "no such attempt", 404)
         for answer in result["answers"]:

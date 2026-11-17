@@ -11,7 +11,7 @@ groundly/
 ├── cli/         # typer verbs: index, list, title, remove, drop, search, import, export,
 │             #   config, models, skill, mcp (stdio, or --http), serve
 ├── mcp/         # FastMCP tool definitions over the core (stdio + streamable HTTP)
-├── web/         # Starlette app + one HTML file: the read-only topic-tree page
+├── web/         # Starlette app + one HTML file: the topic-tree and test page
 ├── agents/      # the gates — the topic gate (submit_tree) and the question gate (submit_questions); nothing unchecked enters store.db
 ├── retrieval/   # dense + sparse + BM25, RRF fusion, cross-encoder rerank
 ├── ingestion/   # docling subprocess → HybridChunker → embed → stores
@@ -38,7 +38,7 @@ flowchart LR
     subgraph Groundly[Groundly local process]
         cli[CLI]
         mcp[MCP server\nstdio or loopback HTTP]
-        web[Topic-tree page\nloopback, read-only]
+        web[Topic-tree and test page\nloopback]
         services[Ingestion, retrieval, gates]
         cli --> services
         mcp --> services
@@ -56,6 +56,7 @@ flowchart LR
     services --> materials
     services --> store
     web -->|read only| store
+    web -->|submitted attempts, via agents/quiz| progress
     web -->|PDFs| materials
     services --> models
     bundle[.groundly export] --> store
@@ -71,7 +72,7 @@ Everything needs only the local models: no path reaches a provider, and none nee
 | CLI verbs | `groundly index/search/import/export/...` | one-shot, core in-process, exits |
 | MCP stdio | `groundly mcp` | **spawned and killed by the host agent** |
 | Optional HTTP | `groundly mcp --http` | user-run; MCP over Streamable HTTP; binds **127.0.0.1 only**; exists so multiple hosts share one bge-m3 load |
-| Topic-tree page | `groundly serve` | user-run; Starlette on uvicorn, **127.0.0.1 only**, all subjects from one process, reads per request; **loads no model and writes no rows** |
+| Topic-tree page | `groundly serve` | user-run; Starlette on uvicorn, **127.0.0.1 only**, all subjects from one process, reads per request; **loads no model and writes no rows to `store.db`**; its one write is a submitted test attempt to `progress.db`, graded in `agents/quiz.py` |
 
 Multiple processes may open the same `store.db` (an `index` run while a host-spawned MCP process answers). Rules: **WAL + busy_timeout** on every connection; **lazy model loading** (never at MCP spawn — hosts expect fast handshakes).
 
@@ -81,5 +82,5 @@ Multiple processes may open the same `store.db` (an `index` run while a host-spa
 - **Subject scoping is filesystem layout** — a query physically cannot cross subjects.
 - **The privacy boundary is a file**: `store.db` exports; `progress.db` never does.
 - **A gate checks every write of host-generated content**: the topic gate for the tree, the question gate for questions, whoever generated it.
-- **The page shows; it never decides.** Titles, summaries and chunk text are layer 3 and are inserted as text only.
+- **The page shows; it never decides.** Grading and mastery are `agents/quiz.py`'s, never the browser's, and a drawn test carries no key. Titles, summaries, questions and chunk text are layer 3 and are inserted as text only.
 - **The host composes answers.** Groundly returns cited chunks and verifies what comes back; it runs no answer-generation loop of its own (decision 33).

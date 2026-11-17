@@ -146,7 +146,8 @@ def draw(store: SubjectStore, progress: ProgressStore, topic_id: int | None, n: 
 
 
 def _is_int(value: object) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
+    """An id SQLite can bind: an int (not a bool) within 64 bits."""
+    return isinstance(value, int) and not isinstance(value, bool) and -(2**63) <= value < 2**63
 
 
 def _grade(q: dict, answer: dict) -> AnswerWrite:

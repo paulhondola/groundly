@@ -506,3 +506,37 @@ def test_result_sources_say_whether_their_pdf_opens(client, seeded):
     (Subject("PDSS").materials_dir / "extra.pdf").write_bytes(PDF_BYTES)
     (answer,) = client.get(f"/api/subjects/PDSS/attempts/{attempt}").json()["answers"]
     assert answer["sources"][0]["pdf"] is True
+
+
+# --- slice 2 review --------------------------------------------------------------------
+
+
+def test_a_deeply_nested_body_is_a_400_not_a_crash(client, seeded):
+    r = client.post(
+        "/api/subjects/PDSS/attempts",
+        content=b"[" * 200_000,
+        headers={**ORIGIN, "Content-Type": "application/json"},
+    )
+    assert r.status_code == 400
+
+
+def test_an_id_too_large_for_sqlite_is_refused_not_a_crash(client, seeded):
+    _bank(seeded)
+    body = {
+        "token": "token-0001",
+        "topic_id": None,
+        "answers": [{"question_id": 2**70, "selected": []}],
+    }
+    assert _post(client, body).status_code == 400
+    assert _post(client, {**body, "topic_id": 2**70}).status_code == 400
+    assert client.get(f"/api/subjects/PDSS/attempts/{2**70}").status_code == 404
+    assert client.get(f"/api/subjects/PDSS/test?topic={2**70}&n=5").status_code == 400
+
+
+def test_an_oversized_body_is_refused_before_it_is_read(client, seeded):
+    r = client.post(
+        "/api/subjects/PDSS/attempts",
+        content=b'{"token": "' + b"x" * 300_000 + b'"}',
+        headers={**ORIGIN, "Content-Type": "application/json"},
+    )
+    assert r.status_code == 413
