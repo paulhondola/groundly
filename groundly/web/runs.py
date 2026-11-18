@@ -254,10 +254,10 @@ def _kill(proc: subprocess.Popen) -> None:
     try:
         os.killpg(proc.pid, signal.SIGTERM)
         proc.wait(5)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):  # no group left; macOS: only zombies left
         return
     except subprocess.TimeoutExpired:
-        with contextlib.suppress(ProcessLookupError):
+        with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(proc.pid, signal.SIGKILL)
         proc.wait()
 
