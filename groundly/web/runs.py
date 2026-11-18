@@ -1,8 +1,8 @@
-"""A page button starts the student's own Claude Code headless on one of the skill's flows.
+"""A page button starts the student's own Claude Code headless on one flow's packaged skill.
 
 Groundly holds no key and builds no client: the run is the student's `claude` on the student's
 login. What the run may touch is fixed here, never by the student's settings: only Groundly's
-MCP server, no built-in tools, a per-flow tool allowlist and the packaged skill. The prompt
+MCP server, no built-in tools, a per-flow tool allowlist and that flow's skill. The prompt
 carries only the flow, the subject name and a topic id; titles, summaries and other layer-3
 text reach the run through tools, as data. The page learns what the run did from tool names
 and counts, never from model text, except the final summary, which it shows as text.
@@ -69,6 +69,7 @@ _ENDING = (
     " and what was rejected. Do not tell them to run any command, and do not call any"
     " question, answer key or verdict verified."
 )
+_PAGE_RUN = "This is a page run. "
 _WRITE_LEAF = (
     'Follow the groundly-questions skill for subject "{subject}", topic id {topic_id}:'
     " bring that topic to {target} questions."
@@ -90,7 +91,8 @@ def build_prompt(kind: str, subject: str, topic_id: int | None, big: bool) -> st
         template = _GRADE
     else:
         template = _WRITE_BIG if big else _WRITE_LEAF
-    return template.format(subject=subject, topic_id=topic_id, target=TARGET_QUESTIONS) + _ENDING
+    prompt = template.format(subject=subject, topic_id=topic_id, target=TARGET_QUESTIONS)
+    return _PAGE_RUN + prompt + _ENDING
 
 
 def _skill_path(kind: str) -> str:

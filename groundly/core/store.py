@@ -699,6 +699,24 @@ class SubjectStore:
                 )
             }
 
+    def topic_sources(self, topic_id: int) -> list[dict]:
+        """One topic's sources in rank order, in the shape `tree()` gives a node's."""
+        with self._open() as conn:
+            return [
+                dict(r)
+                for r in conn.execute(
+                    """
+                    SELECT c.id AS chunk_id, c.material_id, m.filename, c.page,
+                           c.heading_path, c.text
+                    FROM topic_citations tc
+                    JOIN chunks c ON c.id = tc.chunk_id
+                    JOIN materials m ON m.id = c.material_id
+                    WHERE tc.topic_id = ? ORDER BY tc.rank
+                    """,
+                    (topic_id,),
+                )
+            ]
+
     def tree(self, with_sources: bool = True) -> list[dict]:
         """The topic tree in position order, each node's sources in rank order. With
         `with_sources=False` every node's sources are empty and no chunk text is loaded."""

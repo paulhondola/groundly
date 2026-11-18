@@ -49,7 +49,7 @@ def topic_view(store: SubjectStore, topic_id: int) -> dict | None:
     chunks with their verbatim text, and the stems it already holds. No options, no answer
     keys, no model. None when `topic_id` is not in the tree."""
     found = None
-    for big in store.tree():
+    for big in store.tree(with_sources=False):
         if big["id"] == topic_id:
             found = (big, None)
         for sub in big["subtopics"]:
@@ -58,10 +58,10 @@ def topic_view(store: SubjectStore, topic_id: int) -> dict | None:
     if found is None:
         return None
     node, parent = found
-    counts = store.question_ids_by_topic()
-    questions = (
-        [] if node["subtopics"] else store.questions(topic_ids=[topic_id], with_sources=False)
-    )
+    if node["subtopics"]:
+        counts, questions = store.question_ids_by_topic(), []
+    else:
+        counts, questions = {}, store.questions(topic_ids=[topic_id], with_sources=False)
     return {
         "id": node["id"],
         "title": node["title"],
@@ -73,7 +73,7 @@ def topic_view(store: SubjectStore, topic_id: int) -> dict | None:
         ],
         "sources": [
             {k: src[k] for k in ("chunk_id", "filename", "page", "heading_path", "text")}
-            for src in node["sources"]
+            for src in store.topic_sources(topic_id)
         ],
         "questions": [{"id": q["id"], "kind": q["kind"], "stem": q["stem"]} for q in questions],
     }

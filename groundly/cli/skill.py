@@ -32,10 +32,17 @@ def _packaged(name: str) -> bytes:
 def _refuse_symlinks() -> None:
     """Never write through or unlink a link planted at a skill file: it could point
     anywhere the user can write. Checked for every path before anything is written;
-    `is_symlink` also catches a dangling link."""
+    `is_symlink` also catches a dangling link. A linked skill folder is allowed, but not one
+    whose destination is gone: nothing could be written there."""
     for target in (*map(_target, NAMES), _legacy()):
         if target.is_symlink():
             _fail(f"{target} is a symlink to {target.readlink()} — remove it yourself, then re-run")
+        folder = target.parent
+        if folder.is_symlink() and not folder.exists():
+            _fail(
+                f"{folder} links to {folder.readlink()}, which does not exist — fix or remove "
+                "the link, then re-run"
+            )
 
 
 def _remove(target: Path) -> None:
@@ -118,7 +125,9 @@ def uninstall(
         console.print("not installed — nothing to do")
         return
     if not yes:
-        typer.confirm(f"remove {len(present)} Groundly skill files?", abort=True)
+        for target in present:
+            console.print(f"  {target}", soft_wrap=True)
+        typer.confirm(f"remove these {len(present)} Groundly skill files?", abort=True)
     for target in present:
         _remove(target)
         console.print(f"removed {target}", soft_wrap=True)

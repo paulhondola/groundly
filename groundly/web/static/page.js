@@ -338,7 +338,7 @@ async function showTree(subject, reopen) {
     const note = el("div", undefined, "notice");
     const say = el("p", "No map yet. In Claude Code, say: ");
     say.append(el("code", "map my " + subject + " course."));
-    const skill = el("p", "This needs the Groundly skill: run ", "muted");
+    const skill = el("p", "This needs the Groundly skills: run ", "muted");
     skill.append(el("code", "groundly skill install"), " first.");
     note.append(say, skill);
     app.append(note);

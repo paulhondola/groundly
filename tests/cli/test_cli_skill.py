@@ -158,6 +158,20 @@ def test_uninstall_prompts_once_and_a_no_removes_nothing(targets):
     result = runner.invoke(app, ["skill", "uninstall"], input="n\n")
     assert result.exit_code != 0
     assert all(t.exists() for t in targets.values())
+    assert all(str(t) in _flat(result) for t in targets.values())  # names what it would remove
+
+
+@pytest.mark.parametrize("command", [["install"], ["install", "-y"], ["uninstall", "-y"]])
+def test_a_skill_folder_linked_to_nowhere_is_refused_by_name(home, targets, command):
+    folder = targets["groundly-grade"].parent
+    folder.parent.mkdir(parents=True)
+    folder.symlink_to(home / "moved-away")
+
+    result = runner.invoke(app, ["skill", *command])
+
+    assert result.exit_code != 0 and not isinstance(result.exception, OSError)  # no traceback
+    assert "does not exist" in _flat(result) and str(home / "moved-away") in _flat(result)
+    assert not any(t.exists() for t in targets.values())
 
 
 def test_uninstall_keeps_other_files_in_the_folder(targets):

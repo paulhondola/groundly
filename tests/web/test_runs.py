@@ -92,6 +92,7 @@ def test_prompts_carry_only_the_flow_the_subject_and_the_topic_id():
         assert (
             '"apd"' in p and "verified" in p
         )  # the closing line forbids calling anything verified
+        assert p.startswith("This is a page run.")  # the skills' page-run branches key on it
 
 
 def test_reading_a_topic_is_a_plain_word_step():
