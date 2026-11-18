@@ -101,7 +101,10 @@ async def test_topic_source_without_a_page_has_a_uri_without_fragment(retrievabl
 
     store = SubjectStore(subject_dir("TEST") / "store.db")
     store.add_indexed(
-        "notes.txt", "b" * 64, None, [ChunkData("plain notes on deadlock", "Notes", None, 5)],
+        "notes.txt",
+        "b" * 64,
+        None,
+        [ChunkData("plain notes on deadlock", "Notes", None, 5)],
         [([1.0] + [0.0] * (EMBEDDING_DIM - 1), {1: 0.5})],
     )
     store.replace_tree([TopicWrite(None, "Notes", "n", [4])])
@@ -228,11 +231,24 @@ def test_each_skill_stands_alone(name):
 @pytest.mark.parametrize(
     ("name", "triggers", "tools"),
     [
-        ("groundly-map", ("map", "topic tree", "roadmap"),
-         ("list_subjects", "outline", "get_page", "submit_tree", "remove_questions")),
-        ("groundly-questions", ("write questions", "test me", "quiz me"),
-         ("list_subjects", "progress", "topic", "get_page", "search", "submit_questions",
-          "remove_questions")),
+        (
+            "groundly-map",
+            ("map", "topic tree", "roadmap"),
+            ("list_subjects", "outline", "get_page", "submit_tree", "remove_questions"),
+        ),
+        (
+            "groundly-questions",
+            ("write questions", "test me", "quiz me"),
+            (
+                "list_subjects",
+                "progress",
+                "topic",
+                "get_page",
+                "search",
+                "submit_questions",
+                "remove_questions",
+            ),
+        ),
         ("groundly-grade", ("grade my test",), ("review_answers", "get_page")),
     ],
 )
