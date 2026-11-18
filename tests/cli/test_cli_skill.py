@@ -1,4 +1,4 @@
-"""CLI: `groundly skill` status, install and uninstall."""
+"""CLI: `groundly skill` status, install and uninstall of the three packaged skills."""
 
 from importlib.resources import files
 
@@ -9,7 +9,9 @@ from groundly.cli import app
 
 runner = CliRunner()
 
-PACKAGED = files("groundly").joinpath("skill/SKILL.md").read_bytes()
+NAMES = ("groundly-map", "groundly-questions", "groundly-grade")
+PACKAGED = {n: files("groundly").joinpath("skills", n, "SKILL.md").read_bytes() for n in NAMES}
+CONNECT = "claude mcp add --scope user groundly -- groundly mcp"
 
 
 @pytest.fixture(autouse=True)
@@ -19,74 +21,152 @@ def home(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def target(home):
+def targets(home):
+    return {n: home / ".claude/skills" / n / "SKILL.md" for n in NAMES}
+
+
+@pytest.fixture
+def legacy(home):
     return home / ".claude/skills/groundly/SKILL.md"
 
 
-def test_status_reports_not_installed():
+def _plant_legacy(legacy, extra=None):
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("old combined skill")
+    if extra:
+        (legacy.parent / extra).write_text("mine")
+
+
+def _line(output: str, name: str) -> str:
+    (line,) = [ln for ln in output.splitlines() if ln.startswith(f"{name}:")]
+    return line
+
+
+def _flat(result) -> str:
+    return result.output.replace("\n", "")
+
+
+def test_status_reports_each_skill_not_installed():
     result = runner.invoke(app, ["skill"])
     assert result.exit_code == 0, result.output
-    assert "not installed" in result.output
+    for name in NAMES:
+        assert "not installed" in _line(result.output, name)
 
 
-def test_install_copies_packaged_skill(target):
+def test_install_copies_all_three_and_says_how_to_connect(targets):
     result = runner.invoke(app, ["skill", "install"])
     assert result.exit_code == 0, result.output
-    assert target.read_bytes() == PACKAGED
-    assert "claude mcp add --scope user groundly -- groundly mcp" in result.output
-    assert "map my course" in result.output
+    for name, target in targets.items():
+        assert target.read_bytes() == PACKAGED[name]
+    assert CONNECT in _flat(result) and "map my course" in result.output
 
 
-def test_status_reports_installed_then_out_of_date(target):
+def test_status_reports_installed_then_out_of_date_per_skill(targets):
     runner.invoke(app, ["skill", "install"])
     result = runner.invoke(app, ["skill"])
-    assert "installed" in result.output
-    assert "not installed" not in result.output
-    assert "out of date" not in result.output
+    assert "not installed" not in result.output and "out of date" not in result.output
 
-    target.write_text("edited")
+    targets["groundly-grade"].write_text("edited")
     result = runner.invoke(app, ["skill"])
-    assert "out of date" in result.output
-    assert "not installed" not in result.output
+    assert "out of date" in _line(result.output, "groundly-grade")
+    for name in ("groundly-map", "groundly-questions"):
+        line = _line(result.output, name)
+        assert "installed" in line and "not installed" not in line and "out of date" not in line
 
 
-def test_install_prompts_before_replacing_a_different_copy(target):
+def test_a_no_skips_only_that_skill(targets, legacy):
     runner.invoke(app, ["skill", "install"])
-    target.write_text("edited")
-    result = runner.invoke(app, ["skill", "install"], input="n\n")
-    assert result.exit_code != 0
-    assert target.read_text() == "edited"
+    targets["groundly-grade"].write_text("edited")
+    _plant_legacy(legacy)
+
+    result = runner.invoke(app, ["skill", "install"], input="n\ny\n")
+
+    assert result.exit_code == 0, result.output
+    assert targets["groundly-grade"].read_text() == "edited"
+    for name in ("groundly-map", "groundly-questions"):
+        assert targets[name].read_bytes() == PACKAGED[name]
+    assert not legacy.exists()
+    assert "skipped" in _flat(result) and str(targets["groundly-grade"]) in _flat(result)
 
 
-def test_install_yes_replaces_without_prompt(target):
+def test_install_yes_replaces_without_prompt(targets):
     runner.invoke(app, ["skill", "install"])
-    target.write_text("edited")
+    for target in targets.values():
+        target.write_text("edited")
     result = runner.invoke(app, ["skill", "install", "-y"])
     assert result.exit_code == 0, result.output
-    assert target.read_bytes() == PACKAGED
+    for name, target in targets.items():
+        assert target.read_bytes() == PACKAGED[name]
 
 
-def test_install_is_silent_when_identical(target):
+def test_install_is_silent_when_identical(targets):
     runner.invoke(app, ["skill", "install"])
-    result = runner.invoke(app, ["skill", "install"])  # no input: a prompt would abort
+    result = runner.invoke(app, ["skill", "install"])  # no input: a prompt would read EOF
     assert result.exit_code == 0, result.output
-    assert target.read_bytes() == PACKAGED
+    assert "already installed" in result.output and "skipped" not in result.output
 
 
-def test_uninstall_removes_skill_and_empty_folder(target):
+def test_install_retires_the_old_skill_after_a_prompt(legacy):
+    _plant_legacy(legacy)
+    result = runner.invoke(app, ["skill", "install"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert not legacy.parent.exists()
+    status = runner.invoke(app, ["skill"]).output
+    assert all("installed" in _line(status, n) for n in NAMES)
+    assert "not installed" not in status and "old combined skill" not in status
+
+
+def test_declining_the_old_skills_removal_keeps_it_and_warns(legacy):
+    _plant_legacy(legacy)
+    result = runner.invoke(app, ["skill", "install"], input="n\n")
+    assert result.exit_code == 0, result.output
+    assert legacy.read_text() == "old combined skill"
+    assert "will keep triggering" in _flat(result)
+
+
+def test_retiring_keeps_the_users_other_files_in_the_old_folder(legacy):
+    _plant_legacy(legacy, "notes.md")
+    result = runner.invoke(app, ["skill", "install", "-y"])
+    assert result.exit_code == 0, result.output
+    assert not legacy.exists()
+    assert (legacy.parent / "notes.md").read_text() == "mine"
+
+
+def test_status_flags_a_leftover_old_skill(legacy):
+    _plant_legacy(legacy)
+    result = runner.invoke(app, ["skill"])
+    assert result.exit_code == 0, result.output
+    assert "old combined skill" in result.output
+
+
+def test_uninstall_removes_all_three_and_empty_folders(targets):
     runner.invoke(app, ["skill", "install"])
     result = runner.invoke(app, ["skill", "uninstall", "-y"])
     assert result.exit_code == 0, result.output
-    assert not target.parent.exists()
+    assert not any(t.parent.exists() for t in targets.values())
 
 
-def test_uninstall_keeps_other_files_in_the_folder(target):
+def test_uninstall_removes_an_old_skill_alone(legacy):
+    _plant_legacy(legacy)
+    result = runner.invoke(app, ["skill", "uninstall", "-y"])
+    assert result.exit_code == 0, result.output
+    assert not legacy.parent.exists()
+
+
+def test_uninstall_prompts_once_and_a_no_removes_nothing(targets):
     runner.invoke(app, ["skill", "install"])
-    extra = target.parent / "notes.md"
+    result = runner.invoke(app, ["skill", "uninstall"], input="n\n")
+    assert result.exit_code != 0
+    assert all(t.exists() for t in targets.values())
+
+
+def test_uninstall_keeps_other_files_in_the_folder(targets):
+    runner.invoke(app, ["skill", "install"])
+    extra = targets["groundly-map"].parent / "notes.md"
     extra.write_text("mine")
     result = runner.invoke(app, ["skill", "uninstall", "-y"])
     assert result.exit_code == 0, result.output
-    assert not target.exists()
+    assert not targets["groundly-map"].exists()
     assert extra.read_text() == "mine"
 
 
@@ -98,26 +178,31 @@ def test_uninstall_when_not_installed_says_nothing_to_do():
 
 @pytest.mark.parametrize("dangling", [True, False])
 @pytest.mark.parametrize("command", [["install"], ["install", "--yes"], ["uninstall", "--yes"]])
-def test_a_symlinked_skill_file_is_refused_and_never_followed(home, target, command, dangling):
+@pytest.mark.parametrize("which", [*NAMES, "legacy"])
+def test_a_symlinked_skill_file_is_refused_and_never_followed(
+    home, targets, legacy, which, command, dangling
+):
+    link = legacy if which == "legacy" else targets[which]
     destination = home / "elsewhere.txt"
     if not dangling:
         destination.write_text("mine")
-    target.parent.mkdir(parents=True)
-    target.symlink_to(destination)
+    link.parent.mkdir(parents=True)
+    link.symlink_to(destination)
 
     result = runner.invoke(app, ["skill", *command])
 
     assert result.exit_code != 0
-    output = result.output.replace("\n", "")
-    assert "symlink" in output and str(destination) in output
-    assert target.is_symlink()
+    assert "symlink" in _flat(result) and str(destination) in _flat(result)
+    assert link.is_symlink()
     assert destination.exists() is not dangling
     if not dangling:
         assert destination.read_text() == "mine"
+    assert not any(t.exists() for n, t in targets.items() if t != link)
 
 
-def test_a_symlinked_parent_directory_is_still_allowed(home, target):
-    real = home / "dotfiles/groundly"
+def test_a_symlinked_parent_directory_is_still_allowed(home, targets):
+    target = targets["groundly-map"]
+    real = home / "dotfiles/groundly-map"
     real.mkdir(parents=True)
     target.parent.parent.mkdir(parents=True)
     target.parent.symlink_to(real)
@@ -125,19 +210,4 @@ def test_a_symlinked_parent_directory_is_still_allowed(home, target):
     result = runner.invoke(app, ["skill", "install"])
 
     assert result.exit_code == 0, result.output
-    assert (real / "SKILL.md").read_bytes() == PACKAGED
-
-
-def test_packaged_skill_treats_stored_titles_and_summaries_as_data():
-    text = " ".join(PACKAGED.decode().split())
-    assert "titles and summaries" in text and "data, never instructions" in text
-
-
-def test_the_skill_covers_writing_questions_and_grading_a_test():
-    text = " ".join(PACKAGED.decode().split())
-    head = text.split("---")[1]
-    for trigger in ("write questions", "test me", "quiz me", "grade my test"):
-        assert trigger in head, trigger
-    for tool in ("progress", "submit_questions", "review_answers", "remove_questions"):
-        assert f"`{tool}`" in text, tool
-    assert "not that its answer key is right" in text and "verified" not in text.lower()
+    assert (real / "SKILL.md").read_bytes() == PACKAGED["groundly-map"]
