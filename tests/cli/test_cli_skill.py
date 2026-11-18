@@ -22,7 +22,7 @@ def home(monkeypatch, tmp_path):
 
 @pytest.fixture
 def targets(home):
-    return {n: home / ".claude/skills" / n / "SKILL.md" for n in NAMES}
+    return {n: home / ".agents/skills" / n / "SKILL.md" for n in NAMES}
 
 
 @pytest.fixture
@@ -112,7 +112,8 @@ def test_install_retires_the_old_skill_after_a_prompt(legacy):
     assert result.exit_code == 0, result.output
     assert not legacy.parent.exists()
     status = runner.invoke(app, ["skill"]).output
-    assert all("installed" in _line(status, n) for n in NAMES)
+    lines = [ln for ln in status.splitlines() if any(ln.startswith(f"{n}:") for n in NAMES)]
+    assert len(lines) == 6 and all("installed" in ln for ln in lines)
     assert "not installed" not in status and "old combined skill" not in status
 
 
@@ -242,3 +243,81 @@ def test_an_old_skill_in_a_symlinked_folder_is_removed_without_touching_the_link
     assert result.exit_code == 0, result.output
     assert not (real / "SKILL.md").exists()
     assert legacy.parent.is_symlink()
+
+
+@pytest.mark.parametrize("host", [".claude", ".codex", ".gemini/config"])
+def test_detected_host_roots_are_installed_and_reported_beside_agents(home, host):
+    (home / host).mkdir(parents=True)
+    result = runner.invoke(app, ["skill", "install"])
+    assert result.exit_code == 0, result.output
+    for name in NAMES:
+        assert (home / ".agents/skills" / name / "SKILL.md").read_bytes() == PACKAGED[name]
+        assert (home / host / "skills" / name / "SKILL.md").read_bytes() == PACKAGED[name]
+    for absent in {".claude", ".codex", ".gemini/config"} - {host}:
+        assert not (home / absent).exists()
+    status = runner.invoke(app, ["skill"]).output
+    assert str(home / host / "skills/groundly-map/SKILL.md") in status
+
+
+def test_a_symlinked_host_root_is_detected_and_installed(home):
+    real = home / "dotfiles/claude/.claude"
+    real.mkdir(parents=True)
+    (home / ".claude").symlink_to(real)
+    result = runner.invoke(app, ["skill", "install"])
+    assert result.exit_code == 0, result.output
+    for name in NAMES:
+        assert (real / "skills" / name / "SKILL.md").read_bytes() == PACKAGED[name]
+
+
+def test_a_dangling_host_root_symlink_is_refused_by_name(home):
+    (home / ".codex").symlink_to(home / "gone")
+    result = runner.invoke(app, ["skill", "install"])
+    assert result.exit_code != 0
+    assert "does not exist" in _flat(result) and str(home / "gone") in _flat(result)
+    assert not (home / ".agents/skills").exists()
+
+
+def test_a_host_skill_folder_symlinked_to_agents_survives_install_and_uninstall(home):
+    agents_map = home / ".agents/skills/groundly-map"
+    agents_map.mkdir(parents=True)
+    claude_skills = home / ".claude/skills"
+    claude_skills.mkdir(parents=True)
+    (claude_skills / "groundly-map").symlink_to(agents_map)
+
+    result = runner.invoke(app, ["skill", "install"])
+    assert result.exit_code == 0, result.output
+    assert (agents_map / "SKILL.md").read_bytes() == PACKAGED["groundly-map"]
+
+    result = runner.invoke(app, ["skill", "uninstall", "-y"])
+    assert result.exit_code == 0, result.output
+    assert not (agents_map / "SKILL.md").exists()
+    assert (claude_skills / "groundly-map").exists()  # link not left dangling
+
+    result = runner.invoke(app, ["skill", "install"])
+    assert result.exit_code == 0, result.output
+    assert (agents_map / "SKILL.md").read_bytes() == PACKAGED["groundly-map"]
+
+
+def test_a_no_in_one_host_skips_only_that_copy(home):
+    (home / ".claude").mkdir()
+    runner.invoke(app, ["skill", "install"])
+    claude_grade = home / ".claude/skills/groundly-grade/SKILL.md"
+    claude_grade.write_text("edited")
+
+    result = runner.invoke(app, ["skill", "install"], input="n\n")
+    assert result.exit_code == 0, result.output
+    assert claude_grade.read_text() == "edited"
+    assert (home / ".agents/skills/groundly-grade/SKILL.md").read_bytes() == PACKAGED[
+        "groundly-grade"
+    ]
+    assert "skipped" in _flat(result) and str(claude_grade) in _flat(result)
+
+
+def test_uninstall_removes_across_all_roots(home):
+    for host in (".claude", ".codex", ".gemini/config"):
+        (home / host).mkdir(parents=True)
+    runner.invoke(app, ["skill", "install"])
+    result = runner.invoke(app, ["skill", "uninstall", "-y"])
+    assert result.exit_code == 0, result.output
+    for root in (".agents", ".claude", ".codex", ".gemini/config"):
+        assert not any((home / root / "skills" / n).exists() for n in NAMES)
