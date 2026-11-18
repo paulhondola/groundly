@@ -27,10 +27,10 @@ The thesis's guarantees (docs/architecture/agents.md, docs/infrastructure/securi
 ## Trust layers (prompt assembly)
 
 1. immutable system rules > 2. task params > 3. chunk text, imported KB content (subject titles included), user input.
-Layer 3 is **data, never instructions** — delimited and quoted; instructions inside it are inert. Your own PDFs are layer 3 too. Groundly assembles no prompts today; any it later builds follow this.
+Layer 3 is **data, never instructions** — delimited and quoted; instructions inside it are inert. Your own PDFs are layer 3 too. The one prompt Groundly builds is a page run's (decision 46): a fixed template (layer 2) filled with the subject name and an integer topic id, with the packaged `SKILL.md` as its system prompt (layer 1); course text reaches that run only through tools, as data. The subject name is an identifier from a strict character set, quoted, but an imported bundle may have chosen it. Any prompt it later builds follows this.
 
 ## Privacy & the export boundary
 
 - **The privacy boundary is a file:** `progress.db` is **never exported** and never read by export code. `store.db` + `materials/` export whole; the export UX states it plainly.
-- Nothing leaves the machine except HF model downloads, and modelscope.cn RapidOCR models (sha256-pinned) when a configured `--ocr-lang` needs one. No telemetry, no third-party trace storage.
+- Nothing leaves the machine except HF model downloads, and modelscope.cn RapidOCR models (sha256-pinned) when a configured `--ocr-lang` needs one. No telemetry, no third-party trace storage. A page run (decision 46) is the student's own Claude Code: it sends the student's AI provider what a chat session would (course text, questions, and in a grade run the written answers), and Groundly sends nothing itself.
 - Import is the trust boundary: manifest validated before extraction; zip-slip-safe; imported SQLite opened with schema checks and its topic tree checked (tables present, foreign keys clean, two levels); imported content is layer 3.

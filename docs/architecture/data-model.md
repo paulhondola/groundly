@@ -7,6 +7,7 @@ The storage backbone for [`overview.md`](overview.md). SQLite (WAL) per subject;
 ```
 ~/.groundly/                 # global (GROUNDLY_HOME overrides) — MCP hosts spawn
   config.toml                # with arbitrary cwd, so discovery must not be per-project
+  .host-run/                 # a page run's empty working directory (decision 46); never a subject
   <SUBJECT>/
     manifest.json            # the interchange contract (below)
     materials/               # original files — citation targets

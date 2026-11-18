@@ -23,7 +23,7 @@ def _patch(monkeypatch, probe_free=True):
 
     runs: list[dict] = []
     opened: list[str] = []
-    monkeypatch.setattr(uvicorn, "run", lambda app_, **kw: runs.append(kw))
+    monkeypatch.setattr(uvicorn, "run", lambda app_, **kw: runs.append({**kw, "app": app_}))
     monkeypatch.setattr("groundly.cli.serve._open_browser", opened.append)
     if probe_free:  # the default port may be held by a real `groundly serve` on this machine
         monkeypatch.setattr(socket.socket, "bind", lambda self, address: None)
@@ -36,8 +36,29 @@ def test_serve_binds_loopback_and_opens_browser(monkeypatch):
     assert result.exit_code == 0, result.output
     assert [(r["host"], r["port"]) for r in runs] == [("127.0.0.1", 8765)]
     assert runs[0]["proxy_headers"] is False
+    assert runs[0]["timeout_graceful_shutdown"]  # an open /mcp stream cannot hold shutdown
     assert opened == ["http://groundly.localhost:8765/"]
     assert "http://127.0.0.1:8765/" in result.output  # fallback when *.localhost won't resolve
+    assert runs[0]["app"].state.runner.mcp_url is None  # a page run starts its own Groundly
+
+
+def test_a_terminal_hangup_shuts_the_page_down_like_ctrl_c(monkeypatch):
+    # uvicorn shuts down (and the page kills a running `claude`) on SIGINT/SIGTERM only;
+    # closing the terminal sends SIGHUP.
+    import signal
+
+    _patch(monkeypatch)
+    raised = []
+    monkeypatch.setattr(signal, "raise_signal", raised.append)
+    previous = signal.getsignal(signal.SIGHUP)
+    try:
+        assert runner.invoke(app, ["serve"]).exit_code == 0
+        handler = signal.getsignal(signal.SIGHUP)
+        assert callable(handler)
+        handler(signal.SIGHUP, None)
+    finally:
+        signal.signal(signal.SIGHUP, previous)
+    assert raised == [signal.SIGTERM]
 
 
 def test_start_binds_loopback_opens_page_and_prints_both_urls(monkeypatch):
@@ -53,7 +74,9 @@ def test_start_binds_loopback_opens_page_and_prints_both_urls(monkeypatch):
     # MCP clients get the IP: they use the OS resolver, which may send *.localhost upstream
     assert "groundly.localhost:8765/mcp" not in result.output
     # one unwrapped line, so it pastes as a command at any terminal width
-    connect = "claude mcp add --transport http groundly http://127.0.0.1:8765/mcp"
+    # a page run shares this process's model load through its own /mcp
+    assert runs[0]["app"].state.runner.mcp_url == "http://127.0.0.1:8765/mcp"
+    connect = "claude mcp add --scope user --transport http groundly http://127.0.0.1:8765/mcp"
     assert connect in result.output.splitlines()[-1]
     assert "http://127.0.0.1:8765/" in result.output  # fallback when *.localhost won't resolve
 
@@ -149,3 +172,12 @@ def test_the_suggested_host_sentence_quotes_the_topic_title():
 
 def test_a_test_dropped_for_a_removed_question_is_never_saved_again():
     assert "function store() { if (!dead) saveTest(key, test); }" in PAGE
+
+
+def test_page_starts_runs_through_the_api_only():
+    assert "/api/runs" in PAGE and '"/runs"' in PAGE and "/api/runs/stop" in PAGE
+    assert "Write questions for its subtopics" in PAGE and "Grade now" in PAGE
+
+
+def test_page_keeps_the_phrases_as_the_fallback():
+    assert "Say to your agent" in PAGE and "grade my test" in PAGE

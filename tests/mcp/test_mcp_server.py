@@ -1,6 +1,7 @@
 """groundly/mcp/server.py: the FastMCP tool surface (list_subjects/search/get_page +
 citation resource)."""
 
+import re
 import subprocess
 import sys
 
@@ -556,6 +557,51 @@ async def test_get_page_without_fragment_returns_the_whole_material(retrievable_
     async with Client(mcp) as client:
         result = await client.call_tool("get_page", {"uri": "groundly://TEST/lec.pdf"})
     assert [(c["chunk_id"], c["page"]) for c in result.data] == [(1, 1), (2, 2), (3, 3)]
+
+
+async def test_code_keeps_its_lines_from_index_to_search_and_get_page(
+    subject, tmp_path, monkeypatch, stub_embedder
+):
+    """A code-reading question or a source preview shows code line by line only if the
+    worker's plain-text chunks reach the host verbatim: through the store, `search` and
+    `get_page`. The worker runs in-process with a one-token-per-word tokenizer, no bge-m3."""
+    from groundly.core.subject import Subject
+    from groundly.ingestion import extract_worker
+    from groundly.ingestion.extract import ChunkData, Extraction
+    from groundly.ingestion.pipeline import IngestionPipeline
+
+    class InProcessExtractor:
+        def extract(self, path, ocr_lang=None):
+            result = extract_worker._extract_plain_text(path)
+            return Extraction(result["pages"], [ChunkData(**c) for c in result["chunks"]])
+
+    def words(text, **_):
+        return {"offset_mapping": [m.span() for m in re.finditer(r"\S+", text)]}
+
+    monkeypatch.setattr(extract_worker, "_bge_m3_tokenizer", lambda: words)
+    source = (
+        "#include <omp.h>\n\n"
+        "int main(void) {\n"
+        "    double sum = 0.0;\n"
+        "#pragma omp parallel for reduction(+:sum)\n"
+        "    for (int i = 1; i < 8; i++) {\n"
+        "        sum += i;\n"
+        "    }\n"
+        "    return 0;\n"
+        "}\n"
+    )
+    code = tmp_path / "omp_sum.c"
+    code.write_text(source)
+    IngestionPipeline(
+        Subject(subject), extractor=InProcessExtractor(), embedder=stub_embedder()
+    ).run([code])
+
+    async with Client(mcp) as client:
+        hit = (await client.call_tool("search", {"subject": subject, "query": "reduction"})).data[0]
+        page = (await client.call_tool("get_page", {"uri": hit["uri"]})).data
+
+    assert hit["text"] == source.rstrip()
+    assert [c["text"] for c in page] == [source.rstrip()]
 
 
 async def test_get_page_no_match_returns_empty_list(retrievable_subject):
