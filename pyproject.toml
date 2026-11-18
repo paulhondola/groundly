@@ -64,6 +64,7 @@ name = "clients -> services -> foundations"
 type = "layers"
 containers = ["groundly"]
 layers = [
+	"__main__",  # `python -m groundly`: the page's stdio run starts this installation's MCP
 	"cli : mcp : web",
 	"agents",
 	"retrieval | ingestion",

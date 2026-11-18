@@ -7,8 +7,8 @@ Bachelor thesis project, Universitatea Politehnica Timișoara.
 ```
 $ groundly index <SUBJECT> ./slides/
   ✓ 12 PDFs → 384 chunks → embedded (bge-m3, local) → indexed
-$ claude mcp add groundly -- groundly mcp   # wire into Claude Code
-$ groundly skill install                     # then: "map my course"
+$ claude mcp add --scope user groundly -- groundly mcp   # wire into Claude Code
+$ groundly skill install                                 # then: "map my course"
 ```
 
 Then, inside your agent: *"What did lecture 4 say about deadlock prevention?"* It searches the course's own slides and answers citing **lecture-04.pdf, page 12, "Deadlocks › Prevention"**.
@@ -20,7 +20,7 @@ Then, inside your agent: *"What did lecture 4 say about deadlock prevention?"* I
 - **Grounded search** (available now): bge-m3 dense + learned sparse + BM25, cross-encoder reranked, via MCP or `groundly search`. Every chunk carries a `groundly://<subject>/<file>#page=N` URI; `get_page` opens the exact page.
 - **Sharing** (available now): `groundly export <SUBJECT>` writes one file; a coursemate imports it and their agent uses it directly. One person pays the indexing cost.
 - **Topic tree** (available now, Claude Code): a roadmap-style map of each subject. Your agent writes it from the course's own structure, Groundly picks each node's slides and rejects any topic the course does not cover, and `groundly serve` shows it on a local page, where you also take tests drawn from the questions your agent wrote, and see each topic's mastery.
-- **Gated questions** (available now, Claude Code): your agent writes the questions, and Groundly stores one only if it is well formed and re-retrieving it finds a slide it cites. That shows a question is about your course, not that its answer key is right; a wrong one is removed by its number. Your agent grades your written answers when you say "grade my test", and your answers build mastery per topic.
+- **Gated questions** (available now, Claude Code): your agent writes the questions, and Groundly stores one only if it is well formed and re-retrieving it finds a slide it cites. That shows a question is about your course, not that its answer key is right; a wrong one is removed by its number. Your agent grades your written answers when you say "grade my test", and your answers build mastery per topic. With Claude Code installed, the page's **Write questions** and **Grade now** buttons start it for you, with Groundly's tools only, on your own plan.
 
 ## Install
 

@@ -10,7 +10,7 @@ import typer
 
 from groundly.cli.app import _fail, console, skill_app
 
-CONNECT_COMMAND = "claude mcp add groundly -- groundly mcp"
+CONNECT_COMMAND = "claude mcp add --scope user groundly -- groundly mcp"
 
 
 def _target() -> Path:

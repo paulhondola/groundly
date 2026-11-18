@@ -177,7 +177,8 @@ def _extract_plain_text(path: Path) -> dict:
     window's start survives and the chunks join back into the file."""
     from groundly.core.manifest import CHUNK_MAX_TOKENS
 
-    text = path.read_text(errors="replace")
+    # ponytail: a legacy 8-bit file reads with U+FFFD for its accents; detect its encoding if that hurts search
+    text = path.read_text(encoding="utf-8", errors="replace")
     tokenizer = _model_step(_bge_m3_tokenizer)
     offsets = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)[
         "offset_mapping"

@@ -33,7 +33,7 @@ def test_install_copies_packaged_skill(target):
     result = runner.invoke(app, ["skill", "install"])
     assert result.exit_code == 0, result.output
     assert target.read_bytes() == PACKAGED
-    assert "claude mcp add groundly -- groundly mcp" in result.output
+    assert "claude mcp add --scope user groundly -- groundly mcp" in result.output
     assert "map my course" in result.output
 
 
