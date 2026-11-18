@@ -30,10 +30,11 @@ MAX_SUMMARY_CHARS = 2000
 
 WRITE_TOOLS = tuple(
     f"mcp__groundly__{name}"
-    for name in ("list_subjects", "progress", "search", "get_page", "submit_questions")
+    for name in ("list_subjects", "progress", "topic", "search", "get_page", "submit_questions")
 )
 GRADE_TOOLS = ("mcp__groundly__review_answers", "mcp__groundly__get_page")
 _TOOLS = {"write": WRITE_TOOLS, "grade": GRADE_TOOLS}
+_SKILLS = {"write": "groundly-questions", "grade": "groundly-grade"}
 
 
 class RunError(Exception):
@@ -69,17 +70,17 @@ _ENDING = (
     " question, answer key or verdict verified."
 )
 _WRITE_LEAF = (
-    'Follow "Write questions for a topic" for subject "{subject}", topic id {topic_id}:'
+    'Follow the groundly-questions skill for subject "{subject}", topic id {topic_id}:'
     " bring that topic to {target} questions."
 )
 _WRITE_BIG = (
-    'Follow "Write questions for a topic" for subject "{subject}": for each subtopic of topic id'
+    'Follow the groundly-questions skill for subject "{subject}": for each subtopic of topic id'
     " {topic_id} that has fewer than {target} questions (see `progress`), bring it to"
     " {target} questions."
 )
 _GRADE = (
-    'Follow "Grade a test" for subject "{subject}": review every written answer awaiting review,'
-    " calling `review_answers` until `remaining` is 0."
+    'Follow the groundly-grade skill for subject "{subject}": review every written answer awaiting'
+    " review, calling `review_answers` until `remaining` is 0."
 )
 
 
@@ -92,8 +93,8 @@ def build_prompt(kind: str, subject: str, topic_id: int | None, big: bool) -> st
     return template.format(subject=subject, topic_id=topic_id, target=TARGET_QUESTIONS) + _ENDING
 
 
-def _skill_path() -> str:
-    return str(files("groundly").joinpath("skill/SKILL.md"))
+def _skill_path(kind: str) -> str:
+    return str(files("groundly").joinpath("skills", _SKILLS[kind], "SKILL.md"))
 
 
 def build_argv(claude: str, kind: str, prompt: str, mcp_url: str | None) -> list[str]:
@@ -114,7 +115,7 @@ def build_argv(claude: str, kind: str, prompt: str, mcp_url: str | None) -> list
         "--permission-mode",
         "dontAsk",
         "--append-system-prompt-file",
-        _skill_path(),
+        _skill_path(kind),
         "--output-format",
         "stream-json",
         "--verbose",
@@ -169,6 +170,7 @@ _USE_WORDS = {
     "get_page": "Opening a cited page",
     "progress": "Checking question counts",
     "list_subjects": "Checking the subject",
+    "topic": "Reading the topic",
 }
 
 

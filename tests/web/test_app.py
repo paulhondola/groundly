@@ -730,7 +730,7 @@ def test_grade_starts_only_when_answers_await_review(client, seeded, fake_claude
     wait_until_ended(_run_view(client))
     argv = fake_claude.calls()[-1]["argv"]
     assert set(argv[argv.index("--allowedTools") + 1].split(",")) == set(runs.GRADE_TOOLS)
-    assert '"Grade a test"' in fake_claude.prompt()
+    assert "groundly-grade" in fake_claude.prompt()
 
 
 @pytest.mark.parametrize(
