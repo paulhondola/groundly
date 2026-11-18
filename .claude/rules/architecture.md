@@ -21,7 +21,7 @@ Layers: clients (`cli/`, `mcp/`, `web/`) → services (`agents/`, `retrieval/`, 
 ## Storage & concurrency
 
 - SQLite **WAL + busy_timeout on every connection** (one-shot CLI and host-spawned MCP share store.db); schema via `PRAGMA user_version`, no migration framework. The one in-place upgrade (version 1 to 2, decision 44) only adds empty tables.
-- **Lazy model loading** — never load bge-m3/reranker at MCP spawn; load on first use.
+- **Lazy model loading** — never load bge-m3/reranker at MCP spawn; load on first use. Each is one shared instance per process, dropped (and the device cache emptied) after `IDLE_UNLOAD_SECONDS` without a use, so a long-lived `start` or host-spawned process gives the memory back.
 - `groundly mcp --http`, `groundly serve` and `groundly start` (page + `/mcp` in one process) bind **127.0.0.1 only**; `serve` and `start` accept exactly the Host names `127.0.0.1`, `localhost`, `groundly.localhost` (`mcp --http` keeps FastMCP's defaults); the page checks the Host header, loads no model and writes no rows to `store.db`. Its write routes (a test attempt; starting and stopping a run) also require the page's own `Origin` and a JSON body.
 - `progress.db` is the student's private study state (test attempts and answers); `search` and the topic tree write nothing to it.
 

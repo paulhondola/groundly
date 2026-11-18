@@ -3,29 +3,46 @@ alongside embeddings.py (model clients constructed only here); local and key-fre
 lazy-loaded — never at import/spawn time (.claude/rules/architecture.md). Pinned at
 the resolved hf_revision, same interchange-compatibility contract as bge-m3."""
 
+import threading
+
+from groundly.llm.embeddings import LazyModel, ModelDownloadError, ensure_downloaded
+
 RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 RERANKER_HF_REVISION = "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"  # pinned 2026-07-18 (P3 start)
 
 
-class BgeReranker:
+class BgeReranker(LazyModel):
     def __init__(self) -> None:
-        self._model = None
+        super().__init__()
+        # FlagReranker re-sets the shared tokenizer's truncation on every batch, so two
+        # concurrent calls (FastMCP runs tools in a threadpool) would cut each other's text
+        self._scoring = threading.Lock()
 
-    def _load(self):
-        if self._model is None:
-            from groundly.llm.embeddings import ModelDownloadError, ensure_downloaded
+    def _build(self):
+        local = ensure_downloaded(RERANKER_MODEL, RERANKER_HF_REVISION)
+        try:
+            from FlagEmbedding import FlagReranker
 
-            local = ensure_downloaded(RERANKER_MODEL, RERANKER_HF_REVISION)
-            try:
-                from FlagEmbedding import FlagReranker
-
-                self._model = FlagReranker(str(local), use_fp16=False)
-            except Exception as exc:
-                raise ModelDownloadError(f"failed to load {RERANKER_MODEL}: {exc}") from exc
-        return self._model
+            return FlagReranker(str(local), use_fp16=False)
+        except Exception as exc:
+            raise ModelDownloadError(f"failed to load {RERANKER_MODEL}: {exc}") from exc
 
     def compute_score(self, pairs: list[tuple[str, str]]) -> list[float]:
-        scores = self._load().compute_score(pairs)
+        with self._use() as model, self._scoring:
+            scores = model.compute_score(pairs)
         if isinstance(scores, float):
             return [scores]
         return list(scores)
+
+
+_shared: BgeReranker | None = None
+
+
+def shared_reranker() -> BgeReranker:
+    """Process-wide singleton, like `shared_embedder()`: one resident cross-encoder serves
+    every reranked call instead of a reload per `search`. Tests inject stubs via
+    `reranker=`."""
+    global _shared
+    if _shared is None:
+        _shared = BgeReranker()
+    return _shared

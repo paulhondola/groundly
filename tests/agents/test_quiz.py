@@ -371,14 +371,11 @@ def test_the_history_lists_attempts_newest_first(bank):
 
 
 def test_quiz_loads_no_model(bank, monkeypatch):
-    from groundly.llm import embeddings
-
     def boom(*_a, **_k):
         raise AssertionError("a model was loaded")
 
-    for name in ("shared_embedder", "shared_reranker"):
-        if hasattr(embeddings, name):
-            monkeypatch.setattr(embeddings, name, boom)
+    monkeypatch.setattr("groundly.llm.embeddings.shared_embedder", boom)
+    monkeypatch.setattr("groundly.llm.rerank.shared_reranker", boom)
     drawn = quiz.draw(bank.store, bank.progress, None, 5)
     attempt = bank.submit(
         [{"question_id": q["id"], "selected": []} for q in drawn if q["kind"] != "open"]

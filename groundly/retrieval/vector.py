@@ -68,9 +68,9 @@ class VectorRetriever:
     @property
     def reranker(self):
         if self._reranker is None:
-            from groundly.llm.rerank import BgeReranker
+            from groundly.llm.rerank import shared_reranker
 
-            self._reranker = BgeReranker()
+            self._reranker = shared_reranker()
         return self._reranker
 
     def retrieve(self, query: str, material_id: int | None = None) -> list[Hit]:

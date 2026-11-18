@@ -4,9 +4,14 @@ Local and key-free, lazy-loaded (never at MCP spawn), resolved at the pinned hf_
 The pin is the interchange contract: the same pin means shared vectors transfer as-is.
 """
 
+import gc
 import os
 import sys
+import threading
+import time
+import weakref
 from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 
 from groundly.core.manifest import EMBEDDING_MODEL, HF_REVISION
@@ -77,23 +82,116 @@ def remove_cached(model: str = EMBEDDING_MODEL) -> None:
             shutil.rmtree(repo.repo_path, ignore_errors=True)
 
 
-class BgeM3Embedder:
+IDLE_UNLOAD_SECONDS = 600  # an unused model gives its memory back after this long
+
+# One lock for every LazyModel, so device cleanup never overlaps a load or the start of a
+# use of any model. Reentrant: a finalized `encode_stream` generator ends its use under it.
+_lock = threading.RLock()
+_active = 0  # uses in progress across every LazyModel
+
+
+def _expire(ref: "weakref.ref[LazyModel]") -> None:
+    """Timer callback. Holds only a weak reference, so a dropped model is freed at once
+    instead of living on until its timer fires."""
+    model = ref()
+    if model is not None:
+        model._expire()
+
+
+class LazyModel:
+    """A model loaded on first use and dropped `idle_seconds` after its last use ends, so
+    a long-lived process (`groundly start`, a host's stdio `groundly mcp`) does not hold
+    GBs of weights between study sessions. Subclasses implement `_build()` and reach the
+    model only through `with self._use() as model:`."""
+
+    idle_seconds: float = IDLE_UNLOAD_SECONDS
+
     def __init__(self) -> None:
         self._model = None
+        self._users = 0
+        self._last_end = 0.0
+        self._timer: threading.Timer | None = None
 
-    def _load(self):
-        if self._model is None:
-            local = ensure_downloaded()
-            try:
-                from FlagEmbedding import BGEM3FlagModel
+    def _build(self):
+        raise NotImplementedError
 
-                self._model = BGEM3FlagModel(str(local), use_fp16=True)
-            except Exception as exc:
-                raise ModelDownloadError(f"failed to load {EMBEDDING_MODEL}: {exc}") from exc
-        return self._model
+    def _arm(self, delay: float) -> None:
+        """Start the one idle timer; the caller holds `_lock`."""
+        self._timer = threading.Timer(delay, _expire, (weakref.ref(self),))
+        self._timer.daemon = True  # never keeps a one-shot CLI process alive
+        self._timer.start()
+
+    @contextmanager
+    def _use(self):
+        """Hold the model for one use. The idle window starts when the last use ends, and
+        unload() never drops a model in use: freeing weights after the cache was emptied
+        would strand them in it."""
+        global _active
+        with _lock:
+            if self._model is None:
+                self._model = self._build()
+            self._users += 1
+            _active += 1
+            model = self._model
+        try:
+            yield model
+        finally:
+            with _lock:
+                self._users -= 1
+                _active -= 1
+                self._last_end = time.monotonic()
+                if self._timer is None:  # one timer per model, not one thread per use
+                    self._arm(self.idle_seconds)
+
+    def _expire(self) -> None:
+        """Unload if the model sat unused for the whole window, else wait out the rest."""
+        with _lock:
+            if self._timer is not threading.current_thread():
+                return  # a stale timer: the current one decides
+            self._timer = None
+            if self._model is None:
+                return
+            if self._users:
+                self._arm(self.idle_seconds)
+                return
+            left = self._last_end + self.idle_seconds - time.monotonic()
+            if left > 0:
+                self._arm(left)
+                return
+            self.unload()
+
+    def unload(self) -> None:
+        """Drop the weights now and return the freed device memory to the system."""
+        with _lock:
+            if self._model is None or self._users:
+                return  # in use: the end of that use re-arms the timer
+            self._model = None
+            if _active:
+                return  # another model is mid-use; its own unload empties the cache
+            gc.collect()
+            torch = sys.modules.get("torch")  # a loaded model means torch is imported
+            if torch is not None:
+                # the caching allocators keep freed blocks until asked; this is what
+                # actually shrinks the process
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                if torch.backends.mps.is_available():
+                    torch.mps.empty_cache()
+
+
+class BgeM3Embedder(LazyModel):
+    def _build(self):
+        local = ensure_downloaded()
+        try:
+            from FlagEmbedding import BGEM3FlagModel
+
+            return BGEM3FlagModel(str(local), use_fp16=True)
+        except Exception as exc:
+            raise ModelDownloadError(f"failed to load {EMBEDDING_MODEL}: {exc}") from exc
 
     def encode(self, texts: list[str]) -> tuple[list[list[float]], list[SparseWeights]]:
-        out = self._load().encode(texts, return_dense=True, return_sparse=True)
+        with self._use() as model:
+            out = model.encode(texts, return_dense=True, return_sparse=True)
         dense = [vec.tolist() for vec in out["dense_vecs"]]
         sparse = [
             {int(token_id): float(weight) for token_id, weight in weights.items()}
@@ -108,12 +206,14 @@ class BgeM3Embedder:
         texts at a time. FlagEmbedding accumulates results for whatever list it is handed,
         so slicing caps peak RAM at one batch. Dense rows stay numpy fp32, never boxed into
         list[float]; sqlite_vec.serialize_float32 takes them directly."""
-        model = self._load()
-        for start in range(0, len(texts), batch_size):
-            batch = texts[start : start + batch_size]
-            out = model.encode(batch, batch_size=batch_size, return_dense=True, return_sparse=True)
-            for vec, weights in zip(out["dense_vecs"], out["lexical_weights"], strict=True):
-                yield vec, {int(token_id): float(weight) for token_id, weight in weights.items()}
+        with self._use() as model:
+            for start in range(0, len(texts), batch_size):
+                batch = texts[start : start + batch_size]
+                out = model.encode(
+                    batch, batch_size=batch_size, return_dense=True, return_sparse=True
+                )
+                for vec, weights in zip(out["dense_vecs"], out["lexical_weights"], strict=True):
+                    yield vec, {int(tid): float(weight) for tid, weight in weights.items()}
 
 
 _shared: BgeM3Embedder | None = None
