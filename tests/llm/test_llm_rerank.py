@@ -47,6 +47,24 @@ def test_bge_reranker_load_wraps_construction_failure_in_model_download_error(mo
 
     monkeypatch.setattr(builtins, "__import__", fail_flagembedding_import)
 
-    with pytest.raises(ModelDownloadError) as exc_info:
-        BgeReranker()._load()
+    with pytest.raises(ModelDownloadError) as exc_info, BgeReranker()._use():
+        pass
     assert RERANKER_MODEL in str(exc_info.value)
+
+
+def test_shared_reranker_is_a_process_singleton_used_by_vector_retriever_default(monkeypatch):
+    """One resident cross-encoder for every reranked `search` and `submit_tree`, not a
+    fresh load per call (a reload costs about 3 s of load and warm-up per search)."""
+    from pathlib import Path
+
+    import groundly.llm.rerank as rerank_mod
+    from groundly.core.store import SubjectStore
+    from groundly.retrieval.vector import VectorRetriever
+
+    monkeypatch.setattr(rerank_mod, "_shared", None)
+    fake_instance = object()
+    monkeypatch.setattr(rerank_mod, "BgeReranker", lambda: fake_instance)
+
+    assert rerank_mod.shared_reranker() is rerank_mod.shared_reranker() is fake_instance
+    retriever = VectorRetriever(SubjectStore(Path("/nonexistent/store.db")), rerank=True, top_k=1)
+    assert retriever.reranker is fake_instance

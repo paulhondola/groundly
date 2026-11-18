@@ -76,7 +76,7 @@ Everything needs only the local models: no path reaches a provider, and none nee
 | Page + HTTP MCP | `groundly start` | user-run; one process, **127.0.0.1 only**, default 8765: the page at `/` and MCP over Streamable HTTP at `/mcp`, reachable as `groundly.localhost`; every host session shares one model load (decision 45) |
 | Topic-tree page | `groundly serve` | user-run; Starlette on uvicorn, **127.0.0.1 only**, all subjects from one process, reads per request; **loads no model and writes no rows to `store.db`**; its one write is a submitted test attempt to `progress.db`, graded in `agents/quiz.py` |
 
-Multiple processes may open the same `store.db` (an `index` run while a host-spawned MCP process answers). Rules: **WAL + busy_timeout** on every connection; **lazy model loading** (never at MCP spawn — hosts expect fast handshakes).
+Multiple processes may open the same `store.db` (an `index` run while a host-spawned MCP process answers). Rules: **WAL + busy_timeout** on every connection; **lazy model loading** (never at MCP spawn — hosts expect fast handshakes), one shared embedder and one shared reranker per process, each unloaded after 10 minutes unused (`IDLE_UNLOAD_SECONDS`) so a long-lived `groundly start` or host-spawned server does not keep GBs of weights between sessions.
 
 ## Cross-cutting rules
 

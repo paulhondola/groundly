@@ -71,15 +71,16 @@ def _no_forced_colour(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _reset_shared_embedder():
-    """`llm/embeddings.py`'s shared_embedder() is a process-level singleton; reset it
+def _reset_shared_models():
+    """shared_embedder() and shared_reranker() are process-level singletons; reset them
     around every test so one test's stub (or a stray real load) never leaks into the
     next."""
     import groundly.llm.embeddings as embeddings_mod
+    import groundly.llm.rerank as rerank_mod
 
-    embeddings_mod._shared = None
+    embeddings_mod._shared = rerank_mod._shared = None
     yield
-    embeddings_mod._shared = None
+    embeddings_mod._shared = rerank_mod._shared = None
 
 
 @pytest.fixture(autouse=True)

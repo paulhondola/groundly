@@ -114,7 +114,7 @@ One arm: bge-m3 dense + learned sparse + FTS5/BM25, fused with RRF, cross-encode
 - **Zero-key, totally**: no code path constructs an LLM client and no config asks for a key.
 - **Security**: import is the trust boundary (zip-slip protection; imported content is layer 3); `groundly mcp --http`, `groundly serve` and `groundly start` bind 127.0.0.1 only. See [`infrastructure/security.md`](infrastructure/security.md).
 - **Languages**: RO and EN; retrieval is cross-lingual through the dense channel.
-- **Concurrency**: SQLite WAL + busy_timeout on every connection; lazy model loading (never at MCP spawn).
+- **Concurrency**: SQLite WAL + busy_timeout on every connection; lazy model loading (never at MCP spawn), unloaded after 10 minutes unused.
 
 ## 7. Resolved Decisions
 
