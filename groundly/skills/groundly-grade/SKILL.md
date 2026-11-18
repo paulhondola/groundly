@@ -11,7 +11,7 @@ Judge the written (`open`) answers of tests the student took on Groundly's page.
 
 In a page run (the prompt says so), skip these checks and never stop to ask anything.
 
-1. **Check the connection.** If `review_answers` is not available, tell the student to run `claude mcp add --scope user groundly -- groundly mcp`, then restart Claude Code. Stop there.
+1. **Check the connection.** If `review_answers` is not available, tell the student to connect Groundly (`claude mcp add --scope user groundly -- groundly mcp` in Claude Code, `codex mcp add groundly -- groundly mcp` in Codex, or `"groundly": {"command": "groundly", "args": ["mcp"]}` under `mcpServers` in `~/.gemini/config/mcp_config.json` in Antigravity), then restart their agent. Stop there.
 2. **Check the subject.** If you do not know the subject's name, call `list_subjects` and match the student's wording against `subject` or `title`.
 
 ## Read the answers
