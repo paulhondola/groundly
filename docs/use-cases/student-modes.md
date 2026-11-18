@@ -5,13 +5,13 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: a **host agent*
 ## Topic tree (sub-project 2)
 
 **Actor:** host agent (`outline`, `submit_tree`) building the map; student (`groundly serve`) reading it. Decision 41.
-**Preconditions:** the subject is indexed under the current schema; for building, the host is Claude Code with the Groundly server connected and the skills installed (decision 47).
+**Preconditions:** the subject is indexed under the current schema; for building, the host (Claude Code, Codex, Antigravity or another `.agents`-aware host) has the Groundly server connected and the skills installed (decision 47).
 
 A roadmap-style map of a subject: big topics in course order, subtopics under each (exactly two levels), and for every node a short summary and the slides behind it. It lives in `store.db`, so it travels with bundles. No graph, no extra model (decision 37).
 
 **Main flow**
 
-1. **Set up, once.** `claude mcp add --scope user groundly -- groundly mcp` connects the server; `groundly skill install` copies the three packaged skills to `~/.claude/skills/groundly-map/`, `groundly-questions/` and `groundly-grade/`, and retires an old `~/.claude/skills/groundly/` copy after a prompt. Connecting stays a separate step because `skill install` never edits another tool's config. Bare `groundly skill` shows not installed / installed / out of date for each skill; `skill install` and `skill uninstall` prompt before replacing or removing unless `-y/--yes`.
+1. **Set up, once.** Connect the server in your host (`claude mcp add --scope user groundly -- groundly mcp` in Claude Code, `codex mcp add groundly -- groundly mcp` in Codex, or `~/.gemini/config/mcp_config.json` in Antigravity); `groundly skill install` copies the three packaged skills (`groundly-map`, `groundly-questions` and `groundly-grade`) to `~/.agents/skills/` and to whichever of `~/.claude/skills/`, `~/.codex/skills/` and `~/.gemini/config/skills/` exist on your machine, and retires an old `~/.claude/skills/groundly/` copy after a prompt. Connecting stays a separate step because `skill install` never edits another tool's config. Bare `groundly skill` shows not installed / installed / out of date for each skill; `skill install` and `skill uninstall` prompt before replacing or removing unless `-y/--yes`.
 2. **Trigger.** The student asks the host to map the course. If the tools are missing, the `groundly-map` skill gives the connect command and says to restart the host; if the subject is not indexed, it runs `groundly index`.
 3. **Read.** The host calls `outline(subject)`: each indexed material with its page count, its pages' headings and how many of its chunks the current tree cites, plus the current tree with topic ids. No chunk text and no chunk ids.
 4. **Think.** The host merges overlapping lectures, drops noise, orders big topics by course order and writes a summary (at most 500 characters) per node. Groundly does not filter headings.
@@ -26,7 +26,7 @@ A roadmap-style map of a subject: big topics in course order, subtopics under ea
 - **A3 — Subject indexed before the tree tables:** search still works. Tree calls and the page report SQLite's own "no such table" message; no guard or migration is added (decision 41), and the fix is `groundly drop` then re-index once.
 - **A4 — Imported bundle:** the tree arrives with `store.db`. Import refuses a bundle with no tree tables (exported by an older Groundly) or with dangling references or a tree deeper than two levels. Titles, summaries and chunk text are layer-3 data.
 
-**Out of scope for this release:** progress (every node read "Not started" until tests on the page added mastery, decision 44), a generate-quiz button and deep links into the host, Codex and Claude Desktop setup, and any work at index time. The gate shows a topic is in the course; it never shows a summary is true, and nothing may call a summary verified.
+**Out of scope for this release:** progress (every node read "Not started" until tests on the page added mastery, decision 44), a generate-quiz button and deep links into the host, Claude Desktop setup, and any work at index time. The gate shows a topic is in the course; it never shows a summary is true, and nothing may call a summary verified.
 
 **Acceptance criteria**
 
