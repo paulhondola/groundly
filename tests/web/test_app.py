@@ -633,11 +633,17 @@ def _leaf(client):
 
 
 def test_runs_reports_availability_and_no_run(client, seeded, fake_claude, monkeypatch):
-    assert client.get("/api/runs").json() == {"available": True, "reason": None, "run": None}
+    assert client.get("/api/runs").json() == {
+        "available": True,
+        "reason": None,
+        "target": runs.TARGET_QUESTIONS,
+        "run": None,
+    }
     monkeypatch.setenv("PATH", "/nonexistent")
     assert client.get("/api/runs").json() == {
         "available": False,
         "reason": "no_host",
+        "target": runs.TARGET_QUESTIONS,
         "run": None,
     }
 
@@ -736,7 +742,7 @@ def test_grade_starts_only_when_answers_await_review(client, seeded, fake_claude
         (ORIGIN, {"kind": "write", "topic_id": "7"}, 400, "invalid_body"),
         (ORIGIN, {"kind": "write", "topic_id": True}, 400, "invalid_body"),
         (ORIGIN, ["grade"], 400, "invalid_body"),
-        (ORIGIN, {"kind": "write", "topic_id": 999}, 404, "unknown_topic"),
+        (ORIGIN, {"kind": "write", "topic_id": 999}, 400, "unknown_topic_id"),
     ],
 )
 def test_start_refuses_and_spawns_nothing(

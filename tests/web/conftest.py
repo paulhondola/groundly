@@ -13,7 +13,7 @@ import json, os, subprocess, sys, time
 with open(os.environ["FAKE_CLAUDE_ARGV"], "a") as f:
     f.write(json.dumps({{"argv": sys.argv, "cwd": os.getcwd()}}) + "\\n")
 if os.environ.get("FAKE_CLAUDE_PIDS"):
-    child = subprocess.Popen(["sleep", "60"])
+    child = subprocess.Popen(["sleep", "60"], stdout=subprocess.DEVNULL)  # own pipe, as claude gives its MCP server
     with open(os.environ["FAKE_CLAUDE_PIDS"], "w") as f:
         f.write(f"{{os.getpid()}} {{child.pid}}")
 for line in open(os.environ["FAKE_CLAUDE_SCRIPT"]).read().splitlines():

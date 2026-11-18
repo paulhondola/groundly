@@ -100,7 +100,8 @@ def mastery(
     return out
 
 
-def _scope_leaves(store: SubjectStore, topic_id: int | None) -> list[int]:
+def scope_leaves(store: SubjectStore, topic_id: int | None) -> list[int]:
+    """The leaves a scope covers: a topic's subtopics, or the topic itself; every leaf for None."""
     tree = store.tree(with_sources=False)
     children, titles = _topics(tree)
     if topic_id is None:
@@ -117,7 +118,7 @@ def draw(store: SubjectStore, progress: ProgressStore, topic_id: int | None, n: 
     then least recently answered. The result carries no answer key and no reference answer."""
     if n not in TEST_LENGTHS:
         raise QuizError("invalid_text", f"a test is {', '.join(map(str, TEST_LENGTHS))} questions")
-    leaves = _scope_leaves(store, topic_id)
+    leaves = scope_leaves(store, topic_id)
     last: dict[int, tuple[int, bool | None]] = {}
     practised: dict[int, int] = {}
     for index, a in enumerate(progress.answers()):

@@ -16,17 +16,17 @@ def test_unsupported_extension_reported_skipped(subject, course, stub_embedder, 
     pipe = IngestionPipeline(subject=subj, extractor=stub_extractor(), embedder=stub_embedder())
     results = pipe.run([course / "archive.xyz"])
     assert results[0].status == Status.SKIPPED_UNSUPPORTED
-    assert ".xyz" in results[0].detail
+    assert "binary" in results[0].detail
 
 
 def test_docling_suffixes_are_supported(tmp_path):
-    from groundly.ingestion.formats import DOCLING_FORMATS, is_supported_file
+    from groundly.ingestion.formats import DOCLING_FORMATS, skip_reason
 
     assert all(suffix.startswith(".") and suffix == suffix.lower() for suffix in DOCLING_FORMATS)
     for suffix in DOCLING_FORMATS:
         f = tmp_path / f"sample{suffix}"
         f.write_bytes(b"\x00\x01")
-        assert is_supported_file(f)
+        assert skip_reason(f) is None
 
 
 def test_new_plain_text_format_indexes(subject, course, stub_embedder, stub_extractor):
@@ -53,8 +53,13 @@ def test_new_plain_text_format_indexes(subject, course, stub_embedder, stub_extr
         ("uv.lock", b"version = 1\n", ".lock"),
         ("diagram.svg", b"<svg></svg>", ".svg"),
         ("bundle.js.map", b'{"version": 3}', ".map"),
-        ("invalid_utf8.txt", b"\xff\xfe\xfd", ".txt"),
-        ("binary_no_ext", b"ELF\x00\x01\x02", "binary_no_ext"),
+        ("utf16.txt", "notes".encode("utf-16"), "UTF-16"),
+        ("binary_no_ext", b"ELF\x00\x01\x02", "binary"),
+        ("no_nul.dat", b"\xff\x01\x02\x03", "binary"),
+        ("server.key", b"-----BEGIN PRIVATE KEY-----\n", "credentials"),
+        ("cert.pem", b"-----BEGIN CERTIFICATE-----\n", "credentials"),
+        ("prod.env", b"DB_PASSWORD=x\n", "credentials"),
+        ("id_rsa", b"-----BEGIN OPENSSH PRIVATE KEY-----\n", "credentials"),
     ],
 )
 def test_skipped_text_suffixes_and_binary_files_are_unsupported(
@@ -70,11 +75,38 @@ def test_skipped_text_suffixes_and_binary_files_are_unsupported(
 
 
 def test_utf8_multibyte_char_split_across_probe_boundary_is_supported(tmp_path):
-    from groundly.ingestion.formats import PLAIN_TEXT_PROBE_BYTES, is_supported_file
+    from groundly.ingestion.formats import PLAIN_TEXT_PROBE_BYTES, skip_reason
 
     f = tmp_path / "notes.custom"
     f.write_bytes(b"a" * (PLAIN_TEXT_PROBE_BYTES - 1) + "ă".encode() + b"\n")
-    assert is_supported_file(f)
+    assert skip_reason(f) is None
+
+
+def test_legacy_8bit_text_is_supported(tmp_path):
+    from groundly.ingestion.formats import skip_reason
+
+    f = tmp_path / "lab1.c"
+    f.write_bytes("// Funcţia principală\nint main(void) { return 0; }\n".encode("cp1250"))
+    assert skip_reason(f) is None
+
+
+def test_fifo_is_skipped_without_opening_it(tmp_path):
+    import os
+
+    from groundly.ingestion.formats import skip_reason
+
+    fifo = tmp_path / "pipe.txt"
+    os.mkfifo(fifo)
+    assert skip_reason(fifo) == "not a regular file"
+
+
+def test_oversized_plain_text_is_skipped(tmp_path, monkeypatch):
+    from groundly.ingestion import formats
+
+    monkeypatch.setattr(formats, "PLAIN_TEXT_MAX_BYTES", 10)
+    f = tmp_path / "trace.out"
+    f.write_text("x" * 11)
+    assert "too large" in formats.skip_reason(f)
 
 
 def test_ocr_lang_reaches_extract(subject, course, stub_embedder, stub_extractor):

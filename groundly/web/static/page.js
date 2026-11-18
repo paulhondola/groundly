@@ -47,11 +47,11 @@ function postJSON(url, body) {
 // A page run is the student's own Claude Code, started headless for one chore (decision 46).
 // One strip serves the whole page: each view places it, the poll updates it in place, and the
 // run's steps, summary and error reach it as text only.
-const TARGET = 10; // a topic with fewer questions than this is worth a Write click
 const POLL_MS = 2000;
 const KIND_WORDS = { write: "Writing questions", grade: "Grading written answers" };
 // `watched` is the run this tab started or re-attached to; `message` is the last outcome shown.
-const host = { available: false, run: null, watched: null, starting: false, message: null, onEnd: null, timer: null };
+// `target`, from the server: a topic with fewer questions than this is worth a Write click.
+const host = { available: false, target: 0, run: null, watched: null, starting: false, message: null, onEnd: null, timer: null };
 
 const strip = el("section", undefined, "run");
 strip.setAttribute("aria-label", "Agent run");
@@ -122,6 +122,7 @@ function poll(delay = POLL_MS) {
 // the run ends. A run that is working when the view loads is re-attached to.
 function runStrip(info, onEnd) {
   host.available = Boolean(info && info.available);
+  if (info) host.target = info.target;
   host.onEnd = onEnd;
   if (info) host.run = info.run;
   if (info && info.run && info.run.status === "running" && info.run.id !== host.watched) {
@@ -145,6 +146,9 @@ async function startRun(subject, body) {
   } catch (e) {
     host.message = "Could not start: " + e.message;
     stripOutcome.textContent = host.message;
+    // Refused because another tab started a run? Attach to it, so its strip and Stop show here.
+    const info = await runInfo();
+    if (info) runStrip(info, host.onEnd);
   }
   host.starting = false;
   renderStrip();
@@ -166,7 +170,7 @@ function runButton(text, subject, body) {
 // Write is offered while any topic in scope (a leaf, or a big topic's subtopics) is thin.
 function writeButton(subject, node) {
   const leaves = node.subtopics.length ? node.subtopics : [node];
-  if (!host.available || !leaves.some((l) => (l.progress ? l.progress.questions : 0) < TARGET)) return null;
+  if (!host.available || !leaves.some((l) => (l.progress ? l.progress.questions : 0) < host.target)) return null;
   const label = node.subtopics.length ? "Write questions for its subtopics" : "Write questions";
   return runButton(label, subject, { kind: "write", topic_id: node.id });
 }

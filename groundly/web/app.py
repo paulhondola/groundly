@@ -10,6 +10,7 @@ MCP gates, never through this module. A stored filename is never trusted as a pa
 addressed by id and its file must resolve inside the subject's materials dir.
 """
 
+import atexit
 import json
 import re
 import sqlite3
@@ -268,7 +269,12 @@ def _result(request: Request) -> Response:
 def _runs(request: Request) -> JSONResponse:
     _, reason = availability()
     return JSONResponse(
-        {"available": reason is None, "reason": reason, "run": request.app.state.runner.view()}
+        {
+            "available": reason is None,
+            "reason": reason,
+            "target": TARGET_QUESTIONS,
+            "run": request.app.state.runner.view(),
+        }
     )
 
 
@@ -286,17 +292,13 @@ async def _start_run(request: Request) -> Response:
     def start(store: SubjectStore, progress: ProgressStore) -> Response:
         topic_id, big = None, False
         if kind == "write":
-            tree = store.tree(with_sources=False)
-            nodes = [n for root in tree for n in (root, *root["subtopics"])]
-            node = next((n for n in nodes if n["id"] == body["topic_id"]), None)
-            if node is None:
-                return _error("unknown_topic", "no such topic in this subject", 404)
-            states = quiz.mastery(store, progress, tree)
-            leaves = [sub["id"] for sub in node["subtopics"]] or [node["id"]]
-            if all(states[leaf]["questions"] >= TARGET_QUESTIONS for leaf in leaves):
+            topic_id = body["topic_id"]
+            leaves = quiz.scope_leaves(store, topic_id)
+            bank = store.question_ids_by_topic()
+            if all(len(bank.get(leaf, ())) >= TARGET_QUESTIONS for leaf in leaves):
                 detail = f"every topic in scope has {TARGET_QUESTIONS} or more questions"
                 return _error("nothing_to_write", detail)
-            topic_id, big = node["id"], bool(node["subtopics"])
+            big = leaves != [topic_id]
         elif not quiz.pending_reviews(store, progress)["awaiting"]:
             return _error("nothing_to_grade", "no written answer is awaiting review")
         try:
@@ -305,7 +307,8 @@ async def _start_run(request: Request) -> Response:
             return _error(e.reason, e.detail, e.status)
         return JSONResponse(run, status_code=202)
 
-    return _quiz(request, start)
+    # Off the event loop: SQL and a fork/exec, while the same loop may serve /mcp.
+    return await run_in_threadpool(_quiz, request, start)
 
 
 async def _stop_run(request: Request) -> Response:
@@ -325,6 +328,7 @@ def create_app(mcp_app: Starlette | None = None, mcp_url: str | None = None) -> 
     """The page; with `mcp_app` (FastMCP's HTTP app, routed at `/mcp`) mounted after it, and
     `mcp_url` its address, which a page run uses instead of starting its own Groundly."""
     runner = Runner(mcp_url)
+    atexit.register(runner.shutdown)  # a forced exit (a second Ctrl-C) skips the lifespan
 
     @asynccontextmanager
     async def lifespan(app: Starlette):

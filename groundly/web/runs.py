@@ -20,9 +20,10 @@ import threading
 from datetime import UTC, datetime
 from importlib.resources import files
 
+from groundly.agents.quiz import MASTERY_WINDOW
 from groundly.core.paths import groundly_home
 
-TARGET_QUESTIONS = 10  # a subtopic is filled to the mastery window
+TARGET_QUESTIONS = MASTERY_WINDOW  # a subtopic is filled to the mastery window
 RUN_TIMEOUT_S = 20 * 60
 MAX_STEPS = 50
 MAX_SUMMARY_CHARS = 2000
@@ -57,7 +58,8 @@ def mcp_config(mcp_url: str | None) -> dict:
     if mcp_url:
         server = {"type": "http", "url": mcp_url}
     else:
-        server = {"command": sys.executable, "args": ["-m", "groundly", "mcp"]}
+        # -P: the run directory never lands on sys.path, so nothing there shadows groundly
+        server = {"command": sys.executable, "args": ["-P", "-m", "groundly", "mcp"]}
     return {"mcpServers": {"groundly": server}}
 
 
@@ -247,9 +249,8 @@ def _limit_words(seconds: float) -> str:
 
 
 def _kill(proc: subprocess.Popen) -> None:
-    """End the run's whole process group: `claude` and the stdio `groundly mcp` it started."""
-    if proc.poll() is not None:
-        return
+    """End the run's whole process group: `claude` and the stdio `groundly mcp` it started,
+    which may outlive `claude` itself."""
     try:
         os.killpg(proc.pid, signal.SIGTERM)
         proc.wait(5)
@@ -286,7 +287,8 @@ class Runner:
         if reason:
             raise RunError(reason, _UNAVAILABLE[reason], 503)
         with self._lock:
-            if self._run is not None and self._run["status"] == "running":
+            # The process, not the status: after its result event claude may still be exiting.
+            if self._live():
                 raise RunError("run_in_progress", "a run is already working — wait or stop it", 409)
             # One fixed cwd: Claude Code makes a folder per working directory under
             # ~/.claude/projects, so a fresh tempdir per run would leave one per click.
@@ -389,6 +391,7 @@ class Runner:
         proc.stdout.close()
         code = proc.wait()
         timer.cancel()
+        _kill(proc)  # children claude left behind
         stderr.seek(max(0, stderr.seek(0, os.SEEK_END) - _STDERR_TAIL))
         tail = stderr.read().decode("utf-8", "replace").strip()
         stderr.close()
@@ -402,9 +405,14 @@ class Runner:
         """Stop the running run, if any; what the gates already stored stays."""
         with self._lock:
             run, proc = self._run, self._proc
-        if run is not None and proc is not None:
+        if run is not None and proc is not None and self._live():
             self._end(proc, run, "stopped")
         return self.view()
+
+    def _live(self) -> bool:
+        """A run is working or its `claude` has not yet exited."""
+        run, proc = self._run, self._proc
+        return run is not None and (run["status"] == "running" or proc.poll() is None)
 
     def shutdown(self) -> None:
         """The page process is exiting: leave no `claude` behind."""

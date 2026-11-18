@@ -36,7 +36,9 @@ def test_mcp_config_is_the_running_mcp_or_this_installations_stdio():
         "mcpServers": {"groundly": {"type": "http", "url": "http://127.0.0.1:8765/mcp"}}
     }
     assert runs.mcp_config(None) == {
-        "mcpServers": {"groundly": {"command": sys.executable, "args": ["-m", "groundly", "mcp"]}}
+        "mcpServers": {
+            "groundly": {"command": sys.executable, "args": ["-P", "-m", "groundly", "mcp"]}
+        }
     }
 
 
@@ -380,3 +382,28 @@ def test_shutdown_kills_claude_and_its_children(fake_claude):
     claude_pid, child_pid = fake_claude.pids()
     runner.shutdown()
     assert gone(claude_pid) and gone(child_pid)
+
+
+def test_children_claude_leaves_behind_are_ended_when_it_exits(fake_claude):
+    fake_claude.record_pids()  # the fake starts a child and exits without waiting for it
+    runner = runs.Runner()
+    _start(runner)
+    claude_pid, child_pid = fake_claude.pids()
+    assert wait_until_ended(runner.view)["status"] == "done"
+    assert gone(claude_pid) and gone(child_pid)
+
+
+def test_a_start_is_refused_while_the_last_claude_is_still_exiting(fake_claude):
+    fake_claude.script([FAKE_INIT, success(), "SLEEP"])  # reports its result, then lingers
+    fake_claude.record_pids()
+    runner = runs.Runner()
+    _start(runner)
+    claude_pid, _ = fake_claude.pids()
+    assert wait_until_ended(runner.view)["status"] == "done"
+    try:
+        with pytest.raises(runs.RunError) as e:
+            _start(runner, "grade")
+        assert e.value.reason == "run_in_progress"
+    finally:
+        runner.shutdown()
+    assert gone(claude_pid)

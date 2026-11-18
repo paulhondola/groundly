@@ -15,7 +15,7 @@ from groundly.core.manifest import sync_counts
 from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
 from groundly.ingestion.extract import ExtractionFailure, ModelUnavailable, SubprocessExtractor
-from groundly.ingestion.formats import is_supported_file
+from groundly.ingestion.formats import skip_reason
 from groundly.ingestion.results import FileResult, OnEvent, Status
 from groundly.llm.embeddings import BgeM3Embedder
 
@@ -136,14 +136,8 @@ class IngestionPipeline:
                 results.append(FileResult(path, Status.ERROR, "file not found"))
                 self.on_event(path, Status.ERROR)
                 continue
-            if not is_supported_file(path):
-                results.append(
-                    FileResult(
-                        path,
-                        Status.SKIPPED_UNSUPPORTED,
-                        f"unsupported type {path.suffix or path.name!r}",
-                    )
-                )
+            if reason := skip_reason(path):
+                results.append(FileResult(path, Status.SKIPPED_UNSUPPORTED, reason))
                 self.on_event(path, Status.SKIPPED_UNSUPPORTED)
                 continue
 

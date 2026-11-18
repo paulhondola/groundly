@@ -50,7 +50,16 @@ def _run(asgi_app: object, port: int, lines: list[str]) -> None:
         signal.signal(signal.SIGHUP, lambda *_: signal.raise_signal(signal.SIGTERM))
     # proxy_headers=False: the write route's Origin check compares against the socket's own
     # scheme and host, which an X-Forwarded-* header must not be able to change.
-    uvicorn.run(asgi_app, host="127.0.0.1", port=port, log_level="warning", proxy_headers=False)
+    # timeout_graceful_shutdown: an open /mcp stream (a host session, or a page run's) would
+    # otherwise hold shutdown, and the lifespan that stops the run, until it closes.
+    uvicorn.run(
+        asgi_app,
+        host="127.0.0.1",
+        port=port,
+        log_level="warning",
+        proxy_headers=False,
+        timeout_graceful_shutdown=3,
+    )
 
 
 def _page_line(port: int) -> str:

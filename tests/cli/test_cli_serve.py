@@ -36,6 +36,7 @@ def test_serve_binds_loopback_and_opens_browser(monkeypatch):
     assert result.exit_code == 0, result.output
     assert [(r["host"], r["port"]) for r in runs] == [("127.0.0.1", 8765)]
     assert runs[0]["proxy_headers"] is False
+    assert runs[0]["timeout_graceful_shutdown"]  # an open /mcp stream cannot hold shutdown
     assert opened == ["http://groundly.localhost:8765/"]
     assert "http://127.0.0.1:8765/" in result.output  # fallback when *.localhost won't resolve
     assert runs[0]["app"].state.runner.mcp_url is None  # a page run starts its own Groundly
