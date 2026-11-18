@@ -118,6 +118,7 @@ def install(
     and retire the old combined one."""
     _refuse_symlinks()
     skipped: list[Path] = []
+    declined: set[Path] = set()
     for skills_dir in _active_dirs():
         for name in NAMES:
             target, packaged = skills_dir / name / "SKILL.md", _packaged(name)
@@ -125,8 +126,11 @@ def install(
                 if target.read_bytes() == packaged:
                     console.print(f"{name}: already installed  ({target})", soft_wrap=True)
                     continue
+                if target.resolve() in declined:
+                    continue
                 if not yes and not typer.confirm(f"replace the different copy at {target}?"):
                     skipped.append(target)
+                    declined.add(target.resolve())
                     continue
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(packaged)
@@ -159,7 +163,12 @@ def uninstall(
     """Remove the Groundly skills (and the old combined one) from all agent directories."""
     _refuse_symlinks()
     candidates = (*(d / n / "SKILL.md" for d in _all_dirs() for n in NAMES), _legacy())
-    present = [t for t in candidates if t.exists()]
+    present: list[Path] = []
+    seen: set[Path] = set()
+    for target in candidates:
+        if target.exists() and target.resolve() not in seen:
+            present.append(target)
+            seen.add(target.resolve())
     if not present:
         console.print("not installed — nothing to do")
         return
