@@ -11,7 +11,7 @@ A roadmap-style map of a subject: big topics in course order, subtopics under ea
 
 **Main flow**
 
-1. **Set up, once.** `claude mcp add groundly -- groundly mcp` connects the server; `groundly skill install` copies the packaged skill to `~/.claude/skills/groundly/`. Connecting stays a separate step because `skill install` never edits another tool's config. Bare `groundly skill` shows not installed / installed / out of date; `skill install` and `skill uninstall` prompt before replacing or removing unless `-y/--yes`.
+1. **Set up, once.** `claude mcp add --scope user groundly -- groundly mcp` connects the server; `groundly skill install` copies the packaged skill to `~/.claude/skills/groundly/`. Connecting stays a separate step because `skill install` never edits another tool's config. Bare `groundly skill` shows not installed / installed / out of date; `skill install` and `skill uninstall` prompt before replacing or removing unless `-y/--yes`.
 2. **Trigger.** The student asks the host to map the course. If the tools are missing, the skill gives the connect command and says to restart the host; if the subject is not indexed, it runs `groundly index`.
 3. **Read.** The host calls `outline(subject)`: each indexed material with its page count, its pages' headings and how many of its chunks the current tree cites, plus the current tree with topic ids. No chunk text and no chunk ids.
 4. **Think.** The host merges overlapping lectures, drops noise, orders big topics by course order and writes a summary (at most 500 characters) per node. Groundly does not filter headings.

@@ -11,12 +11,13 @@ indexes it). No API key is needed for anything the host can call.
 ## Claude Code
 
 ```sh
-claude mcp add groundly -- groundly mcp
+claude mcp add --scope user groundly -- groundly mcp
 ```
 
-Add `--scope user` to make it available in every project rather than just the
-current one. Alternatively, check a `.mcp.json` into a project to share the
-setup:
+`--scope user` makes Groundly available in every folder you open Claude Code
+in. Without it, Claude Code registers the server for the current folder only,
+and the tools are missing everywhere else. To connect one project only, drop
+the flag, or check a `.mcp.json` into the project to share the setup:
 
 ```json
 {
@@ -93,7 +94,7 @@ groundly start                   # page at http://groundly.localhost:8765/, MCP 
 It binds 127.0.0.1 only, opens the page, and prints the connect command:
 
 ```sh
-claude mcp add --transport http groundly http://127.0.0.1:8765/mcp
+claude mcp add --scope user --transport http groundly http://127.0.0.1:8765/mcp
 ```
 
 Keep it running while you work; the tools fail while it is stopped. If the page's `groundly.localhost` address does not open, use the printed `127.0.0.1` one. The MCP URL uses the IP on purpose: Claude Code looks names up through the operating system, which on some Linux setups asks outside DNS about `*.localhost`.
@@ -111,7 +112,7 @@ groundly mcp --http --port 9000
 It binds 127.0.0.1 only. Point the host at the URL:
 
 ```sh
-claude mcp add --transport http groundly http://127.0.0.1:8000/mcp
+claude mcp add --scope user --transport http groundly http://127.0.0.1:8000/mcp
 ```
 
 or in `.mcp.json`:
