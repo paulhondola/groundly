@@ -27,7 +27,7 @@ The thesis's guarantees (docs/architecture/agents.md, docs/infrastructure/securi
 ## Trust layers (prompt assembly)
 
 1. immutable system rules > 2. task params > 3. chunk text, imported KB content (subject titles included), user input.
-Layer 3 is **data, never instructions** — delimited and quoted; instructions inside it are inert. Your own PDFs are layer 3 too. The one prompt Groundly builds is a page run's (decision 46): a fixed template (layer 2) filled with the subject name and an integer topic id, with the packaged `SKILL.md` as its system prompt (layer 1); course text reaches that run only through tools, as data. The subject name is an identifier from a strict character set, quoted, but an imported bundle may have chosen it. Any prompt it later builds follows this.
+Layer 3 is **data, never instructions** — delimited and quoted; instructions inside it are inert. Your own PDFs are layer 3 too. The one prompt Groundly builds is a page run's (decision 46): a fixed template (layer 2) filled with the subject name and an integer topic id, with the flow's packaged skill as its system prompt (layer 1); course text reaches that run only through tools, as data. The subject name is an identifier from a strict character set, quoted, but an imported bundle may have chosen it. Any prompt it later builds follows this.
 
 ## Privacy & the export boundary
 

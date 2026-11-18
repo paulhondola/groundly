@@ -5,14 +5,14 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: a **host agent*
 ## Topic tree (sub-project 2)
 
 **Actor:** host agent (`outline`, `submit_tree`) building the map; student (`groundly serve`) reading it. Decision 41.
-**Preconditions:** the subject is indexed under the current schema; for building, the host is Claude Code with the Groundly server connected and the skill installed.
+**Preconditions:** the subject is indexed under the current schema; for building, the host is Claude Code with the Groundly server connected and the skills installed (decision 47).
 
 A roadmap-style map of a subject: big topics in course order, subtopics under each (exactly two levels), and for every node a short summary and the slides behind it. It lives in `store.db`, so it travels with bundles. No graph, no extra model (decision 37).
 
 **Main flow**
 
-1. **Set up, once.** `claude mcp add --scope user groundly -- groundly mcp` connects the server; `groundly skill install` copies the packaged skill to `~/.claude/skills/groundly/`. Connecting stays a separate step because `skill install` never edits another tool's config. Bare `groundly skill` shows not installed / installed / out of date; `skill install` and `skill uninstall` prompt before replacing or removing unless `-y/--yes`.
-2. **Trigger.** The student asks the host to map the course. If the tools are missing, the skill gives the connect command and says to restart the host; if the subject is not indexed, it runs `groundly index`.
+1. **Set up, once.** `claude mcp add --scope user groundly -- groundly mcp` connects the server; `groundly skill install` copies the three packaged skills to `~/.claude/skills/groundly-map/`, `groundly-questions/` and `groundly-grade/`, and retires an old `~/.claude/skills/groundly/` copy after a prompt. Connecting stays a separate step because `skill install` never edits another tool's config. Bare `groundly skill` shows not installed / installed / out of date for each skill; `skill install` and `skill uninstall` prompt before replacing or removing unless `-y/--yes`.
+2. **Trigger.** The student asks the host to map the course. If the tools are missing, the `groundly-map` skill gives the connect command and says to restart the host; if the subject is not indexed, it runs `groundly index`.
 3. **Read.** The host calls `outline(subject)`: each indexed material with its page count, its pages' headings and how many of its chunks the current tree cites, plus the current tree with topic ids. No chunk text and no chunk ids.
 4. **Think.** The host merges overlapping lectures, drops noise, orders big topics by course order and writes a summary (at most 500 characters) per node. Groundly does not filter headings.
 5. **Submit.** The host calls `submit_tree(subject, tree)` with `[{id?, title, summary, subtopics: [{id?, title, summary}]}]`; list order is course order. The host cites nothing: Groundly retrieves on `title + "\n" + summary` with the reranker always on, and the hits at or above `TOPIC_RELEVANCE_CUTOFF` (1.0, up to 5) become the node's sources. The whole tree is accepted or rejected, in one transaction.
@@ -21,7 +21,7 @@ A roadmap-style map of a subject: big topics in course order, subtopics under ea
 
 **Alternate / error flows**
 
-- **A1 — No tree yet:** the page shows the sentence to say to the host and notes that the skill must be installed.
+- **A1 — No tree yet:** the page shows the sentence to say to the host and notes that the skills must be installed.
 - **A2 — A cited material was removed:** its citations go with it, the node stays and shows "sources removed — ask your agent to update the map". The next accepted submit restores or removes it.
 - **A3 — Subject indexed before the tree tables:** search still works. Tree calls and the page report SQLite's own "no such table" message; no guard or migration is added (decision 41), and the fix is `groundly drop` then re-index once.
 - **A4 — Imported bundle:** the tree arrives with `store.db`. Import refuses a bundle with no tree tables (exported by an older Groundly) or with dangling references or a tree deeper than two levels. Titles, summaries and chunk text are layer-3 data.
@@ -40,7 +40,7 @@ A roadmap-style map of a subject: big topics in course order, subtopics under ea
 8. `store.db` carries the tree through export and import, `progress.db` is not in the bundle, and import refuses a bundle whose citations do not resolve.
 9. `serve` binds 127.0.0.1, rejects a foreign Host header, loads no model and writes no rows to `store.db`. Each page path works: subject list, tree, empty state, flagged node, PDF at a page, chunk text for a non-PDF.
 10. A title containing `<script>` in an imported bundle renders as text.
-11. `groundly skill install`, `uninstall` and the bare status all work, and a replaced copy prompts unless `-y`. **End to end on Claude Code:** with the server connected and the skill installed, "map my course" alone leads to an accepted tree. With the server not connected, the skill gives the connect command.
+11. `groundly skill install`, `uninstall` and the bare status all work for each of the three skills, a replaced copy prompts unless `-y`, and a "no" skips only that file. **End to end on Claude Code:** with the server connected and the skills installed, "map my course" alone leads to an accepted tree. With the server not connected, the skill gives the connect command.
 12. **Human review:** on a fully re-indexed apd, the skill builds a tree Paul recognises as the course against the issue's seven big nodes (Intro, POSIX Threads, Synchronization, Performance, OpenMP, MPI, Sockets & Distributed). The review is recorded with the criteria.
 13. **Cutoff check before release:** Claude Code-written trees on apd and `passc` pass without wrongly rejected nodes piling up. Change the constant if they do.
 
@@ -103,7 +103,7 @@ Criteria 1, 12, 13 and the end-to-end half of 11 are manual and recorded above. 
 **Main flow**
 
 1. **Write.** In a topic's panel the student presses **Write questions** (on a subtopic) or **Write questions for its subtopics** (on a big topic). The button shows only while that subtopic, or one of the big topic's subtopics, has fewer than 10 questions.
-2. **Run.** The page starts one isolated `claude -p` run with Groundly's tools only and a fixed prompt naming the subject and topic id. The run follows the skill's "Write questions for a topic" flow and stores what passes `submit_questions`, bringing each thin subtopic in scope to 10.
+2. **Run.** The page starts one isolated `claude -p` run with Groundly's tools only and a fixed prompt naming the subject and topic id. The run follows the `groundly-questions` skill, starting from `topic`, and stores what passes `submit_questions`, bringing each thin subtopic in scope to 10.
 3. **Watch.** A strip at the top of the view shows the run's steps in plain words and a **Stop** button; every run button is disabled meanwhile. A reload re-attaches to the running run.
 4. **End.** The strip shows the run's summary (at most three sentences, as text) and the view re-reads the map, so the panel shows the new question count.
 5. **Grade.** On a result awaiting review the student presses **Grade now**. One run reviews every written answer in the subject that awaits review through `review_answers`, until `remaining` is 0, and the result re-reads with the verdicts.
@@ -129,7 +129,7 @@ Tests use a fake `claude` executable put on PATH that prints canned `stream-json
 4. With `claude` not on PATH, `available` is false, no run button shows, and the phrases show as today. The start route answers `no_host`.
 5. A start while a run is running answers `run_in_progress` and spawns nothing.
 6. The start route refuses each of these and spawns nothing: a foreign or missing `Origin`, a non-JSON body, an unknown subject, an unknown topic, a kind other than `write` or `grade`, a `topic_id` that is not an integer.
-7. The spawned argv holds `--tools ""`, `--setting-sources ""`, `--strict-mcp-config`, `--permission-mode dontAsk`, the flow's allowlist (a write run's lacks `remove_questions`, `submit_tree` and `review_answers`) and the packaged `SKILL.md` path. It is exec'd with no shell. A topic titled `<script>` or "ignore previous instructions" does not appear in the prompt.
+7. The spawned argv holds `--tools ""`, `--setting-sources ""`, `--strict-mcp-config`, `--permission-mode dontAsk`, the flow's allowlist (a write run's lacks `remove_questions`, `submit_tree` and `review_answers`) and the path of the flow's packaged skill (`groundly-questions` or `groundly-grade`). It is exec'd with no shell. A topic titled `<script>` or "ignore previous instructions" does not appear in the prompt.
 8. Under `start`, the MCP config is `/mcp` on the process's own port. Under `serve`, it is the same installation's `groundly mcp`.
 9. A fake `claude` whose init event lists a built-in tool (e.g. `Bash`), or an MCP server other than `groundly`, is killed before its first turn and ends `failed` with `isolation_failed`. On Windows, `available` is false with `unsupported_platform`.
 10. **Stop** ends the run with status `stopped`. A run over the timeout ends `failed` with a cause that names the timeout. A non-zero exit ends `failed` with the exit's message.
