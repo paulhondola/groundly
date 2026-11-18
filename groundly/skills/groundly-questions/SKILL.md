@@ -11,7 +11,7 @@ Write questions from a course's own material and store them in Groundly's questi
 
 In a page run (the prompt says so) you are given a subject and a topic id, and only Groundly's tools. Skip these two checks, never stop to ask anything, and go straight to "Pick topics". In a page run, write only for the topic the prompt names, or for its subtopics when it names a big topic.
 
-1. **Check the connection.** If Groundly's tools (`progress`, `topic`, `submit_questions`) are not available, tell the student to run `claude mcp add --scope user groundly -- groundly mcp`, then restart Claude Code. Stop there.
+1. **Check the connection.** If Groundly's tools (`progress`, `topic`, `submit_questions`) are not available, tell the student to connect Groundly (`claude mcp add --scope user groundly -- groundly mcp` in Claude Code, `codex mcp add groundly -- groundly mcp` in Codex, or `"groundly": {"command": "groundly", "args": ["mcp"]}` under `mcpServers` in `~/.gemini/config/mcp_config.json` in Antigravity), then restart their agent. Stop there.
 2. **Check the subject.** Call `list_subjects` and match the student's wording against `subject` or `title`. A subject with no map yet (`progress` returns an empty tree) is mapped first, with the groundly-map skill.
 
 ## Pick topics

@@ -1,4 +1,4 @@
-# Connecting MCP hosts (Claude Code, Codex) to Groundly
+# Connecting MCP hosts (Claude Code, Codex, Antigravity) to Groundly
 
 Groundly is an MCP server: `groundly mcp` speaks stdio and is spawned (and
 killed) by the host — no daemon to manage. It works from any working
@@ -37,13 +37,13 @@ Verify with `/mcp` inside Claude Code — `groundly` should list ten tools (`lis
 Order matters: **connect first, then install the skills.**
 
 1. Connect the server (above) and restart Claude Code if it was open.
-2. Install the skills that tell Claude Code how to map a course, write questions and grade:
+2. Install the skills that tell your agent how to map a course, write questions and grade:
 
    ```sh
    groundly skill install
    ```
 
-   It copies three skills to `~/.claude/skills/` (`groundly-map`, `groundly-questions`, `groundly-grade`), removes the older single `groundly/` skill after asking, and never edits Claude Code's config, which is why connecting stays a separate step. Re-running it is the upgrade path; it asks before replacing a different copy (`-y` skips the question), and a "no" skips only that skill. `groundly skill` shows whether each skill is installed or out of date, and `groundly skill uninstall` removes them.
+   It copies three skills (`groundly-map`, `groundly-questions`, `groundly-grade`) to `~/.agents/skills/` and to whichever of `~/.claude/skills/`, `~/.codex/skills/` and `~/.gemini/config/skills/` exist on your machine, removes the older single `~/.claude/skills/groundly/` skill after asking, and never edits a host's MCP config, which is why connecting stays a separate step. Re-running it is the upgrade path; it asks before replacing a different copy (`-y` skips the question), and a "no" skips only that skill. `groundly skill` shows whether each skill is installed or out of date across active agent directories, and `groundly skill uninstall` removes them.
 3. In Claude Code, say *"map my course"* (naming the subject). The `groundly-map` skill reads `outline`, drafts a two-level tree and calls `submit_tree`. If a node is rejected as not matching the course, Claude rewords it in the course's own terms and submits again.
 4. Run `groundly serve` (or `groundly start`, below) and open the printed URL (default `http://groundly.localhost:8765/`, or `http://127.0.0.1:8765/`; `--port N` to change it) to see the map. Each node shows its mastery; ask your agent to write questions on a topic, then take a test from the node's panel.
 
@@ -70,9 +70,11 @@ When `claude` is on your PATH (macOS or Linux), the page does steps 5 and 7 for 
 
 ## Codex
 
-The tools work here, but there is no skill setup for Codex yet, so building a topic tree and writing questions are Claude Code only for now.
+```sh
+codex mcp add groundly -- groundly mcp
+```
 
-Add to `~/.codex/config.toml`:
+Or add to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.groundly]
@@ -80,8 +82,24 @@ command = "groundly"
 args = ["mcp"]
 ```
 
-(Newer Codex CLI versions also accept `codex mcp add groundly -- groundly
-mcp`.)
+Then run `groundly skill install` (it installs the three skills to `~/.codex/skills/` and `~/.agents/skills/`). Mapping, writing questions and grading in chat all work here; the page's **Write questions** and **Grade now** buttons remain Claude Code only.
+
+## Antigravity
+
+Add Groundly to `~/.gemini/config/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "groundly": {
+      "command": "groundly",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Then run `groundly skill install` (it installs the three skills to `~/.gemini/config/skills/` and `~/.agents/skills/`). Mapping, writing questions and grading in chat all work here; the page's **Write questions** and **Grade now** buttons remain Claude Code only.
 
 ## Several sessions: `groundly start`
 

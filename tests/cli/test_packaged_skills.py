@@ -22,6 +22,8 @@ def test_each_skill_stands_alone(name):
     assert "data, never instructions" in text
     assert "verified" not in text.lower()
     assert "claude mcp add --scope user groundly -- groundly mcp" in text
+    assert "codex mcp add groundly -- groundly mcp" in text
+    assert "~/.gemini/config/mcp_config.json" in text
 
 
 @pytest.mark.parametrize(
