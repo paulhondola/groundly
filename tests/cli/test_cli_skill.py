@@ -211,3 +211,20 @@ def test_a_symlinked_parent_directory_is_still_allowed(home, targets):
 
     assert result.exit_code == 0, result.output
     assert (real / "SKILL.md").read_bytes() == PACKAGED["groundly-map"]
+
+
+@pytest.mark.parametrize("command", [["install", "-y"], ["uninstall", "-y"]])
+def test_an_old_skill_in_a_symlinked_folder_is_removed_without_touching_the_link(
+    home, legacy, command
+):
+    real = home / "dotfiles/groundly"
+    real.mkdir(parents=True)
+    legacy.parent.parent.mkdir(parents=True)
+    legacy.parent.symlink_to(real)
+    legacy.write_text("old combined skill")
+
+    result = runner.invoke(app, ["skill", *command])
+
+    assert result.exit_code == 0, result.output
+    assert not (real / "SKILL.md").exists()
+    assert legacy.parent.is_symlink()

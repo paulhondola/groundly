@@ -61,3 +61,20 @@ def test_the_map_skill_handles_a_remap_blocked_by_questions():
 
 def test_the_questions_skill_points_a_subject_with_no_map_to_the_map_skill():
     assert "groundly-map" in _text("groundly-questions")
+
+
+def test_the_grade_skill_opens_a_source_by_its_own_uri():
+    text = " ".join(_text("groundly-grade").split())
+    assert "groundly://<subject>/<filename>" not in text
+    assert "`uri` verbatim" in text
+
+
+def test_the_map_skill_says_nearest_points_at_the_closest_passage():
+    text = " ".join(_text("groundly-map").split())
+    assert "closest course text" not in text
+    assert "file, page and heading of the closest" in text
+
+
+def test_the_questions_skill_keeps_a_page_run_on_its_topic():
+    text = " ".join(_text("groundly-questions").split())
+    assert "In a page run, write only for the topic" in text

@@ -17,7 +17,7 @@ In a page run, skip these checks and never stop to ask anything.
 ## Read the answers
 
 3. **Call `review_answers` with no `reviews`.** It returns up to 20 answers awaiting review, oldest first, each with its question's stem, its reference answer, the student's answer and the cited course chunks, plus `remaining`: how many more wait for a later call.
-4. **Open a page when a chunk is too short to judge by,** with `get_page` (`groundly://<subject>/<filename>#page=N`, the filename verbatim).
+4. **Open a page when a chunk is too short to judge by:** pass the source's `uri` verbatim to `get_page`. A uri without `#page` opens the whole material, so judge such a source from its chunk text instead.
 
 ## Judge each answer
 
@@ -26,7 +26,7 @@ In a page run, skip these checks and never stop to ask anything.
 7. **Incorrect outright:** a blank answer, an answer to a different question, a copy of the question, "I don't know", or a restatement of the stem.
 8. **Judge only against the reference answer and the cited chunks,** never your general knowledge of the topic. If the reference answer and the chunks disagree, follow the chunks, and say so in the comment.
 9. **One standard for the whole batch.** Two answers that say the same thing get the same verdict.
-10. **The comment.** One or two sentences, at most 1000 characters, in the course's language, that the student reads on the result page. Say what was missing or wrong, or what made the answer right, and name the page to read (its filename and page number). No lecture, and no softening a verdict in words.
+10. **The comment.** One or two sentences, at most 1000 characters, in the course's language, that the student reads on the result page. Say what was missing or wrong, or what made the answer right, and name where to read (the source's filename, and its page number when it has one). No lecture, and no softening a verdict in words.
 
 ## Record
 

@@ -40,7 +40,8 @@ def _refuse_symlinks() -> None:
 
 def _remove(target: Path) -> None:
     target.unlink()
-    if not any(target.parent.iterdir()):  # keep a folder that still holds the user's files
+    # keep a folder that still holds the user's files, and never remove a linked folder
+    if not target.parent.is_symlink() and not any(target.parent.iterdir()):
         target.parent.rmdir()
 
 

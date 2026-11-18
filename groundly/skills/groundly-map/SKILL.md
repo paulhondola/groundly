@@ -30,7 +30,7 @@ Turn a subject's indexed materials into a topic tree of exactly two levels: big 
 
 11. **On a re-run,** send back the `id` of every node you keep, copied from `outline`, so existing nodes are updated rather than recreated and their questions stay with them.
 12. **Call `submit_tree`.** Nothing is stored unless every node passes, so resubmit the whole tree after each fix. Read every rejection:
-    - `below_relevance_cutoff`: the course does not match the node as worded. Read its `detail` and `nearest` (the closest course text), then reword the title and summary in the course's terms. Drop the node if the course does not cover it.
+    - `below_relevance_cutoff`: the course does not match the node as worded. Read its `detail` and `nearest` (the file, page and heading of the closest course passage; open it with `get_page` to see the course's wording), then reword the title and summary in the course's terms. Drop the node if the course does not cover it.
     - `topic_has_questions`: the new tree drops a topic that holds questions, or gives it subtopics. Tell the student which topic and how many questions it holds, and offer two ways: keep the topic as it was (send it back under its `id` with no subtopics), or remove its questions with `remove_questions`. Removal cannot be undone, so do it only after the student confirms. `topic` lists a topic's questions with their ids.
     - Any other reason: fix what its `detail` names.
 
