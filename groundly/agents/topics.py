@@ -44,6 +44,41 @@ def outline(store: SubjectStore) -> dict:
     }
 
 
+def topic_view(store: SubjectStore, topic_id: int) -> dict | None:
+    """What the question writer reads about one topic: its place in the tree, its source
+    chunks with their verbatim text, and the stems it already holds. No options, no answer
+    keys, no model. None when `topic_id` is not in the tree."""
+    found = None
+    for big in store.tree():
+        if big["id"] == topic_id:
+            found = (big, None)
+        for sub in big["subtopics"]:
+            if sub["id"] == topic_id:
+                found = (sub, big)
+    if found is None:
+        return None
+    node, parent = found
+    counts = store.question_ids_by_topic()
+    questions = (
+        [] if node["subtopics"] else store.questions(topic_ids=[topic_id], with_sources=False)
+    )
+    return {
+        "id": node["id"],
+        "title": node["title"],
+        "summary": node["summary"],
+        "parent": None if parent is None else {"id": parent["id"], "title": parent["title"]},
+        "subtopics": [
+            {"id": s["id"], "title": s["title"], "questions": len(counts.get(s["id"], []))}
+            for s in node["subtopics"]
+        ],
+        "sources": [
+            {k: src[k] for k in ("chunk_id", "filename", "page", "heading_path", "text")}
+            for src in node["sources"]
+        ],
+        "questions": [{"id": q["id"], "kind": q["kind"], "stem": q["stem"]} for q in questions],
+    }
+
+
 def _tree_view(nodes: list[dict]) -> list[dict]:
     return [
         {
