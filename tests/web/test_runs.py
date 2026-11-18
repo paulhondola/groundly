@@ -63,13 +63,18 @@ def test_write_argv_is_isolated_and_allows_only_the_write_tools():
         "mcp__groundly__review_answers",
     } & set(allowed)
     skill = Path(argv[argv.index("--append-system-prompt-file") + 1])
-    assert skill.name == "SKILL.md" and "## Grade a test" in skill.read_text()
+    assert skill.parent.name == "groundly-questions" and skill.name == "SKILL.md"
+    assert "name: groundly-questions" in skill.read_text()
+    assert "mcp__groundly__topic" in allowed
     assert json.loads(argv[argv.index("--mcp-config") + 1]) == runs.mcp_config(None)
 
 
 def test_grade_argv_allows_only_the_grade_tools():
     argv = runs.build_argv("/bin/claude", "grade", "P", "http://127.0.0.1:8765/mcp")
     assert set(argv[argv.index("--allowedTools") + 1].split(",")) == set(runs.GRADE_TOOLS)
+    skill = Path(argv[argv.index("--append-system-prompt-file") + 1])
+    assert skill.parent.name == "groundly-grade" and "name: groundly-grade" in skill.read_text()
+    assert "mcp__groundly__topic" not in runs.GRADE_TOOLS
     assert json.loads(argv[argv.index("--mcp-config") + 1]) == runs.mcp_config(
         "http://127.0.0.1:8765/mcp"
     )
@@ -79,14 +84,21 @@ def test_prompts_carry_only_the_flow_the_subject_and_the_topic_id():
     leaf = runs.build_prompt("write", "apd", 27, big=False)
     big = runs.build_prompt("write", "apd", 3, big=True)
     grade = runs.build_prompt("grade", "apd", None, big=False)
-    assert '"Write questions for a topic"' in leaf
+    assert "groundly-questions" in leaf and "groundly-questions" in big
     assert "topic id 27" in leaf and "10 questions" in leaf
     assert "each subtopic of topic id 3" in big and "fewer than 10" in big
-    assert '"Grade a test"' in grade and "`remaining` is 0" in grade
+    assert "groundly-grade" in grade and "`remaining` is 0" in grade
     for p in (leaf, big, grade):
         assert (
             '"apd"' in p and "verified" in p
         )  # the closing line forbids calling anything verified
+        assert p.startswith("This is a page run.")  # the skills' page-run branches key on it
+
+
+def test_reading_a_topic_is_a_plain_word_step():
+    assert runs.Steps().feed(use("t1", "mcp__groundly__topic", {"topic_id": 27})) == [
+        "Reading the topic"
+    ]
 
 
 INIT = {
