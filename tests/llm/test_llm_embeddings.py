@@ -114,3 +114,19 @@ def test_lazy_model_keeps_its_weights_while_in_use():
     assert model.builds == 1
     model.unload()
     assert model._model is None
+
+
+def test_lazy_model_keeps_one_timer_and_never_pins_a_dropped_model():
+    """Uses reuse one idle timer instead of a thread each, and the pending timer holds the
+    model only weakly: a model its owner drops is freed at once, weights and all."""
+    model = _CountingModel()
+    with model._use():
+        pass
+    timer = model._timer
+    with model._use() as weights:
+        pass
+    assert model._timer is timer
+    ref, weights_ref = weakref.ref(model), weakref.ref(weights)
+    del model, weights
+    assert ref() is None and weights_ref() is None
+    timer.cancel()

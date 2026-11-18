@@ -17,7 +17,7 @@ from groundly.core.subject import Subject
 from groundly.ingestion.extract import ExtractionFailure, ModelUnavailable, SubprocessExtractor
 from groundly.ingestion.formats import skip_reason
 from groundly.ingestion.results import FileResult, OnEvent, Status
-from groundly.llm.embeddings import BgeM3Embedder
+from groundly.llm.embeddings import shared_embedder
 
 DEFAULT_IGNORED_DIRS = {
     ".git",
@@ -107,7 +107,7 @@ class IngestionPipeline:
         self.subject = subject
         self.store = SubjectStore(subject.store_db_path)
         self.extractor = extractor or SubprocessExtractor(load_settings().ingestion)
-        self.embedder = embedder or BgeM3Embedder()
+        self.embedder = embedder or shared_embedder()
         self.on_event = on_event or (lambda path, stage: None)
         self.on_discovered = on_discovered or (lambda total: None)
 

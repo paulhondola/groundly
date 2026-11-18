@@ -3,16 +3,22 @@ alongside embeddings.py (model clients constructed only here); local and key-fre
 lazy-loaded — never at import/spawn time (.claude/rules/architecture.md). Pinned at
 the resolved hf_revision, same interchange-compatibility contract as bge-m3."""
 
-from groundly.llm.embeddings import LazyModel
+import threading
+
+from groundly.llm.embeddings import LazyModel, ModelDownloadError, ensure_downloaded
 
 RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 RERANKER_HF_REVISION = "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"  # pinned 2026-07-18 (P3 start)
 
 
 class BgeReranker(LazyModel):
-    def _build(self):
-        from groundly.llm.embeddings import ModelDownloadError, ensure_downloaded
+    def __init__(self) -> None:
+        super().__init__()
+        # FlagReranker re-sets the shared tokenizer's truncation on every batch, so two
+        # concurrent calls (FastMCP runs tools in a threadpool) would cut each other's text
+        self._scoring = threading.Lock()
 
+    def _build(self):
         local = ensure_downloaded(RERANKER_MODEL, RERANKER_HF_REVISION)
         try:
             from FlagEmbedding import FlagReranker
@@ -22,7 +28,7 @@ class BgeReranker(LazyModel):
             raise ModelDownloadError(f"failed to load {RERANKER_MODEL}: {exc}") from exc
 
     def compute_score(self, pairs: list[tuple[str, str]]) -> list[float]:
-        with self._use() as model:
+        with self._use() as model, self._scoring:
             scores = model.compute_score(pairs)
         if isinstance(scores, float):
             return [scores]

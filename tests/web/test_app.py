@@ -482,6 +482,7 @@ def test_serving_a_test_loads_no_model(client, seeded, monkeypatch):
         raise AssertionError("a model was loaded")
 
     monkeypatch.setattr(embeddings, "shared_embedder", boom)
+    monkeypatch.setattr("groundly.llm.rerank.shared_reranker", boom)
     _, (q, *_) = _bank(seeded)
     assert client.get("/api/subjects/PDSS/test?n=5").status_code == 200
     assert _post(client, _attempt(q, _key(q))).status_code == 201
