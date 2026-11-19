@@ -5,7 +5,7 @@ import io
 import re
 import sys
 from importlib.metadata import version as _package_version
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 import typer
 from rich.console import Console
@@ -53,7 +53,7 @@ def _safe(value: object, *, multiline: bool = False) -> str:
     return escape(_visible(value))
 
 
-def _fail(message: str) -> None:
+def _fail(message: str) -> NoReturn:
     console.print(f"[red]Error:[/red] {_safe(message, multiline=True)}")
     raise typer.Exit(code=1)
 
