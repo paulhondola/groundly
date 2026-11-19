@@ -436,6 +436,11 @@ def test_an_unknown_attempt_is_404(client, seeded):
     assert client.get("/api/subjects/NOPE/attempts").status_code == 404
 
 
+def test_an_attempt_of_an_unknown_subject_is_404(client, seeded):
+    r = client.get("/api/subjects/NOPE/attempts/1")
+    assert (r.status_code, r.json()["error"]) == (404, "unknown_subject")
+
+
 def test_test_and_result_pages_serve_the_shell_under_the_csp(client, seeded):
     for path in ("/s/PDSS/test", "/s/PDSS/attempts/1"):
         r = client.get(path)

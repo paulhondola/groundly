@@ -17,6 +17,7 @@ import sqlite3
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import TypeVar
 
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
@@ -44,6 +45,9 @@ _CSP = (
 )
 
 
+T = TypeVar("T")
+
+
 def _open_subject(name: str) -> Subject | None:
     try:
         subject = Subject(name)
@@ -52,7 +56,7 @@ def _open_subject(name: str) -> Subject | None:
     return subject if subject.exists() else None
 
 
-def _read(subject: Subject, reader: Callable[[SubjectStore], Response | dict | None]):
+def _read(subject: Subject, reader: Callable[[SubjectStore], T]) -> T | JSONResponse:
     """Run a store read. A damaged or incomplete store answers with its own message."""
     try:
         return reader(SubjectStore(subject.store_db_path))
@@ -250,6 +254,11 @@ def _history(request: Request) -> Response:
 
 
 def _result(request: Request) -> Response:
+    name = request.path_params["subject"]
+    subject = _open_subject(name)
+    if subject is None:
+        return _error("unknown_subject", f"unknown subject {name!r}", 404)
+
     def read(store: SubjectStore, progress: ProgressStore) -> Response:
         attempt_id = request.path_params["id"]
         result = (
@@ -262,7 +271,6 @@ def _result(request: Request) -> Response:
                 src["pdf"] = _stored_pdf(subject, src["filename"]) is not None
         return JSONResponse(result)
 
-    subject = _open_subject(request.path_params["subject"])
     return _quiz(request, read)
 
 
@@ -284,7 +292,9 @@ async def _start_run(request: Request) -> Response:
     if isinstance(body, Response):
         return body
     kind = body.get("kind") if isinstance(body, dict) else None
-    if not (kind == "grade" or (kind == "write" and quiz.is_id(body.get("topic_id")))):
+    if not isinstance(body, dict) or not (
+        kind == "grade" or (kind == "write" and quiz.is_id(body.get("topic_id")))
+    ):
         return _error("invalid_body", 'expected {kind: "write", topic_id} or {kind: "grade"}')
     name = request.path_params["subject"]
     runner: Runner = request.app.state.runner
@@ -336,7 +346,7 @@ def create_app(mcp_app: Starlette | None = None, mcp_url: str | None = None) -> 
             if mcp_app is None:
                 yield
             else:  # the mounted app's session manager runs in its lifespan
-                async with mcp_app.lifespan(app):
+                async with mcp_app.router.lifespan_context(app):
                     yield
         finally:
             runner.shutdown()  # no `claude` outlives the page

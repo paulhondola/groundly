@@ -290,6 +290,7 @@ class Runner:
         claude, reason = availability()
         if reason:
             raise RunError(reason, _UNAVAILABLE[reason], 503)
+        assert claude is not None  # availability() gives a path whenever it gives no reason
         with self._lock:
             # The process, not the status: after its result event claude may still be exiting.
             if self._live():
@@ -327,6 +328,7 @@ class Runner:
             self._next_id += 1
             self._run, self._proc = run, proc
             snapshot = self._snapshot()
+        assert snapshot is not None  # self._run was set just above
         timer = threading.Timer(
             RUN_TIMEOUT_S,
             self._end,
@@ -416,7 +418,11 @@ class Runner:
     def _live(self) -> bool:
         """A run is working or its `claude` has not yet exited."""
         run, proc = self._run, self._proc
-        return run is not None and (run["status"] == "running" or proc.poll() is None)
+        return (
+            run is not None
+            and proc is not None
+            and (run["status"] == "running" or proc.poll() is None)
+        )
 
     def shutdown(self) -> None:
         """The page process is exiting: leave no `claude` behind."""
