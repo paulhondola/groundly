@@ -1,0 +1,69 @@
+import io
+import json
+import subprocess
+import sys
+import textwrap
+
+from groundly.ingestion import extract_worker as w
+
+
+def _run(handler, n):
+    reqs = "".join(
+        json.dumps({"in": f"/x{i}", "out": f"/o{i}", "ocr_lang": None}) + "\n" for i in range(n)
+    )
+    out = io.StringIO()
+    w.serve(io.StringIO(reqs), out, handle=handler)
+    return [json.loads(line)["status"] for line in out.getvalue().splitlines()]
+
+
+def test_serve_maps_each_outcome_to_a_status_and_keeps_going():
+    outcomes = iter(
+        [
+            None,
+            SystemExit(w.EXIT_NO_TEXT),
+            SystemExit(w.EXIT_MODEL_UNAVAILABLE),
+            SystemExit(w.EXIT_INPUT_TOO_LARGE),
+            SystemExit("not a readable nbformat 4 notebook"),
+            ValueError("docling blew up"),
+            None,
+        ]
+    )
+
+    def handler(i, o, lang):
+        e = next(outcomes)
+        if e:
+            raise e
+
+    assert _run(handler, 7) == [
+        "ok",
+        "no_text",
+        "model_unavailable",
+        "input_too_large",
+        "error",
+        "error",
+        "ok",
+    ]
+
+
+def test_serve_writes_the_cause_to_stderr_before_replying(capsys):
+    def handler(i, o, lang):
+        raise SystemExit("not a readable nbformat 4 notebook: boom")
+
+    _run(handler, 1)
+    assert capsys.readouterr().err.strip().splitlines()[-1].endswith("boom")
+
+
+def test_library_stdout_never_reaches_the_protocol_stream():
+    code = textwrap.dedent("""
+        import os
+        from groundly.ingestion import extract_worker as w
+        def h(i, o, lang):
+            print("noise")
+            os.write(1, b"raw noise\\n")
+        w.serve_stdio(handle=h)
+    """)
+    req = json.dumps({"in": "/a", "out": "/b", "ocr_lang": None}) + "\n"
+    r = subprocess.run(
+        [sys.executable, "-c", code], input=req, capture_output=True, text=True, check=True
+    )
+    assert [json.loads(line)["status"] for line in r.stdout.splitlines()] == ["ok"]

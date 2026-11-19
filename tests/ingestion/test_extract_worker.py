@@ -8,6 +8,15 @@ from pathlib import Path
 import pytest
 
 from groundly.core.manifest import CHUNK_MAX_TOKENS
+from groundly.ingestion import extract_worker
+
+
+@pytest.fixture(autouse=True)
+def _fresh_converter():
+    """The worker keeps one converter per OCR language; tests that stub the class need a miss."""
+    extract_worker._converter.cache_clear()
+    yield
+    extract_worker._converter.cache_clear()
 
 
 def test_docling_model_fetch_failure_exits_retryable(monkeypatch, tmp_path):
