@@ -102,9 +102,10 @@ def uninstall(
         return
 
     if not yes:
-        typer.confirm(
-            f"remove {' and '.join(cached)} from the local Hugging Face cache?", abort=True
-        )
+        targets = [f"{m} from the local Hugging Face cache" for m in cached]
+        if converted.exists():
+            targets.append("the converted bge-m3 weights")
+        typer.confirm(f"remove {' and '.join(targets)}?", abort=True)
 
     for model in cached:
         embeddings.remove_cached(model)

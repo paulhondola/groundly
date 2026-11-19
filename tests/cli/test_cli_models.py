@@ -151,7 +151,7 @@ def test_models_uninstall_aborts_without_confirmation(monkeypatch):
     assert removed == []
 
 
-def test_uninstall_removes_converted_weights(monkeypatch):
+def test_uninstall_removes_converted_weights(home, monkeypatch):
     from groundly.llm import convert
 
     monkeypatch.setattr(embeddings, "cached_snapshot", lambda *a: Path("/fake/cached"))
@@ -160,4 +160,15 @@ def test_uninstall_removes_converted_weights(monkeypatch):
     (convert.converted_dir() / "model.safetensors").write_bytes(b"x")
     result = runner.invoke(app, ["models", "uninstall", "-y"])
     assert result.exit_code == 0, result.output
+    assert not convert.converted_dir().exists()
+
+
+def test_uninstall_prompt_names_converted_weights_when_only_they_exist(home, monkeypatch):
+    from groundly.llm import convert
+
+    monkeypatch.setattr(embeddings, "cached_snapshot", lambda *a: None)
+    convert.converted_dir().mkdir(parents=True)
+    result = runner.invoke(app, ["models", "uninstall"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert "remove the converted bge-m3 weights?" in result.output
     assert not convert.converted_dir().exists()
