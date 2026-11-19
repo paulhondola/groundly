@@ -138,6 +138,8 @@ class SubprocessExtractor:
         offset the request started at. A dead or silent worker is closed before raising,
         so the next call starts a fresh one."""
         for attempt in range(2):
+            if self._proc is not None and self._proc.poll() is not None:
+                self.close()  # died while idle: it never saw this file
             if self._proc is None:
                 self._start()
             proc, tmpdir = self._proc, self._tmp
@@ -164,9 +166,10 @@ class SubprocessExtractor:
             rc = _reap(proc)
             tail = _stderr_tail(tmp / "stderr.log", start)
             self.close()
-            # A clean exit with nothing said means the worker left between files without
-            # reading this request: resend it once to a fresh worker.
-            if rc != 0 or tail or attempt:
+            # A death with nothing said since this request may have happened before the
+            # worker read it: resend once to a fresh worker. A file that kills workers
+            # silently still fails on the second try.
+            if tail or attempt:
                 raise ExtractionFailure(f"parser failed: {tail or f'exit code {rc}'}")
         raise AssertionError("unreachable: the second attempt returns or raises")
 

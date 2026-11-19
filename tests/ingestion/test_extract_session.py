@@ -63,6 +63,14 @@ def test_a_worker_that_exits_between_files_is_restarted(tmp_path):
         assert ex.extract(tmp_path / "ok.txt").chunks
 
 
+def test_a_worker_that_dies_between_files_does_not_fail_the_next(tmp_path):
+    (tmp_path / "die.txt").write_text("x")
+    (tmp_path / "ok.txt").write_text("x")
+    with _ex() as ex:
+        ex.extract(tmp_path / "die.txt")
+        assert ex.extract(tmp_path / "ok.txt").chunks
+
+
 def test_close_leaves_no_worker_running(tmp_path):
     (tmp_path / "ok.txt").write_text("x")
     ex = _ex()

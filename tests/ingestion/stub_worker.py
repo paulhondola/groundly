@@ -25,3 +25,5 @@ for line in sys.stdin:
     sys.stdout.flush()
     if name.startswith("bye"):
         os._exit(0)
+    if name.startswith("die"):
+        os._exit(9)

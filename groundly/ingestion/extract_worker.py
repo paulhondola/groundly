@@ -282,6 +282,8 @@ def serve(
         except SystemExit as exc:
             if isinstance(exc.code, int):
                 status = _SERVE_STATUS.get(exc.code, "error")
+                if status == "error":
+                    print(f"exit code {exc.code}", file=sys.stderr)
             else:
                 print(exc.code, file=sys.stderr)
                 status = "error"

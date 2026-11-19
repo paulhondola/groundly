@@ -53,6 +53,14 @@ def test_serve_writes_the_cause_to_stderr_before_replying(capsys):
     assert capsys.readouterr().err.strip().splitlines()[-1].endswith("boom")
 
 
+def test_an_unmapped_exit_code_reaches_stderr_as_the_cause(capsys):
+    def handler(i, o, lang):
+        raise SystemExit(7)
+
+    assert _run(handler, 1) == ["error"]
+    assert capsys.readouterr().err.strip().splitlines()[-1] == "exit code 7"
+
+
 def test_library_stdout_never_reaches_the_protocol_stream():
     code = textwrap.dedent("""
         import os
