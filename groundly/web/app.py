@@ -156,9 +156,15 @@ def _error(error: str, detail: str, status_code: int = 400) -> JSONResponse:
     return JSONResponse({"error": error, "detail": detail}, status_code=status_code)
 
 
-def _quiz(request: Request, call: Callable[[SubjectStore, ProgressStore], Response]) -> Response:
-    """Run a quiz call on the subject's two stores, mapping each failure to its own answer."""
-    subject = _open_subject(request.path_params["subject"])
+def _quiz(
+    request: Request,
+    call: Callable[[SubjectStore, ProgressStore], Response],
+    subject: Subject | None = None,
+) -> Response:
+    """Run a quiz call on the subject's two stores, mapping each failure to its own answer.
+    A caller that already opened the subject passes it in."""
+    if subject is None:
+        subject = _open_subject(request.path_params["subject"])
     if subject is None:
         name = request.path_params["subject"]
         return _error("unknown_subject", f"unknown subject {name!r}", 404)
@@ -271,7 +277,7 @@ def _result(request: Request) -> Response:
                 src["pdf"] = _stored_pdf(subject, src["filename"]) is not None
         return JSONResponse(result)
 
-    return _quiz(request, read)
+    return _quiz(request, read, subject)
 
 
 def _runs(request: Request) -> JSONResponse:
