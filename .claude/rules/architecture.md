@@ -17,6 +17,7 @@ Layers: clients (`cli/`, `mcp/`, `web/`) → services (`agents/`, `retrieval/`, 
 - **Groundly runs no answer-generation loop.** The host composes answers from `search` results (decision 33); adding a server-side generation path is a decision change, not a feature.
 - **The page may start the student's own host, isolated** (decision 46): `web/runs.py` spawns `claude -p` for the write and grade flows only, from an argv list with no shell, with `--strict-mcp-config` (Groundly only), `--setting-sources ""`, `--tools ""`, the flow's `--allowedTools`, `--permission-mode dontAsk` and the flow's packaged skill (`groundly-questions` or `groundly-grade`, decision 47); the init event is checked fail-closed. It passes no key and no `--model`, and the prompt carries the subject name and a topic id only, never layer-3 text. That is the student's binary on the student's login, not a Groundly client; widening the tools, adding a flow or passing course text in is a decision change.
 - Embeddings: `bge-m3`, pinned incl. hf_revision — the pin is the interchange compatibility contract. Changing it = full re-index migration + manifest bump, never a tweak.
+- The engine is not part of the pin (decision 48): MLX on Apple Silicon (macOS 14+), FlagEmbedding/torch elsewhere. Any engine must stay within the recorded tolerance (dense cosine ≥ 0.9997, sparse top-10 identical up to f16 near-ties ≤ 1e-3, rerank top-5 identical); torch stays installed for docling's extraction worker.
 
 ## Storage & concurrency
 
@@ -27,4 +28,4 @@ Layers: clients (`cli/`, `mcp/`, `web/`) → services (`agents/`, `retrieval/`, 
 
 ## Frameworks
 
-Exactly one for the tool surface: FastMCP. Starlette and uvicorn serve the topic-tree page and are not a second tool-surface framework. Exact pins for docling/sentence-transformers/FlagEmbedding/rapidocr are guarded by `.claude/hooks/guard-pins.sh`; upgrades are deliberate events recorded in docs + manifest.
+Exactly one for the tool surface: FastMCP. Starlette and uvicorn serve the topic-tree page and are not a second tool-surface framework. Exact pins for docling/sentence-transformers/FlagEmbedding/rapidocr/mlx are guarded by `.claude/hooks/guard-pins.sh`; upgrades are deliberate events recorded in docs + manifest.
