@@ -1,7 +1,7 @@
 #!/bin/sh
 # PreToolUse guard: block edits that change an exact interchange pin in pyproject.toml.
 #
-# The pins for docling / sentence-transformers / FlagEmbedding / rapidocr are the
+# The pins for docling / sentence-transformers / FlagEmbedding / rapidocr / mlx are the
 # interchange compatibility contract (.claude/rules/architecture.md) — recorded in the
 # thesis and in every export manifest. Changing one is a deliberate
 # event, never a tweak made in passing while fixing something else.
@@ -23,12 +23,12 @@ esac
 printf '%s' "$input" |
 	jq -r '[.tool_input.old_string, .tool_input.new_string, .tool_input.content]
 	       | map(select(. != null)) | join("\n")' |
-	grep -Eiq '(docling|sentence[-_.]transformers|flagembedding|rapidocr)==' || exit 0
+	grep -Eiq '(docling|sentence[-_.]transformers|flagembedding|rapidocr|mlx)==' || exit 0
 
 cat >&2 <<'EOF'
 Blocked: this edit changes an exact interchange pin in pyproject.toml.
 
-The docling / sentence-transformers / FlagEmbedding / rapidocr pins
+The docling / sentence-transformers / FlagEmbedding / rapidocr / mlx pins
 are the interchange compatibility contract (.claude/rules/architecture.md): they are
 recorded in the thesis and in every export manifest, and changing one means a full
 re-index migration + manifest bump — not a tweak.

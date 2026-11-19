@@ -149,3 +149,15 @@ def test_models_uninstall_aborts_without_confirmation(monkeypatch):
     result = runner.invoke(app, ["models", "uninstall"], input="n\n")
     assert result.exit_code != 0
     assert removed == []
+
+
+def test_uninstall_removes_converted_weights(monkeypatch):
+    from groundly.llm import convert
+
+    monkeypatch.setattr(embeddings, "cached_snapshot", lambda *a: Path("/fake/cached"))
+    _record_removals(monkeypatch)
+    convert.converted_dir().mkdir(parents=True)
+    (convert.converted_dir() / "model.safetensors").write_bytes(b"x")
+    result = runner.invoke(app, ["models", "uninstall", "-y"])
+    assert result.exit_code == 0, result.output
+    assert not convert.converted_dir().exists()

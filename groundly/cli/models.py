@@ -1,6 +1,7 @@
 """Embedding model management verbs, plus the config verbs (small; not worth a module
 of their own)."""
 
+import shutil
 from typing import Annotated
 
 import typer
@@ -92,9 +93,11 @@ def uninstall(
 ) -> None:
     """Remove bge-m3 and bge-reranker-v2-m3 from the local Hugging Face cache."""
     from groundly.llm import embeddings
+    from groundly.llm.convert import converted_dir
 
     cached = [model for model, revision in _models() if embeddings.cached_snapshot(model, revision)]
-    if not cached:
+    converted = converted_dir()
+    if not cached and not converted.exists():
         console.print("no models cached — nothing to do")
         return
 
@@ -106,3 +109,6 @@ def uninstall(
     for model in cached:
         embeddings.remove_cached(model)
         console.print(f"removed {model} from the cache")
+    if converted.exists():
+        shutil.rmtree(converted)
+        console.print("removed the converted bge-m3 weights")
