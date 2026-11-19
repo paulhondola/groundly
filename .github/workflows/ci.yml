@@ -28,5 +28,8 @@ jobs:
       - name: Layering (import-linter)
         run: uv run lint-imports
 
+      - name: Type check (pyrefly)
+        run: uv run pyrefly check
+
       - name: Test (pytest)
         run: uv run pytest

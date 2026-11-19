@@ -32,4 +32,4 @@ stdio servers are spawned and killed by the host — there is no daemon to manag
 ## Release process
 
 - PyPI package `groundly`; versions are semver; the manifest records `tool_version` on every export.
-- CI (GitHub Actions): ruff + pytest on Linux/macOS; no service containers — the test suite runs on SQLite files and stub embedders.
+- CI (GitHub Actions): ruff + pyrefly + pytest on Linux/macOS; no service containers — the test suite runs on SQLite files and stub embedders.
