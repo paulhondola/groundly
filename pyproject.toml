@@ -33,6 +33,7 @@ dev = [
     "ruff>=0.5",
     "memray>=1.14",
     "import-linter>=2.15",
+    "pyrefly==1.4.0",
 ]
 
 [project.scripts]
@@ -51,6 +52,11 @@ packages = ["groundly"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.pyrefly]
+project-includes = ["groundly"]
+preset = "default"
+python-version = "3.11"
 
 [tool.importlinter]
 root_package = "groundly"
