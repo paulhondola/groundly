@@ -239,6 +239,16 @@ def test_mlx_edge_inputs():
 
 
 @needs_mlx
+def test_mlx_ignores_trailing_whitespace_like_flagembedding():
+    """FlagEmbedding's tokenizer adds no token for trailing whitespace; 12 apd chunks end in it."""
+    import numpy as np
+
+    model = _mlx_embedder()
+    dense = model.encode(["a | - |\n", "a | - |", "abc ", "abc"])["dense_vecs"]
+    assert np.allclose(dense[0], dense[1]) and np.allclose(dense[2], dense[3])
+
+
+@needs_mlx
 def test_concurrent_encodes_and_reranks_equal_sequential():
     """Overlapping tool calls: embeds and reranks running at once give the sequential results."""
     from concurrent.futures import ThreadPoolExecutor

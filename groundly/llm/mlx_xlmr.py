@@ -158,7 +158,9 @@ class MlxBgeM3:
         import mlx.core as mx
         from mlx import nn
 
-        ids = [e.ids for e in self._tok.encode_batch(list(texts))] if texts else []
+        # rstrip: transformers' bge-m3 tokenizer (what FlagEmbedding runs) emits no token for
+        # trailing whitespace, where the raw tokenizer.json emits "▁" before </s>
+        ids = [e.ids for e in self._tok.encode_batch([t.rstrip() for t in texts])] if texts else []
         dense = np.zeros(
             (len(ids), self._w["embeddings.word_embeddings.weight"].shape[1]), np.float32
         )
