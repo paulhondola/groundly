@@ -5,7 +5,12 @@ the resolved hf_revision, same interchange-compatibility contract as bge-m3."""
 
 import threading
 
-from groundly.llm.embeddings import LazyModel, ModelDownloadError, ensure_downloaded
+from groundly.llm.embeddings import (
+    FORWARD_BATCH,
+    LazyModel,
+    ModelDownloadError,
+    ensure_downloaded,
+)
 
 RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 RERANKER_HF_REVISION = "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"  # pinned 2026-07-18 (P3 start)
@@ -29,7 +34,7 @@ class BgeReranker(LazyModel):
 
     def compute_score(self, pairs: list[tuple[str, str]]) -> list[float]:
         with self._use() as model, self._scoring:
-            scores = model.compute_score(pairs)
+            scores = model.compute_score(pairs, batch_size=FORWARD_BATCH)
         if isinstance(scores, float):
             return [scores]
         return list(scores)
