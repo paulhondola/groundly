@@ -513,6 +513,7 @@ class SubjectStore:
                 (filename, sha256, pages),
             )
             material_id = cur.lastrowid
+            assert material_id is not None  # set by the INSERT above
             for chunk, (vec, weights) in zip(chunks, vectors, strict=True):
                 cid = conn.execute(
                     "INSERT INTO chunks (material_id, page, heading_path, text, token_count) "
@@ -521,7 +522,11 @@ class SubjectStore:
                 ).lastrowid
                 conn.execute(
                     "INSERT INTO vectors (rowid, embedding) VALUES (?, ?)",
-                    (cid, sqlite_vec.serialize_float32(vec)),
+                    (
+                        cid,
+                        # pyrefly: ignore[bad-argument-type] -- stub says list[float]; it unpacks any sequence, numpy rows included
+                        sqlite_vec.serialize_float32(vec),
+                    ),
                 )
                 conn.executemany(
                     "INSERT INTO sparse_terms (token_id, chunk_id, weight) VALUES (?, ?, ?)",
@@ -594,6 +599,7 @@ class SubjectStore:
                     "VALUES (?, ?, ?, ?, ?)",
                     (topic_id, q.kind, q.stem, q.code, q.reference_answer),
                 ).lastrowid
+                assert question_id is not None  # set by the INSERT above
                 conn.executemany(
                     "INSERT INTO question_options (question_id, position, text, correct) "
                     "VALUES (?, ?, ?, ?)",
@@ -779,7 +785,7 @@ class SubjectStore:
                 for position, node in enumerate(nodes):
                     if node.id is not None and node.id not in existing:
                         raise StaleTopicError(f"topic {node.id} no longer exists")
-                    if node.id in existing:
+                    if node.id is not None:  # the guard above ensures it is in `existing`
                         topic_id = node.id
                         conn.execute(
                             "UPDATE topics SET parent_id = ?, position = ?, title = ?, "
@@ -792,6 +798,7 @@ class SubjectStore:
                             "VALUES (?, ?, ?, ?)",
                             (parent_id, position, node.title, node.summary),
                         ).lastrowid
+                        assert topic_id is not None  # set by the INSERT above
                     kept.add(topic_id)
                     conn.execute("DELETE FROM topic_citations WHERE topic_id = ?", (topic_id,))
                     conn.executemany(

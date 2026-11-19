@@ -63,7 +63,7 @@ def _valid_fields(model: type[BaseModel]) -> str:
 
 
 # plain-language names for `config set` errors, keyed by field type
-_EXPECTED = {int: "an integer", float: "a number", bool: "true or false"}
+_EXPECTED: dict[object, str] = {int: "an integer", float: "a number", bool: "true or false"}
 
 
 def _coerce(model: type[BaseModel], field: str, value: str, section: str):
@@ -98,6 +98,7 @@ def set_key(dotted_key: str, value: str) -> None:
         raise ConfigKeyError(f"unknown config section '{section}' — valid: {valid}")
     data = _load_raw()
     model = Settings.model_fields[section].annotation
+    assert isinstance(model, type) and issubclass(model, BaseModel)  # every field is a model
     data.setdefault(section, {})[field] = _coerce(model, field, value, section)
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
