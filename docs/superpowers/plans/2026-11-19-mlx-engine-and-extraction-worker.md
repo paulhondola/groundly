@@ -56,28 +56,56 @@
 import io, json
 from groundly.ingestion import extract_worker as w
 
+
 def _run(handler, n):
-    reqs = "".join(json.dumps({"in": f"/x{i}", "out": f"/o{i}", "ocr_lang": None}) + "\n" for i in range(n))
+    reqs = "".join(
+        json.dumps({"in": f"/x{i}", "out": f"/o{i}", "ocr_lang": None}) + "\n" for i in range(n)
+    )
     out = io.StringIO()
     w.serve(io.StringIO(reqs), out, handle=handler)
     return [json.loads(line)["status"] for line in out.getvalue().splitlines()]
 
+
 def test_serve_maps_each_outcome_to_a_status_and_keeps_going():
-    outcomes = iter([None, SystemExit(w.EXIT_NO_TEXT), SystemExit(w.EXIT_MODEL_UNAVAILABLE),
-                     SystemExit(w.EXIT_INPUT_TOO_LARGE), SystemExit("not a readable nbformat 4 notebook"),
-                     ValueError("docling blew up"), None])
+    outcomes = iter(
+        [
+            None,
+            SystemExit(w.EXIT_NO_TEXT),
+            SystemExit(w.EXIT_MODEL_UNAVAILABLE),
+            SystemExit(w.EXIT_INPUT_TOO_LARGE),
+            SystemExit("not a readable nbformat 4 notebook"),
+            ValueError("docling blew up"),
+            None,
+        ]
+    )
+
     def handler(i, o, lang):
         e = next(outcomes)
-        if e: raise e
-    assert _run(handler, 7) == ["ok", "no_text", "model_unavailable", "input_too_large", "error", "error", "ok"]
+        if e:
+            raise e
+
+    assert _run(handler, 7) == [
+        "ok",
+        "no_text",
+        "model_unavailable",
+        "input_too_large",
+        "error",
+        "error",
+        "ok",
+    ]
+
 
 def test_serve_writes_the_cause_to_stderr_before_replying(capsys):
-    def handler(i, o, lang): raise SystemExit("not a readable nbformat 4 notebook: boom")
+    def handler(i, o, lang):
+        raise SystemExit("not a readable nbformat 4 notebook: boom")
+
     _run(handler, 1)
     assert capsys.readouterr().err.strip().splitlines()[-1].endswith("boom")
 
+
 def test_library_stdout_never_reaches_the_protocol_stream():  # Review Focus 1
     import subprocess, sys
+
     code = textwrap.dedent("""
         import os
         from groundly.ingestion import extract_worker as w
@@ -87,7 +115,9 @@ def test_library_stdout_never_reaches_the_protocol_stream():  # Review Focus 1
         w.serve_stdio(handle=h)
     """)
     req = json.dumps({"in": "/a", "out": "/b", "ocr_lang": None}) + "\n"
-    r = subprocess.run([sys.executable, "-c", code], input=req, capture_output=True, text=True, check=True)
+    r = subprocess.run(
+        [sys.executable, "-c", code], input=req, capture_output=True, text=True, check=True
+    )
     assert [json.loads(l)["status"] for l in r.stdout.splitlines()] == ["ok"]
 ```
 
@@ -134,46 +164,65 @@ git commit -m "feat(ingestion): extraction worker serves many files over a line 
 ```python
 STUB = [sys.executable, str(Path(__file__).parent / "stub_worker.py")]
 
+
 def _ex(timeout=30):
     return SubprocessExtractor(IngestionSettings(timeout_seconds=timeout), argv=STUB)
 
-def _pid(extraction): return extraction.chunks[0].text
+
+def _pid(extraction):
+    return extraction.chunks[0].text
+
 
 def test_one_worker_serves_the_whole_run(tmp_path):
     files = [tmp_path / f"f{i}.txt" for i in range(3)]
-    for f in files: f.write_text("x")
+    for f in files:
+        f.write_text("x")
     with _ex() as ex:
         assert len({_pid(ex.extract(f)) for f in files}) == 1
 
+
 def test_a_crash_fails_only_that_file_and_a_fresh_worker_takes_the_next(tmp_path):
-    (tmp_path / "crash.pdf").write_text("x"); (tmp_path / "ok.txt").write_text("x")
+    (tmp_path / "crash.pdf").write_text("x")
+    (tmp_path / "ok.txt").write_text("x")
     with _ex() as ex:
         with pytest.raises(ExtractionFailure, match="^parser failed: "):
             ex.extract(tmp_path / "crash.pdf")
         assert ex.extract(tmp_path / "ok.txt").chunks
 
+
 def test_a_timeout_names_the_limit_and_the_next_file_still_indexes(tmp_path):
-    (tmp_path / "hang.pdf").write_text("x"); (tmp_path / "ok.txt").write_text("x")
+    (tmp_path / "hang.pdf").write_text("x")
+    (tmp_path / "ok.txt").write_text("x")
     with _ex(timeout=1) as ex:
         with pytest.raises(ExtractionFailure, match="^extraction timed out after 1s$"):
             ex.extract(tmp_path / "hang.pdf")
         assert ex.extract(tmp_path / "ok.txt").chunks
 
+
 def test_no_text_keeps_todays_message(tmp_path):
     (tmp_path / "notext.pdf").write_text("x")
-    with _ex() as ex, pytest.raises(ExtractionFailure, match="^no readable text — OCR found nothing to extract$"):
+    with (
+        _ex() as ex,
+        pytest.raises(ExtractionFailure, match="^no readable text — OCR found nothing to extract$"),
+    ):
         ex.extract(tmp_path / "notext.pdf")
 
+
 def test_a_worker_that_exits_between_files_is_restarted(tmp_path):  # Review Focus 2
-    (tmp_path / "bye.txt").write_text("x"); (tmp_path / "ok.txt").write_text("x")
+    (tmp_path / "bye.txt").write_text("x")
+    (tmp_path / "ok.txt").write_text("x")
     with _ex() as ex:
         ex.extract(tmp_path / "bye.txt")
         assert ex.extract(tmp_path / "ok.txt").chunks
 
+
 def test_close_leaves_no_worker_running(tmp_path):
     (tmp_path / "ok.txt").write_text("x")
-    ex = _ex(); ex.extract(tmp_path / "ok.txt"); proc = ex._proc
-    ex.close(); ex.close()
+    ex = _ex()
+    ex.extract(tmp_path / "ok.txt")
+    proc = ex._proc
+    ex.close()
+    ex.close()
     assert proc.poll() is not None
 ```
 
@@ -233,17 +282,22 @@ git commit -m "feat(ingestion): one warm extraction worker per indexing run, res
 
 ```python
 def _fake_snapshot(tmp_path):  # runs torch in a child, never in the test process
-    snap = tmp_path / "snap"; snap.mkdir()
-    code = ("import torch,sys; p=sys.argv[1];"
-            "torch.save({'embeddings.word_embeddings.weight': torch.ones(4, 2)}, p + '/pytorch_model.bin');"
-            "torch.save({'weight': torch.ones(1, 2), 'bias': torch.zeros(1)}, p + '/sparse_linear.pt')")
+    snap = tmp_path / "snap"
+    snap.mkdir()
+    code = (
+        "import torch,sys; p=sys.argv[1];"
+        "torch.save({'embeddings.word_embeddings.weight': torch.ones(4, 2)}, p + '/pytorch_model.bin');"
+        "torch.save({'weight': torch.ones(1, 2), 'bias': torch.zeros(1)}, p + '/sparse_linear.pt')"
+    )
     subprocess.run([sys.executable, "-c", code, str(snap)], check=True)
     return snap
+
 
 def test_converts_once_to_f16_safetensors(tmp_path, monkeypatch):
     monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
     out = convert.ensure_converted(_fake_snapshot(tmp_path), revision="r1")
     from safetensors.numpy import load_file
+
     enc, head = load_file(out / "model.safetensors"), load_file(out / "sparse_linear.safetensors")
     assert enc["embeddings.word_embeddings.weight"].dtype == np.float16
     assert set(head) == {"weight", "bias"}
@@ -251,19 +305,30 @@ def test_converts_once_to_f16_safetensors(tmp_path, monkeypatch):
     assert convert.ensure_converted(tmp_path / "snap", revision="r1") == out
     assert (out / "model.safetensors").stat().st_mtime_ns == mtime  # reused, not reconverted
 
+
 def test_a_half_finished_conversion_is_never_used(tmp_path, monkeypatch):  # Review Focus 4
     monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
     partial = convert.converted_dir("r1").parent / "bge-m3-r1.tmp-dead"
-    partial.mkdir(parents=True); (partial / "model.safetensors").write_bytes(b"trunc")
+    partial.mkdir(parents=True)
+    (partial / "model.safetensors").write_bytes(b"trunc")
     out = convert.ensure_converted(_fake_snapshot(tmp_path), revision="r1")
     assert out == convert.converted_dir("r1") and (out / "sparse_linear.safetensors").exists()
 
+
 def test_conversion_never_imports_torch_in_the_caller(tmp_path):
-    probe = ("import sys, groundly.llm.convert as c; from pathlib import Path;"
-             f"c.ensure_converted(Path({str(_fake_snapshot(tmp_path))!r}), revision='r2'); print('torch' in sys.modules)")
-    r = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True,
-                       env={**os.environ, "GROUNDLY_HOME": str(tmp_path / "home")})
+    probe = (
+        "import sys, groundly.llm.convert as c; from pathlib import Path;"
+        f"c.ensure_converted(Path({str(_fake_snapshot(tmp_path))!r}), revision='r2'); print('torch' in sys.modules)"
+    )
+    r = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "GROUNDLY_HOME": str(tmp_path / "home")},
+    )
     assert r.stdout.strip() == "False"
+
 
 def test_a_failed_conversion_names_the_model(tmp_path, monkeypatch):
     monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
@@ -324,7 +389,9 @@ def test_pack_groups_respects_the_budget_and_keeps_order():
     assert pack_groups([600, 400, 30, 2000, 10], budget=1024) == [[0, 1], [2], [3], [4]]
     assert pack_groups([], budget=1024) == []
 
+
 needs_mlx = pytest.mark.skipif(not mlx_available(), reason="MLX needs Apple Silicon")
+
 
 @needs_mlx
 def test_packed_forward_equals_one_input_per_pass():
@@ -332,7 +399,9 @@ def test_packed_forward_equals_one_input_per_pass():
     w = _tiny_weights(layers=2, hidden=32, vocab=50)
     a, b = [0, 5, 7, 2], [0, 9, 2]
     packed = np.array(forward(w, a + b, [4, 3], heads=2))
-    alone = np.concatenate([np.array(forward(w, a, [4], heads=2)), np.array(forward(w, b, [3], heads=2))])
+    alone = np.concatenate(
+        [np.array(forward(w, a, [4], heads=2)), np.array(forward(w, b, [3], heads=2))]
+    )
     assert np.allclose(packed, alone, atol=1e-2)
 ```
 
@@ -417,18 +486,23 @@ git commit -m "feat(llm): bge-m3 and the reranker on MLX on Apple Silicon, torch
 def test_search_path_never_imports_torch():
     """Search, the topic gate and import re-embedding all reach the models through these two
     singletons, so one probe covers them. A subprocess: never pop torch from sys.modules."""
-    probe = ("import sys; from groundly.llm.embeddings import shared_embedder;"
-             "from groundly.llm.rerank import shared_reranker;"
-             "shared_embedder().encode(['x']); list(shared_embedder().encode_stream(['y']));"
-             "shared_reranker().compute_score([('a', 'b')]);"
-             "print(','.join(m for m in ('torch', 'FlagEmbedding', 'sentence_transformers') if m in sys.modules))")
+    probe = (
+        "import sys; from groundly.llm.embeddings import shared_embedder;"
+        "from groundly.llm.rerank import shared_reranker;"
+        "shared_embedder().encode(['x']); list(shared_embedder().encode_stream(['y']));"
+        "shared_reranker().compute_score([('a', 'b')]);"
+        "print(','.join(m for m in ('torch', 'FlagEmbedding', 'sentence_transformers') if m in sys.modules))"
+    )
     r = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
     assert r.stdout.strip() == ""
+
 
 @needs_mlx
 def test_idle_unload_returns_mlx_memory():
     import mlx.core as mx
-    m = BgeM3Embedder(); m.encode(["warm"])
+
+    m = BgeM3Embedder()
+    m.encode(["warm"])
     assert mx.get_active_memory() > 500 * 2**20
     m.unload()
     assert mx.get_active_memory() < 50 * 2**20 and mx.get_cache_memory() == 0
