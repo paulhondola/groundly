@@ -179,6 +179,14 @@ class LazyModel:
                     torch.mps.empty_cache()
 
 
+# Inputs per forward pass: texts when embedding, query-passage pairs when reranking. A batch is
+# padded to its longest input, and on Apple's MPS that padding costs more than batching saves:
+# one input per pass is the fastest there.
+# ponytail: one value for every device; CUDA likely prefers larger batches — make it
+# per-device once one is measured.
+FORWARD_BATCH = 1
+
+
 class BgeM3Embedder(LazyModel):
     def _build(self):
         local = ensure_downloaded()
@@ -191,7 +199,9 @@ class BgeM3Embedder(LazyModel):
 
     def encode(self, texts: list[str]) -> tuple[list[list[float]], list[SparseWeights]]:
         with self._use() as model:
-            out = model.encode(texts, return_dense=True, return_sparse=True)
+            out = model.encode(
+                texts, batch_size=FORWARD_BATCH, return_dense=True, return_sparse=True
+            )
         dense = [vec.tolist() for vec in out["dense_vecs"]]
         sparse = [
             {int(token_id): float(weight) for token_id, weight in weights.items()}
@@ -204,13 +214,14 @@ class BgeM3Embedder(LazyModel):
     ) -> Iterator[tuple[Sequence[float], SparseWeights]]:
         """Memory-bounded index path: yield (dense_row, sparse) per text, encoding batch_size
         texts at a time. FlagEmbedding accumulates results for whatever list it is handed,
-        so slicing caps peak RAM at one batch. Dense rows stay numpy fp32, never boxed into
-        list[float]; sqlite_vec.serialize_float32 takes them directly."""
+        so slicing caps peak RAM at one batch. Within a slice the model runs FORWARD_BATCH
+        texts per pass. Dense rows stay numpy fp32, never boxed into list[float];
+        sqlite_vec.serialize_float32 takes them directly."""
         with self._use() as model:
             for start in range(0, len(texts), batch_size):
                 batch = texts[start : start + batch_size]
                 out = model.encode(
-                    batch, batch_size=batch_size, return_dense=True, return_sparse=True
+                    batch, batch_size=FORWARD_BATCH, return_dense=True, return_sparse=True
                 )
                 for vec, weights in zip(out["dense_vecs"], out["lexical_weights"], strict=True):
                     yield vec, {int(tid): float(weight) for tid, weight in weights.items()}
