@@ -16,8 +16,16 @@ CACHE_LIMIT_BYTES = (
     1 << 30
 )  # MLX's buffer cache is unbounded by default and grows until it thrashes
 SPECIAL_IDS = {0, 1, 2, 3}  # XLM-R <s> <pad> </s> <unk>
-EMBED_MAX_TOKENS = 8192
+CLS_ID, SEP_ID = 0, 2
+EMBED_MAX_TOKENS = (
+    512  # FlagEmbedding's default for queries and passages; every stored vector used it
+)
 RERANK_MAX_TOKENS = 512
+RERANK_QUERY_MAX_TOKENS = RERANK_MAX_TOKENS * 3 // 4  # FlagReranker cuts the query first
+
+# Every MLX forward and eval, embedder and reranker alike, runs under this one lock: they
+# share MLX's default stream, so two overlapping tool calls must never evaluate at once.
+_FORWARD_LOCK = threading.Lock()
 
 
 @functools.cache
@@ -112,13 +120,24 @@ def _load(path: Path, prefix: str = "") -> dict:
     return w
 
 
-def _tokenizer(path: Path, max_tokens: int):
+def _tokenizer(path: Path, max_tokens: int | None):
     from tokenizers import Tokenizer
 
     tok = Tokenizer.from_file(str(path))
     tok.no_padding()
-    tok.enable_truncation(max_tokens)
+    if max_tokens is None:
+        tok.no_truncation()
+    else:
+        tok.enable_truncation(max_tokens)
     return tok
+
+
+def rerank_ids(tok, query: str, passage: str) -> list[int]:
+    """FlagReranker's pair input: the query cut to RERANK_QUERY_MAX_TOKENS, then
+    `<s> q </s></s> p </s>` with only the passage cut to fit RERANK_MAX_TOKENS."""
+    q = tok.encode(query, add_special_tokens=False).ids[:RERANK_QUERY_MAX_TOKENS]
+    p = tok.encode(passage, add_special_tokens=False).ids[: RERANK_MAX_TOKENS - 4 - len(q)]
+    return [CLS_ID, *q, SEP_ID, SEP_ID, *p, SEP_ID]
 
 
 class MlxBgeM3:
@@ -132,7 +151,6 @@ class MlxBgeM3:
         head = _load(model_dir / "sparse_linear.safetensors")
         self._sparse_w, self._sparse_b = head["weight"], head["bias"]
         self._tok = _tokenizer(tokenizer_json, EMBED_MAX_TOKENS)
-        self._lock = threading.Lock()  # one forward at a time: MLX's stream is shared
 
     def encode(
         self, texts, batch_size: int = 1, return_dense: bool = True, return_sparse: bool = True
@@ -148,7 +166,7 @@ class MlxBgeM3:
         for group in pack_groups([len(i) for i in ids]):
             lens = [len(ids[i]) for i in group]
             starts = _starts(lens)
-            with self._lock:
+            with _FORWARD_LOCK:
                 x = forward(self._w, [t for i in group for t in ids[i]], lens)
                 cls = x[mx.array(starts)].astype(mx.float32)
                 sp = nn.relu(mx.addmm(self._sparse_b, x, self._sparse_w.T)).astype(mx.float32)
@@ -175,17 +193,16 @@ class MlxReranker:
 
         mx.set_cache_limit(CACHE_LIMIT_BYTES)
         self._w = _load(model_dir / "model.safetensors", "roberta.")
-        self._tok = _tokenizer(model_dir / "tokenizer.json", RERANK_MAX_TOKENS)
-        self._lock = threading.Lock()
+        self._tok = _tokenizer(model_dir / "tokenizer.json", None)
 
     def compute_score(self, pairs, batch_size: int = 1) -> list[float]:
         import mlx.core as mx
 
-        ids = [self._tok.encode(q, p).ids for q, p in pairs]
+        ids = [rerank_ids(self._tok, q, p) for q, p in pairs]
         scores: list[float] = []
         for group in pack_groups([len(i) for i in ids]):
             lens = [len(ids[i]) for i in group]
-            with self._lock:
+            with _FORWARD_LOCK:
                 x = forward(self._w, [t for i in group for t in ids[i]], lens)
                 cls = x[mx.array(_starts(lens))]
                 h = mx.tanh(_linear(self._w, cls, "classifier.dense"))

@@ -116,7 +116,7 @@ _TEXTS = [
         ),
         f"Întrebare de examen: definiți {ro} și dați un exemplu din sistemul de operare Linux.",
     )
-][:31] + ["Sincronizare și concurență în sisteme distribuite. " * 1200]  # > 8,192 tokens
+][:31] + ["Sincronizare și concurență în sisteme distribuite. " * 1200]  # probes truncation at 512
 
 
 def _mlx_embedder():
@@ -152,7 +152,7 @@ def test_mlx_matches_torch_within_the_pin_tolerance():
     assert len(_TEXTS) == 32
     mlx_out = _mlx_embedder().encode(_TEXTS)
     torch_out = BGEM3FlagModel(str(ensure_downloaded()), use_fp16=True).encode(
-        _TEXTS, batch_size=1, max_length=8192, return_dense=True, return_sparse=True
+        _TEXTS, batch_size=1, return_dense=True, return_sparse=True
     )
     cosines = [float(np.dot(a, b)) for a, b in zip(mlx_out["dense_vecs"], torch_out["dense_vecs"])]
     assert min(cosines) >= 0.9997
@@ -185,6 +185,43 @@ def test_mlx_reranker_keeps_flagreranker_order():
 
 
 @needs_mlx
+def test_mlx_reranker_truncates_a_long_query_like_flagreranker():
+    """A query over 384 tokens is cut first, then only the passage is cut to fit 512."""
+    from FlagEmbedding import FlagReranker
+    from FlagEmbedding.utils.tokenizer_compat import prepare_for_model_compat
+
+    from groundly.llm.embeddings import ensure_downloaded
+    from groundly.llm.mlx_xlmr import MlxReranker, rerank_ids
+    from groundly.llm.rerank import RERANKER_HF_REVISION, RERANKER_MODEL
+
+    snapshot = ensure_downloaded(RERANKER_MODEL, RERANKER_HF_REVISION)
+    mlx_model = MlxReranker(snapshot)
+    torch_model = FlagReranker(str(snapshot), use_fp16=False)
+    query = "De ce apare un deadlock când procesele așteaptă resurse? " * 60
+    passages = _TEXTS[:20]
+    hf = torch_model.tokenizer
+    for p in passages:
+        q_ids = hf(query, add_special_tokens=False, max_length=384, truncation=True)["input_ids"]
+        p_ids = hf(p, add_special_tokens=False, max_length=512, truncation=True)["input_ids"]
+        expected = prepare_for_model_compat(
+            hf, q_ids, p_ids, truncation="only_second", max_length=512, padding=False
+        )["input_ids"]
+        assert rerank_ids(mlx_model._tok, query, p) == expected
+    assert len(q_ids) == 384
+
+    pairs = [(query, p) for p in passages]
+    mine = mlx_model.compute_score(pairs)
+    ref = torch_model.compute_score(pairs, batch_size=1)
+    assert (
+        sorted(range(20), key=lambda i: -mine[i])[:5]
+        == sorted(range(20), key=lambda i: -ref[i])[:5]
+    )
+    # f16 against torch's f32 over full 512-token inputs: the ids match exactly, the
+    # scores drift a little more than on short pairs
+    assert max(abs(a - b) for a, b in zip(mine, ref, strict=True)) <= 0.05
+
+
+@needs_mlx
 def test_mlx_edge_inputs():
     import numpy as np
 
@@ -197,16 +234,28 @@ def test_mlx_edge_inputs():
 
 
 @needs_mlx
-def test_concurrent_encodes_equal_sequential():
+def test_concurrent_encodes_and_reranks_equal_sequential():
+    """Overlapping tool calls: embeds and reranks running at once give the sequential results."""
     from concurrent.futures import ThreadPoolExecutor
 
     import numpy as np
 
     from groundly.llm.embeddings import BgeM3Embedder
+    from groundly.llm.rerank import BgeReranker
 
-    m = BgeM3Embedder()
+    m, r = BgeM3Embedder(), BgeReranker()
     texts = ["mutex", "semafor", "deadlock", "barieră"]
-    expected = m.encode(texts)[0]
+    pairs = [("ce este un deadlock?", t) for t in _TEXTS[:8]]
+    expected_dense = m.encode(texts)[0]
+    expected_scores = r.compute_score(pairs)
+
+    def job(i):
+        return ("embed", m.encode(texts)[0]) if i % 2 else ("rerank", r.compute_score(pairs))
+
     with ThreadPoolExecutor(4) as pool:
-        results = list(pool.map(lambda _: m.encode(texts)[0], range(8)))
-    assert all(np.allclose(r, expected, atol=1e-6) for r in results)
+        results = list(pool.map(job, range(12)))
+    for kind, out in results:
+        if kind == "embed":
+            assert np.allclose(out, expected_dense, atol=1e-6)
+        else:
+            assert np.allclose(out, expected_scores, atol=1e-6)
