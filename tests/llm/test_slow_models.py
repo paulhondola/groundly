@@ -1,7 +1,12 @@
 """Real-model checks — excluded by default (pyproject addopts); run: pytest -m slow.
 First run downloads bge-m3 (~2.3 GB) to the HF cache."""
 
+import subprocess
+import sys
+
 import pytest
+
+from groundly.llm.embeddings import BgeM3Embedder
 
 pytestmark = pytest.mark.slow
 
@@ -259,3 +264,29 @@ def test_concurrent_encodes_and_reranks_equal_sequential():
             assert np.allclose(out, expected_dense, atol=1e-6)
         else:
             assert np.allclose(out, expected_scores, atol=1e-6)
+
+
+@needs_mlx
+def test_search_path_never_imports_torch():
+    """Search, the topic gate and import re-embedding all reach the models through these two
+    singletons, so one probe covers them. A subprocess: never pop torch from sys.modules."""
+    probe = (
+        "import sys; from groundly.llm.embeddings import shared_embedder;"
+        "from groundly.llm.rerank import shared_reranker;"
+        "shared_embedder().encode(['x']); list(shared_embedder().encode_stream(['y']));"
+        "shared_reranker().compute_score([('a', 'b')]);"
+        "print(','.join(m for m in ('torch', 'FlagEmbedding', 'sentence_transformers') if m in sys.modules))"
+    )
+    r = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
+    assert r.stdout.strip() == ""
+
+
+@needs_mlx
+def test_idle_unload_returns_mlx_memory():
+    import mlx.core as mx
+
+    m = BgeM3Embedder()
+    m.encode(["warm"])
+    assert mx.get_active_memory() > 500 * 2**20
+    m.unload()
+    assert mx.get_active_memory() < 50 * 2**20 and mx.get_cache_memory() == 0
