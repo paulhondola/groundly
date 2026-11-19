@@ -7,6 +7,7 @@ import signal
 import socket
 import threading
 import webbrowser
+from collections.abc import Awaitable, Callable
 from typing import Annotated
 
 import typer
@@ -26,7 +27,7 @@ _PORT = Annotated[
 ]
 
 
-def _run(asgi_app: object, port: int, lines: list[str]) -> None:
+def _run(asgi_app: Callable[..., Awaitable[None]], port: int, lines: list[str]) -> None:
     """Probe the port, print `lines`, open the page and serve `asgi_app` on 127.0.0.1."""
     import uvicorn
 

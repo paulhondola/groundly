@@ -10,7 +10,7 @@
 
 - Python ≥3.11; typer CLI; Pydantic v2; type hints on public functions.
 - SQLite schema versioned via `PRAGMA user_version` (checked on open; refuse newer-than-known). Integrity rules as constraints where SQLite allows (unique hashes, FKs), not app code.
-- pytest for tests (no service containers — SQLite files + stub embedders); ruff for lint + format.
+- pytest for tests (no service containers — SQLite files + stub embedders); ruff for lint + format; pyrefly (default preset) for types.
 - **Comments and docstrings state intent and invariants.** History belongs in git and in `docs/`: no "used to", no decision narration, no measurement tables in code.
 
 ## Product surfaces

@@ -391,6 +391,7 @@ def _text_problem(name: str, kind: str, length: int | None, trimmed: int | None,
         return f"has a {name} that is not text"
     if not trimmed:
         return f"has an empty {name}"
+    assert length is not None  # a text value always has a length
     if length > limit:
         return f"has a {name} of {length} characters; the limit is {limit}"
     return None

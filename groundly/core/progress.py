@@ -172,6 +172,7 @@ class ProgressStore:
                 "INSERT INTO attempts (token, scope_topic_id, question_count) VALUES (?, ?, ?)",
                 (token, scope_topic_id, len(answers)),
             ).lastrowid
+            assert attempt_id is not None  # set by the INSERT above
             conn.executemany(
                 "INSERT INTO answers (attempt_id, position, question_id, topic_id, kind, "
                 "response, correct) VALUES (?, ?, ?, ?, ?, ?, ?)",
