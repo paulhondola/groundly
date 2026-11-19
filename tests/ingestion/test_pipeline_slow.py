@@ -96,7 +96,7 @@ def test_empty_file_fails_cleanly_then_skips_then_new_hash_indexes(
     # failed is terminal: an unchanged re-run must not re-extract (UC-01 idempotency)
     results = pipeline.index_paths(subject, [empty], embedder=stub_embedder())
     assert results[0].status == "skipped_failed"
-    assert "remove to retry" in results[0].detail
+    assert "re-run with --retry-failed" in results[0].detail
 
     empty.write_text("Now it has real content about semaphores.")  # fixed file = new hash
     results = pipeline.index_paths(subject, [empty], embedder=stub_embedder())
