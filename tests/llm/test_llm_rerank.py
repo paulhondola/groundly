@@ -37,6 +37,7 @@ def test_bge_reranker_load_wraps_construction_failure_in_model_download_error(mo
     from groundly.llm.embeddings import ModelDownloadError
 
     monkeypatch.setattr("groundly.llm.rerank.ensure_downloaded", lambda *a, **k: Path("/fake"))
+    monkeypatch.setattr("groundly.llm.rerank.mlx_available", lambda: False)
 
     real_import = builtins.__import__
 
@@ -50,6 +51,16 @@ def test_bge_reranker_load_wraps_construction_failure_in_model_download_error(mo
     with pytest.raises(ModelDownloadError) as exc_info, BgeReranker()._use():
         pass
     assert RERANKER_MODEL in str(exc_info.value)
+
+
+def test_build_uses_mlx_when_available(monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setattr("groundly.llm.rerank.ensure_downloaded", lambda *a, **k: Path("/fake"))
+    monkeypatch.setattr("groundly.llm.rerank.mlx_available", lambda: True)
+    monkeypatch.setattr("groundly.llm.rerank.MlxReranker", lambda *a, **k: ("mlx-model", a))
+    with BgeReranker()._use() as model:
+        assert model == ("mlx-model", (Path("/fake"),))
 
 
 def test_shared_reranker_is_a_process_singleton_used_by_vector_retriever_default(monkeypatch):

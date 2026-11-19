@@ -17,6 +17,7 @@ def test_bge_m3_load_wraps_construction_failure_in_model_download_error(monkeypa
     from pathlib import Path
 
     monkeypatch.setattr("groundly.llm.embeddings.ensure_downloaded", lambda *a, **k: Path("/fake"))
+    monkeypatch.setattr("groundly.llm.embeddings.mlx_available", lambda: False)
 
     real_import = builtins.__import__
 
@@ -30,6 +31,31 @@ def test_bge_m3_load_wraps_construction_failure_in_model_download_error(monkeypa
     with pytest.raises(ModelDownloadError) as exc_info, BgeM3Embedder()._use():
         pass
     assert EMBEDDING_MODEL in str(exc_info.value)
+
+
+def test_build_uses_mlx_when_available(monkeypatch):
+    monkeypatch.setattr("groundly.llm.embeddings.ensure_downloaded", lambda *a, **k: Path("/fake"))
+    monkeypatch.setattr("groundly.llm.embeddings.mlx_available", lambda: True)
+    monkeypatch.setattr("groundly.llm.embeddings.ensure_converted", lambda *a, **k: Path("/conv"))
+    built = []
+    monkeypatch.setattr(
+        "groundly.llm.embeddings.MlxBgeM3", lambda *a, **k: built.append(a) or "mlx-model"
+    )
+    with BgeM3Embedder()._use() as model:
+        assert model == "mlx-model"
+    assert built == [(Path("/conv"), Path("/fake/tokenizer.json"))]
+
+
+def test_build_wraps_an_mlx_load_failure_in_model_download_error(monkeypatch):
+    monkeypatch.setattr("groundly.llm.embeddings.ensure_downloaded", lambda *a, **k: Path("/fake"))
+    monkeypatch.setattr("groundly.llm.embeddings.mlx_available", lambda: True)
+
+    def fail(*a, **k):
+        raise ModelDownloadError("converting bge-m3 weights failed: boom")
+
+    monkeypatch.setattr("groundly.llm.embeddings.ensure_converted", fail)
+    with pytest.raises(ModelDownloadError, match="boom"), BgeM3Embedder()._use():
+        pass
 
 
 def test_shared_embedder_is_a_process_singleton_used_by_vector_retriever_default(monkeypatch):

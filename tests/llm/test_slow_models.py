@@ -81,3 +81,132 @@ def test_cross_lingual_romanian_query_matches_english_deadlock_chunk(tmp_path, m
     hits = retriever.retrieve("ce condiții sunt necesare pentru un deadlock?")
     assert hits
     assert "mutual exclusion" in hits[0].text
+
+
+needs_mlx = pytest.mark.skipif(
+    not __import__("groundly.llm.mlx_xlmr").llm.mlx_xlmr.mlx_available(),
+    reason="MLX needs Apple Silicon",
+)
+
+_TOPICS = [
+    ("excluderea mutuală", "mutual exclusion"),
+    ("impasul (deadlock)", "deadlock"),
+    ("semafoarele", "semaphores"),
+    ("monitoarele", "monitors"),
+    ("bariera de sincronizare", "the synchronization barrier"),
+    ("problema producător-consumator", "the producer-consumer problem"),
+    ("algoritmul lui Peterson", "Peterson's algorithm"),
+    ("variabilele de condiție", "condition variables"),
+]
+_TEXTS = [
+    t
+    for ro, en in _TOPICS
+    for t in (
+        (
+            f"Capitolul despre {ro}: firele de execuție accesează o resursă partajată, iar "
+            f"secțiunea critică trebuie protejată pentru a evita condițiile de cursă."
+        ),
+        (
+            f"This lecture covers {en}. Threads share memory, so every access to shared state "
+            f"needs a protocol; we prove safety and liveness for {en} on slide 12."
+        ),
+        (
+            f"{en.capitalize()} — exercise: implement it in C with pthreads and explain why "
+            f"busy waiting wastes CPU cycles compared to blocking primitives."
+        ),
+        f"Întrebare de examen: definiți {ro} și dați un exemplu din sistemul de operare Linux.",
+    )
+][:31] + ["Sincronizare și concurență în sisteme distribuite. " * 1200]  # > 8,192 tokens
+
+
+def _mlx_embedder():
+    from groundly.llm.convert import ensure_converted
+    from groundly.llm.embeddings import ensure_downloaded
+    from groundly.llm.mlx_xlmr import MlxBgeM3
+
+    snapshot = ensure_downloaded()
+    return MlxBgeM3(ensure_converted(snapshot), snapshot / "tokenizer.json")
+
+
+def _top10(weights):
+    return [t for t, _ in sorted(weights.items(), key=lambda kv: -kv[1])[:10]]
+
+
+def _same_top10(a, b, tie=1e-3):
+    """Top-10 token sets match, except where f16 noise swaps a near-tie across rank 10:
+    a token in only one top-10 must sit within `tie` of the other side's 10th weight."""
+    top_a, top_b = _top10(a), _top10(b)
+    tenth_a, tenth_b = a[top_a[-1]], b[top_b[-1]]
+    return all(abs(b.get(t, 0.0) - tenth_b) <= tie for t in set(top_a) - set(top_b)) and all(
+        abs(a.get(t, 0.0) - tenth_a) <= tie for t in set(top_b) - set(top_a)
+    )
+
+
+@needs_mlx
+def test_mlx_matches_torch_within_the_pin_tolerance():
+    import numpy as np
+    from FlagEmbedding import BGEM3FlagModel
+
+    from groundly.llm.embeddings import ensure_downloaded
+
+    assert len(_TEXTS) == 32
+    mlx_out = _mlx_embedder().encode(_TEXTS)
+    torch_out = BGEM3FlagModel(str(ensure_downloaded()), use_fp16=True).encode(
+        _TEXTS, batch_size=1, max_length=8192, return_dense=True, return_sparse=True
+    )
+    cosines = [float(np.dot(a, b)) for a, b in zip(mlx_out["dense_vecs"], torch_out["dense_vecs"])]
+    assert min(cosines) >= 0.9997
+    for m, t in zip(mlx_out["lexical_weights"], torch_out["lexical_weights"], strict=True):
+        assert _same_top10(m, {int(k): float(v) for k, v in t.items()})
+
+
+@needs_mlx
+def test_mlx_reranker_keeps_flagreranker_order():
+    from FlagEmbedding import FlagReranker
+
+    from groundly.llm.embeddings import ensure_downloaded
+    from groundly.llm.mlx_xlmr import MlxReranker
+    from groundly.llm.rerank import RERANKER_HF_REVISION, RERANKER_MODEL
+
+    snapshot = ensure_downloaded(RERANKER_MODEL, RERANKER_HF_REVISION)
+    mlx_model = MlxReranker(snapshot)
+    torch_model = FlagReranker(str(snapshot), use_fp16=False)
+    passages = _TEXTS[:20]
+    for query in ("ce este un deadlock?", "how does a semaphore work?", "Peterson's algorithm"):
+        pairs = [(query, p) for p in passages]
+        mine = mlx_model.compute_score(pairs)
+        ref = torch_model.compute_score(pairs, batch_size=1)
+
+        def top5(scores):
+            return set(sorted(range(len(scores)), key=lambda i: -scores[i])[:5])
+
+        assert top5(mine) == top5(ref)
+        assert max(abs(a - b) for a, b in zip(mine, ref, strict=True)) <= 0.03
+
+
+@needs_mlx
+def test_mlx_edge_inputs():
+    import numpy as np
+
+    model = _mlx_embedder()
+    out = model.encode([])
+    assert out["dense_vecs"].shape == (0, 1024) and out["lexical_weights"] == []
+    out = model.encode(["", "x " * 20_000])
+    assert out["dense_vecs"].shape == (2, 1024) and np.isfinite(out["dense_vecs"]).all()
+    assert len(out["lexical_weights"]) == 2
+
+
+@needs_mlx
+def test_concurrent_encodes_equal_sequential():
+    from concurrent.futures import ThreadPoolExecutor
+
+    import numpy as np
+
+    from groundly.llm.embeddings import BgeM3Embedder
+
+    m = BgeM3Embedder()
+    texts = ["mutex", "semafor", "deadlock", "barieră"]
+    expected = m.encode(texts)[0]
+    with ThreadPoolExecutor(4) as pool:
+        results = list(pool.map(lambda _: m.encode(texts)[0], range(8)))
+    assert all(np.allclose(r, expected, atol=1e-6) for r in results)
