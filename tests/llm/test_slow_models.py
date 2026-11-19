@@ -242,10 +242,20 @@ def test_mlx_edge_inputs():
 def test_mlx_ignores_trailing_whitespace_like_flagembedding():
     """FlagEmbedding's tokenizer adds no token for trailing whitespace; 12 apd chunks end in it."""
     import numpy as np
+    from FlagEmbedding import BGEM3FlagModel
 
-    model = _mlx_embedder()
-    dense = model.encode(["a | - |\n", "a | - |", "abc ", "abc"])["dense_vecs"]
+    from groundly.llm.embeddings import ensure_downloaded
+
+    texts = ["a | - |\n", "a | - |", "abc ", "abc", " abc"]
+    dense = _mlx_embedder().encode(texts)["dense_vecs"]
+    ref = BGEM3FlagModel(str(ensure_downloaded()), use_fp16=True).encode(
+        texts, batch_size=1, return_dense=True
+    )["dense_vecs"]
     assert np.allclose(dense[0], dense[1]) and np.allclose(dense[2], dense[3])
+    # leading whitespace: torch tokenizes " abc" as "abc", and MLX must agree with torch
+    assert np.dot(ref[4], ref[3]) >= 0.9999
+    assert np.allclose(dense[4], dense[3])
+    assert min(float(np.dot(m, t)) for m, t in zip(dense, ref, strict=True)) >= 0.9997
 
 
 @needs_mlx
