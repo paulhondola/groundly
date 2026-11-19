@@ -5,6 +5,8 @@ Answer keys and reference answers never leave this module in a drawn test; gradi
 keys from store.db at submit time. Loads no model: everything here is SQL and set arithmetic.
 """
 
+from typing import Any, TypeGuard
+
 from groundly.core.progress import AnswerWrite, ProgressStore, ReviewError
 from groundly.core.store import SubjectStore
 
@@ -156,7 +158,7 @@ def draw(store: SubjectStore, progress: ProgressStore, topic_id: int | None, n: 
     return drawn
 
 
-def is_id(value: object) -> bool:
+def is_id(value: object) -> TypeGuard[int]:
     """An id SQLite can bind: an int (not a bool) within 64 bits."""
     return isinstance(value, int) and not isinstance(value, bool) and -(2**63) <= value < 2**63
 
@@ -203,9 +205,12 @@ def submit_attempt(
     it since the draw, and that must not cost the student their answers."""
     if not answers or len(answers) > MAX_TEST_QUESTIONS:
         raise QuizError("too_large", f"a test has 1 to {MAX_TEST_QUESTIONS} answers")
-    ids = [a.get("question_id") if isinstance(a, dict) else None for a in answers]
-    if not all(map(is_id, ids)):
-        raise QuizError("invalid_text", "every answer names its question id")
+    ids: list[int] = []
+    for a in answers:
+        question_id = a.get("question_id") if isinstance(a, dict) else None
+        if not is_id(question_id):
+            raise QuizError("invalid_text", "every answer names its question id")
+        ids.append(question_id)
     if len(set(ids)) != len(ids):
         raise QuizError("invalid_text", "a question is answered twice")
     questions = {q["id"]: q for q in store.questions(ids=ids, with_sources=False)}
@@ -238,7 +243,7 @@ def attempt_result(store: SubjectStore, progress: ProgressStore, attempt_id: int
         return None
     ids = [a["question_id"] for a in attempt["answers"]]
     questions = {q["id"]: q for q in store.questions(ids=ids)}
-    answers = []
+    answers: list[dict[str, Any]] = []
     for a in attempt["answers"]:
         q = questions.get(a["question_id"])
         chosen = set(a["response"]) if isinstance(a["response"], list) else set()

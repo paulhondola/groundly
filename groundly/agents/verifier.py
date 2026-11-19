@@ -145,9 +145,11 @@ def _structure(question) -> QuestionWrite:
 
 def _retrieval_text(q: QuestionWrite) -> str:
     """What the question claims the course says: the stem, its code and the right answer."""
-    answer = (
-        [q.reference_answer] if q.kind == "open" else [t for t, correct in q.options if correct]
-    )
+    if q.kind == "open":
+        assert q.reference_answer is not None  # the structural check requires it first
+        answer = [q.reference_answer]
+    else:
+        answer = [t for t, correct in q.options if correct]
     return "\n".join([q.stem, *([q.code] if q.code else []), *answer])
 
 
