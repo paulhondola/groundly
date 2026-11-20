@@ -61,7 +61,7 @@ class Embedding(BaseModel):
 
 
 class Chunking(BaseModel):
-    strategy: str = "docling-hybrid"
+    strategy: str = "page-routed-hybrid"
     max_tokens: int = CHUNK_MAX_TOKENS
     overlap: int = CHUNK_OVERLAP
 
