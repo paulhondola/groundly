@@ -28,6 +28,21 @@ def test_classify_page(tmp_path, lines, cover, expected):
     assert pdf_router.classify_page(pdf[0]) == expected
 
 
+@pytest.mark.parametrize(("lines", "expected"), [(SENTENCE, "mixed"), ([], "image")])
+def test_image_cover_on_a_rotated_page(tmp_path, lines, expected):
+    page = Page(lines=lines, image_cover=0.10, rotation=90)
+    pdf = pdfium.PdfDocument(make_pdf(tmp_path / "d.pdf", [page]))
+    assert pdf_router.classify_page(pdf[0]) == expected
+
+
+@pytest.mark.parametrize(("lines", "expected"), [(SENTENCE, "mixed"), ([], "image")])
+def test_image_cover_inside_a_scaled_form(tmp_path, lines, expected):
+    # 2.5 % of the form's own space, 10 % of the page once the form is scaled.
+    page = Page(lines=lines, image_cover=0.10, image_in_form=True)
+    pdf = pdfium.PdfDocument(make_pdf(tmp_path / "d.pdf", [page]))
+    assert pdf_router.classify_page(pdf[0]) == expected
+
+
 def _deck(tmp_path, landscape: int, portrait: int):
     pages = [Page(lines=SENTENCE)] * landscape + [
         Page(width=540, height=960, lines=SENTENCE)
@@ -277,3 +292,15 @@ def test_handle_routes_pdf_to_the_router(tmp_path, monkeypatch):
     pdf = make_pdf(tmp_path / "d.pdf", [Page(lines=SENTENCE)])
     extract_worker._handle(pdf, tmp_path / "out.json", None)
     assert json.loads((tmp_path / "out.json").read_text()) == out
+
+
+def test_surrogate_pairs_join_and_lone_halves_are_replaced(tmp_path, monkeypatch):
+    # pdfium returns UTF-16 code units: the math italic x (U+1D465) arrives as two.
+    real = pdf_router.raw.FPDFText_GetUnicode
+    units = {ord("A"): 0xD835, ord("B"): 0xDC65, ord("C"): 0xD835}
+    monkeypatch.setattr(
+        pdf_router.raw, "FPDFText_GetUnicode", lambda tp, i: units.get(real(tp, i), real(tp, i))
+    )
+    got = _lines(tmp_path, [("AB = 0, C alone", 16)])
+    assert got[0][0] == "\U0001d465 = 0, � alone"
+    got[0][0].encode("utf-8")  # the tokenizer rejects lone surrogates

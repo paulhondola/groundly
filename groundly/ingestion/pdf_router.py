@@ -31,15 +31,23 @@ PageClass = Literal["text", "blank", "mixed", "image"]
 
 
 def _image_cover(page: pdfium.PdfPage) -> float:
-    """Fraction of the page area covered by images, clipped to the page box."""
-    width, height = page.get_size()
+    """Fraction of the page area covered by images, clipped to the page box.
+
+    Measured in unrotated page space, where object bounds live (get_size() applies
+    /Rotate); an image inside a Form XObject is mapped up through each form's matrix."""
+    box_left, box_bottom, box_right, box_top = page.get_bbox()
     covered = 0.0
     for obj in page.get_objects(filter=[raw.FPDF_PAGEOBJ_IMAGE]):
-        left, bottom, right, top = obj.get_bounds()
-        covered += max(0.0, min(right, width) - max(left, 0.0)) * max(
-            0.0, min(top, height) - max(bottom, 0.0)
+        bounds = obj.get_bounds()
+        form = obj.container
+        while form is not None:
+            bounds = form.get_matrix().on_rect(*bounds)
+            form = form.container
+        left, bottom, right, top = bounds
+        covered += max(0.0, min(right, box_right) - max(left, box_left)) * max(
+            0.0, min(top, box_top) - max(bottom, box_bottom)
         )
-    return min(1.0, covered / (width * height))
+    return min(1.0, covered / ((box_right - box_left) * (box_top - box_bottom)))
 
 
 def classify_page(page: pdfium.PdfPage) -> PageClass:
@@ -58,7 +66,7 @@ def classify_page(page: pdfium.PdfPage) -> PageClass:
 
 def is_slide_deck(pdf: pdfium.PdfDocument) -> bool:
     """True when more than half the pages are landscape (width >= height)."""
-    sizes = [page.get_size() for page in pdf]
+    sizes = [pdf.get_page_size(i) for i in range(len(pdf))]
     landscape = sum(1 for width, height in sizes if width >= height)
     return landscape * 2 > len(sizes)
 
@@ -74,7 +82,9 @@ def page_lines(page: pdfium.PdfPage) -> list[tuple[str, float]]:
         sizes: list[float] = []
 
         def flush() -> None:
-            text = "".join(chars).strip()
+            # pdfium yields UTF-16 code units: pairs join, a lone half becomes U+FFFD.
+            joined = "".join(chars).encode("utf-16-le", "surrogatepass")
+            text = joined.decode("utf-16-le", "replace").strip()
             if text and sizes:
                 lines.append((text, float(median(sizes))))
             chars.clear()
@@ -167,10 +177,9 @@ def extract(path: Path, ocr_lang: str | None) -> dict:
         pdf = pdfium.PdfDocument(path)
     except pdfium.PdfiumError:
         return extract_worker._extract_docling(path, ocr_lang)
-    if not is_slide_deck(pdf):
-        pdf.close()
-        return extract_worker._extract_docling(path, ocr_lang)
     try:
+        if not is_slide_deck(pdf):
+            return extract_worker._extract_docling(path, ocr_lang)
         chunks: list[dict] = []
         carried: str | None = None
         pipeline_ready = False
