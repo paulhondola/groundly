@@ -378,3 +378,25 @@ def test_retry_failed_extracts_same_content_sibling_once(subject, tmp_path, stub
     )
     assert retry.seen == ["a.txt"]
     assert [r.status for r in results] == [Status.EXTRACTION_FAILED, Status.SKIPPED_FAILED]
+
+
+def test_run_closes_the_extractor_it_created(
+    monkeypatch, subject, course, stub_embedder, stub_extractor
+):
+    closed = []
+
+    def recording(*args, **kwargs):
+        ext = stub_extractor()
+        ext.close = lambda: closed.append(ext)
+        return ext
+
+    monkeypatch.setattr(pipeline, "SubprocessExtractor", recording)
+    subj = Subject(subject)
+    IngestionPipeline(subject=subj, embedder=stub_embedder()).run([course / "notes.txt"])
+    assert len(closed) == 1
+
+    injected = recording()
+    IngestionPipeline(subject=subj, extractor=injected, embedder=stub_embedder()).run(
+        [course / "notes.txt"]
+    )
+    assert injected not in closed

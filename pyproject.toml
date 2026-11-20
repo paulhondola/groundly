@@ -24,6 +24,7 @@ dependencies = [
 	"docling==2.115.0",             # includes bundled RapidOCR — OCR enabled
 	"rapidocr==3.10.0",              # load-bearing: docling's OCR engine, local/offline
 	"onnxruntime>=1.31",            # RapidOCR's backend (extract_worker.py pins it)
+	"mlx==0.32.4; sys_platform == 'darwin' and platform_machine == 'arm64' and platform_release >= '23'",  # Apple Silicon engine (Metal)
 ]
 
 [project.optional-dependencies]
@@ -57,6 +58,9 @@ target-version = "py311"
 project-includes = ["groundly"]
 preset = "default"
 python-version = "3.11"
+# mlx is installed on macOS 14+ arm64 only; ignore missing imports on Linux/Windows CI
+# while still type-checking against the real mlx package wherever it is installed.
+ignore-missing-imports = ["mlx.*"]
 
 [tool.importlinter]
 root_package = "groundly"

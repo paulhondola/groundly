@@ -1,4 +1,5 @@
-"""Extraction worker: `python -m groundly.ingestion.extract_worker <in> <out.json> [ocr_lang]`.
+"""Extraction worker: `python -m groundly.ingestion.extract_worker <in> <out.json> [ocr_lang]`,
+or `--serve` to extract many files in one process over a line protocol (see `serve`).
 
 Always a child process, so a parser crash on a hostile or broken file kills only this
 process, not the indexing run (UC-01 A2). OCR uses docling's bundled RapidOCR. Exits
@@ -8,12 +9,16 @@ model cannot load: an environment failure, retryable, never a bad document.
 Output JSON: {"pages": N|null, "chunks": [{"text", "heading_path", "page", "token_count"}]}
 """
 
+import functools
 import json
 import os
 import re
 import sys
 import tempfile
+import traceback
+from collections.abc import Callable
 from pathlib import Path
+from typing import TextIO
 
 from groundly.ingestion.formats import (
     DOCLING_FORMATS,
@@ -39,6 +44,7 @@ MAX_IMAGE_PIXELS = 100_000_000
 INFERENCE_THREADS = 8
 
 
+@functools.cache
 def _bge_m3_tokenizer():
     from transformers import AutoTokenizer
 
@@ -83,19 +89,15 @@ def _first_frame(path: Path) -> Path:
     return Path(tmp)
 
 
-def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
-    from docling.chunking import HybridChunker
+@functools.cache
+def _converter(ocr_lang: str | None):
+    """One DocumentConverter per OCR language, kept for the process: docling caches the
+    loaded pipeline inside it, so a serving worker pays model load once."""
     from docling.datamodel.accelerator_options import AcceleratorOptions
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import PdfPipelineOptions, RapidOcrOptions
     from docling.document_converter import DocumentConverter, ImageFormatOption, PdfFormatOption
-    from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
 
-    from groundly.core.manifest import CHUNK_MAX_TOKENS
-
-    input_format = InputFormat(DOCLING_FORMATS[path.suffix.lower()])
-    if path.suffix.lower() in IMAGE_SUFFIXES:
-        path = _first_frame(path)
     # OCR on explicitly, with the engine pinned to RapidOCR/onnxruntime: docling's "auto"
     # would switch engines if another appeared in the environment. A non-default ocr_lang
     # (decision 15) is also passed as Rec.lang_type, because docling maps ISO codes to a
@@ -117,16 +119,28 @@ def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
     )
     # IMAGE needs the same options, or docling's auto OCR picks a different engine (ocrmac,
     # easyocr) than the pinned RapidOCR (decision 14).
-    converter = DocumentConverter(
+    return DocumentConverter(
         format_options={
             InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
             InputFormat.IMAGE: ImageFormatOption(pipeline_options=pipeline_options),
         }
     )
+
+
+def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
+    from docling.chunking import HybridChunker
+    from docling.datamodel.base_models import InputFormat
+    from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
+
+    from groundly.core.manifest import CHUNK_MAX_TOKENS
+
+    input_format = InputFormat(DOCLING_FORMATS[path.suffix.lower()])
+    if path.suffix.lower() in IMAGE_SUFFIXES:
+        path = _first_frame(path)
     # docling's layout models load here, before the document is touched — a fetch
     # failure is the environment's fault, never this document's parse failure
-    _model_step(lambda: converter.initialize_pipeline(input_format))
-    doc = converter.convert(path).document
+    _model_step(lambda: _converter(ocr_lang).initialize_pipeline(input_format))
+    doc = _converter(ocr_lang).convert(path).document
     tokenizer = HuggingFaceTokenizer(
         tokenizer=_model_step(_bge_m3_tokenizer), max_tokens=CHUNK_MAX_TOKENS
     )
@@ -229,10 +243,14 @@ def _extract_notebook(path: Path) -> dict:
         return _extract_docling(rendered)
 
 
-def main() -> None:
-    in_path, out_path = Path(sys.argv[1]), Path(sys.argv[2])
-    ocr_lang = sys.argv[3] if len(sys.argv) > 3 else None
+_SERVE_STATUS = {
+    EXIT_NO_TEXT: "no_text",
+    EXIT_MODEL_UNAVAILABLE: "model_unavailable",
+    EXIT_INPUT_TOO_LARGE: "input_too_large",
+}
 
+
+def _handle(in_path: Path, out_path: Path, ocr_lang: str | None) -> None:
     if in_path.suffix.lower() in DOCLING_SUFFIXES:
         result = _extract_docling(in_path, ocr_lang)
     elif in_path.suffix.lower() in NOTEBOOK_SUFFIXES:
@@ -245,6 +263,52 @@ def main() -> None:
         sys.exit(EXIT_NO_TEXT)
 
     out_path.write_text(json.dumps(result))
+
+
+def serve(
+    stdin: TextIO,
+    stdout: TextIO,
+    handle: Callable[[Path, Path, str | None], None] = _handle,
+) -> None:
+    """One JSON request per line in ({"in", "out", "ocr_lang"}), one reply per line out
+    ({"status": ok|no_text|model_unavailable|input_too_large|error}). The cause goes to
+    stderr before the reply, so the parent can read it once the reply arrives. A failing
+    file never ends the loop."""
+    for line in stdin:
+        req = json.loads(line)
+        status = "ok"
+        try:
+            handle(Path(req["in"]), Path(req["out"]), req["ocr_lang"])
+        except SystemExit as exc:
+            if isinstance(exc.code, int):
+                status = _SERVE_STATUS.get(exc.code, "error")
+                if status == "error":
+                    print(f"exit code {exc.code}", file=sys.stderr)
+            else:
+                print(exc.code, file=sys.stderr)
+                status = "error"
+        except Exception:  # noqa: BLE001 - one bad file must not end the worker
+            traceback.print_exc()
+            status = "error"
+        sys.stderr.flush()
+        stdout.write(json.dumps({"status": status}) + "\n")
+        stdout.flush()
+
+
+def serve_stdio(handle: Callable[[Path, Path, str | None], None] = _handle) -> None:
+    """`serve` on the process's stdin and a private copy of fd 1. fd 1 itself is pointed at
+    stderr, so anything a library prints (even from C) can never corrupt the protocol."""
+    reply = os.fdopen(os.dup(1), "w")
+    os.dup2(2, 1)
+    sys.stdout = sys.stderr
+    serve(sys.stdin, reply, handle)
+
+
+def main() -> None:
+    if sys.argv[1] == "--serve":
+        serve_stdio()
+        return
+    _handle(Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3] if len(sys.argv) > 3 else None)
 
 
 if __name__ == "__main__":

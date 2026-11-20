@@ -15,6 +15,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from groundly.core.manifest import EMBEDDING_MODEL, HF_REVISION
+from groundly.llm.convert import ensure_converted
+from groundly.llm.mlx_xlmr import MlxBgeM3, mlx_available
 
 # Silence transformers' advisory warnings. The env var, not logging.setLevel: transformers
 # resets its logger level on first (lazy) import, while the env var is read per call.
@@ -169,7 +171,7 @@ class LazyModel:
             if _active:
                 return  # another model is mid-use; its own unload empties the cache
             gc.collect()
-            torch = sys.modules.get("torch")  # a loaded model means torch is imported
+            torch = sys.modules.get("torch")  # imported only when a model runs on torch
             if torch is not None:
                 # the caching allocators keep freed blocks until asked; this is what
                 # actually shrinks the process
@@ -177,6 +179,9 @@ class LazyModel:
                     torch.cuda.empty_cache()
                 if torch.backends.mps.is_available():
                     torch.mps.empty_cache()
+            mlx_core = sys.modules.get("mlx.core")
+            if mlx_core is not None:
+                mlx_core.clear_cache()
 
 
 # Inputs per forward pass: texts when embedding, query-passage pairs when reranking. A batch is
@@ -191,6 +196,8 @@ class BgeM3Embedder(LazyModel):
     def _build(self):
         local = ensure_downloaded()
         try:
+            if mlx_available():
+                return MlxBgeM3(ensure_converted(local), local / "tokenizer.json")
             from FlagEmbedding import BGEM3FlagModel
 
             return BGEM3FlagModel(str(local), use_fp16=True)

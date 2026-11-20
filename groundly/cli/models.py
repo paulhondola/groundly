@@ -1,6 +1,7 @@
 """Embedding model management verbs, plus the config verbs (small; not worth a module
 of their own)."""
 
+import shutil
 from typing import Annotated
 
 import typer
@@ -70,8 +71,10 @@ def install(
     ] = False,
 ) -> None:
     """Download the bge-m3 embedding model and the bge-reranker-v2-m3 cross-encoder
-    into the local Hugging Face cache."""
+    into the local Hugging Face cache; on Apple Silicon, also convert bge-m3 for MLX."""
     from groundly.llm import embeddings
+    from groundly.llm.convert import ensure_converted
+    from groundly.llm.mlx_xlmr import mlx_available
 
     names = " and ".join(model for model, _ in _models())
     if not force and all(embeddings.cached_snapshot(m, r) for m, r in _models()):
@@ -80,7 +83,9 @@ def install(
 
     try:
         for model, revision in _models():
-            embeddings.ensure_downloaded(model, revision, force=force)
+            snapshot = embeddings.ensure_downloaded(model, revision, force=force)
+            if model == embeddings.EMBEDDING_MODEL and mlx_available():
+                ensure_converted(snapshot, revision)
     except embeddings.ModelDownloadError as exc:
         _fail(str(exc))
     console.print(f"{names} ready")
@@ -90,19 +95,26 @@ def install(
 def uninstall(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
 ) -> None:
-    """Remove bge-m3 and bge-reranker-v2-m3 from the local Hugging Face cache."""
+    """Remove bge-m3 and bge-reranker-v2-m3 from the local Hugging Face cache, and the
+    converted bge-m3 weights."""
     from groundly.llm import embeddings
+    from groundly.llm.convert import converted_dir
 
     cached = [model for model, revision in _models() if embeddings.cached_snapshot(model, revision)]
-    if not cached:
+    converted = converted_dir()
+    if not cached and not converted.exists():
         console.print("no models cached — nothing to do")
         return
 
     if not yes:
-        typer.confirm(
-            f"remove {' and '.join(cached)} from the local Hugging Face cache?", abort=True
-        )
+        targets = [f"{m} from the local Hugging Face cache" for m in cached]
+        if converted.exists():
+            targets.append("the converted bge-m3 weights")
+        typer.confirm(f"remove {' and '.join(targets)}?", abort=True)
 
     for model in cached:
         embeddings.remove_cached(model)
         console.print(f"removed {model} from the cache")
+    if converted.exists():
+        shutil.rmtree(converted)
+        console.print("removed the converted bge-m3 weights")

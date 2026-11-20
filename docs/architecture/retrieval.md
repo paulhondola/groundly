@@ -26,6 +26,10 @@ Fusion is three-way reciprocal rank fusion, ties broken by how many channels fou
 id. Rerank is `bge-reranker-v2-m3` over the fused top-20, default ON (`--no-rerank` for
 weak hardware).
 
+Both models run on MLX on Apple Silicon (macOS 14+) and on FlagEmbedding/torch elsewhere;
+the engines agree within the tolerance in decision 48, so stored vectors and rankings carry
+across machines ([tech-stack](../tech-stack/tech-stack.md#engine-per-platform)).
+
 **Cross-lingual caveat:** only the dense channel matches a Romanian question against
 English slides; sparse and BM25 are same-language.
 

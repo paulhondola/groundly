@@ -11,6 +11,7 @@ from groundly.llm.embeddings import (
     ModelDownloadError,
     ensure_downloaded,
 )
+from groundly.llm.mlx_xlmr import MlxReranker, mlx_available
 
 RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 RERANKER_HF_REVISION = "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"  # pinned 2026-07-18 (P3 start)
@@ -26,6 +27,8 @@ class BgeReranker(LazyModel):
     def _build(self):
         local = ensure_downloaded(RERANKER_MODEL, RERANKER_HF_REVISION)
         try:
+            if mlx_available():
+                return MlxReranker(local)
             from FlagEmbedding import FlagReranker
 
             return FlagReranker(str(local), use_fp16=False)

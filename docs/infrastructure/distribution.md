@@ -25,8 +25,9 @@ stdio servers are spawned and killed by the host — there is no daemon to manag
 
 ## Requirements
 
-- macOS / Linux / Windows; ~6GB disk (deps + models); 8GB RAM comfortable (indexing peaks with Docling + embedding in memory; sequential per-file processing bounds it).
+- macOS / Linux / Windows; ~6GB disk (deps + models); 8GB RAM comfortable (indexing peaks with Docling + embedding in memory; files are processed one at a time, in one extraction worker per run, which bounds it).
 - CPU-only works: indexing is one-time per subject (minutes); queries are milliseconds (retrieval) + rerank (~1s CPU). Apple Silicon/GPU accelerates both.
+- **Apple Silicon fast path** (decision 48): on macOS 14 or later on arm64, `mlx` installs and bge-m3 and the reranker run on MLX; long-running processes (`start`, `mcp`, `serve`) never import torch. Older macOS on arm64, Intel Macs, Linux and Windows run the same models on torch through FlagEmbedding. On first use the bge-m3 weights are converted once to f16 safetensors (~1.1 GB) under `~/.groundly/models/`, in a child process; `groundly models uninstall` removes them with the cached models.
 - No API key is needed or accepted anywhere ([`cost-model.md`](cost-model.md)).
 
 ## Release process

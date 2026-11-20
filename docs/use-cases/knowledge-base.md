@@ -18,7 +18,7 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. Actor: the **student**
 **Alternate / error flows**
 
 - **A1 — Scanned/image-only PDF or standalone image:** indexes via OCR (bundled RapidOCR); a standalone image (PNG/JPG/…) is treated as a one-page scanned PDF (page-1 attribution). A multi-frame raster (multi-page TIFF, animated WEBP) indexes its first frame only — multi-page scans belong in a PDF (decision 17). The remaining failure is no readable text even after OCR → `extraction_failed` with "no readable text — OCR found nothing to extract".
-- **A2 — Parser crash on a hostile/broken file:** subprocess dies → that file is `extraction_failed`; the run continues.
+- **A2 — Parser crash on a hostile/broken file:** the extraction worker dies → that file is `extraction_failed`, a fresh worker takes the next file; the run continues.
 - **A3 — Duplicate (same hash, same subject):** skipped, reported as duplicate.
 - **A4 — Ctrl-C mid-run:** per-file transactions mean at most the in-flight file is lost; re-run resumes.
 - **A5 — Retrying a failure:** later runs skip an `extraction_failed` file (a slow OCR timeout must not repeat every run) and say so; `groundly index --retry-failed` re-extracts it, e.g. after raising `ingestion.timeout_seconds`.

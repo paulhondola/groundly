@@ -14,6 +14,14 @@ runner = CliRunner()
 
 
 @pytest.fixture(autouse=True)
+def no_mlx(monkeypatch):
+    """Install tests never convert weights for real."""
+    from groundly.llm import mlx_xlmr
+
+    monkeypatch.setattr(mlx_xlmr, "mlx_available", lambda: False)
+
+
+@pytest.fixture(autouse=True)
 def home(monkeypatch, tmp_path):
     monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
     (tmp_path / "home").mkdir()
@@ -65,6 +73,31 @@ def test_models_install_cache_miss_downloads_both_models(monkeypatch):
     assert len(calls) == 2  # embedding + reranker
     assert all(force is False for _, force in calls)
     assert "ready" in result.output
+
+
+def _convert_calls(monkeypatch, mlx):
+    from groundly.llm import convert, mlx_xlmr
+
+    calls = []
+    monkeypatch.setattr(embeddings, "cached_snapshot", lambda *a: None)
+    monkeypatch.setattr(embeddings, "ensure_downloaded", lambda *a, force=False: Path("/snap"))
+    monkeypatch.setattr(mlx_xlmr, "mlx_available", lambda: mlx)
+    monkeypatch.setattr(convert, "ensure_converted", lambda *a: calls.append(a))
+    return calls
+
+
+def test_models_install_converts_bge_m3_when_mlx_is_available(monkeypatch):
+    calls = _convert_calls(monkeypatch, mlx=True)
+    result = runner.invoke(app, ["models", "install"])
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 1 and calls[0][0] == Path("/snap")
+
+
+def test_models_install_does_not_convert_without_mlx(monkeypatch):
+    calls = _convert_calls(monkeypatch, mlx=False)
+    result = runner.invoke(app, ["models", "install"])
+    assert result.exit_code == 0, result.output
+    assert calls == []
 
 
 def test_models_install_force_downloads_even_if_cached(monkeypatch):
@@ -149,3 +182,26 @@ def test_models_uninstall_aborts_without_confirmation(monkeypatch):
     result = runner.invoke(app, ["models", "uninstall"], input="n\n")
     assert result.exit_code != 0
     assert removed == []
+
+
+def test_uninstall_removes_converted_weights(home, monkeypatch):
+    from groundly.llm import convert
+
+    monkeypatch.setattr(embeddings, "cached_snapshot", lambda *a: Path("/fake/cached"))
+    _record_removals(monkeypatch)
+    convert.converted_dir().mkdir(parents=True)
+    (convert.converted_dir() / "model.safetensors").write_bytes(b"x")
+    result = runner.invoke(app, ["models", "uninstall", "-y"])
+    assert result.exit_code == 0, result.output
+    assert not convert.converted_dir().exists()
+
+
+def test_uninstall_prompt_names_converted_weights_when_only_they_exist(home, monkeypatch):
+    from groundly.llm import convert
+
+    monkeypatch.setattr(embeddings, "cached_snapshot", lambda *a: None)
+    convert.converted_dir().mkdir(parents=True)
+    result = runner.invoke(app, ["models", "uninstall"], input="y\n")
+    assert result.exit_code == 0, result.output
+    assert "remove the converted bge-m3 weights?" in result.output
+    assert not convert.converted_dir().exists()

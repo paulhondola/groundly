@@ -8,13 +8,24 @@ Expands [`groundly-spec.md`](../groundly-spec.md) §4. Every row is a **decision
 | CLI | **typer + rich** | Batch verbs with progress output; the host agent is the interactive surface (no TUI) | — |
 | MCP surface | **FastMCP** | stdio + streamable HTTP from one tool set; tools and resources | — |
 | Storage | **SQLite (WAL) + sqlite-vec + FTS5**, files on disk | Zero services; export = zip; exact KNN at 5k–50k chunks/subject | LanceDB/IVF if a corpus ever outgrows brute force |
-| Document extraction | **Docling with bundled RapidOCR** | Local/offline, zero-key; layout/table/reading order plus OCR for scanned PDFs and raster images; HybridChunker for structure-aware chunks | none — documents with no readable text fail cleanly |
-| Embeddings | **`bge-m3` local** (FlagEmbedding), pinned incl. **hf_revision**; dense + learned sparse from one forward pass | RO/EN cross-lingual; the pin is the interchange compatibility contract | ColBERT vectors rejected (~100× storage) |
+| Document extraction | **Docling with bundled RapidOCR**, one warm worker process per `index` run | Local/offline, zero-key; layout/table/reading order plus OCR for scanned PDFs and raster images; HybridChunker for structure-aware chunks; the worker keeps per-file crash and timeout isolation (decision 48) | none — documents with no readable text fail cleanly |
+| Embeddings | **`bge-m3` local**, pinned incl. **hf_revision**; dense + learned sparse from one forward pass; engine per platform (below) | RO/EN cross-lingual; the pin is the interchange compatibility contract | ColBERT vectors rejected (~100× storage) |
 | Rerank | **`bge-reranker-v2-m3`**, default ON | Quality-first; same model family as the embedder | `--no-rerank` for weak hardware |
 | Retrieval | **A plain `VectorRetriever` returning `Hit`** | One arm left, so an orchestration framework wrapped a SQLite row (decision 36) | — |
 | Answer generation | **The host agent** | It is already an LLM; enforced server-side answering was measured and removed (decision 33) | — |
 | HTTP transport | `groundly start` (with the page, at `/mcp`) or `groundly mcp --http`, loopback-only | fastmcp's own Streamable HTTP app | — |
 | Topic-tree page | **Starlette + uvicorn** (`groundly serve`, loopback-only), one inline-CSS/vanilla-JS HTML file | Both were already installed through `fastmcp`, so declaring them directly adds nothing to the install; one self-contained file means no build step, CDN or external font. Not a second tool-surface framework (decision 41) | — |
+
+## Engine per platform
+
+The embedder and the reranker run on one of two engines, chosen at run time by whether `mlx` imports (decision 48):
+
+| Platform | Engine | Precision |
+|---|---|---|
+| macOS 14+ on arm64 | **MLX**: one hand-written XLM-R forward (`groundly/llm/mlx_xlmr.py`) shared by both models, inputs packed up to 1,024 tokens per pass, truncated as FlagEmbedding truncates | f16 |
+| everywhere else, or wherever `mlx` fails to import | **FlagEmbedding on torch** (MPS, CUDA or CPU), one input per pass | bge-m3 fp16 on a GPU, the reranker fp32 |
+
+The engine is not part of the embedding pin. An engine must stay within the tolerance MLX measured against torch on all 1,197 apd chunks and the 50 workload search pools: dense cosine ≥ 0.9997; sparse top-10 identical up to f16 near-ties (1,196 of 1,197 within 1e-3 of the 10th weight, the last at 1.1e-3); rerank top-5 identical as a set, with adjacent near-ties allowed to swap (48 of 50 in identical order); reranker scores within 0.026 on search pools and 0.034 on full 512-token inputs. bge-m3's pinned weights ship as torch pickles; MLX reads them after a one-time conversion to f16 safetensors in a child process, so the serving process never imports torch. torch stays installed: docling's layout model and TableFormer need it in the extraction worker.
 
 ## No LLM client
 
@@ -26,4 +37,4 @@ Expands [`groundly-spec.md`](../groundly-spec.md) §4. Every row is a **decision
 
 ## Version pinning policy
 
-Pin **exact** versions of `docling`, `sentence-transformers`, `FlagEmbedding` and `rapidocr` (and bge-m3's hf_revision); record them in the thesis and in every export manifest. Pinned 2026-10-31 (decision 39): `docling==2.115.0`, `sentence-transformers==6.2.0`, `FlagEmbedding==1.4.2`, `rapidocr==3.10.0`, with `transformers` 5.x; bge-m3 hf_revision `5617a9f61b028005a4858fdac845db406aefb181` (unchanged since 2026-07-16). **docling stays below 2.116**: its layout-driven OCR reads each layout region separately and reorders the words of a line ("Mutual Exclusion Principle" → "Exclusion Principle Mutual"); swapping the layout model or enabling heading hierarchy does not fix it, and `OcrMode.FULL_PAGE` does at the cost of OCRing digital PDFs over their text layer. Revisit when upstream fixes it; `tests/ingestion/test_extract_worker.py::test_title_only_image_salvages_heading_text` (`-m slow`) is the check. A pin upgrade runs the slow suite. The embedding pin is the **interchange compatibility contract**; upgrades are deliberate events, guarded by `.claude/hooks/guard-pins.sh`.
+Pin **exact** versions of `docling`, `sentence-transformers`, `FlagEmbedding`, `rapidocr` and `mlx` (and bge-m3's hf_revision); record them in the thesis and in every export manifest. Pinned 2026-10-31 (decision 39): `docling==2.115.0`, `sentence-transformers==6.2.0`, `FlagEmbedding==1.4.2`, `rapidocr==3.10.0`, with `transformers` 5.x; `mlx==0.32.4` on macOS 14+ arm64 only (decision 48, platform marker `platform_release >= '23'`); bge-m3 hf_revision `5617a9f61b028005a4858fdac845db406aefb181` (unchanged since 2026-07-16). **docling stays below 2.116**: its layout-driven OCR reads each layout region separately and reorders the words of a line ("Mutual Exclusion Principle" → "Exclusion Principle Mutual"); swapping the layout model or enabling heading hierarchy does not fix it, and `OcrMode.FULL_PAGE` does at the cost of OCRing digital PDFs over their text layer. Revisit when upstream fixes it; `tests/ingestion/test_extract_worker.py::test_title_only_image_salvages_heading_text` (`-m slow`) is the check. A pin upgrade runs the slow suite. The embedding pin is the **interchange compatibility contract**; upgrades are deliberate events, guarded by `.claude/hooks/guard-pins.sh`.

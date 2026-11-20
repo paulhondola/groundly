@@ -106,6 +106,7 @@ class IngestionPipeline:
     ) -> None:
         self.subject = subject
         self.store = SubjectStore(subject.store_db_path)
+        self._owns_extractor = extractor is None  # an injected extractor is the caller's to close
         self.extractor = extractor or SubprocessExtractor(load_settings().ingestion)
         self.embedder = embedder or shared_embedder()
         self.on_event = on_event or (lambda path, stage: None)
@@ -119,6 +120,13 @@ class IngestionPipeline:
                 f"subject '{self.subject.name}' is not initialized — run: groundly index {self.subject.name} <paths>"
             )
 
+        try:
+            return self._run(paths, ocr_lang, retry_failed)
+        finally:
+            if self._owns_extractor:
+                self.extractor.close()
+
+    def _run(self, paths: list[Path], ocr_lang: str | None, retry_failed: bool) -> list[FileResult]:
         results: list[FileResult] = []
         known = self.store.hash_status()
         retried: set[str] = set()  # retry each content once; a same-content sibling skips
