@@ -33,6 +33,7 @@ def ensure_converted(snapshot: Path, revision: str = HF_REVISION) -> Path:
         return final
     final.parent.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix=f"{final.name}.tmp-", dir=final.parent))
+    print("converting bge-m3 weights to safetensors (one-time) …", file=sys.stderr)
     try:
         proc = subprocess.run(
             [sys.executable, "-m", "groundly.llm.convert", str(snapshot), str(tmp)],

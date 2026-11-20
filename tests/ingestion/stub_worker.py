@@ -15,7 +15,13 @@ for line in sys.stdin:
         os._exit(9)
     if name.startswith("hang"):
         time.sleep(60)
-    if name.startswith("notext"):
+    if name.startswith("unavail"):
+        print("rapidocr model missing", file=sys.stderr, flush=True)
+        status = "model_unavailable"
+    elif name.startswith("toolarge"):
+        print("image exceeds 100 megapixels", file=sys.stderr, flush=True)
+        status = "input_too_large"
+    elif name.startswith("notext"):
         status = "no_text"
     else:
         chunk = {"text": str(os.getpid()), "heading_path": None, "page": 1, "token_count": 1}

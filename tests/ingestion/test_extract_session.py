@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from groundly.core.config import IngestionSettings
-from groundly.ingestion.extract import ExtractionFailure, SubprocessExtractor
+from groundly.ingestion.extract import ExtractionFailure, ModelUnavailable, SubprocessExtractor
 
 STUB = [sys.executable, str(Path(__file__).parent / "stub_worker.py")]
 
@@ -53,6 +53,18 @@ def test_no_text_keeps_todays_message(tmp_path):
         pytest.raises(ExtractionFailure, match="^no readable text — OCR found nothing to extract$"),
     ):
         ex.extract(tmp_path / "notext.pdf")
+
+
+def test_model_unavailable_raises_with_the_workers_cause(tmp_path):
+    (tmp_path / "unavail.pdf").write_text("x")
+    with _ex() as ex, pytest.raises(ModelUnavailable, match="^rapidocr model missing$"):
+        ex.extract(tmp_path / "unavail.pdf")
+
+
+def test_input_too_large_fails_the_file_with_the_workers_cause(tmp_path):
+    (tmp_path / "toolarge.png").write_text("x")
+    with _ex() as ex, pytest.raises(ExtractionFailure, match="^image exceeds 100 megapixels$"):
+        ex.extract(tmp_path / "toolarge.png")
 
 
 def test_a_worker_that_exits_between_files_is_restarted(tmp_path):

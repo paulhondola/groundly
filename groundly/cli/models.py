@@ -71,8 +71,10 @@ def install(
     ] = False,
 ) -> None:
     """Download the bge-m3 embedding model and the bge-reranker-v2-m3 cross-encoder
-    into the local Hugging Face cache."""
+    into the local Hugging Face cache; on Apple Silicon, also convert bge-m3 for MLX."""
     from groundly.llm import embeddings
+    from groundly.llm.convert import ensure_converted
+    from groundly.llm.mlx_xlmr import mlx_available
 
     names = " and ".join(model for model, _ in _models())
     if not force and all(embeddings.cached_snapshot(m, r) for m, r in _models()):
@@ -81,7 +83,9 @@ def install(
 
     try:
         for model, revision in _models():
-            embeddings.ensure_downloaded(model, revision, force=force)
+            snapshot = embeddings.ensure_downloaded(model, revision, force=force)
+            if model == embeddings.EMBEDDING_MODEL and mlx_available():
+                ensure_converted(snapshot, revision)
     except embeddings.ModelDownloadError as exc:
         _fail(str(exc))
     console.print(f"{names} ready")
@@ -91,7 +95,8 @@ def install(
 def uninstall(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the confirmation prompt.")] = False,
 ) -> None:
-    """Remove bge-m3 and bge-reranker-v2-m3 from the local Hugging Face cache."""
+    """Remove bge-m3 and bge-reranker-v2-m3 from the local Hugging Face cache, and the
+    converted bge-m3 weights."""
     from groundly.llm import embeddings
     from groundly.llm.convert import converted_dir
 

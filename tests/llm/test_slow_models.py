@@ -287,6 +287,30 @@ def test_concurrent_encodes_and_reranks_equal_sequential():
 
 
 @needs_mlx
+def test_building_one_model_while_the_other_runs_equals_sequential():
+    """A lazy rebuild after idle unload overlaps the other model's forwards safely."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    import numpy as np
+
+    from groundly.llm.embeddings import BgeM3Embedder
+    from groundly.llm.rerank import BgeReranker
+
+    texts = ["mutex", "semafor", "deadlock", "barieră"]
+    pairs = [("ce este un deadlock?", t) for t in _TEXTS[:8]]
+    m, r = BgeM3Embedder(), BgeReranker()
+    expected_dense, expected_scores = m.encode(texts)[0], r.compute_score(pairs)
+
+    fresh = BgeM3Embedder()  # unbuilt: its first encode loads weights
+    with ThreadPoolExecutor(2) as pool:
+        build = pool.submit(fresh.encode, texts)
+        scores = [pool.submit(r.compute_score, pairs) for _ in range(6)]
+        assert np.allclose(build.result()[0], expected_dense, atol=1e-6)
+        for f in scores:
+            assert np.allclose(f.result(), expected_scores, atol=1e-6)
+
+
+@needs_mlx
 def test_search_path_never_imports_torch():
     """Search, the topic gate and import re-embedding all reach the models through these two
     singletons, so one probe covers them. A subprocess: never pop torch from sys.modules."""

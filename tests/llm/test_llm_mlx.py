@@ -16,6 +16,22 @@ def test_pack_groups_respects_the_budget_and_keeps_order():
     assert pack_groups([], budget=1024) == []
 
 
+def test_mlx_is_unavailable_when_metal_cannot_evaluate(monkeypatch):
+    """A Metal that imports but cannot eval must fall back to torch, not fail every search."""
+    pytest.importorskip("mlx.core")
+    import mlx.core as mx
+
+    def broken(*a, **k):
+        raise RuntimeError("no Metal device")
+
+    monkeypatch.setattr(mx, "eval", broken)
+    mlx_available.cache_clear()
+    try:
+        assert mlx_available() is False
+    finally:
+        mlx_available.cache_clear()
+
+
 def test_importing_the_llm_layer_loads_no_framework():
     """Spawn stays cheap: the embedder, reranker and MLX modules import neither MLX nor torch."""
     code = (

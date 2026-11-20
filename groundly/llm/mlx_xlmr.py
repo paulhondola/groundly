@@ -31,8 +31,10 @@ _FORWARD_LOCK = threading.Lock()
 @functools.cache
 def mlx_available() -> bool:
     try:
-        import mlx.core  # noqa: F401
-    except Exception:  # noqa: BLE001 - any import failure means "use torch"
+        import mlx.core as mx
+
+        mx.eval(mx.zeros(1) + 1)  # a Metal that cannot evaluate must fall back to torch
+    except Exception:  # noqa: BLE001 - any import or Metal failure means "use torch"
         return False
     return True
 
@@ -109,14 +111,15 @@ def _load(path: Path, prefix: str = "") -> dict:
     """f16 weights with `prefix` stripped; position-id buffers are skipped (positions are computed)."""
     import mlx.core as mx
 
-    loaded = mx.load(str(path))
-    assert isinstance(loaded, dict)  # a .safetensors file always loads as a dict
-    w = {
-        k.removeprefix(prefix): v.astype(mx.float16)
-        for k, v in loaded.items()
-        if not k.endswith("position_ids")
-    }
-    mx.eval(list(w.values()))
+    with _FORWARD_LOCK:  # the eval shares MLX's stream with every running forward
+        loaded = mx.load(str(path))
+        assert isinstance(loaded, dict)  # a .safetensors file always loads as a dict
+        w = {
+            k.removeprefix(prefix): v.astype(mx.float16)
+            for k, v in loaded.items()
+            if not k.endswith("position_ids")
+        }
+        mx.eval(list(w.values()))
     return w
 
 
@@ -146,7 +149,8 @@ class MlxBgeM3:
     def __init__(self, model_dir: Path, tokenizer_json: Path) -> None:
         import mlx.core as mx
 
-        mx.set_cache_limit(CACHE_LIMIT_BYTES)
+        with _FORWARD_LOCK:
+            mx.set_cache_limit(CACHE_LIMIT_BYTES)
         self._w = _load(model_dir / "model.safetensors")
         head = _load(model_dir / "sparse_linear.safetensors")
         self._sparse_w, self._sparse_b = head["weight"], head["bias"]
@@ -193,7 +197,8 @@ class MlxReranker:
     def __init__(self, model_dir: Path) -> None:
         import mlx.core as mx
 
-        mx.set_cache_limit(CACHE_LIMIT_BYTES)
+        with _FORWARD_LOCK:
+            mx.set_cache_limit(CACHE_LIMIT_BYTES)
         self._w = _load(model_dir / "model.safetensors", "roberta.")
         self._tok = _tokenizer(model_dir / "tokenizer.json", None)
 
