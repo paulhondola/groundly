@@ -62,6 +62,7 @@ def _text(pdf, page, text, size, x, y):
     raw.FPDFPageObj_Transform(obj, 1, 0, 0, 1, x, y)
     raw.FPDFPage_InsertObject(page.raw, obj)
 
+
 # image covering `image_cover` of the page, placed bottom-right:
 img = pdfium.PdfImage.new(pdf)
 img.set_bitmap(pdfium.PdfBitmap.from_pil(Image.new("RGB", (64, 64), "red")))
@@ -131,7 +132,11 @@ git commit -m "feat(ingestion): classify PDF pages for the page router"
 ```python
 def test_page_lines_reads_text_and_sizes(tmp_path):
     # Page(lines=[("Deadlock conditions", 32), ("Mutual exclusion is required.", 16)])
-    assert pdf_router.page_lines(pdf[0]) == [("Deadlock conditions", 32.0), ("Mutual exclusion is required.", 16.0)]
+    assert pdf_router.page_lines(pdf[0]) == [
+        ("Deadlock conditions", 32.0),
+        ("Mutual exclusion is required.", 16.0),
+    ]
+
 
 def test_soft_hyphen_marker_is_dropped(tmp_path):
     # Page(lines=[("using only send­receive, BUT", 16)]) — pdfium reports the marker as 0x02
@@ -139,24 +144,36 @@ def test_soft_hyphen_marker_is_dropped(tmp_path):
     # in today's apd index, Curs 10 page 4), so the text route does too.
     assert pdf_router.page_lines(pdf[0])[0][0] == "using only sendreceive, BUT"
 
+
 def test_split_title_takes_the_leading_large_run():
-    assert pdf_router.split_title([("Deadlock", 32), ("conditions", 30), ("Body text here", 16),
-                                   ("Big again", 32)]) == ("Deadlock conditions", ["Body text here", "Big again"])
+    assert pdf_router.split_title(
+        [("Deadlock", 32), ("conditions", 30), ("Body text here", 16), ("Big again", 32)]
+    ) == ("Deadlock conditions", ["Body text here", "Big again"])
+
 
 def test_split_title_needs_three_letters():
-    assert pdf_router.split_title([("12", 32), ("Body text here", 16)]) == (None, ["12", "Body text here"])
+    assert pdf_router.split_title([("12", 32), ("Body text here", 16)]) == (
+        None,
+        ["12", "Body text here"],
+    )
+
 
 def test_split_title_none_when_all_one_size():
     assert pdf_router.split_title([("a b c", 16), ("d e f", 16)]) == (None, ["a b c", "d e f"])
 
+
 def test_code_line_with_hash_stays_verbatim_body():
-    doc = pdf_router.text_page_document(3, 960, 540, "Includes", ["#include <stdio.h>"], carried=None)
+    doc = pdf_router.text_page_document(
+        3, 960, 540, "Includes", ["#include <stdio.h>"], carried=None
+    )
     assert [t.text for t in doc.texts if t.label == DocItemLabel.TEXT] == ["#include <stdio.h>"]
     assert [t.text for t in doc.texts if t.label == DocItemLabel.SECTION_HEADER] == ["Includes"]
+
 
 def test_untitled_page_carries_the_earlier_title():
     doc = pdf_router.text_page_document(4, 960, 540, None, ["more detail"], carried="Deadlock")
     assert [t.text for t in doc.texts if t.label == DocItemLabel.SECTION_HEADER] == ["Deadlock"]
+
 
 def test_every_item_cites_its_page():
     doc = pdf_router.text_page_document(7, 960, 540, "T", ["a", "b"], carried=None)
