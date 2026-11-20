@@ -58,6 +58,9 @@ target-version = "py311"
 project-includes = ["groundly"]
 preset = "default"
 python-version = "3.11"
+# mlx is installed on macOS 14+ arm64 only; ignore missing imports on Linux/Windows CI
+# while still type-checking against the real mlx package wherever it is installed.
+ignore-missing-imports = ["mlx.*"]
 
 [tool.importlinter]
 root_package = "groundly"
