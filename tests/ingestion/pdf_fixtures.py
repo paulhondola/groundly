@@ -17,6 +17,7 @@ class Page:
     height: float = 540
     lines: list[tuple[str, float]] = field(default_factory=list)  # (text, font size), top down
     image_cover: float = 0.0  # fraction of the page area, placed bottom-right
+    image: Image.Image | None = None  # the bitmap drawn there; a red square when None
 
 
 def _text(
@@ -41,7 +42,8 @@ def make_pdf(path: Path, pages: list[Page]) -> Path:
             scale = spec.image_cover**0.5
             w_img, h_img = spec.width * scale, spec.height * scale
             img = pdfium.PdfImage.new(pdf)
-            img.set_bitmap(pdfium.PdfBitmap.from_pil(Image.new("RGB", (64, 64), "red")))
+            bitmap = spec.image or Image.new("RGB", (64, 64), "red")
+            img.set_bitmap(pdfium.PdfBitmap.from_pil(bitmap))
             img.set_matrix(pdfium.PdfMatrix().scale(w_img, h_img).translate(spec.width - w_img, 0))
             page.insert_obj(img)
         page.gen_content()

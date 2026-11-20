@@ -9,6 +9,7 @@ would OCR is never classed "text", so it keeps docling's route.
 from __future__ import annotations
 
 from collections import Counter
+from pathlib import Path
 from statistics import median
 from typing import TYPE_CHECKING, Literal
 
@@ -144,3 +145,59 @@ def text_page_document(
     for line in body:
         doc.add_text(DocItemLabel.TEXT, line, prov=prov)
     return doc
+
+
+def last_heading(doc: DoclingDocument) -> str | None:
+    """Text of the document's last section header or title, the heading a following
+    untitled page carries."""
+    from docling_core.types.doc import DocItemLabel
+
+    labels = {DocItemLabel.SECTION_HEADER, DocItemLabel.TITLE}
+    return next((t.text for t in reversed(doc.texts) if t.label in labels), None)
+
+
+def extract(path: Path, ocr_lang: str | None) -> dict:
+    """Worker output for a PDF. A slide deck is chunked page by page: text and blank
+    pages from the text layer, mixed and image pages through docling one page at a time,
+    so every chunk cites its own page. Anything else, or a file pypdfium2 cannot open,
+    goes to docling whole."""
+    from groundly.ingestion import extract_worker
+
+    try:
+        pdf = pdfium.PdfDocument(path)
+    except pdfium.PdfiumError:
+        return extract_worker._extract_docling(path, ocr_lang)
+    if not is_slide_deck(pdf):
+        pdf.close()
+        return extract_worker._extract_docling(path, ocr_lang)
+    try:
+        chunks: list[dict] = []
+        carried: str | None = None
+        pipeline_ready = False
+        for n, page in enumerate(pdf, start=1):
+            if classify_page(page) in ("text", "blank"):
+                lines = page_lines(page)
+                if not lines:
+                    continue
+                title, body = split_title(lines)
+                width, height = page.get_size()
+                doc = text_page_document(
+                    n, width, height, title, body, carried if title is None else None
+                )
+                carried = title or carried
+            else:
+                from docling.datamodel.base_models import InputFormat
+
+                if not pipeline_ready:
+                    extract_worker._model_step(
+                        lambda: extract_worker._converter(ocr_lang).initialize_pipeline(
+                            InputFormat.PDF
+                        )
+                    )
+                    pipeline_ready = True
+                doc = extract_worker._converter(ocr_lang).convert(path, page_range=(n, n)).document
+                carried = last_heading(doc) or carried
+            chunks += extract_worker.chunk_document(doc, page=n)
+        return {"pages": len(pdf), "chunks": chunks}
+    finally:
+        pdf.close()

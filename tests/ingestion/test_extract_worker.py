@@ -199,6 +199,54 @@ def test_blank_pdf_exits_no_text(tmp_path, monkeypatch):
     assert exc.value.code == extract_worker.EXIT_NO_TEXT
 
 
+def _slide_bitmap(text):
+    from PIL import Image, ImageDraw, ImageFont
+
+    img = Image.new("RGB", (1920, 1080), "white")
+    ImageDraw.Draw(img).text((120, 440), text, fill="black", font=ImageFont.load_default(size=120))
+    return img
+
+
+@pytest.mark.slow
+def test_landscape_deck_routes_pages_and_cites_each(tmp_path):
+    """A slide deck's text and blank pages come from the text layer, its image and mixed
+    pages from docling's OCR, and every chunk cites its own page."""
+    from groundly.ingestion import pdf_router
+    from tests.ingestion.pdf_fixtures import Page, make_pdf
+
+    body = ("Mutual exclusion and hold-and-wait are both required.", 16)
+    pdf = make_pdf(
+        tmp_path / "deck.pdf",
+        [
+            Page(lines=[("Deadlock conditions", 32), body]),
+            Page(lines=[("Scheduling", 32)]),  # one size: body, not a title
+            Page(image=_slide_bitmap("Circular wait occurs"), image_cover=1.0),
+            Page(lines=[body], image=_slide_bitmap("Resource graph"), image_cover=0.10),
+        ],
+    )
+
+    result = pdf_router.extract(pdf, None)
+
+    assert result["pages"] == 4
+    assert {c["page"] for c in result["chunks"]} == {1, 2, 3, 4}
+    assert any("Circular wait" in c["text"] and c["page"] == 3 for c in result["chunks"])
+    assert any(
+        c["text"].startswith("Deadlock conditions") and c["page"] == 1 for c in result["chunks"]
+    )
+    assert any("Scheduling" in c["text"] and c["page"] == 2 for c in result["chunks"])
+
+
+def test_blank_landscape_deck_exits_no_text(tmp_path, monkeypatch):
+    """Empty slide pages take the text route and yield nothing: EXIT_NO_TEXT, no model load."""
+    from tests.ingestion.pdf_fixtures import Page, make_pdf
+
+    pdf = make_pdf(tmp_path / "blank.pdf", [Page(), Page()])
+    monkeypatch.setattr("sys.argv", ["extract_worker", str(pdf), str(tmp_path / "out.json")])
+    with pytest.raises(SystemExit) as exc:
+        extract_worker.main()
+    assert exc.value.code == extract_worker.EXIT_NO_TEXT
+
+
 def _image_with_text(path, lines):
     # Standalone image fixture: text rendered onto a page-tall white canvas, no text
     # layer, so a passing OCR read proves the IMAGE pipeline ran. Page-sized canvas +
