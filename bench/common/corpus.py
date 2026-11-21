@@ -72,22 +72,25 @@ def census(pdfs: list[tuple[str, Path]]) -> list[dict]:
         try:
             deck = is_slide_deck(pdf)
             for n, page in enumerate(pdf, start=1):
-                tp = page.get_textpage()
                 try:
-                    text = tp.get_text_range()
+                    tp = page.get_textpage()
+                    try:
+                        text = tp.get_text_range()
+                    finally:
+                        tp.close()
+                    doc_rows.append(
+                        {
+                            "subject": subject,
+                            "sha256": sha,
+                            "path_hint": hint,
+                            "page": n,
+                            "kind": classify_page(page),
+                            "lang": page_lang(text),
+                            "deck": deck,
+                        }
+                    )
                 finally:
-                    tp.close()
-                doc_rows.append(
-                    {
-                        "subject": subject,
-                        "sha256": sha,
-                        "path_hint": hint,
-                        "page": n,
-                        "kind": classify_page(page),
-                        "lang": page_lang(text),
-                        "deck": deck,
-                    }
-                )
+                    page.close()
         finally:
             pdf.close()
         known = Counter(r["lang"] for r in doc_rows if r["lang"] != "?")

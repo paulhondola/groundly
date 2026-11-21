@@ -78,3 +78,29 @@ def test_load_manifest_fails_loudly_on_changed_file(tmp_path):
     pdf.write_bytes(pdf.read_bytes() + b"%")
     with pytest.raises(ValueError, match="a.pdf"):
         load_manifest(tmp_path / "m.json")
+
+
+def test_census_unknown_language_takes_document_majority(tmp_path):
+    pdf = pdfium.PdfDocument.new()
+    for text in (
+        "The algorithm is used for sorting and the search is that fast",
+        "Hello world this is a page with enough text to count here ok",
+    ):
+        page = pdf.new_page(595, 842)
+        font = raw.FPDFText_LoadStandardFont(pdf, b"Helvetica")
+        obj = raw.FPDFPageObj_CreateTextObj(pdf, font, 12)
+        units = (ctypes.c_ushort * (len(text) + 1))(*text.encode("utf-16-le")[::2], 0)
+        raw.FPDFText_SetText(obj, units)
+        raw.FPDFPage_InsertObject(page, obj)
+        raw.FPDFPage_GenerateContent(page)
+    path = tmp_path / "b.pdf"
+    pdf.save(path)
+    assert [r["lang"] for r in census([("s", path)])] == ["en", "en"]
+
+
+def test_load_manifest_fails_loudly_on_missing_file(tmp_path):
+    pdf = make_pdf(tmp_path / "a.pdf")
+    write_manifest(census([("s", pdf)]), tmp_path / "m.json")
+    pdf.unlink()
+    with pytest.raises(FileNotFoundError, match="a.pdf"):
+        load_manifest(tmp_path / "m.json")
