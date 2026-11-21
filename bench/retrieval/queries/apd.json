@@ -1,0 +1,252 @@
+[
+ {
+  "query": "Why do processing elements need to coordinate: communication, load balancing and synchronization",
+  "file": "Curs 1 - IntroParallel.pdf",
+  "page": 23
+ },
+ {
+  "query": "What does the output of the MPI reduce demo look like when run with 4 processes",
+  "file": "Curs 10 - MPICollective.pdf",
+  "page": 16
+ },
+ {
+  "query": "When would you use MPI scatter and gather in a master-worker program",
+  "file": "Curs 10 - MPICollective.pdf",
+  "page": 29
+ },
+ {
+  "query": "code that scatters an array of 20 integers to the processes and gathers the doubled chunks back",
+  "file": "Curs 10 - MPICollective.pdf",
+  "page": 32
+ },
+ {
+  "query": "how do tasks interact in an MPI stencil computation that exchanges frontiers every time step",
+  "file": "Curs 11- MPIAlgo.pdf",
+  "page": 36
+ },
+ {
+  "query": "how does a TCP server prepare for listening: create a socket, bind it to a fixed port, make it a listening socket",
+  "file": "Curs 12 - Sockets.pdf",
+  "page": 15
+ },
+ {
+  "query": "how does a client connect its socket to the server and what arguments does connect take",
+  "file": "Curs 12 - Sockets.pdf",
+  "page": 27
+ },
+ {
+  "query": "concurrent server loop that forks a child process for every accepted client",
+  "file": "Curs 12 - Sockets.pdf",
+  "page": 37
+ },
+ {
+  "query": "which Java stream classes are used to send text or primitive types over a socket",
+  "file": "Curs 12 - Sockets.pdf",
+  "page": 48
+ },
+ {
+  "query": "Java echo client loop that reads user input, prints the echo and handles an unknown host",
+  "file": "Curs 12 - Sockets.pdf",
+  "page": 55
+ },
+ {
+  "query": "HelloAB pthread_create example where main prints in a loop and then joins both threads",
+  "file": "Curs 2 - POSIX Threads.pdf",
+  "page": 14
+ },
+ {
+  "query": "shared queue declarations: buffer size, in and out indexes, mutex and condition variables for producer consumer",
+  "file": "Curs 3 - Synchronization.pdf",
+  "page": 47
+ },
+ {
+  "query": "enqueue function that waits on a condition variable while the queue is full",
+  "file": "Curs 3 - Synchronization.pdf",
+  "page": 51
+ },
+ {
+  "query": "what are the POSIX semaphore functions sem_init, sem_wait, sem_post",
+  "file": "Curs 4 - SynchroReview.pdf",
+  "page": 6
+ },
+ {
+  "query": "serial code that counts how many times a value x appears in a large array",
+  "file": "Curs 5 - PerformanceIssues.pdf",
+  "page": 4
+ },
+ {
+  "query": "conclusions about the dangers of mutexes, cache misses and false sharing",
+  "file": "Curs 5 - PerformanceIssues.pdf",
+  "page": 48
+ },
+ {
+  "query": "serial implementation of the trapezoidal rule for computing an integral",
+  "file": "Curs 6 - OpenMP.pdf",
+  "page": 24
+ },
+ {
+  "query": "summing N numbers in OpenMP without the reduction clause, using a critical section",
+  "file": "Curs 6 - OpenMP.pdf",
+  "page": 30
+ },
+ {
+  "query": "what restrictions must a for loop satisfy so it can be parallelized with omp parallel for",
+  "file": "Curs 6 - OpenMP.pdf",
+  "page": 41
+ },
+ {
+  "query": "why does parallelizing the Fibonacci array loop with omp parallel for give wrong results",
+  "file": "Curs 6 - OpenMP.pdf",
+  "page": 48
+ },
+ {
+  "query": "trapezoidal integral parallelized with parallel for and a reduction on integral",
+  "file": "Curs 6 - OpenMP.pdf",
+  "page": 49
+ },
+ {
+  "query": "classic serial matrix-matrix multiplication with three nested loops",
+  "file": "Curs 7 - DenseMatrix.pdf",
+  "page": 5
+ },
+ {
+  "query": "what is the heat distribution problem with fixed boundary temperatures",
+  "file": "Curs 7 - DenseMatrix.pdf",
+  "page": 23
+ },
+ {
+  "query": "is the epidemics simulation a stencil pattern like the bacteria colony assignment",
+  "file": "Curs 7 - DenseMatrix.pdf",
+  "page": 33
+ },
+ {
+  "query": "why can the two recursive calls of quicksort run at the same time",
+  "file": "Curs 8 - OpenMPTasking.pdf",
+  "page": 16
+ },
+ {
+  "query": "quicksort implemented with omp parallel sections",
+  "file": "Curs 8 - OpenMPTasking.pdf",
+  "page": 17
+ },
+ {
+  "query": "why does the quicksort version with parallel sections perform so badly",
+  "file": "Curs 8 - OpenMPTasking.pdf",
+  "page": 18
+ },
+ {
+  "query": "data scoping rules for OpenMP tasks, which variables are firstprivate",
+  "file": "Curs 8 - OpenMPTasking.pdf",
+  "page": 31
+ },
+ {
+  "query": "printing which thread executes which Fibonacci task with omp task",
+  "file": "Curs 8 - OpenMPTasking.pdf",
+  "page": 36
+ },
+ {
+  "query": "Fibonacci with OpenMP tasks using an if clause cutoff when n is greater than 30",
+  "file": "Curs 8 - OpenMPTasking.pdf",
+  "page": 40
+ },
+ {
+  "query": "how are distributed memory systems programmed with the message passing paradigm",
+  "file": "Curs 9 - MPIIntro.pdf",
+  "page": 4
+ },
+ {
+  "query": "what are the basic send and receive operations of message passing",
+  "file": "Curs 9 - MPIIntro.pdf",
+  "page": 5
+ },
+ {
+  "query": "first MPI hello world program printing the task id and host name",
+  "file": "Curs 9 - MPIIntro.pdf",
+  "page": 22
+ },
+ {
+  "query": "signatures of the blocking MPI_Send and MPI_Recv functions",
+  "file": "Curs 9 - MPIIntro.pdf",
+  "page": 27
+ },
+ {
+  "query": "is MPI_Send blocking: buffered versus nonbuffered behaviour depending on the implementation",
+  "file": "Curs 9 - MPIIntro.pdf",
+  "page": 32
+ },
+ {
+  "query": "why does a ring where every process calls MPI_Recv before MPI_Send deadlock",
+  "file": "Curs 9 - MPIIntro.pdf",
+  "page": 42
+ },
+ {
+  "query": "MPI trapezoidal rule where processes send their local integrals to process 0 which adds them up",
+  "file": "Curs 9 - MPIIntro.pdf",
+  "page": 57
+ },
+ {
+  "query": "Java shared counter class incremented by two threads with an Incrementer runnable",
+  "file": "JavaThreads.pdf",
+  "page": 15
+ },
+ {
+  "query": "where can I find the source code of the Java shared counter examples",
+  "file": "JavaThreads.pdf",
+  "page": 23
+ },
+ {
+  "query": "why must wait be called inside a loop in Java",
+  "file": "JavaThreads.pdf",
+  "page": 35
+ },
+ {
+  "query": "how to make a bounded buffer thread-safe and blocking by moving synchronization into add and remove",
+  "file": "JavaThreads.pdf",
+  "page": 38
+ },
+ {
+  "query": "Fibonacci with Callable tasks submitted to an ExecutorService in Java",
+  "file": "JavaThreads.pdf",
+  "page": 57
+ },
+ {
+  "query": "experiment showing the effect of false sharing on matrix-vector multiplication with different matrix shapes",
+  "file": "Overview 1 - MatrixVectorMultPerformance.pdf",
+  "page": 12
+ },
+ {
+  "query": "pthreads matrix-vector multiplication that accumulates the sum in a local variable to avoid false sharing",
+  "file": "Overview 1 - MatrixVectorMultPerformance.pdf",
+  "page": 13
+ },
+ {
+  "query": "what programming approaches exist for GPUs: CUDA, OpenCL, OpenACC, OpenMP offloading",
+  "file": "Overview 2 - GPU.pdf",
+  "page": 8
+ },
+ {
+  "query": "how was Raft designed to be easy to understand",
+  "file": "Overview 4 - RAFT.pdf",
+  "page": 14
+ },
+ {
+  "query": "what happens when a follower missed AppendEntries calls and the leader decrements nextIndex",
+  "file": "Overview 4 - RAFT.pdf",
+  "page": 50
+ },
+ {
+  "query": "why can't a Raft leader commit entries from a previous term by counting replicas",
+  "file": "Overview 4 - RAFT.pdf",
+  "page": 57
+ },
+ {
+  "query": "Raft scenario where S1 crashes and S5 could be elected and overwrite the entry",
+  "file": "Overview 4 - RAFT.pdf",
+  "page": 60
+ },
+ {
+  "query": "quiz: can a process contain several threads, processes versus threads",
+  "file": "Quiz 1 - ThreadsSynchro.pdf",
+  "page": 2
+ }
+]
