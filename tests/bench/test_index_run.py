@@ -1,0 +1,47 @@
+import sqlite3
+import sys
+
+from bench.index.run import schedule, scratch_home, store_stats, worker_argv
+from groundly.core.store import create_store
+
+
+def test_schedule_alternates():
+    assert schedule(["a", "b"], 2) == [("a", 0), ("b", 0), ("a", 1), ("b", 1)]
+
+
+def test_scratch_home_holds_only_the_models_link(tmp_path):
+    models = tmp_path / "models"
+    models.mkdir()
+    home = scratch_home(models)
+    assert [p.name for p in home.iterdir()] == ["models"]
+    assert (home / "models").resolve() == models.resolve()
+
+
+def test_worker_argv_plain_and_memray(tmp_path):
+    assert worker_argv("x", None) == [sys.executable, "-m", "bench.stacks.x", "--serve"]
+    assert worker_argv("x", tmp_path / "w.bin") == [
+        sys.executable, "-m", "memray", "run", "-q", "-o", str(tmp_path / "w.bin"),
+        "-m", "bench.stacks.x", "--serve",
+    ]  # fmt: skip
+
+
+def test_store_stats_reads_chunks_and_failures(tmp_path):
+    db = tmp_path / "s" / "store.db"
+    db.parent.mkdir()
+    create_store(db)
+    con = sqlite3.connect(db)
+    con.execute(
+        "INSERT INTO materials (id, filename, sha256, status) VALUES (1, 'ok.pdf', 'a', 'indexed')"
+    )
+    con.execute(
+        "INSERT INTO materials (id, filename, sha256, status, error) "
+        "VALUES (2, 'big.pdf', 'b', 'extraction_failed', 'extraction timed out after 300s')"
+    )
+    con.executemany(
+        "INSERT INTO chunks (material_id, text) VALUES (1, ?)", [("x",), ("y",), ("z",)]
+    )
+    con.commit()
+    con.close()
+    stats = store_stats(tmp_path, "s")
+    assert stats["chunks"] == 3 and stats["materials"] == 2
+    assert stats["failed"] == [{"filename": "big.pdf", "error": "extraction timed out after 300s"}]
