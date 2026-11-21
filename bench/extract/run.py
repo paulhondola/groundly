@@ -45,6 +45,7 @@ def main() -> None:
     ap.add_argument("--reference-dir", type=Path, default=ROOT / "bench/reference")
     ap.add_argument("--only-ref", action="store_true")
     ap.add_argument("--ocr-lang")
+    ap.add_argument("--session", default=None)
     args = ap.parse_args()
 
     manifest = load_manifest(args.manifest)
@@ -69,12 +70,13 @@ def main() -> None:
         "peak_rss_mb": m.peak_rss_mb,
         "ms_p50": statistics.median(timed) if timed else None,
     }
+    session = args.session or results.new_session()
     sha = results._sh("git", "-C", str(ROOT), "rev-parse", "--short", "HEAD")
     results.append(
         "extract",
         {
             "bench": "extract",
-            "session": results.new_session(),
+            "session": session,
             "arm": args.stack,
             "sha": sha,
             "machine": results.machine(),
@@ -87,6 +89,7 @@ def main() -> None:
         },
     )
     print(json.dumps(metrics, indent=1))
+    print(f"session: {session}")
 
 
 if __name__ == "__main__":

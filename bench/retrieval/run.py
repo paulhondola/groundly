@@ -40,39 +40,52 @@ def metrics(
     }
 
 
+def row(session: str, arm: str, subject: str, queries: int, returncode: int, m: dict) -> dict:
+    return {
+        "bench": "retrieval",
+        "session": session,
+        "arm": arm,
+        "sha": results._sh("git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"),
+        "machine": results.machine(),
+        "versions": results.versions(Path(sys.executable)),
+        "ocr_lang": None,
+        "manifest_version": None,
+        "run": 1,
+        "subject": subject,
+        "queries": queries,
+        "memray": False,
+        "returncode": returncode,
+        "metrics": m,
+    }
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="python -m bench.retrieval.run")
     ap.add_argument("--home", type=Path, required=True)
     ap.add_argument("--subject", required=True)
     ap.add_argument("--queries", type=Path, required=True)
     ap.add_argument("--arm", required=True)
+    ap.add_argument("--session")
     args = ap.parse_args()
 
+    labelled = json.loads(args.queries.read_text())
+    if not labelled:
+        sys.exit(f"no queries in {args.queries}")
+    session = args.session or results.new_session()
     os.environ["GROUNDLY_HOME"] = str(args.home.expanduser())
     from groundly.retrieval import vector
 
-    labelled = json.loads(args.queries.read_text())
-    hits = [
-        [(h.filename, h.page) for h in vector.search(args.subject, lab["query"], k=8)]
-        for lab in labelled
-    ]
+    try:
+        hits = [
+            [(h.filename, h.page) for h in vector.search(args.subject, lab["query"], k=8)]
+            for lab in labelled
+        ]
+    except Exception as e:  # noqa: BLE001  a failed arm still leaves a row so compare reports it as dropped
+        results.append("retrieval", row(session, args.arm, args.subject, len(labelled), 1, {}))
+        sys.exit(f"{args.arm}: search failed: {e!r}\nsession: {session}")
     m = metrics(labelled, hits)
-    results.append(
-        "retrieval",
-        {
-            "bench": "retrieval",
-            "session": results.new_session(),
-            "arm": args.arm,
-            "sha": results._sh("git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"),
-            "machine": results.machine(),
-            "versions": results.versions(Path(sys.executable)),
-            "subject": args.subject,
-            "queries": len(labelled),
-            "memray": False,
-            "metrics": m,
-        },
-    )
-    print(f"{args.arm}: {m}")
+    results.append("retrieval", row(session, args.arm, args.subject, len(labelled), 0, m))
+    print(f"{args.arm}: {m}\nsession: {session}")
 
 
 if __name__ == "__main__":
