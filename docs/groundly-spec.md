@@ -5,7 +5,7 @@
 > [`use-cases/`](use-cases/knowledge-base.md) (flows & acceptance criteria) ·
 > [`architecture/`](architecture/overview.md) ([data model](architecture/data-model.md), [retrieval](architecture/retrieval.md), [verification](architecture/agents.md)) ·
 > [`tech-stack/`](tech-stack/tech-stack.md) · [`infrastructure/`](infrastructure/distribution.md).
-> Measurement protocols and results are kept outside the repo; the code that produced them is at tag `thesis-experiments-2026-09`.
+> Bench code and its page manifest live in `bench/`; results and reference text stay out of git (`bench/results/`, `bench/reference/`, gitignored). Protocols and results of the retired experiments are kept outside the repo; their code is at tag `thesis-experiments-2026-09`.
 
 ## 1. Vision
 

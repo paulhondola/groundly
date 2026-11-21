@@ -4,7 +4,7 @@
 
 - Decisions live in `docs/groundly-spec.md` §4/§7 with satellite docs; a changed decision updates the docs in the same change set (`/decision`).
 - "Done" for a feature = the acceptance criteria in `docs/use-cases/` pass.
-- Measurement protocols and results are kept outside the repo; the retired experiments' code is at tag `thesis-experiments-2026-09`.
+- Bench code and its page manifest live in `bench/`; results and reference text stay out of git (`bench/results/`, `bench/reference/`, gitignored). Protocols and results of the retired experiments are kept outside the repo; their code is at tag `thesis-experiments-2026-09`.
 
 ## Python
 
