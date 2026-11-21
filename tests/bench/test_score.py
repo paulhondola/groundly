@@ -47,3 +47,33 @@ def test_error_page_scores_zero_and_ok_page_scores_one(tmp_path):
     out = score(m, [_out(p0, "alpha beta gamma delta 0"), _out(p1, "", error="boom")], tmp_path)
     key = f"word_f1/{p0['kind']}/{p0['lang']}"
     assert out["failed_pages"] == 1 and out[key] == pytest.approx(0.5)
+
+
+def _ref_manifest(tmp_path):
+    m = _manifest(tmp_path)
+    m["pages"] = [{**p, "ref": True} for p in m["pages"]]
+    return m
+
+
+def test_unchecked_ref_page_is_skipped(tmp_path):
+    m = _ref_manifest(tmp_path)
+    p0, p1 = m["pages"]
+    (tmp_path / f"{p0['sha256']}-{p0['page']}.txt").write_text("alpha beta", encoding="utf-8")
+    out = score(m, [_out(p0, "alpha beta"), _out(p1, "alpha")], tmp_path)
+    assert out["skipped_pages"] == 1 and out["scored_pages"] == 1 and out["failed_pages"] == 0
+    assert out[f"pages/{p0['kind']}/{p0['lang']}"] == 1
+
+
+def test_errored_unchecked_ref_page_still_fails(tmp_path):
+    m = _ref_manifest(tmp_path)
+    p0, p1 = m["pages"]
+    out = score(m, [_out(p0, "", error="boom"), _out(p1, "x")], tmp_path)
+    assert out["failed_pages"] == 1 and out["skipped_pages"] == 2 and out["scored_pages"] == 0
+
+
+def test_empty_reference_and_output_scores_one(tmp_path):
+    m = _ref_manifest(tmp_path)
+    p0 = m["pages"][0]
+    (tmp_path / f"{p0['sha256']}-{p0['page']}.txt").write_text("", encoding="utf-8")
+    out = score({"pages": [p0]}, [_out(p0, "")], tmp_path)
+    assert out[f"word_f1/{p0['kind']}/{p0['lang']}"] == 1.0

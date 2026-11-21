@@ -66,7 +66,7 @@ def reference_text(page: dict, reference_dir: Path) -> str | None:
     other page reads the PDF's own text layer."""
     if page.get("ref"):
         f = reference_dir / f"{page['sha256']}-{page['page']}.txt"
-        return f.read_text() if f.is_file() else None
+        return f.read_text(encoding="utf-8") if f.is_file() else None
     pdf = pdfium.PdfDocument(Path(page["path_hint"]).expanduser())
     try:
         pg = pdf[page["page"] - 1]
@@ -85,15 +85,16 @@ def reference_text(page: dict, reference_dir: Path) -> str | None:
 def score(manifest: dict, outputs: list[dict], reference_dir: Path) -> dict[str, float]:
     by_page = {(o["sha256"], o["page"]): o for o in outputs}
     acc: dict[str, list[float]] = defaultdict(list)
-    failed = scored = 0
+    failed = scored = skipped = 0
     for page in manifest["pages"]:
+        out = by_page.get((page["sha256"], page["page"]))
+        broken = out is None or bool(out.get("error"))
+        failed += broken
         ref = reference_text(page, reference_dir)
         if ref is None:  # reference not checked yet: not scorable
+            skipped += 1
             continue
         scored += 1
-        out = by_page.get((page["sha256"], page["page"]))
-        broken = out is None or out.get("error")
-        failed += bool(broken)
         hyp = "" if broken else out["text"]
         suffix = f"{page['kind']}/{page['lang']}"
         acc[f"word_f1/{suffix}"].append(word_f1(ref, hyp))
@@ -103,4 +104,11 @@ def score(manifest: dict, outputs: list[dict], reference_dir: Path) -> dict[str,
             if d is not None:
                 acc[f"{name}/{suffix}"].append(d)
     result = {k: sum(v) / len(v) for k, v in acc.items()}
-    return {**result, "failed_pages": failed, "scored_pages": scored}
+    # n behind the averages: differs per metric (diacritic pages only)
+    for k, v in acc.items():
+        metric, suffix = k.split("/", 1)
+        if metric == "word_f1":
+            result[f"pages/{suffix}"] = len(v)
+        elif metric == "diacritic_recall":
+            result[f"diacritic_pages/{suffix}"] = len(v)
+    return {**result, "failed_pages": failed, "scored_pages": scored, "skipped_pages": skipped}
