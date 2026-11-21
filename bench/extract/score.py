@@ -97,8 +97,9 @@ def score(manifest: dict, outputs: list[dict], reference_dir: Path) -> dict[str,
         scored += 1
         hyp = "" if broken else out["text"]
         suffix = f"{page['kind']}/{page['lang']}"
-        acc[f"word_f1/{suffix}"].append(word_f1(ref, hyp))
-        acc[f"bigram_f1/{suffix}"].append(bigram_f1(ref, hyp))
+        # a broken page scores 0 even against a blank reference
+        acc[f"word_f1/{suffix}"].append(0.0 if broken else word_f1(ref, hyp))
+        acc[f"bigram_f1/{suffix}"].append(0.0 if broken else bigram_f1(ref, hyp))
         for name, fold in (("diacritic_recall", False), ("diacritic_recall_folded", True)):
             d = diacritic_recall(ref, hyp, fold=fold)
             if d is not None:

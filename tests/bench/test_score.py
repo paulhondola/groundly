@@ -77,3 +77,12 @@ def test_empty_reference_and_output_scores_one(tmp_path):
     (tmp_path / f"{p0['sha256']}-{p0['page']}.txt").write_text("", encoding="utf-8")
     out = score({"pages": [p0]}, [_out(p0, "")], tmp_path)
     assert out[f"word_f1/{p0['kind']}/{p0['lang']}"] == 1.0
+
+
+def test_errored_page_on_blank_reference_scores_zero(tmp_path):
+    m = _ref_manifest(tmp_path)
+    p0 = m["pages"][0]
+    (tmp_path / f"{p0['sha256']}-{p0['page']}.txt").write_text("", encoding="utf-8")
+    out = score({"pages": [p0]}, [_out(p0, "", error="boom")], tmp_path)
+    assert out[f"word_f1/{p0['kind']}/{p0['lang']}"] == 0.0
+    assert score({"pages": [p0]}, [], tmp_path)[f"word_f1/{p0['kind']}/{p0['lang']}"] == 0.0
