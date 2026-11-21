@@ -39,6 +39,13 @@ def _tree_rss(root: psutil.Process) -> int:
     return total
 
 
+def _command(cmd: list[str], memray_out: Path | None, memray_python: Path | None) -> list[str]:
+    if memray_out is None:
+        return cmd
+    py = str(memray_python or sys.executable)
+    return [py, "-m", "memray", "run", "--follow-fork", "-o", str(memray_out), *cmd]
+
+
 def run(
     cmd: list[str],
     *,
@@ -48,9 +55,7 @@ def run(
     memray_out: Path | None = None,
     memray_python: Path | None = None,
 ) -> Measurement:
-    if memray_out is not None:
-        py = str(memray_python or sys.executable)
-        cmd = [py, "-m", "memray", "run", "--follow-fork", "-o", str(memray_out), *cmd]
+    cmd = _command(cmd, memray_out, memray_python)
     start = time.perf_counter()
     proc = subprocess.Popen(cmd, env=env, cwd=cwd)
     root = psutil.Process(proc.pid)

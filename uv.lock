@@ -1408,6 +1408,7 @@ dependencies = [
 dev = [
     { name = "import-linter" },
     { name = "memray" },
+    { name = "psutil" },
     { name = "pyrefly" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -1423,6 +1424,7 @@ requires-dist = [
     { name = "memray", marker = "extra == 'dev'", specifier = ">=1.14" },
     { name = "mlx", marker = "platform_machine == 'arm64' and platform_release >= '23' and sys_platform == 'darwin'", specifier = "==0.32.4" },
     { name = "onnxruntime", specifier = ">=1.31" },
+    { name = "psutil", marker = "extra == 'dev'", specifier = ">=7.2" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pypdfium2", specifier = "==5.14.0" },
     { name = "pyrefly", marker = "extra == 'dev'", specifier = "==1.4.0" },

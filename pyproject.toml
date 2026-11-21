@@ -36,6 +36,7 @@ dev = [
     "memray>=1.14",
     "import-linter>=2.15",
     "pyrefly==1.4.0",
+    "psutil>=7.2",
 ]
 
 [project.scripts]
