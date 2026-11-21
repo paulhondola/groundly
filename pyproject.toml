@@ -38,6 +38,8 @@ dev = [
     "pyrefly==1.4.0",
     "psutil>=7.2",
 ]
+# Benchmark-only: MinerU2.5 drafts and scores reference pages; never a runtime dependency.
+bench = ["mineru-vl-utils[mlx]==2.0.9"]
 
 [project.scripts]
 groundly = "groundly.cli:app"
@@ -90,3 +92,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = ["slow: needs model downloads / real documents; excluded by default, run with -m slow"]
 addopts = "-m 'not slow'"
+
+[tool.uv]
+# opencv-python would overwrite the cv2 that RapidOCR (opencv-python-headless) uses.
+override-dependencies = ["opencv-python ; sys_platform == 'never'"]
