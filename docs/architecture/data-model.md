@@ -22,7 +22,7 @@ The storage backbone for [`overview.md`](overview.md). SQLite (WAL) per subject;
 | Table | Contents | Notes |
 |---|---|---|
 | materials | filename, sha-256, status (`indexed`/`extraction_failed`), page count | unique hash per subject = duplicate rejection |
-| chunks | material FK, page ref, **heading path**, text, token count | the citation unit; ids are never reused, so a stored citation can't come to mean a different chunk; heading path from Docling HybridChunker |
+| chunks | material FK, page ref, **heading path**, text, token count | the citation unit; ids are never reused, so a stored citation can't come to mean a different chunk; heading path from the slide-title rule on text-layer slide pages, docling's layout model elsewhere |
 | vectors | sqlite-vec virtual table, bge-m3 dense (1024-d) | exact KNN (brute force — an upgrade over approximate HNSW) |
 | sparse_terms | inverted index of bge-m3 learned sparse weights | same forward pass as dense |
 | chunks_fts | FTS5 index over chunk text | BM25 channel |
@@ -49,7 +49,7 @@ Two tables at `PRAGMA user_version = 2` (decision 44): `attempts` (one per submi
   "title": "Parallel and Distributed Systems",
   "embedding": { "model": "BAAI/bge-m3", "hf_revision": "<pin>", "dim": 1024,
                   "dtype": "float16", "normalized": true },
-  "chunking":  { "strategy": "docling-hybrid", "max_tokens": 512, "overlap": 0 },
+  "chunking":  { "strategy": "page-routed-hybrid", "max_tokens": 512, "overlap": 0 },
   "ocr":       { "engine": "rapidocr-onnxruntime", "lang": [] },
   "counts":    { "materials": 0, "chunks": 0 },
   "tool_version": "<groundly version>"

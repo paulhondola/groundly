@@ -2,7 +2,9 @@
 or `--serve` to extract many files in one process over a line protocol (see `serve`).
 
 Always a child process, so a parser crash on a hostile or broken file kills only this
-process, not the indexing run (UC-01 A2). OCR uses docling's bundled RapidOCR. Exits
+process, not the indexing run (UC-01 A2). PDFs go through the page router (`pdf_router`),
+which sends a slide deck's text pages to the text layer and only its image pages to docling;
+other docling formats convert whole. OCR uses docling's bundled RapidOCR. Exits
 EXIT_NO_TEXT when nothing is readable even after OCR, and EXIT_MODEL_UNAVAILABLE when a
 model cannot load: an environment failure, retryable, never a bad document.
 
@@ -18,7 +20,7 @@ import tempfile
 import traceback
 from collections.abc import Callable
 from pathlib import Path
-from typing import TextIO
+from typing import TYPE_CHECKING, TextIO
 
 from groundly.ingestion.formats import (
     DOCLING_FORMATS,
@@ -26,6 +28,9 @@ from groundly.ingestion.formats import (
     IMAGE_SUFFIXES,
     NOTEBOOK_SUFFIXES,
 )
+
+if TYPE_CHECKING:
+    from docling_core.types.doc import DoclingDocument
 
 # Silence the fast-tokenizer advisory HybridChunker triggers. The env var, not
 # logging.setLevel: transformers resets its logger level on first (lazy) import.
@@ -127,40 +132,39 @@ def _converter(ocr_lang: str | None):
     )
 
 
-def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
+@functools.cache
+def _chunker():
+    """The bge-m3 token-budget tokenizer and HybridChunker, built once per process."""
     from docling.chunking import HybridChunker
-    from docling.datamodel.base_models import InputFormat
     from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
 
     from groundly.core.manifest import CHUNK_MAX_TOKENS
 
-    input_format = InputFormat(DOCLING_FORMATS[path.suffix.lower()])
-    if path.suffix.lower() in IMAGE_SUFFIXES:
-        path = _first_frame(path)
-    # docling's layout models load here, before the document is touched — a fetch
-    # failure is the environment's fault, never this document's parse failure
-    _model_step(lambda: _converter(ocr_lang).initialize_pipeline(input_format))
-    doc = _converter(ocr_lang).convert(path).document
     tokenizer = HuggingFaceTokenizer(
         tokenizer=_model_step(_bge_m3_tokenizer), max_tokens=CHUNK_MAX_TOKENS
     )
-    chunker = HybridChunker(tokenizer=tokenizer, merge_peers=True)
+    return tokenizer, HybridChunker(tokenizer=tokenizer, merge_peers=True)
 
+
+def chunk_document(doc: "DoclingDocument", page: int | None = None) -> list[dict]:
+    """Worker chunks for a parsed document. Each chunk cites the page of its first item,
+    or `page` for every chunk when given (a one-page conversion)."""
+    tokenizer, chunker = _chunker()
     chunks = []
     for chunk in chunker.chunk(doc):
         text = chunker.contextualize(chunk)  # heading path prepended — what gets embedded
         headings = getattr(chunk.meta, "headings", None) or []
-        page = None
+        chunk_page = None
         for item in getattr(chunk.meta, "doc_items", []) or []:
             prov = getattr(item, "prov", None)
             if prov:
-                page = prov[0].page_no
+                chunk_page = prov[0].page_no
                 break
         chunks.append(
             {
                 "text": text,
                 "heading_path": " > ".join(headings) or None,
-                "page": page,
+                "page": page if page is not None else chunk_page,
                 "token_count": tokenizer.count_tokens(text),
             }
         )
@@ -171,16 +175,29 @@ def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
         salvaged = [t for t in doc.texts if t.text and t.text.strip()]
         if salvaged:
             text = "\n".join(t.text.strip() for t in salvaged)
-            page = next((t.prov[0].page_no for t in salvaged if t.prov), None)
+            chunk_page = next((t.prov[0].page_no for t in salvaged if t.prov), None)
             chunks.append(
                 {
                     "text": text,
                     "heading_path": None,
-                    "page": page,
+                    "page": page if page is not None else chunk_page,
                     "token_count": tokenizer.count_tokens(text),
                 }
             )
+    return chunks
 
+
+def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
+    from docling.datamodel.base_models import InputFormat
+
+    input_format = InputFormat(DOCLING_FORMATS[path.suffix.lower()])
+    if path.suffix.lower() in IMAGE_SUFFIXES:
+        path = _first_frame(path)
+    # docling's layout models load here, before the document is touched — a fetch
+    # failure is the environment's fault, never this document's parse failure
+    _model_step(lambda: _converter(ocr_lang).initialize_pipeline(input_format))
+    doc = _converter(ocr_lang).convert(path).document
+    chunks = chunk_document(doc)
     pages = len(doc.pages) if doc.pages else None
     return {"pages": pages, "chunks": chunks}
 
@@ -251,7 +268,11 @@ _SERVE_STATUS = {
 
 
 def _handle(in_path: Path, out_path: Path, ocr_lang: str | None) -> None:
-    if in_path.suffix.lower() in DOCLING_SUFFIXES:
+    if in_path.suffix.lower() == ".pdf":
+        from groundly.ingestion import pdf_router
+
+        result = pdf_router.extract(in_path, ocr_lang)
+    elif in_path.suffix.lower() in DOCLING_SUFFIXES:
         result = _extract_docling(in_path, ocr_lang)
     elif in_path.suffix.lower() in NOTEBOOK_SUFFIXES:
         result = _extract_notebook(in_path)
