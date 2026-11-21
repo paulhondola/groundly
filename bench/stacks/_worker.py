@@ -39,8 +39,8 @@ def _page_mode(stack: ModuleType, manifest: Path, out: Path, only_ref: bool, ocr
             path = Path(hint).expanduser()
             try:
                 if not warmed:  # model load stays out of every timing
-                    warmed = True
                     stack.page_texts(path, pages[:1], ocr_lang)
+                    warmed = True  # a failed warm-up leaves the next file to do it
                 start = time.perf_counter()
                 texts = stack.page_texts(path, pages, ocr_lang)
                 each = (time.perf_counter() - start) * 1000 / len(pages)

@@ -14,6 +14,19 @@ SUFFIXES = frozenset({".pdf"})
 extract = pdf_router.extract
 # Per-page conversion time of the last page_texts call, read by the page-mode runner.
 last_ms: dict[int, float] = {}
+_ready: set[str | None] = set()
+
+
+def _init_pipeline(ocr_lang: str | None) -> None:
+    """Loads docling's models once, as `pdf_router.extract` does before its first
+    docling page, so no timed page includes the load."""
+    from docling.datamodel.base_models import InputFormat
+
+    if ocr_lang not in _ready:
+        extract_worker._model_step(
+            lambda: extract_worker._converter(ocr_lang).initialize_pipeline(InputFormat.PDF)
+        )
+        _ready.add(ocr_lang)
 
 
 def page_texts(path: Path, pages: list[int], ocr_lang: str | None) -> dict[int, str]:
@@ -47,6 +60,8 @@ def page_texts(path: Path, pages: list[int], ocr_lang: str | None) -> dict[int, 
                         carried = title or carried
                         text = doc.export_to_markdown()
                 else:
+                    _init_pipeline(ocr_lang)
+                    start = time.perf_counter()  # model load is never timed
                     doc = (
                         extract_worker._converter(ocr_lang)
                         .convert(path, page_range=(n, n))

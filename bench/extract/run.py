@@ -42,7 +42,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(prog="python -m bench.extract.run")
     ap.add_argument("--stack", required=True)
     ap.add_argument("--manifest", type=Path, default=ROOT / "bench/corpus/manifest.json")
-    ap.add_argument("--reference-dir", type=Path, default=ROOT / "bench/corpus/reference")
+    ap.add_argument("--reference-dir", type=Path, default=ROOT / "bench/reference")
     ap.add_argument("--only-ref", action="store_true")
     ap.add_argument("--ocr-lang")
     args = ap.parse_args()
