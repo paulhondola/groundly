@@ -78,6 +78,18 @@ thesis.
 | B | Page sampling: a few hundred pages through each stack in one process, scaled up | 15 min, but the gate is an end-to-end CLI number and the ~30 s the router still loses sits in worker start-up and embedding, which sampling cannot see | Rejected for the gate; kept as the `extract` bench type for accuracy |
 | C | Re-index every subject on `main` | Most complete, ~5+ h, adds little to the gate verdict | Rejected |
 
+**Revision (Paul, 2026-11-21, after Task 1): how a run reaches each stack.** The embedder and reranker
+are settled on MLX, so the only variable is extraction (OCR model, routing). Three ways to run a stack:
+
+| | Approach | Trade-off | Verdict |
+|---|---|---|---|
+| A′ | A product flag, `groundly index --extractor X` | A decision change (zero-config is total; decision 48: no setting chooses the engine), and every experimental OCR model becomes a dependency the product worker imports | Rejected |
+| B′ | OCR-only scripts per stack | Fast and free to change, but blind to what routing changes end to end: chunk count (router 1,343 vs 1,197 → more embedding), worker start-up, timeouts | Rejected for timing; its per-page mode survives for accuracy |
+| **C′** | **A stack is a worker module plugged into the real `IngestionPipeline` through `SubprocessExtractor(argv=…)`**, the seam that already exists (`groundly/ingestion/extract.py:82`, `extract_worker.serve_stdio(handle=…)`) | End to end through Groundly's real worker isolation, timeouts, chunker, MLX embedder and store, with no product change; skips the CLI's own seconds (typer, progress), equal for every arm | **Picked** |
+
+C′ replaces approach A's git worktrees: `pdf-page-router` differs from `main` only in the router, so
+"main" is the stack that sends every PDF to docling whole, and both arms run from one checkout.
+
 Accuracy reference: text layer plus a hand-checked set (picked) against text layer only (rejected: it
 gives OCR pages no fair score, and OCR pages are exactly where future MLX/VLM stacks differ).
 
@@ -95,16 +107,18 @@ bench/
     results.py     append a row to bench/results/<type>.jsonl with the run metadata
     compare.py     table of any stack/ref against the baseline: medians, spread, ratio
   stacks/
-    docling_standard.py   docling 2.115 + RapidOCR as Groundly on main runs it, per page
-    docling_routed.py     the pdf_router path on pdf-page-router, per page
+    _worker.py            shared worker main: serve_stdio with a handle that sends the stack's
+                          suffixes to its extract() and everything else to extract_worker._handle
+    docling_standard.py   every PDF through docling whole (Groundly on main)
+    docling_routed.py     pdf_router.extract (pdf-page-router)
     mineru.py             MinerU2.5 on MLX (bench extra): drafts the reference pages
   extract/
     sample.py      build corpus/manifest.json from a census (stratified sample)
-    run.py         run one stack over the corpus in its own interpreter, collect per-page JSONL
+    run.py         run one stack's page mode over the corpus as a subprocess, collect per-page JSONL
     score.py       word F1, diacritic-word recall, per page kind x language
   index/
-    run.py         interleaved A/B of `groundly index` across git refs in fresh scratch homes
-    stages.py      in-process run of IngestionPipeline using its on_event hook for extract/embed split
+    run.py         interleaved runs of IngestionPipeline, one stack per run, fresh scratch homes;
+                   extract/embed split from the pipeline's on_event hook on every run
   retrieval/
     run.py         hit@8 exact page and within one page, MRR@8, against an indexed home
     queries/apd.json         the 50 labelled EN queries from the router spike
@@ -117,15 +131,28 @@ bench/
 
 ### Stack contract
 
-A stack is a script run as its own process, so a future stack whose dependencies do not fit Groundly's
-venv can get its own interpreter (`uv run --with …` or a separate venv) without touching the harness.
-Today all stacks run on Groundly's venv; `stacks/mineru.py` (MinerU2.5 on MLX, two-step, as in the
-spike) is used to draft the reference pages and can be scored like any other stack. Input: the manifest path (and optionally a subset).
-Output on stdout, one JSON line per page:
+A stack is one module, `bench/stacks/<name>.py`, run as a process with `PYTHONPATH` set to the repo
+root (`SubprocessExtractor` starts its worker in a temp dir). It defines:
+
+- `SUFFIXES: frozenset[str]`: the file types it handles, default `{".pdf"}`; every other file goes
+  through Groundly's own `extract_worker._handle`, so stacks differ only where they claim to.
+- `extract(path: Path, ocr_lang: str | None) -> dict`: the worker contract `pdf_router.extract`
+  already has, `{"pages": int | None, "chunks": [...]}`, chunks made by `extract_worker.chunk_document`
+  so chunking stays Groundly's. The shared `_worker.py` applies the same no-text exit as `_handle`.
+- `page_texts(path: Path, pages: list[int], ocr_lang: str | None) -> dict[int, str]`: the Markdown of
+  each requested page as this stack would chunk it, for the accuracy scorer.
+
+Two modes: `python -m bench.stacks.<name> --serve` is the extraction worker the index bench hands to
+`SubprocessExtractor(argv=…)`; `python -m bench.stacks.<name> --pages MANIFEST --out OUT.jsonl
+[--only-ref]` is the page mode the extract bench runs, one JSON line per page:
 
 ```json
 {"sha256": "…", "page": 12, "text": "…", "ms": 184.2, "error": null}
 ```
+
+Today all stacks run on Groundly's venv; a future stack whose dependencies do not fit can run on its own
+interpreter as long as `groundly` and `bench` import there. `stacks/mineru.py` (MinerU2.5 on MLX,
+two-step, as in the spike) drafts the reference pages and can be scored or timed like any other stack.
 
 `docling_routed` reproduces the real pipeline, including `pdf_router`'s `is_slide_deck()` check: a
 non-deck PDF goes to docling whole, exactly as on `main`, so its pages score the same for both stacks.
@@ -136,8 +163,8 @@ OCR runs with RapidOCR's default models (no `--ocr-lang`), which is how every in
 built (`ocr.lang: []`) and how the spike measured; result rows record the OCR language so a later
 `--ocr-lang` run is never compared silently. *(Builder-check call.)*
 
-The harness wraps the process in `monitor.py` for wall time and peak memory, and never imports the
-stack. Each stack warms up on one untimed page first. Page text goes into a temp file the scorer reads,
+In page mode the harness wraps the process in `monitor.py` and never imports the stack. Each stack
+warms up on one untimed page first. Page text goes into a temp file the scorer reads,
 never into `results/`.
 
 ### Corpus
@@ -168,9 +195,11 @@ version they used.
 
 ### Index bench and the gate
 
-- Refs: `main` and `pdf-page-router` checked out side by side as git worktrees, each with its own
-  `uv sync`'d venv, so neither run imports the other's code.
-- Order: main, router, main, router, … 5 runs each on apd, each into a fresh scratch `GROUNDLY_HOME`,
+- Arms: the stacks `docling_standard` (what `main` does) and `docling_routed` (this branch), both from
+  one checkout. Each run is an `IngestionPipeline` built with
+  `SubprocessExtractor(settings, argv=[sys.executable, "-m", f"bench.stacks.{stack}", "--serve"])`
+  and the shared MLX embedder, the subject created the way `groundly index` creates it.
+- Order: standard, routed, standard, routed, … 5 runs each on apd, each into a fresh scratch `GROUNDLY_HOME`,
   so no run inherits an index. Each scratch home symlinks `models/` to `~/.groundly/models` (the
   converted bge-m3 safetensors) and shares the HF cache, as the spike's homes did: the one-time weight
   conversion is not part of the gate. *(Builder-check call.)*
@@ -178,23 +207,28 @@ version they used.
   indexed: 187 materials, ~1,200–1,340 chunks), not `data/Algoritmi-Paraleli-si-Distribuiti/`
   (282 files, unlike anything measured). Default `config.toml` (timeout 300 s, rerank on), same as
   the live home. *(Builder-check call.)*
-- Per run: CLI wall time and the summed peak memory of the process tree from `monitor.py`; chunk count and
-  failed files read from the resulting `store.db`. `stages.py` runs once per ref for the
-  extract / embed split (not part of the gate).
-- **Gate verdict:** the router's median wall time against `main`'s median in the same session, with
-  the spread. The spike's measured win was 240 s → 178 s (1.35×). The proposed restated gate is
-  **router median ≤ 0.85 × main median, same session**, which is the original 190/237 ratio rounded.
+- Per run: wall time of `pipeline.run` and the summed peak memory of the process tree (the runner plus
+  its worker) from `monitor.py`; the extract / embed split from `on_event`; chunk count and failed
+  files from the resulting `store.db`. Each run is its own child process, so the runner's model memory
+  never carries into the next run's peak.
+- `--memray` wraps the **worker** (`argv = [python, -m, memray, run, -q, -o, OUT, -m,
+  bench.stacks.<name>, --serve]`): that is where OCR memory lives, and memray cannot follow the worker's
+  `exec` from the parent. Quiet mode matters: the worker's stdout is the reply protocol.
+- **Gate verdict:** `docling_routed`'s median wall time against `docling_standard`'s median in the
+  same session, with the spread. It is a pipeline time, not a CLI time; the CLI's own overhead is the
+  same for both arms, so the ratio stands. The spike's measured win was 240 s → 178 s (1.35×). The proposed restated gate is
+  **routed median ≤ 0.85 × standard median, same session**, which is the original 190/237 ratio rounded.
   Whether to restate decision 49's gate this way is Paul's call at the result, recorded through
   `/decision`.
-- Then one run of each ref on two new subjects, picked by the census as the most Romanian one and the
+- Then one run of each stack on two new subjects, picked by the census as the most Romanian one and the
   most English one among bia, gac, lftc, pdss, pi, pm and romsilva (excluding pi and bia on size), plus
   the three files that timed out under the router (`LFTC Cursuri.pdf`, `PI_Slide-uri_3.pdf`,
-  `NT1 - Compozitii, scheme si tehnologii de regenerare.pdf`) indexed alone on each ref. Each timeout
-  is reported as router-caused, shared, or neither.
+  `NT1 - Compozitii, scheme si tehnologii de regenerare.pdf`) indexed alone with each stack. Each
+  timeout is reported as router-caused, shared, or neither.
 
 ### Retrieval bench
 
-Runs the labelled queries through Groundly's `search` against an index each ref produced. Reports
+Runs the labelled queries through Groundly's `search` against an index each stack produced. Reports
 hit@8 on the exact page and within one page, plus MRR@8, per query set. The apd set already exists
 (50 EN queries, `{query, file, page}`) at
 `~/Developer/groundly-rs/bench/extract-alt/route/queries_labeled.json` and is copied into
@@ -203,8 +237,8 @@ hit@8 on the exact page and within one page, plus MRR@8, per query set. The apd 
 
 ### Result rows
 
-Every row: bench type, stack or git ref + sha, manifest version, engine versions (docling, rapidocr,
-pypdfium2, mlx), machine, date, run index, and the metrics. `compare.py` groups by stack/ref and prints
+Every row: bench type, stack, git sha, manifest version, engine versions (docling, rapidocr,
+pypdfium2, mlx), machine, date, run index, and the metrics. `compare.py` groups by stack and prints
 medians, spread and the ratio to a chosen baseline.
 
 ## What is left to the builder
