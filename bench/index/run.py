@@ -54,6 +54,20 @@ def store_stats(home: Path, subject: str) -> dict:
         con.close()
 
 
+def stage_seconds(marks: dict) -> tuple[float, float]:
+    """Sum per-file extract and embed time from stage timestamps ("extracting", "embedding",
+    "end"). A file that fails extraction never reaches "embedding"; its extract time runs to
+    its terminal event, so a timeout still counts."""
+    extract_s = embed_s = 0.0
+    for m in marks.values():
+        if "extracting" not in m:
+            continue
+        extract_s += m.get("embedding", m.get("end", m["extracting"])) - m["extracting"]
+        if "embedding" in m and "end" in m:
+            embed_s += m["end"] - m["embedding"]
+    return extract_s, embed_s
+
+
 def _one(
     stack: str, subject: str, input_path: Path, memray_out: Path | None, timing_out: Path | None
 ) -> None:
@@ -77,12 +91,7 @@ def _one(
         IngestionPipeline(subj, extractor=ex, on_event=on_event).run([input_path])
     pipeline_s = time.perf_counter() - t0
 
-    extract_s = embed_s = 0.0
-    for m in marks.values():
-        if "extracting" in m and "embedding" in m:
-            extract_s += m["embedding"] - m["extracting"]
-        if "embedding" in m and "end" in m:
-            embed_s += m["end"] - m["embedding"]
+    extract_s, embed_s = stage_seconds(marks)
     out = json.dumps(
         {"pipeline_s": pipeline_s, "extract_s": extract_s, "embed_s": embed_s, "files": len(marks)}
     )
@@ -105,6 +114,8 @@ def main() -> None:
     ap.add_argument("--keep-homes", action="store_true")
     args = ap.parse_args()
     args.input = args.input.expanduser()
+    if not args.one and not args.stacks:
+        ap.error("--stacks is required unless --one is given")
     if args.one:
         return _one(args.stack, args.subject, args.input, args.memray_out, args.timing_out)
 
@@ -113,7 +124,8 @@ def main() -> None:
     memray_dir = results.RESULTS_DIR / "memray"
     if args.memray:
         memray_dir.mkdir(parents=True, exist_ok=True)
-    for stack, run in schedule(args.stacks, args.runs):
+    for stack, i in schedule(args.stacks, args.runs):
+        run = i + 1
         home = scratch_home()
         cmd = [sys.executable, "-m", "bench.index.run", "--one", "--stack", stack]
         cmd += ["--subject", args.subject, "--input", str(args.input)]
@@ -121,42 +133,47 @@ def main() -> None:
             cmd += ["--memray-out", str(memray_dir / f"{session}-{stack}-{run}.bin")]
         timing = home / "timing.json"  # outside the subject dir, so it never reaches store stats
         cmd += ["--timing-out", str(timing)]
-        env = {**os.environ, "GROUNDLY_HOME": str(home), "PYTHONPATH": str(ROOT)}
-        m = monitor.run(cmd, env=env, cwd=ROOT)
-        stats = (
-            store_stats(home, args.subject) if (home / args.subject / "store.db").exists() else None
-        )
-        metrics = {"wall_s": m.wall_s, "peak_rss_mb": m.peak_rss_mb}
-        if timing.exists():
-            metrics |= {k: v for k, v in json.loads(timing.read_text()).items() if k != "files"}
-        if stats:
-            metrics |= {
-                "chunks": stats["chunks"],
-                "materials": stats["materials"],
-                "failed_count": len(stats["failed"]),
-            }
-        results.append(
-            "index",
-            {
-                "bench": "index",
-                "session": session,
-                "arm": stack,
-                "sha": sha,
-                "machine": results.machine(),
-                "versions": results.versions(Path(sys.executable)),
-                "ocr_lang": None,
-                "manifest_version": None,
-                "run": run + 1,
-                "returncode": m.returncode,
-                "metrics": metrics,
-                "failed": stats["failed"] if stats else [],
-            },
-        )
-        print(f"{stack} run {run + 1}: rc={m.returncode} {metrics}")
-        if args.keep_homes:
-            print(f"kept home: {home}")
-        else:
-            shutil.rmtree(home, ignore_errors=True)
+        try:
+            env = {**os.environ, "GROUNDLY_HOME": str(home), "PYTHONPATH": str(ROOT)}
+            m = monitor.run(cmd, env=env, cwd=ROOT)
+            stats = (
+                store_stats(home, args.subject)
+                if (home / args.subject / "store.db").exists()
+                else None
+            )
+            metrics = {"wall_s": m.wall_s, "peak_rss_mb": m.peak_rss_mb}
+            if timing.exists():
+                metrics |= {k: v for k, v in json.loads(timing.read_text()).items() if k != "files"}
+            if stats:
+                metrics |= {
+                    "chunks": stats["chunks"],
+                    "materials": stats["materials"],
+                    "failed_count": len(stats["failed"]),
+                }
+            results.append(
+                "index",
+                {
+                    "bench": "index",
+                    "session": session,
+                    "arm": stack,
+                    "sha": sha,
+                    "machine": results.machine(),
+                    "versions": results.versions(Path(sys.executable)),
+                    "ocr_lang": None,
+                    "manifest_version": None,
+                    "run": run,
+                    "memray": args.memray,
+                    "returncode": m.returncode,
+                    "metrics": metrics,
+                    "failed": stats["failed"] if stats else [],
+                },
+            )
+            print(f"{stack} run {run}: rc={m.returncode} {metrics}")
+        finally:
+            if args.keep_homes:
+                print(f"kept home: {home}")
+            else:
+                shutil.rmtree(home, ignore_errors=True)
 
 
 if __name__ == "__main__":

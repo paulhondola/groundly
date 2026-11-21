@@ -1,7 +1,7 @@
 import sqlite3
 import sys
 
-from bench.index.run import schedule, scratch_home, store_stats, worker_argv
+from bench.index.run import schedule, scratch_home, stage_seconds, store_stats, worker_argv
 from groundly.core.store import create_store
 
 
@@ -45,3 +45,11 @@ def test_store_stats_reads_chunks_and_failures(tmp_path):
     stats = store_stats(tmp_path, "s")
     assert stats["chunks"] == 3 and stats["materials"] == 2
     assert stats["failed"] == [{"filename": "big.pdf", "error": "extraction timed out after 300s"}]
+
+
+def test_stage_seconds_counts_a_failed_extraction_as_extract_time():
+    marks = {
+        "ok.pdf": {"extracting": 10.0, "embedding": 14.0, "end": 15.5},
+        "big.pdf": {"extracting": 15.5, "end": 315.5},
+    }
+    assert stage_seconds(marks) == (304.0, 1.5)
