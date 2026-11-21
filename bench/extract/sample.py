@@ -19,7 +19,7 @@ def main() -> None:
         for d in sorted(args.home.iterdir())
         if (d / "materials").is_dir()
         for f in sorted((d / "materials").rglob("*"))
-        if f.suffix.lower() == ".pdf"
+        if f.is_file() and f.suffix.lower() == ".pdf"
     ]
     rows = census(pdfs)
     counts: dict[str, Counter] = {}

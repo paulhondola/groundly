@@ -84,7 +84,7 @@ def test_census_unknown_language_takes_document_majority(tmp_path):
     pdf = pdfium.PdfDocument.new()
     for text in (
         "The algorithm is used for sorting and the search is that fast",
-        "Hello world this is a page with enough text to count here ok",
+        "x = 3; y = 4; z = 5; w = 6; v = 7; u = 8; t = 9; s = 10;",
     ):
         page = pdf.new_page(595, 842)
         font = raw.FPDFText_LoadStandardFont(pdf, b"Helvetica")
