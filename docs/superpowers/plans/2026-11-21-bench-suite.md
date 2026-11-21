@@ -4,7 +4,7 @@
 
 **Goal:** A repo-level `bench/` with three bench types (extract, index, retrieval) and per-stack scripts, then use it to settle decision 49's speed gate and record the first baseline.
 
-**Architecture:** `bench/common/` holds the process-tree monitor, result rows and the comparison table. A stack is a standalone script that writes one JSON line per page and imports nothing from `bench`. The index bench drives `groundly index` from side-by-side git worktrees of `main` and `pdf-page-router`, alternating runs in one session.
+**Architecture:** `bench/common/` holds the process-tree monitor, result rows and the comparison table. A stack is one module in `bench/stacks/` with a worker mode (plugged into Groundly's real `IngestionPipeline` through `SubprocessExtractor(argv=…)`) and a page mode (per-page text for accuracy). The index bench alternates stacks run by run in one session, from one checkout; `docling_standard` is what `main` does.
 
 **Tech Stack:** Python 3.11, psutil 7.2, memray 1.20, pypdfium2 5.14, docling 2.115 (via Groundly's worker functions), mineru-vl-utils[mlx] 2.0.9 (optional `bench` extra), pytest, uv.
 
@@ -14,11 +14,12 @@
 
 - Work on branch `bench-suite`, never `main`. Commit after each task.
 - `bench/` is versioned; `bench/results/` and `bench/reference/` are gitignored. Result rows and the manifest carry hashes, page numbers and scores, **never page text**.
-- `groundly/` never imports `bench`. Stack scripts (`bench/stacks/*.py`) and `bench/index/stages.py` import nothing from `bench` (they run under other interpreters).
+- `groundly/` never imports `bench`, and product code is not changed for the bench: stacks reach the pipeline only through the existing `SubprocessExtractor(argv=…)` and `serve_stdio(handle=…)` seams.
+- Stacks run as `python -m bench.stacks.<name>` with `PYTHONPATH` = repo root (the worker starts in a temp dir).
 - No bench dependency in Groundly's default install. MinerU goes in an optional `bench` extra only, and the lock may **add** packages but never change an existing one (docling, rapidocr, onnxruntime, opencv-python-headless 5.0, torch, transformers, mlx 0.32.4).
 - OCR language: RapidOCR defaults (`ocr_lang=None`); every row records `ocr_lang`.
 - Gate input: the 187 files in `~/.groundly/apd/materials/`; default `config.toml`; each scratch home symlinks `models/` → `~/.groundly/models`.
-- Proposed gate: router median wall ≤ **0.85 ×** main median, same session.
+- Proposed gate: `docling_routed` median wall ≤ **0.85 ×** `docling_standard` median, same session (pipeline time, not CLI time).
 - Census thresholds come from `groundly/ingestion/pdf_router.py` (`classify_page`, `is_slide_deck`), no new constants.
 - Tests live in `tests/bench/`, run in the fast suite (`uv run pytest tests/bench`), no model downloads.
 
@@ -32,7 +33,7 @@
 
 ---
 
-### Task 1: Scaffold, process-tree monitor, convention amendment
+### Task 1: Scaffold, process-tree monitor, convention amendment — DONE (0294f09..333460d)
 
 **Files:**
 - Create: `bench/__init__.py`, `bench/common/__init__.py`, `bench/common/monitor.py`, `tests/bench/__init__.py`, `tests/bench/test_monitor.py`
@@ -266,48 +267,71 @@ git commit -m "feat(bench): word, bigram and diacritic scorer"
 
 ---
 
-### Task 5: The two docling stacks and the extract runner
+### Task 5: Stack modules (shared worker, docling standard and routed) and the extract runner
 
 **Files:**
-- Create: `bench/stacks/docling_standard.py`, `bench/stacks/docling_routed.py`, `bench/extract/run.py`, `tests/bench/test_extract_run.py`
+- Create: `bench/stacks/__init__.py`, `bench/stacks/_worker.py`, `bench/stacks/docling_standard.py`, `bench/stacks/docling_routed.py`, `bench/extract/run.py`, `tests/bench/test_stacks.py`, `tests/bench/test_extract_run.py`
 
 **Interfaces:**
 - Consumes: `run`/`Measurement` (Task 1), `append`/`new_session`/`machine`/`versions` (Task 2), `load_manifest` (Task 3), `score` (Task 4)
 - Produces:
-  - Stack CLI contract: `python bench/stacks/<name>.py --manifest M --out OUT.jsonl [--only-ref]`. Writes one line per manifest page `{"sha256", "page", "text", "ms", "error"}`, warming up untimed on the first file's page 1. A per-file exception writes `error` for that file's pages and the stack carries on.
-  - `docling_standard`: per file, `extract_worker._converter(None).convert(path).document` once, then `doc.export_to_markdown(page_no=n)`. `ms` = the conversion time ÷ the file's page count (amortized; say so in the docstring).
-  - `docling_routed`: if `not pdf_router.is_slide_deck(pdf)`, same as standard. Otherwise walk every page in order, exactly as `pdf_router.extract` does (the `carried` title included): text/blank pages → `text_page_document(...).export_to_markdown()`, others → `_converter(None).convert(path, page_range=(n, n)).document.export_to_markdown()`. Emit only manifest pages, each timed on its own.
-  - `collect(manifest: dict, out_path: Path) -> list[dict]`: reads the stack output; manifest pages absent from it come back with `error="missing from stack output"`
-  - Runner CLI: `python -m bench.extract.run --stack NAME [--manifest bench/corpus/manifest.json] [--only-ref] [--memray]`. Runs the stack under `monitor.run`, collects, scores, appends one `extract` row with `arm=NAME`, metrics = score keys + `wall_s`, `peak_rss_mb`, `ms_p50`. Stack output goes to a `tempfile` that is deleted afterwards.
+  - A stack module defines `SUFFIXES: frozenset[str]` (default `frozenset({".pdf"})`), `extract(path: Path, ocr_lang: str | None) -> dict` (`{"pages": int | None, "chunks": [...]}`, chunks from `extract_worker.chunk_document`), and `page_texts(path: Path, pages: list[int], ocr_lang: str | None) -> dict[int, str]`. It ends with `if __name__ == "__main__": main(sys.modules[__name__])`.
+  - `_worker.handler(stack) -> Callable[[Path, Path, str | None], None]`: files whose suffix is in `stack.SUFFIXES` go to `stack.extract`, everything else to `extract_worker._handle` unchanged. When the stack's result has no chunk with non-blank text, it `sys.exit(extract_worker.EXIT_NO_TEXT)`, the same rule `_handle` applies. Otherwise it writes `json.dumps(result)` to the out path.
+  - `_worker.main(stack) -> None`: `--serve` → `extract_worker.serve_stdio(handler(stack))`. `--pages MANIFEST --out OUT [--only-ref] [--ocr-lang L]` → page mode: per manifest file, `stack.page_texts(...)` for its pages, one line per page `{"sha256", "page", "text", "ms", "error"}`, warming up untimed on the first file. A per-file exception writes `error` (the exception's `type: message`) on that file's pages and the run carries on.
+  - `docling_standard`: `extract = extract_worker._extract_docling` (every PDF through docling whole, as on `main`). `page_texts`: `_converter(ocr_lang).convert(path).document` once, then `doc.export_to_markdown(page_no=n)`. `ms` = the conversion time ÷ the requested page count, amortized; say so in the docstring.
+  - `docling_routed`: `extract = pdf_router.extract`. `page_texts`: if `not is_slide_deck`, same as standard. Otherwise walk every page in order as `pdf_router.extract` does (the `carried` title included): text/blank pages → `text_page_document(...).export_to_markdown()`, others → `_converter(ocr_lang).convert(path, page_range=(n, n)).document.export_to_markdown()`. Return only the requested pages, each timed on its own.
+  - `collect(manifest: dict, out_path: Path) -> list[dict]`: reads page-mode output; manifest pages absent from it come back with `error="missing from stack output"`.
+  - Runner CLI: `python -m bench.extract.run --stack NAME [--manifest bench/corpus/manifest.json] [--only-ref]`. Runs `[sys.executable, "-m", f"bench.stacks.{NAME}", "--pages", …]` under `monitor.run` with `PYTHONPATH` = repo root, then collects, scores, and appends one `extract` row with `arm=NAME`. Metrics are the score keys plus `wall_s`, `peak_rss_mb`, `ms_p50`. Page text goes to a `tempfile` that is deleted afterwards.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
 ```python
+# tests/bench/test_stacks.py — a fake stack module built with types.ModuleType
+def test_claimed_suffix_goes_to_the_stack(tmp_path):
+    stack = fake_stack(SUFFIXES=frozenset({".pdf"}), result={"pages": 1, "chunks": [{"text": "hi", ...}]})
+    handler(stack)(touch(tmp_path / "a.pdf"), tmp_path / "out.json", None)
+    assert json.loads((tmp_path / "out.json").read_text())["pages"] == 1 and stack.calls == 1
+
+def test_other_suffixes_use_groundly_default(tmp_path):
+    stack = fake_stack(SUFFIXES=frozenset({".pdf"}))
+    (tmp_path / "n.txt").write_text("plain text notes long enough to chunk")
+    handler(stack)(tmp_path / "n.txt", tmp_path / "out.json", None)
+    assert stack.calls == 0 and json.loads((tmp_path / "out.json").read_text())["chunks"]
+
+def test_blank_stack_output_exits_no_text(tmp_path):
+    stack = fake_stack(result={"pages": 1, "chunks": [{"text": "  "}]})
+    with pytest.raises(SystemExit) as e:
+        handler(stack)(touch(tmp_path / "a.pdf"), tmp_path / "out.json", None)
+    assert e.value.code == extract_worker.EXIT_NO_TEXT
+
+# tests/bench/test_extract_run.py
 def test_collect_marks_pages_the_stack_skipped(tmp_path):
     manifest = {"version": 1, "pages": [page("aa", 1), page("aa", 2)]}
     out = tmp_path / "o.jsonl"
     out.write_text(json.dumps({"sha256": "aa", "page": 1, "text": "x", "ms": 1.0, "error": None}) + "\n")
-    got = collect(manifest, out)
-    assert [g["error"] for g in got] == [None, "missing from stack output"]
+    assert [g["error"] for g in collect(manifest, out)] == [None, "missing from stack output"]
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+The `.txt` test needs the plain-text path of `extract_worker._handle`, which loads the bge-m3 tokenizer for chunking. If that needs a model download, mark the test `@pytest.mark.slow` and keep the other three in the fast suite.
 
-Run: `uv run pytest tests/bench/test_extract_run.py -v`
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `uv run pytest tests/bench/test_stacks.py tests/bench/test_extract_run.py -v`
 Expected: FAIL, import error
 
-- [ ] **Step 3: Implement both stacks and `run.py`** to the contract above.
+- [ ] **Step 3: Implement `_worker.py`, both stacks and `extract/run.py`** to the interfaces above.
 
-- [ ] **Step 4: Run the test, then a smoke run on a two-page manifest**
+- [ ] **Step 4: Run the tests, then smoke-test both modes**
 
-Run: `uv run pytest tests/bench/test_extract_run.py -v` → 1 passed.
-Then, from a scratch manifest holding 2 pages of one apd deck: `uv run python -m bench.extract.run --stack docling_routed --manifest <scratch>` → one row appended, `failed_pages` 0.
+Run: `uv run pytest tests/bench/test_stacks.py tests/bench/test_extract_run.py -v` → all pass (slow ones excepted).
+Page mode: from a scratch manifest with 2 pages of one apd deck, `uv run python -m bench.extract.run --stack docling_routed --manifest <scratch>` → one row, `failed_pages` 0.
+Worker mode: `printf '{"in": "<an apd deck>", "out": "<tmp>/o.json", "ocr_lang": null}\n' | PYTHONPATH=. uv run python -m bench.stacks.docling_routed --serve` → `{"status": "ok"}` and `o.json` has chunks.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add bench tests/bench
-git commit -m "feat(bench): docling standard and routed stacks, extract runner"
+git commit -m "feat(bench): stack modules with worker and page modes, extract runner"
 ```
 
 ---
@@ -319,16 +343,18 @@ git commit -m "feat(bench): docling standard and routed stacks, extract runner"
 - Create: `bench/stacks/mineru.py`
 
 **Interfaces:**
-- Consumes: the stack CLI contract (Task 5)
-- Produces: `bench/stacks/mineru.py` under the same contract. Each page is rendered with pypdfium2 at scale 2 and run through MinerU2.5 two-step extraction on the MLX backend (model: the MinerU2.5-Pro 2605 1.2B checkpoint the spike used; check its exact HF id and the client API in `mineru_vl_utils` before coding). A page's blocks joined in reading order as text.
+- Consumes: the stack module contract and `_worker.main` (Task 5)
+- Produces: `bench/stacks/mineru.py` with `SUFFIXES = frozenset({".pdf"})`.
+  - `page_texts`: each page rendered with pypdfium2 at scale 2 and run through MinerU2.5 two-step extraction on the MLX backend, using the MinerU2.5-Pro 2605 1.2B checkpoint the spike used. Check its exact HF id and the client API in `mineru_vl_utils` before coding. A page's blocks are joined in reading order as Markdown.
+  - `extract`: each page's Markdown → a one-page `DoclingDocument` through docling's Markdown backend → `extract_worker.chunk_document(doc, page=n)`. Every chunk cites its page.
 
-- [ ] **Step 1: Record the before state.** `cp uv.lock /tmp/uv.lock.before`; `uv run python -c "import cv2; print(cv2.__version__)"` → `5.0.0.93` or the same major.minor.
+- [ ] **Step 1: Record the before state.** Copy `uv.lock` into the plan workspace; `uv run python -c "import cv2; print(cv2.__version__)"` → note it (5.0.x).
 
 - [ ] **Step 2: Add the extra and the override, then `uv lock && uv sync --extra bench --extra dev`.** The guard hook blocks edits whose text contains `mlx==`; `mineru-vl-utils[mlx]==` does not match it, so it should go through. If it is blocked, stop and report.
 
-- [ ] **Step 3: Verify nothing existing changed.** `diff <(grep -A1 '^name = ' /tmp/uv.lock.before) <(grep -A1 '^name = ' uv.lock)` shows **only added** packages. `cv2.__version__` is unchanged. `uv run pytest -q` passes as before. If any existing package changed version, revert `pyproject.toml` and `uv.lock` and report to Paul.
+- [ ] **Step 3: Verify nothing existing changed.** Comparing package name/version pairs between the saved lock and `uv.lock` shows **only added** packages. `cv2.__version__` is unchanged. `uv run pytest -q` passes as before. If any existing package changed version, revert `pyproject.toml` and `uv.lock` and report.
 
-- [ ] **Step 4: Implement `mineru.py` and smoke-run it on one apd image page:** `uv run python bench/stacks/mineru.py --manifest <scratch> --out /tmp/m.jsonl` → one line, non-empty `text`.
+- [ ] **Step 4: Implement `mineru.py` and smoke-test both modes on one apd image page:** page mode gives one line with non-empty `text`; worker mode (the Task 5 printf check) gives `{"status": "ok"}`.
 
 - [ ] **Step 5: Commit**
 
@@ -339,20 +365,20 @@ git commit -m "feat(bench): MinerU2.5 MLX stack behind an optional bench extra"
 
 ---
 
-### Task 7: Index bench (interleaved A/B over git refs)
+### Task 7: Index bench (interleaved stacks through the real pipeline)
 
 **Files:**
-- Create: `bench/index/__init__.py`, `bench/index/run.py`, `bench/index/stages.py`, `tests/bench/test_index_run.py`
+- Create: `bench/index/__init__.py`, `bench/index/run.py`, `tests/bench/test_index_run.py`
 
 **Interfaces:**
-- Consumes: `run` (Task 1), `append`/`new_session`/`machine`/`versions` (Task 2)
+- Consumes: `run` (Task 1), `append`/`new_session`/`machine`/`versions` (Task 2), stack modules (Task 5)
 - Produces:
-  - `schedule(refs: list[str], runs: int) -> list[tuple[str, int]]`: interleaved, `[(r0,0),(r1,0),(r0,1),(r1,1),…]`
-  - `worktree(ref: str, root: Path = Path.home() / ".cache/groundly-bench/worktrees") -> Path`: `git worktree add --detach <root>/<ref-slug> <ref>` if absent (else `git checkout --detach <ref>` there), then `uv sync --frozen`; returns the worktree path
+  - `schedule(stacks: list[str], runs: int) -> list[tuple[str, int]]`: interleaved, `[(s0,0),(s1,0),(s0,1),(s1,1),…]`
   - `scratch_home(models: Path = Path.home() / ".groundly/models") -> Path`: a `tempfile.mkdtemp` with `models` symlinked in and nothing else
+  - `worker_argv(stack: str, memray_out: Path | None) -> list[str]`: `[sys.executable, "-m", f"bench.stacks.{stack}", "--serve"]`, or with memray `[sys.executable, "-m", "memray", "run", "-q", "-o", str(memray_out), "-m", f"bench.stacks.{stack}", "--serve"]`
   - `store_stats(home: Path, subject: str) -> dict`: `{"chunks": int, "materials": int, "failed": [{"filename", "error"}]}` from `store.db`
-  - CLI: `python -m bench.index.run --refs main pdf-page-router --runs 5 --subject apd --input ~/.groundly/apd/materials [--keep-homes] [--memray]`. For each scheduled run: a scratch home, then `monitor.run([wt/.venv/bin/groundly, "index", subject, input], env={..., "GROUNDLY_HOME": home})`, then `store_stats`. Appends an `index` row (`arm=ref`, metrics `wall_s, peak_rss_mb, chunks, materials, failed_count`; the `failed` list goes in the row as `failed`, filenames and errors only), and deletes the home unless `--keep-homes` (kept homes print their path).
-  - `stages.py`: standalone (imports `groundly` and stdlib only), run as `<wt>/.venv/bin/python bench/index/stages.py --subject S --input DIR` with `GROUNDLY_HOME` set. Builds `IngestionPipeline(Subject(S), on_event=…)` after creating the subject the way the CLI does, sums per-file time from `"extracting"` to `"embedding"` (extract) and from `"embedding"` to the terminal status (embed), and prints one JSON object `{"extract_s", "embed_s", "files"}`. The runner calls it once per ref when given `--stages` and stores it as a separate `index-stages` row.
+  - Child mode `python -m bench.index.run --one --stack S --subject N --input P [--memray-out F]`, run with `GROUNDLY_HOME` set by the parent. It initializes the subject as `groundly index` does (`Subject(N)`, then `initialize()` if it does not exist), runs `IngestionPipeline(subj, extractor=SubprocessExtractor(load_settings().ingestion, argv=worker_argv(S, F)), on_event=…).run([P])` with the extractor closed afterwards (context manager), and prints one JSON object `{"pipeline_s", "extract_s", "embed_s", "files"}`. `extract_s` sums each file's time from `"extracting"` to `"embedding"`; `embed_s` sums from `"embedding"` to its terminal status.
+  - Parent CLI: `python -m bench.index.run --stacks docling_standard docling_routed --runs 5 --subject apd --input ~/.groundly/apd/materials [--keep-homes] [--memray]`. For each scheduled run: a scratch home, then `monitor.run([sys.executable, "-m", "bench.index.run", "--one", …], env={**os.environ, "GROUNDLY_HOME": home, "PYTHONPATH": repo_root})` (the tree peak covers runner plus worker), then `store_stats`. It appends an `index` row (`arm=stack`; metrics `wall_s, pipeline_s, extract_s, embed_s, peak_rss_mb, chunks, materials, failed_count`; `failed` in the row as filenames and errors only) and deletes the home unless `--keep-homes` (kept homes print their path). With `--memray`, each run's worker profile goes to `bench/results/memray/<session>-<stack>-<run>.bin`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -366,9 +392,15 @@ def test_scratch_home_holds_only_the_models_link(tmp_path):
     assert [p.name for p in home.iterdir()] == ["models"]
     assert (home / "models").resolve() == models.resolve()
 
-def test_store_stats_reads_chunks_and_failures(tmp_path, monkeypatch):
-    # build a subject in tmp_path via groundly's SubjectStore: 1 indexed material with 3 chunks
-    # and 1 extraction_failed material with error "extraction timed out after 300s"
+def test_worker_argv_plain_and_memray(tmp_path):
+    assert worker_argv("x", None) == [sys.executable, "-m", "bench.stacks.x", "--serve"]
+    assert worker_argv("x", tmp_path / "w.bin") == [
+        sys.executable, "-m", "memray", "run", "-q", "-o", str(tmp_path / "w.bin"),
+        "-m", "bench.stacks.x", "--serve"]
+
+def test_store_stats_reads_chunks_and_failures(tmp_path):
+    # schema via groundly's SubjectStore, rows by raw SQL (ruling R4): 1 indexed material with
+    # 3 chunks, 1 extraction_failed "big.pdf" with error "extraction timed out after 300s"
     stats = store_stats(tmp_path, "s")
     assert stats["chunks"] == 3 and stats["materials"] == 2
     assert stats["failed"] == [{"filename": "big.pdf", "error": "extraction timed out after 300s"}]
@@ -379,18 +411,18 @@ def test_store_stats_reads_chunks_and_failures(tmp_path, monkeypatch):
 Run: `uv run pytest tests/bench/test_index_run.py -v`
 Expected: FAIL, import error
 
-- [ ] **Step 3: Implement `run.py` and `stages.py`** to the interfaces above.
+- [ ] **Step 3: Implement `run.py`** to the interfaces above.
 
 - [ ] **Step 4: Run the tests, then a one-run smoke test**
 
-Run: `uv run pytest tests/bench/test_index_run.py -v` → 3 passed.
-Then `uv run python -m bench.index.run --refs main pdf-page-router --runs 1 --subject smoke --input <dir with 2 small apd PDFs>` → two `index` rows, both `returncode` 0.
+Run: `uv run pytest tests/bench/test_index_run.py -v` → 4 passed.
+Then `uv run python -m bench.index.run --stacks docling_standard docling_routed --runs 1 --subject smoke --input <dir with 2 small apd PDFs>` → two `index` rows, both `returncode` 0 and `chunks` > 0. Then once with `--memray` → a `.bin` per run and still `returncode` 0, which proves `-q` keeps the reply protocol clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add bench/index tests/bench
-git commit -m "feat(bench): interleaved index A/B over git worktrees"
+git commit -m "feat(bench): interleaved index runs of stacks through the real pipeline"
 ```
 
 ---
@@ -443,10 +475,10 @@ git commit -m "feat(bench): retrieval bench with the apd labelled set"
 - Create: `bench/README.md` (how to run each bench, what each metric means, the stack contract, the memray caveat)
 
 - [ ] **Step 1: Nothing else heavy running.** Close other indexing; `pmset -g` shows AC power. Note the time.
-- [ ] **Step 2: Gate runs.** `uv run python -m bench.index.run --refs main pdf-page-router --runs 5 --subject apd --input ~/.groundly/apd/materials --stages --keep-homes` (about 40 min, run in the background). Expected: 10 `index` rows with `returncode` 0, chunk counts near 1,197 (main) and 1,343 (router).
-- [ ] **Step 3: Verdict.** `uv run python -m bench.common.compare index --baseline main --gate 0.85` → paste the table.
-- [ ] **Step 4: Retrieval on one kept home per ref.** `python -m bench.retrieval.run --home <kept main home> --subject apd --queries bench/retrieval/queries/apd.json --arm main`, same for the router; compare `--baseline main --metric hit_within1@8`. Expected near the spike: within one page 0.98 for both, exact 0.80 (main) vs 0.94 (router). Then delete the kept homes.
-- [ ] **Step 5: New subjects and timeouts.** `uv run python -m bench.extract.sample --version 1` prints RO/EN shares per subject. Pick the most RO and the most EN subject among gac, lftc, pdss, pm, romsilva (pi and bia are excluded on size). Run `bench.index.run --runs 1` on each with `--input ~/.groundly/<s>/materials`. Then run each of the three timed-out files alone (`LFTC Cursuri.pdf`, `PI_Slide-uri_3.pdf`, `NT1 - Compozitii, scheme si tehnologii de regenerare.pdf`) as its own `--subject timeout-<n>` run. Label each timeout router-caused, shared, or neither.
+- [ ] **Step 2: Gate runs.** `uv run python -m bench.index.run --stacks docling_standard docling_routed --runs 5 --subject apd --input ~/.groundly/apd/materials --keep-homes` (about 40 min, run in the background). Expected: 10 `index` rows with `returncode` 0, chunk counts near 1,197 (standard) and 1,343 (routed).
+- [ ] **Step 3: Verdict.** `uv run python -m bench.common.compare index --baseline docling_standard --gate 0.85` → paste the table (`wall_s`, then `--metric extract_s` and `--metric embed_s`).
+- [ ] **Step 4: Retrieval on one kept home per stack.** `python -m bench.retrieval.run --home <kept standard home> --subject apd --queries bench/retrieval/queries/apd.json --arm docling_standard`, same for routed; compare `--baseline docling_standard --metric hit_within1@8`. Expected near the spike: within one page 0.98 for both, exact 0.80 (standard) vs 0.94 (routed). Then delete the kept homes. One `--memray` run per stack on apd for the worker memory profiles.
+- [ ] **Step 5: New subjects and timeouts.** `uv run python -m bench.extract.sample --version 1` prints RO/EN shares per subject. Pick the most RO and the most EN subject among gac, lftc, pdss, pm, romsilva (pi and bia are excluded on size). Run `bench.index.run --stacks docling_standard docling_routed --runs 1` on each with `--input ~/.groundly/<s>/materials`. Then run each of the three timed-out files alone (`LFTC Cursuri.pdf`, `PI_Slide-uri_3.pdf`, `NT1 - Compozitii, scheme si tehnologii de regenerare.pdf`) as its own `--subject timeout-<n>` run. Label each timeout router-caused, shared, or neither.
 - [ ] **Step 6: Report to Paul** with the gate table, the retrieval numbers and the timeout labels. Restating decision 49's gate is Paul's call via `/decision`; do not edit decision 49 here.
 - [ ] **Step 7: Commit** `bench/README.md` and `bench/corpus/manifest.json`.
 
@@ -459,10 +491,10 @@ git commit -m "docs(bench): README and corpus manifest v1"
 
 ### Task 10: Accuracy baseline (needs Paul's corrections)
 
-- [ ] **Step 1: Draft the reference pages.** `uv run python bench/stacks/mineru.py --manifest bench/corpus/manifest.json --only-ref --out /tmp/ref.jsonl`. Write each page's text to `bench/reference/<sha256>-<page>.draft.txt`, and the page rendered at scale 2 next to it as `.png`.
+- [ ] **Step 1: Draft the reference pages.** `PYTHONPATH=. uv run python -m bench.stacks.mineru --pages bench/corpus/manifest.json --only-ref --out <workspace>/ref.jsonl`. Write each page's text to `bench/reference/<sha256>-<page>.draft.txt`, and the page rendered at scale 2 next to it as `.png`.
 - [ ] **Step 2: Hand off to Paul.** He corrects each draft against its PNG and saves it as `<sha256>-<page>.txt` (about an hour). Wait.
 - [ ] **Step 3: Extract runs.** `bench.extract.run --stack docling_standard`, `--stack docling_routed`, `--stack mineru` (one session per invocation is fine for accuracy; the speed gate is Task 9's). Expected: `failed_pages` 0 (or explained), `scored_pages` = the manifest size.
-- [ ] **Step 4: RO retrieval set.** Write about 30 labelled queries `{query, file, page}` on the most-RO subject chosen in Task 9, in the apd set's style, to `bench/retrieval/queries/<subject>.json`. Paul spot-checks them. Run the retrieval bench on a fresh index of that subject from each ref (`bench.index.run --runs 1 --keep-homes`).
+- [ ] **Step 4: RO retrieval set.** Write about 30 labelled queries `{query, file, page}` on the most-RO subject chosen in Task 9, in the apd set's style, to `bench/retrieval/queries/<subject>.json`. Paul spot-checks them. Run the retrieval bench on a fresh index of that subject from each stack (`bench.index.run --stacks docling_standard docling_routed --runs 1 --keep-homes`).
 - [ ] **Step 5: Report** per stack: word F1 / bigram F1 / diacritic recall (plain and folded) per kind × language, plus RO retrieval, compared with `--baseline docling_standard`.
 - [ ] **Step 6: Commit** the RO query file.
 
