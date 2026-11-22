@@ -11,7 +11,15 @@ import pytest
 
 from groundly.web import runs
 from tests.web.conftest import INIT as FAKE_INIT
-from tests.web.conftest import gone, success, use, wait_until_ended
+from tests.web.conftest import (
+    gone,
+    stream_delta,
+    stream_start,
+    success,
+    tool_result,
+    use,
+    wait_until_ended,
+)
 
 
 def test_python_dash_m_groundly_runs_the_cli():
@@ -96,9 +104,10 @@ def test_prompts_carry_only_the_flow_the_subject_and_the_topic_id():
 
 
 def test_reading_a_topic_is_a_plain_word_step():
-    assert runs.Steps().feed(use("t1", "mcp__groundly__topic", {"topic_id": 27})) == [
-        "Reading the topic"
-    ]
+    assert runs.Steps().feed(use("t1", "mcp__groundly__topic", {"topic_id": 27})) == (
+        ["Reading the topic"],
+        False,
+    )
 
 
 INIT = {
@@ -174,22 +183,29 @@ def _result(tool_id, payload, is_error=False):
 
 def test_steps_come_from_tool_names_and_counts_never_model_text():
     s = runs.Steps()
-    assert s.feed(_text("I will now write <script>")) == []
-    assert s.feed(_use("t1", "mcp__groundly__search", {})) == ["Reading the course"]
-    assert s.feed(_use("t2", "mcp__groundly__search", {})) == []  # consecutive repeats collapse
-    assert s.feed(_use("t3", "mcp__groundly__submit_questions", {"questions": [1, 2, 3]})) == [
-        "Submitting 3 questions"
-    ]
-    assert s.feed(_result("t3", {"accepted": [{}, {}], "rejected": [{}]})) == [
-        "2 stored, 1 rejected"
-    ]
-    assert s.feed(_use("t4", "mcp__groundly__review_answers", {"reviews": [1, 2]})) == [
-        "Recording 2 verdicts"
-    ]
-    assert s.feed(_result("t4", {"recorded": [7, 8], "awaiting": [], "remaining": 0})) == [
-        "2 verdicts recorded"
-    ]
-    assert s.feed(_result("t9", "boom", is_error=True)) == ["A tool call failed"]
+    assert s.feed(_text("I will now write <script>")) == ([], False)
+    assert s.feed(_use("t1", "mcp__groundly__search", {})) == (["Reading the course"], False)
+    assert s.feed(_use("t2", "mcp__groundly__search", {})) == (
+        [],
+        False,
+    )  # consecutive repeats collapse
+    assert s.feed(_use("t3", "mcp__groundly__submit_questions", {"questions": [1, 2, 3]})) == (
+        ["Submitting 3 questions"],
+        False,
+    )
+    assert s.feed(_result("t3", {"accepted": [{}, {}], "rejected": [{}]})) == (
+        ["2 stored, 1 rejected"],
+        True,
+    )
+    assert s.feed(_use("t4", "mcp__groundly__review_answers", {"reviews": [1, 2]})) == (
+        ["Recording 2 verdicts"],
+        False,
+    )
+    assert s.feed(_result("t4", {"recorded": [7, 8], "awaiting": [], "remaining": 0})) == (
+        ["2 verdicts recorded"],
+        True,
+    )
+    assert s.feed(_result("t9", "boom", is_error=True)) == (["A tool call failed"], False)
 
 
 def test_steps_read_a_result_wrapped_as_result_or_given_as_a_plain_string():
@@ -199,7 +215,7 @@ def test_steps_read_a_result_wrapped_as_result_or_given_as_a_plain_string():
     wrapped["message"]["content"][0]["content"] = wrapped["message"]["content"][0]["content"][0][
         "text"
     ]
-    assert s.feed(wrapped) == ["1 stored, 0 rejected"]
+    assert s.feed(wrapped) == (["1 stored, 0 rejected"], True)
 
 
 def test_summary_of_success_and_error():
@@ -419,3 +435,170 @@ def test_a_start_is_refused_while_the_last_claude_is_still_exiting(fake_claude):
     finally:
         runner.shutdown()
     assert gone(claude_pid)
+
+
+def test_build_argv_enables_partial_messages():
+    argv = runs.build_argv("/bin/claude", "write", "P", None)
+    assert "--include-partial-messages" in argv
+    assert argv.index("--include-partial-messages") == argv.index("--verbose") + 1
+
+
+def test_stream_tracker_tracks_partial_deltas_and_drops_tool_json():
+    tracker = runs.StreamTracker()
+    assert tracker.on_init() == runs.PhaseEvent("thinking", None)
+    assert tracker.feed(stream_start("thinking")) == [
+        runs.PhaseEvent("thinking", None),
+        runs.DeltaEvent("thinking", "", reset=True),
+    ]
+    tracker.feed(stream_delta("thinking_delta", "Checking "))
+    tracker.feed(stream_delta("thinking_delta", "slides.\nNext line."))
+    assert tracker.thought == "Checking slides.\nNext line."
+    assert tracker.thought_channel == "thinking"
+    # Drops input_json_delta and flips phase immediately on tool_use start
+    assert tracker.feed(stream_start("tool_use", name="mcp__groundly__submit_questions")) == [
+        runs.PhaseEvent("writing", "Drafting questions")
+    ]
+    assert tracker.feed(stream_delta("input_json_delta", '{"questions": [')) == []
+    assert tracker.thought == "Checking slides.\nNext line."
+    # Completed tool_result transitions back to thinking
+    assert tracker.feed(tool_result("q1", {"accepted": [{}], "rejected": []})) == [
+        runs.PhaseEvent("thinking", None)
+    ]
+    # review_answers starts as reading, upgrades to writing on completed assistant if reviews present
+    assert tracker.feed(stream_start("tool_use", name="mcp__groundly__review_answers")) == [
+        runs.PhaseEvent("reading", "Reviewing answers")
+    ]
+    assert tracker.feed(use("r1", "mcp__groundly__review_answers", {"reviews": [1]})) == [
+        runs.PhaseEvent("writing", "Reviewing answers")
+    ]
+    tracker.reset_settled()
+    assert (tracker.phase, tracker.active_tool, tracker.thought, tracker.thought_channel) == (
+        None,
+        None,
+        "",
+        None,
+    )
+
+
+def test_stream_tracker_caps_thought_at_max_stream_chars_and_falls_back_on_assistant():
+    tracker = runs.StreamTracker()
+    tracker.on_init()
+    tracker.feed(stream_start("text"))
+    tracker.feed(stream_delta("text_delta", "a" * (runs.MAX_STREAM_CHARS + 50)))
+    assert len(tracker.thought) == runs.MAX_STREAM_CHARS
+    assert tracker.thought == "a" * runs.MAX_STREAM_CHARS
+    # Non-partial assistant fallback updates thought when no stream_event ran for the turn
+    tracker2 = runs.StreamTracker()
+    tracker2.on_init()
+    tracker2.feed(
+        {"type": "assistant", "message": {"content": [{"type": "thinking", "thinking": "Plan"}]}}
+    )
+    assert tracker2.thought == "Plan" and tracker2.thought_channel == "thinking"
+
+
+def test_steps_refresh_flag_triggers_only_on_nonempty_gate_writes():
+    s = runs.Steps()
+    assert s.feed(stream_delta("text_delta", "10 stored")) == ([], False)
+    assert s.feed(use("q0", "mcp__groundly__submit_questions", {"questions": []})) == (
+        ["Submitting 0 questions"],
+        False,
+    )
+    assert s.feed(tool_result("q0", {"accepted": [], "rejected": [{}]})) == (
+        ["0 stored, 1 rejected"],
+        False,
+    )
+    assert s.feed(use("q1", "mcp__groundly__submit_questions", {"questions": [1]})) == (
+        ["Submitting 1 questions"],
+        False,
+    )
+    assert s.feed(tool_result("q1", {"accepted": [{}], "rejected": []})) == (
+        ["1 stored, 0 rejected"],
+        True,
+    )
+    assert s.feed(use("r0", "mcp__groundly__review_answers", {})) == (
+        ["Reading answers awaiting review"],
+        False,
+    )
+    assert s.feed(tool_result("r0", {"awaiting": [], "remaining": 0})) == ([], False)
+    assert s.feed(use("r1", "mcp__groundly__review_answers", {"reviews": [1]})) == (
+        ["Recording 1 verdicts"],
+        False,
+    )
+    assert s.feed(tool_result("r1", {"recorded": [1], "remaining": 0})) == (
+        ["1 verdicts recorded"],
+        True,
+    )
+
+
+def test_stream_event_before_init_fails_closed(fake_claude):
+    fake_claude.script([stream_delta("text_delta", "hello"), FAKE_INIT, success()])
+    runner = runs.Runner()
+    runner.start("write", "PDSS", 7, "the prompt")
+    run = wait_until_ended(runner.view)
+    assert run["status"] == "failed" and run["error"]["reason"] == "isolation_failed"
+    assert run["phase"] is None and run["thought"] == ""
+
+
+def test_run_tracks_and_clears_phase_and_thought_on_settlement(fake_claude):
+    fake_claude.script(
+        [
+            FAKE_INIT,
+            stream_start("thinking"),
+            stream_delta("thinking_delta", "Thinking..."),
+            use("t1", "mcp__groundly__search"),
+            success("Stored 10."),
+        ]
+    )
+    runner = runs.Runner()
+    started = runner.start("write", "PDSS", 7, "the prompt")
+    assert (started["phase"], started["active_tool"], started["thought"]) == (
+        "starting",
+        None,
+        "",
+    )
+    done = wait_until_ended(runner.view)
+    assert (
+        done["status"],
+        done["phase"],
+        done["active_tool"],
+        done["thought"],
+        done["thought_channel"],
+    ) == ("done", None, None, "", None)
+
+
+def test_stop_and_exit_clear_live_phase_and_thought(fake_claude):
+    fake_claude.script(
+        [
+            FAKE_INIT,
+            stream_start("thinking"),
+            stream_delta("thinking_delta", "Working..."),
+            "SLEEP",
+        ]
+    )
+    runner = runs.Runner()
+    runner.start("write", "PDSS", 7, "the prompt")
+    stopped = runner.stop()
+    assert stopped is not None
+    assert (
+        stopped["status"],
+        stopped["phase"],
+        stopped["active_tool"],
+        stopped["thought"],
+        stopped["thought_channel"],
+    ) == ("stopped", None, None, "", None)
+
+    fake_claude.script(
+        [FAKE_INIT, stream_start("text"), stream_delta("text_delta", "Partial...")],
+        exit_code=2,
+        stderr="crashed",
+    )
+    runner2 = runs.Runner()
+    runner2.start("write", "PDSS", 7, "the prompt")
+    ended = wait_until_ended(runner2.view)
+    assert (
+        ended["status"],
+        ended["phase"],
+        ended["active_tool"],
+        ended["thought"],
+        ended["thought_channel"],
+    ) == ("failed", None, None, "", None)

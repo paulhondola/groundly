@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib.resources import files
 
@@ -27,6 +28,10 @@ TARGET_QUESTIONS = MASTERY_WINDOW  # a subtopic is filled to the mastery window
 RUN_TIMEOUT_S = 20 * 60
 MAX_STEPS = 50
 MAX_SUMMARY_CHARS = 2000
+MAX_STREAM_CHARS = 2000
+DELTA_COALESCE_S = 0.04
+SUBSCRIBER_QUEUE_MAX = 256
+SSE_KEEPALIVE_S = 15.0
 
 WRITE_TOOLS = tuple(
     f"mcp__groundly__{name}"
@@ -121,6 +126,7 @@ def build_argv(claude: str, kind: str, prompt: str, mcp_url: str | None) -> list
         "--output-format",
         "stream-json",
         "--verbose",
+        "--include-partial-messages",
         "--no-session-persistence",
     ]
 
@@ -201,24 +207,26 @@ class Steps:
             return "Reading answers awaiting review"
         return _USE_WORDS.get(name)
 
-    def _result(self, block: dict) -> str | None:
+    def _result(self, block: dict) -> tuple[str | None, bool]:
         if block.get("is_error"):
-            return "A tool call failed"
+            return "A tool call failed", False
         name = self._names.get(str(block.get("tool_use_id")))
         data = _payload(block.get("content"))
         if data is None:
-            return None
+            return None, False
         if name == "submit_questions":
             accepted, rejected = _count(data.get("accepted")), _count(data.get("rejected"))
-            return f"{accepted} stored, {rejected} rejected"
+            return f"{accepted} stored, {rejected} rejected", accepted > 0
         if name == "review_answers" and "recorded" in data:
-            return f"{_count(data.get('recorded'))} verdicts recorded"
-        return None
+            recorded = _count(data.get("recorded"))
+            return f"{recorded} verdicts recorded", recorded > 0
+        return None, False
 
-    def feed(self, event: dict) -> list[str]:
+    def feed(self, event: dict) -> tuple[list[str], bool]:
         out: list[str] = []
+        refresh = False
         if event.get("type") not in ("assistant", "user"):
-            return out
+            return out, refresh
         content = (event.get("message") or {}).get("content")
         for block in content if isinstance(content, list) else []:
             if not isinstance(block, dict):
@@ -226,8 +234,161 @@ class Steps:
             if block.get("type") == "tool_use":
                 self._emit(self._use(block), out)
             elif block.get("type") == "tool_result":
-                self._emit(self._result(block), out)
+                step, block_refresh = self._result(block)
+                self._emit(step, out)
+                refresh = refresh or block_refresh
+        return out, refresh
+
+
+@dataclass(frozen=True)
+class PhaseEvent:
+    """Live activity phase and plain-language tool label emitted by StreamTracker."""
+
+    phase: str | None
+    active_tool: str | None
+
+
+@dataclass(frozen=True)
+class DeltaEvent:
+    """Live plain-text stream delta (or reset marker) emitted by StreamTracker."""
+
+    channel: str
+    text: str
+    reset: bool = False
+
+
+def _tool_phase(name: str, tool_input: dict | None = None) -> tuple[str, str | None]:
+    """Map a stripped Groundly tool name (and optional input) to (phase, active_tool)."""
+    if name == "submit_questions":
+        return "writing", "Drafting questions"
+    if name == "review_answers":
+        reviews = (tool_input or {}).get("reviews")
+        return ("writing" if reviews else "reading"), "Reviewing answers"
+    return "reading", _USE_WORDS.get(name)
+
+
+class StreamTracker:
+    """Tracks live run phase, active tool, and tail-capped rolling current-turn thought."""
+
+    def __init__(self) -> None:
+        self.phase: str | None = "starting"
+        self.active_tool: str | None = None
+        self.thought: str = ""
+        self.thought_channel: str | None = None
+        self._saw_stream_for_turn = False
+
+    def on_init(self) -> PhaseEvent:
+        """Transition from starting to initial thinking after system/init passes."""
+        self.phase = "thinking"
+        self.active_tool = None
+        return PhaseEvent(self.phase, self.active_tool)
+
+    def reset_settled(self) -> None:
+        """Clear live streaming state once the run reaches any terminal status."""
+        self.phase = None
+        self.active_tool = None
+        self.thought = ""
+        self.thought_channel = None
+        self._saw_stream_for_turn = False
+
+    def _append_thought(self, channel: str, text: str) -> DeltaEvent | None:
+        if not text:
+            return None
+        self.thought = (self.thought + text)[-MAX_STREAM_CHARS:]
+        self.thought_channel = channel
+        return DeltaEvent(channel, text)
+
+    def _feed_stream(self, event: dict) -> list[PhaseEvent | DeltaEvent]:
+        inner = event.get("event") or {}
+        if not isinstance(inner, dict):
+            return []
+        etype = inner.get("type")
+        if etype == "content_block_start":
+            block = inner.get("content_block") or {}
+            if not isinstance(block, dict):
+                return []
+            btype = block.get("type")
+            if btype in ("thinking", "text"):
+                self._saw_stream_for_turn = True
+                self.phase = "thinking"
+                self.active_tool = None
+                self.thought = ""
+                self.thought_channel = btype
+                return [PhaseEvent("thinking", None), DeltaEvent(btype, "", reset=True)]
+            if btype == "tool_use":
+                self._saw_stream_for_turn = True
+                name = str(block.get("name", "")).removeprefix("mcp__groundly__")
+                self.phase, self.active_tool = _tool_phase(name)
+                return [PhaseEvent(self.phase, self.active_tool)]
+            return []
+        if etype == "content_block_delta":
+            delta = inner.get("delta") or {}
+            if not isinstance(delta, dict):
+                return []
+            dtype = delta.get("type")
+            if dtype == "thinking_delta":
+                self._saw_stream_for_turn = True
+                ev = self._append_thought("thinking", str(delta.get("thinking") or ""))
+                return [ev] if ev is not None else []
+            if dtype == "text_delta":
+                self._saw_stream_for_turn = True
+                ev = self._append_thought("text", str(delta.get("text") or ""))
+                return [ev] if ev is not None else []
+            if dtype == "input_json_delta":
+                self._saw_stream_for_turn = True
+                return []
+        return []
+
+    def _feed_assistant(self, event: dict) -> list[PhaseEvent | DeltaEvent]:
+        out: list[PhaseEvent | DeltaEvent] = []
+        content = (event.get("message") or {}).get("content")
+        saw_stream = self._saw_stream_for_turn
+        self._saw_stream_for_turn = False
+        for block in content if isinstance(content, list) else []:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type")
+            if not saw_stream and btype in ("thinking", "text"):
+                text = block.get(btype)
+                if isinstance(text, str) and text:
+                    self.phase = "thinking"
+                    self.active_tool = None
+                    self.thought = text[-MAX_STREAM_CHARS:]
+                    self.thought_channel = btype
+                    out.append(PhaseEvent("thinking", None))
+                    out.append(DeltaEvent(btype, self.thought, reset=True))
+            elif btype == "tool_use":
+                name = str(block.get("name", "")).removeprefix("mcp__groundly__")
+                if saw_stream and name != "review_answers":
+                    continue
+                tool_input = block.get("input")
+                phase, active_tool = _tool_phase(
+                    name, tool_input if isinstance(tool_input, dict) else None
+                )
+                if not saw_stream or (phase, active_tool) != (self.phase, self.active_tool):
+                    self.phase, self.active_tool = phase, active_tool
+                    out.append(PhaseEvent(phase, active_tool))
         return out
+
+    def _feed_user(self, event: dict) -> list[PhaseEvent | DeltaEvent]:
+        content = (event.get("message") or {}).get("content")
+        for block in content if isinstance(content, list) else []:
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                self.phase = "thinking"
+                self.active_tool = None
+                return [PhaseEvent("thinking", None)]
+        return []
+
+    def feed(self, event: dict) -> list[PhaseEvent | DeltaEvent]:
+        """Consume one stream-json event and return any PhaseEvent or DeltaEvent updates."""
+        etype = event.get("type")
+        if etype == "stream_event":
+            return self._feed_stream(event)
+        if etype == "assistant":
+            return self._feed_assistant(event)
+        if etype == "user":
+            return self._feed_user(event)
+        return []
 
 
 def summary_of(event: dict) -> tuple[str | None, tuple[str, str] | None]:
@@ -264,6 +425,13 @@ def _kill(proc: subprocess.Popen) -> None:
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(proc.pid, signal.SIGKILL)
         proc.wait()
+
+
+def _clear_live(run: dict) -> None:
+    run["phase"] = None
+    run["active_tool"] = None
+    run["thought"] = ""
+    run["thought_channel"] = None
 
 
 class Runner:
@@ -320,6 +488,10 @@ class Runner:
                 "subject": subject,
                 "topic_id": topic_id,
                 "status": "running",
+                "phase": "starting",
+                "active_tool": None,
+                "thought": "",
+                "thought_channel": None,
                 "steps": [],
                 "summary": None,
                 "error": None,
@@ -350,10 +522,12 @@ class Runner:
             if run["status"] == "running":
                 run["status"] = status
                 run["error"] = error and {"reason": error[0], "detail": error[1]}
+                _clear_live(run)
         _kill(proc)
 
     def _read(self, proc, run, stderr, timer) -> None:
         steps = Steps()
+        tracker = StreamTracker()
         checked = False
         for raw in iter(lambda: proc.stdout.readline(_MAX_LINE_BYTES), b""):
             try:
@@ -370,8 +544,18 @@ class Runner:
                     fault = check_init(event) if is_init else None
                     if is_init and fault is None:
                         checked = True
+                        tracker.on_init()
+                        with self._lock:
+                            if run["status"] == "running":
+                                run["phase"] = tracker.phase
+                                run["active_tool"] = tracker.active_tool
                         continue
-                    if not is_init and event.get("type") not in ("assistant", "user", "result"):
+                    if not is_init and event.get("type") not in (
+                        "stream_event",
+                        "assistant",
+                        "user",
+                        "result",
+                    ):
                         continue  # other system events (e.g. hooks) carry no tool use
                     self._end(
                         proc,
@@ -380,15 +564,23 @@ class Runner:
                         fault or ("isolation_failed", "the run did not report its tools first"),
                     )
                     break
-                new = steps.feed(event)
+                new, _refresh = steps.feed(event)
+                tracker.feed(event)
                 with self._lock:
-                    if new and run["status"] == "running":
-                        run["steps"] = (run["steps"] + new)[-MAX_STEPS:]
-                    if event.get("type") == "result" and run["status"] == "running":
-                        summary, error = summary_of(event)
-                        run["summary"] = summary
-                        run["status"] = "failed" if error else "done"
-                        run["error"] = error and {"reason": error[0], "detail": error[1]}
+                    if run["status"] == "running":
+                        if new:
+                            run["steps"] = (run["steps"] + new)[-MAX_STEPS:]
+                        run["phase"] = tracker.phase
+                        run["active_tool"] = tracker.active_tool
+                        run["thought"] = tracker.thought
+                        run["thought_channel"] = tracker.thought_channel
+                        if event.get("type") == "result":
+                            summary, error = summary_of(event)
+                            run["summary"] = summary
+                            run["status"] = "failed" if error else "done"
+                            run["error"] = error and {"reason": error[0], "detail": error[1]}
+                            tracker.reset_settled()
+                            _clear_live(run)
             except Exception as e:  # noqa: BLE001 - an event shape it cannot read fails the run, never hangs it
                 reason = "host_error" if checked else "isolation_failed"
                 detail = f"unreadable output from claude ({type(e).__name__}: {e})"
@@ -406,6 +598,7 @@ class Runner:
                 detail = f"claude exited with code {code}" + (f": {tail}" if tail else "")
                 run["status"] = "failed"
                 run["error"] = {"reason": "host_exit", "detail": detail}
+                _clear_live(run)
 
     def stop(self) -> dict | None:
         """Stop the running run, if any; what the gates already stored stays."""

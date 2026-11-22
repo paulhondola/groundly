@@ -42,6 +42,44 @@ def use(tool_id, name, tool_input=None):
     return {"type": "assistant", "message": {"content": [block]}}
 
 
+_DELTA_KEY = {
+    "thinking_delta": "thinking",
+    "text_delta": "text",
+    "input_json_delta": "partial_json",
+}
+
+
+def stream_start(block_type: str, *, name: str | None = None) -> dict:
+    block: dict = {"type": block_type}
+    if name is not None:
+        block["name"] = name
+    return {
+        "type": "stream_event",
+        "event": {"type": "content_block_start", "content_block": block},
+    }
+
+
+def stream_delta(delta_type: str, value: str) -> dict:
+    return {
+        "type": "stream_event",
+        "event": {
+            "type": "content_block_delta",
+            "delta": {"type": delta_type, _DELTA_KEY[delta_type]: value},
+        },
+    }
+
+
+def tool_result(tool_id: str, payload, *, is_error: bool = False) -> dict:
+    text = payload if isinstance(payload, str) else json.dumps(payload)
+    block = {
+        "type": "tool_result",
+        "tool_use_id": tool_id,
+        "content": [{"type": "text", "text": text}],
+        "is_error": is_error,
+    }
+    return {"type": "user", "message": {"content": [block]}}
+
+
 class FakeClaude:
     def __init__(self, root: Path, monkeypatch):
         self.root = root
