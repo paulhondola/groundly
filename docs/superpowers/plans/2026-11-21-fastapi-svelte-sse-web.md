@@ -89,6 +89,7 @@ def test_build_argv_enables_partial_messages():
     argv = runs.build_argv("/bin/claude", "write", "P", None)
     assert "--include-partial-messages" in argv
 
+
 def test_stream_tracker_tracks_partial_deltas_and_drops_tool_json():
     tracker = runs.StreamTracker()
     assert tracker.on_init() == runs.PhaseEvent("thinking", None)
@@ -114,6 +115,7 @@ def test_stream_tracker_tracks_partial_deltas_and_drops_tool_json():
         runs.PhaseEvent("writing", "Reviewing answers")
     ]
 
+
 def test_stream_tracker_caps_thought_at_max_stream_chars_and_falls_back_on_assistant():
     tracker = runs.StreamTracker()
     tracker.on_init()
@@ -124,20 +126,45 @@ def test_stream_tracker_caps_thought_at_max_stream_chars_and_falls_back_on_assis
     # Non-partial assistant fallback updates thought when no stream_event ran for the turn
     tracker2 = runs.StreamTracker()
     tracker2.on_init()
-    tracker2.feed({"type": "assistant", "message": {"content": [{"type": "thinking", "thinking": "Plan"}]}})
+    tracker2.feed(
+        {"type": "assistant", "message": {"content": [{"type": "thinking", "thinking": "Plan"}]}}
+    )
     assert tracker2.thought == "Plan" and tracker2.thought_channel == "thinking"
+
 
 def test_steps_refresh_flag_triggers_only_on_nonempty_gate_writes():
     s = runs.Steps()
     assert s.feed(stream_delta("text_delta", "10 stored")) == ([], False)
-    assert s.feed(use("q0", "mcp__groundly__submit_questions", {"questions": []})) == (["Submitting 0 questions"], False)
-    assert s.feed(tool_result("q0", {"accepted": [], "rejected": [{}]})) == (["0 stored, 1 rejected"], False)
-    assert s.feed(use("q1", "mcp__groundly__submit_questions", {"questions": [1]})) == (["Submitting 1 questions"], False)
-    assert s.feed(tool_result("q1", {"accepted": [{}], "rejected": []})) == (["1 stored, 0 rejected"], True)
-    assert s.feed(use("r0", "mcp__groundly__review_answers", {})) == (["Reading answers awaiting review"], False)
+    assert s.feed(use("q0", "mcp__groundly__submit_questions", {"questions": []})) == (
+        ["Submitting 0 questions"],
+        False,
+    )
+    assert s.feed(tool_result("q0", {"accepted": [], "rejected": [{}]})) == (
+        ["0 stored, 1 rejected"],
+        False,
+    )
+    assert s.feed(use("q1", "mcp__groundly__submit_questions", {"questions": [1]})) == (
+        ["Submitting 1 questions"],
+        False,
+    )
+    assert s.feed(tool_result("q1", {"accepted": [{}], "rejected": []})) == (
+        ["1 stored, 0 rejected"],
+        True,
+    )
+    assert s.feed(use("r0", "mcp__groundly__review_answers", {})) == (
+        ["Reading answers awaiting review"],
+        False,
+    )
     assert s.feed(tool_result("r0", {"awaiting": [], "remaining": 0})) == ([], False)
-    assert s.feed(use("r1", "mcp__groundly__review_answers", {"reviews": [1]})) == (["Recording 1 verdicts"], False)
-    assert s.feed(tool_result("r1", {"recorded": [1], "remaining": 0})) == (["1 verdicts recorded"], True)
+    assert s.feed(use("r1", "mcp__groundly__review_answers", {"reviews": [1]})) == (
+        ["Recording 1 verdicts"],
+        False,
+    )
+    assert s.feed(tool_result("r1", {"recorded": [1], "remaining": 0})) == (
+        ["1 verdicts recorded"],
+        True,
+    )
+
 
 def test_stream_event_before_init_fails_closed(fake_claude):
     fake_claude.script([stream_delta("text_delta", "hello"), FAKE_INIT, success()])
@@ -147,21 +174,28 @@ def test_stream_event_before_init_fails_closed(fake_claude):
     assert run["status"] == "failed" and run["error"]["reason"] == "isolation_failed"
     assert run["phase"] is None and run["thought"] == ""
 
+
 def test_run_tracks_and_clears_phase_and_thought_on_settlement(fake_claude):
-    fake_claude.script([
-        FAKE_INIT,
-        stream_start("thinking"),
-        stream_delta("thinking_delta", "Thinking..."),
-        use("t1", "mcp__groundly__search"),
-        success("Stored 10."),
-    ])
+    fake_claude.script(
+        [
+            FAKE_INIT,
+            stream_start("thinking"),
+            stream_delta("thinking_delta", "Thinking..."),
+            use("t1", "mcp__groundly__search"),
+            success("Stored 10."),
+        ]
+    )
     runner = runs.Runner()
     started = runner.start("write", "PDSS", 7, "the prompt")
     assert (started["phase"], started["active_tool"], started["thought"]) == ("starting", None, "")
     done = wait_until_ended(runner.view)
-    assert (done["status"], done["phase"], done["active_tool"], done["thought"], done["thought_channel"]) == (
-        "done", None, None, "", None
-    )
+    assert (
+        done["status"],
+        done["phase"],
+        done["active_tool"],
+        done["thought"],
+        done["thought_channel"],
+    ) == ("done", None, None, "", None)
 ```
 
 - [ ] **Step 2: Run tests to verify failure**
@@ -211,15 +245,17 @@ Include tests covering fan-out, causal coalescing, backpressure overflow (Review
 
 ```python
 async def test_runner_subscribe_fans_out_coalesced_deltas_before_phase_and_step(fake_claude):
-    fake_claude.script([
-        FAKE_INIT,
-        stream_start("thinking"),
-        stream_delta("thinking_delta", "One "),
-        stream_delta("thinking_delta", "two"),
-        use("t1", "mcp__groundly__search"),
-        tool_result("t1", {"hits": []}),
-        success("Done."),
-    ])
+    fake_claude.script(
+        [
+            FAKE_INIT,
+            stream_start("thinking"),
+            stream_delta("thinking_delta", "One "),
+            stream_delta("thinking_delta", "two"),
+            use("t1", "mcp__groundly__search"),
+            tool_result("t1", {"hits": []}),
+            success("Done."),
+        ]
+    )
     loop = asyncio.get_running_loop()
     runner = runs.Runner()
     runner.start("write", "PDSS", 7, "the prompt")
@@ -239,7 +275,10 @@ async def test_runner_subscribe_fans_out_coalesced_deltas_before_phase_and_step(
     # Merged/coalesced delta arrives strictly before the tool_use phase transition
     assert names.index("delta") < names.index("step")
 
-async def test_subscriber_queue_overflow_emits_snapshot_resync_without_blocking(fake_claude, monkeypatch):
+
+async def test_subscriber_queue_overflow_emits_snapshot_resync_without_blocking(
+    fake_claude, monkeypatch
+):
     # Review Focus #2: small maxsize forces QueueFull -> drains stale frames, emits ("snapshot", ...)
     monkeypatch.setattr(runs, "SUBSCRIBER_QUEUE_MAX", 2)
     fake_claude.script([FAKE_INIT, "SLEEP"])
@@ -249,13 +288,18 @@ async def test_subscriber_queue_overflow_emits_snapshot_resync_without_blocking(
     _, q = runner.subscribe(loop)
     assert q is not None
     for i in range(10):
-        runner._publish("delta", {"id": 1, "channel": "text", "text": str(i), "reset": False}, snapshot_fallback={"id": 1, "i": i})
+        runner._publish(
+            "delta",
+            {"id": 1, "channel": "text", "text": str(i), "reset": False},
+            snapshot_fallback={"id": 1, "i": i},
+        )
     await asyncio.sleep(0.05)
     items = []
     while not q.empty():
         items.append(q.get_nowait())
     assert any(name == "snapshot" for name, _ in items)
     runner.shutdown()
+
 
 async def test_shutdown_pushes_sentinel_and_wakes_subscribers(fake_claude):
     fake_claude.script([FAKE_INIT, "SLEEP"])
@@ -327,6 +371,7 @@ def test_openapi_and_docs_are_disabled_at_runtime_but_work_offline(client):
     assert "/api/runs/stream" in schema["paths"]
     assert "/api/subjects/{subject}/runs" in schema["paths"]
 
+
 def test_runs_stream_closes_immediately_when_idle_or_already_settled(client, seeded, fake_claude):
     # Review Focus #1: idle or already settled run emits event: snapshot then closes
     r = client.get("/api/runs/stream")
@@ -340,17 +385,20 @@ def test_runs_stream_closes_immediately_when_idle_or_already_settled(client, see
     r2 = client.get("/api/runs/stream")
     assert "event: snapshot\n" in r2.text and '"status": "done"' in r2.text
 
+
 def test_runs_stream_emits_phase_delta_step_and_done(client, seeded, fake_claude, tmp_path):
     gate = tmp_path / "go"
-    fake_claude.script([
-        FAKE_INIT,
-        f"WAIT:{gate}",
-        stream_start("thinking"),
-        stream_delta("thinking_delta", "Reading notes"),
-        use("t1", "mcp__groundly__submit_questions", {"questions": [1]}),
-        tool_result("t1", {"accepted": [{}], "rejected": []}),
-        success("Stored 1."),
-    ])
+    fake_claude.script(
+        [
+            FAKE_INIT,
+            f"WAIT:{gate}",
+            stream_start("thinking"),
+            stream_delta("thinking_delta", "Reading notes"),
+            use("t1", "mcp__groundly__submit_questions", {"questions": [1]}),
+            tool_result("t1", {"accepted": [{}], "rejected": []}),
+            success("Stored 1."),
+        ]
+    )
     leaf = _leaf(client)
     assert _runs_post(client, {"kind": "write", "topic_id": leaf}).status_code == 202
     chunks = []
@@ -365,6 +413,7 @@ def test_runs_stream_emits_phase_delta_step_and_done(client, seeded, fake_claude
     assert "event: delta\n" in body
     assert "event: step\n" in body and '"refresh": true' in body
     assert "event: done\n" in body
+
 
 def test_runs_stream_refuses_writes_with_405(client):
     for method in ("post", "put", "patch", "delete"):

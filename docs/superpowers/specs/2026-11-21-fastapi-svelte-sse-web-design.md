@@ -176,17 +176,17 @@ SSE_KEEPALIVE_S = 15.0
 
 run = {
     "id": self._next_id,
-    "kind": kind,              # "write" | "grade"
+    "kind": kind,  # "write" | "grade"
     "subject": subject,
-    "topic_id": topic_id,      # int | None
-    "status": "running",       # "running" | "done" | "failed" | "stopped"
-    "phase": "starting",       # "starting" | "thinking" | "reading" | "writing" | None
-    "active_tool": None,       # str | None (plain label for tool currently generating/running)
-    "thought": "",             # str (rolling current-turn plain text, tail-capped at MAX_STREAM_CHARS)
-    "thought_channel": None,   # "thinking" | "text" | None
-    "steps": [],               # list[str] from Steps.feed only (up to MAX_STEPS)
-    "summary": None,           # str | None (up to MAX_SUMMARY_CHARS)
-    "error": None,             # {"reason": str, "detail": str} | None
+    "topic_id": topic_id,  # int | None
+    "status": "running",  # "running" | "done" | "failed" | "stopped"
+    "phase": "starting",  # "starting" | "thinking" | "reading" | "writing" | None
+    "active_tool": None,  # str | None (plain label for tool currently generating/running)
+    "thought": "",  # str (rolling current-turn plain text, tail-capped at MAX_STREAM_CHARS)
+    "thought_channel": None,  # "thinking" | "text" | None
+    "steps": [],  # list[str] from Steps.feed only (up to MAX_STEPS)
+    "summary": None,  # str | None (up to MAX_SUMMARY_CHARS)
+    "error": None,  # {"reason": str, "detail": str} | None
     "started_at": datetime.now(UTC).isoformat(timespec="seconds"),
 }
 ```
