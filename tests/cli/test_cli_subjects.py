@@ -723,6 +723,27 @@ def test_index_progress_prints_a_hostile_filename_inert(monkeypatch, tmp_path):
     assert ":warning:" in result.output
 
 
+def test_index_progress_bar_shows_zero_when_nothing_remains(monkeypatch, tmp_path):
+    f = tmp_path / "lec.txt"
+    f.write_text("content")
+    init_subject("PDSS")
+
+    def fake_index_paths(subject, paths, on_event=None, on_discovered=None, **_):
+        on_discovered(0)
+        return [FileResult(f, Status.SKIPPED_DUPLICATE, "already indexed")]
+
+    from groundly.cli.app import console
+
+    monkeypatch.setattr(pipeline, "index_paths", fake_index_paths)
+    monkeypatch.setattr(console, "_force_terminal", True)  # the bar renders only on a terminal
+
+    result = runner.invoke(app, ["index", "PDSS", str(f)])
+
+    assert result.exit_code == 0, result.output
+    assert "nothing to index" in result.output
+    assert "0/0" in result.output
+
+
 def _manifest_has_a_hostile_ocr_lang(path):
     path.write_text('{"subject": "PDSS", "ocr": {"lang": ["[/nosuch]"]}}')
 

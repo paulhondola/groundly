@@ -108,7 +108,11 @@ def index(
         task = progress.add_task("discovering files…", total=1)
 
         def on_discovered(total: int) -> None:
-            progress.update(task, description="indexing…", total=total)
+            progress.update(
+                task,
+                description="nothing to index" if total == 0 else "indexing…",
+                total=total,
+            )
 
         def on_event(path: Path, stage: str) -> None:
             if stage in ("extracting", "embedding"):

@@ -291,6 +291,174 @@ def test_on_discovered_and_terminal_events_match_file_count(
     assert len(terminal_events) == discovered[0]
 
 
+def test_on_discovered_counts_only_remaining_files_on_reindex(
+    subject, course, stub_embedder, stub_extractor
+):
+    subj = Subject(subject)
+    IngestionPipeline(subject=subj, extractor=stub_extractor(), embedder=stub_embedder()).run(
+        [course]
+    )
+
+    (course / "week2.txt").write_text("Lamport timestamps.")
+    (course / "junk.bin").write_bytes(b"\x00\x01")
+
+    discovered: list[int] = []
+    terminal_events: list[str] = []
+    results = IngestionPipeline(
+        subject=subj,
+        extractor=stub_extractor(),
+        embedder=stub_embedder(),
+        on_event=lambda _path, stage: (
+            terminal_events.append(stage) if stage in set(Status) else None
+        ),
+        on_discovered=discovered.append,
+    ).run([course])
+
+    assert discovered == [1]
+    assert terminal_events == [Status.INDEXED]
+    assert {r.path.name: r.status for r in results} == {
+        "notes.txt": Status.SKIPPED_DUPLICATE,
+        "readme.md": Status.SKIPPED_DUPLICATE,
+        "week2.txt": Status.INDEXED,
+        "junk.bin": Status.SKIPPED_UNSUPPORTED,
+    }
+
+
+def test_on_discovered_counts_only_failed_files_on_retry_failed(
+    subject, tmp_path, stub_embedder, stub_extraction
+):
+    from groundly.ingestion.extract import ExtractionFailure
+
+    course = tmp_path / "course3"
+    course.mkdir()
+    (course / "a.txt").write_text("alpha")
+    (course / "b.txt").write_text("beta")
+    (course / "c.txt").write_text("gamma")
+
+    class FailOnB:
+        def extract(self, path, ocr_lang=None):
+            if path.name == "b.txt":
+                raise ExtractionFailure("no readable text — OCR found nothing to extract")
+            return stub_extraction()
+
+    class Succeed:
+        def extract(self, path, ocr_lang=None):
+            return stub_extraction()
+
+    subj = Subject(subject)
+    IngestionPipeline(subject=subj, extractor=FailOnB(), embedder=stub_embedder()).run([course])
+
+    discovered: list[int] = []
+    terminal_events: list[str] = []
+    results = IngestionPipeline(
+        subject=subj,
+        extractor=Succeed(),
+        embedder=stub_embedder(),
+        on_event=lambda _path, stage: (
+            terminal_events.append(stage) if stage in set(Status) else None
+        ),
+        on_discovered=discovered.append,
+    ).run([course], retry_failed=True)
+
+    assert discovered == [1]
+    assert terminal_events == [Status.INDEXED]
+    assert [r.status for r in results] == [
+        Status.SKIPPED_DUPLICATE,
+        Status.INDEXED,
+        Status.SKIPPED_DUPLICATE,
+    ]
+
+
+def test_on_discovered_counts_zero_when_nothing_remains(
+    subject, course, stub_embedder, stub_extractor
+):
+    subj = Subject(subject)
+    IngestionPipeline(subject=subj, extractor=stub_extractor(), embedder=stub_embedder()).run(
+        [course]
+    )
+
+    discovered: list[int] = []
+    terminal_events: list[str] = []
+    results = IngestionPipeline(
+        subject=subj,
+        extractor=stub_extractor(),
+        embedder=stub_embedder(),
+        on_event=lambda _path, stage: (
+            terminal_events.append(stage) if stage in set(Status) else None
+        ),
+        on_discovered=discovered.append,
+    ).run([course])
+
+    assert discovered == [0]
+    assert terminal_events == []
+    assert [r.status for r in results] == [Status.SKIPPED_DUPLICATE, Status.SKIPPED_DUPLICATE]
+
+
+def test_on_discovered_counts_same_content_siblings_once(
+    subject, tmp_path, stub_embedder, stub_extractor
+):
+    dup = tmp_path / "dup_progress"
+    dup.mkdir()
+    for name in ("a.txt", "b.txt"):
+        (dup / name).write_text("identical content")
+
+    subj = Subject(subject)
+    discovered_fail: list[int] = []
+    events_fail: list[str] = []
+    results_fail = IngestionPipeline(
+        subject=subj,
+        extractor=_AlwaysFail(),
+        embedder=stub_embedder(),
+        on_event=lambda _path, stage: events_fail.append(stage) if stage in set(Status) else None,
+        on_discovered=discovered_fail.append,
+    ).run([dup])
+
+    assert discovered_fail == [1]
+    assert events_fail == [Status.EXTRACTION_FAILED]
+    assert [r.status for r in results_fail] == [Status.EXTRACTION_FAILED, Status.SKIPPED_FAILED]
+
+    discovered_retry: list[int] = []
+    events_retry: list[str] = []
+    results_retry = IngestionPipeline(
+        subject=subj,
+        extractor=stub_extractor(),
+        embedder=stub_embedder(),
+        on_event=lambda _path, stage: events_retry.append(stage) if stage in set(Status) else None,
+        on_discovered=discovered_retry.append,
+    ).run([dup], retry_failed=True)
+
+    assert discovered_retry == [1]
+    assert events_retry == [Status.INDEXED]
+    assert [r.status for r in results_retry] == [Status.INDEXED, Status.SKIPPED_DUPLICATE]
+
+
+def test_retry_failed_preserves_unretried_failure_rows_until_processed(
+    subject, tmp_path, stub_embedder, connect
+):
+    course = tmp_path / "interrupt"
+    course.mkdir()
+    (course / "a.txt").write_text("alpha")
+    (course / "b.txt").write_text("beta")
+
+    subj = Subject(subject)
+    IngestionPipeline(subject=subj, extractor=_AlwaysFail(), embedder=stub_embedder()).run([course])
+
+    class InterruptOnA:
+        def extract(self, path, ocr_lang=None):
+            if path.name == "a.txt":
+                raise KeyboardInterrupt
+            raise AssertionError("should not reach b.txt")
+
+    with pytest.raises(KeyboardInterrupt):
+        IngestionPipeline(subject=subj, extractor=InterruptOnA(), embedder=stub_embedder()).run(
+            [course], retry_failed=True
+        )
+
+    with connect(subject) as conn:
+        rows = conn.execute("SELECT filename, status FROM materials ORDER BY filename").fetchall()
+    assert [(r["filename"], r["status"]) for r in rows] == [("b.txt", "extraction_failed")]
+
+
 def test_uninitialized_subject_names_the_fix(
     monkeypatch, tmp_path, course, stub_embedder, stub_extractor
 ):
