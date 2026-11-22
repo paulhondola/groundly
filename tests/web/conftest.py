@@ -20,6 +20,12 @@ for line in open(os.environ["FAKE_CLAUDE_SCRIPT"]).read().splitlines():
     if line == "SLEEP":
         time.sleep(30)
         continue
+    if line.startswith("WAIT:"):
+        target = line.removeprefix("WAIT:")
+        deadline = time.monotonic() + 5.0
+        while not os.path.exists(target) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        continue
     print(line, flush=True)
 sys.stderr.write(os.environ.get("FAKE_CLAUDE_STDERR", ""))
 sys.exit(int(os.environ.get("FAKE_CLAUDE_EXIT", "0")))
@@ -92,7 +98,7 @@ class FakeClaude:
         self.script([INIT, success()])
 
     def script(self, lines, *, exit_code=0, stderr=""):
-        """Lines are events (dicts), raw strings, or "SLEEP" to hang for 30 s."""
+        """Lines are events (dicts), raw strings, "SLEEP" (30 s), or "WAIT:<path>" (up to 5 s)."""
         text = "\n".join(json.dumps(x) if isinstance(x, dict) else x for x in lines)
         self.script_file.write_text(text + "\n")
         self.monkeypatch.setenv("FAKE_CLAUDE_EXIT", str(exit_code))

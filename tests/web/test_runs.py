@@ -655,10 +655,24 @@ def test_stop_and_exit_clear_live_phase_and_thought(fake_claude):
     ) == ("failed", None, None, "", None)
 
 
-async def test_runner_subscribe_fans_out_coalesced_deltas_before_phase_and_step(fake_claude):
+async def _await_init(runner: runs.Runner, timeout: float = 5.0) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        snap = runner.view()
+        if snap is not None and snap["phase"] == "thinking":
+            return snap
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"run did not pass init within {timeout}s: {runner.view()}")
+
+
+async def test_runner_subscribe_fans_out_coalesced_deltas_before_phase_and_step(
+    fake_claude, tmp_path
+):
+    gate = tmp_path / "go"
     fake_claude.script(
         [
             FAKE_INIT,
+            f"WAIT:{gate}",
             stream_start("thinking"),
             stream_delta("thinking_delta", "One "),
             stream_delta("thinking_delta", "two"),
@@ -670,22 +684,27 @@ async def test_runner_subscribe_fans_out_coalesced_deltas_before_phase_and_step(
     loop = asyncio.get_running_loop()
     runner = runs.Runner()
     runner.start("write", "PDSS", 7, "the prompt")
-    snap, q1 = runner.subscribe(loop)
-    _, q2 = runner.subscribe(loop)
-    assert snap is not None and q1 is not None and q2 is not None
-    events1 = []
-    while (item := await asyncio.wait_for(q1.get(), timeout=5.0)) is not None:
-        events1.append(item)
-    events2 = []
-    while (item := await asyncio.wait_for(q2.get(), timeout=5.0)) is not None:
-        events2.append(item)
-    assert events1 == events2
-    names = [name for name, _ in events1]
-    assert "delta" in names and "step" in names and names[-1] == "done"
-    assert names.index("delta") < names.index("step")
-    deltas = [data for name, data in events1 if name == "delta"]
-    assert "".join(d["text"] for d in deltas) == "One two"
-    assert events1[-1][1]["status"] == "done" and events1[-1][1]["summary"] == "Done."
+    try:
+        await _await_init(runner)
+        snap, q1 = runner.subscribe(loop)
+        _, q2 = runner.subscribe(loop)
+        assert snap is not None and q1 is not None and q2 is not None
+        gate.write_text("1")
+        events1 = []
+        while (item := await asyncio.wait_for(q1.get(), timeout=5.0)) is not None:
+            events1.append(item)
+        events2 = []
+        while (item := await asyncio.wait_for(q2.get(), timeout=5.0)) is not None:
+            events2.append(item)
+        assert events1 == events2
+        names = [name for name, _ in events1]
+        assert "delta" in names and "step" in names and names[-1] == "done"
+        assert names.index("delta") < names.index("step")
+        deltas = [data for name, data in events1 if name == "delta"]
+        assert "".join(d["text"] for d in deltas) == "One two"
+        assert events1[-1][1]["status"] == "done" and events1[-1][1]["summary"] == "Done."
+    finally:
+        runner.shutdown()
 
 
 async def test_subscriber_queue_overflow_emits_snapshot_resync_without_blocking(
@@ -698,6 +717,7 @@ async def test_subscriber_queue_overflow_emits_snapshot_resync_without_blocking(
     runner = runs.Runner()
     runner.start("write", "PDSS", 7, "the prompt")
     try:
+        await _await_init(runner)
         _, q = runner.subscribe(loop)
         assert q is not None
         for i in range(10):
@@ -722,6 +742,7 @@ async def test_shutdown_pushes_sentinel_and_wakes_subscribers(fake_claude):
     runner = runs.Runner()
     runner.start("write", "PDSS", 7, "the prompt")
     try:
+        await _await_init(runner)
         _, q = runner.subscribe(loop)
         assert q is not None
         runner.shutdown()
@@ -733,10 +754,12 @@ async def test_shutdown_pushes_sentinel_and_wakes_subscribers(fake_claude):
         runner.shutdown()
 
 
-async def test_delta_coalescer_flushes_after_40ms_while_process_pauses(fake_claude):
+async def test_delta_coalescer_flushes_after_40ms_while_process_pauses(fake_claude, tmp_path):
+    gate = tmp_path / "go"
     fake_claude.script(
         [
             FAKE_INIT,
+            f"WAIT:{gate}",
             stream_start("thinking"),
             stream_delta("thinking_delta", "One "),
             stream_delta("thinking_delta", "two"),
@@ -746,9 +769,11 @@ async def test_delta_coalescer_flushes_after_40ms_while_process_pauses(fake_clau
     loop = asyncio.get_running_loop()
     runner = runs.Runner()
     runner.start("write", "PDSS", 7, "the prompt")
-    snap, q = runner.subscribe(loop)
-    assert snap is not None and q is not None
     try:
+        await _await_init(runner)
+        snap, q = runner.subscribe(loop)
+        assert snap is not None and q is not None
+        gate.write_text("1")
         deltas = []
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
@@ -766,10 +791,12 @@ async def test_delta_coalescer_flushes_after_40ms_while_process_pauses(fake_clau
         runner.shutdown()
 
 
-async def test_channel_switch_and_reset_flush_prior_buffered_deltas(fake_claude):
+async def test_channel_switch_and_reset_flush_prior_buffered_deltas(fake_claude, tmp_path):
+    gate = tmp_path / "go"
     fake_claude.script(
         [
             FAKE_INIT,
+            f"WAIT:{gate}",
             stream_start("thinking"),
             stream_delta("thinking_delta", "Think"),
             stream_start("text"),
@@ -780,20 +807,26 @@ async def test_channel_switch_and_reset_flush_prior_buffered_deltas(fake_claude)
     loop = asyncio.get_running_loop()
     runner = runs.Runner()
     runner.start("write", "PDSS", 7, "the prompt")
-    _, q = runner.subscribe(loop)
-    assert q is not None
-    items = []
-    while (item := await asyncio.wait_for(q.get(), timeout=5.0)) is not None:
-        items.append(item)
-    deltas = [data for name, data in items if name == "delta"]
-    assert [(d["channel"], d["text"], d["reset"]) for d in deltas] == [
-        ("thinking", "Think", True),
-        ("text", "Say", True),
-    ]
-    assert items[-1][0] == "done"
+    try:
+        await _await_init(runner)
+        _, q = runner.subscribe(loop)
+        assert q is not None
+        gate.write_text("1")
+        items = []
+        while (item := await asyncio.wait_for(q.get(), timeout=5.0)) is not None:
+            items.append(item)
+        deltas = [data for name, data in items if name == "delta"]
+        assert [(d["channel"], d["text"], d["reset"]) for d in deltas] == [
+            ("thinking", "Think", True),
+            ("text", "Say", True),
+        ]
+        assert items[-1][0] == "done"
+    finally:
+        runner.shutdown()
 
 
-async def test_step_refresh_attaches_only_to_gate_result_step(fake_claude):
+async def test_step_refresh_attaches_only_to_gate_result_step(fake_claude, tmp_path):
+    gate = tmp_path / "go"
     mixed_results = {
         "type": "user",
         "message": {
@@ -818,6 +851,7 @@ async def test_step_refresh_attaches_only_to_gate_result_step(fake_claude):
     fake_claude.script(
         [
             FAKE_INIT,
+            f"WAIT:{gate}",
             use("t2", "mcp__groundly__submit_questions", {"questions": [1]}),
             mixed_results,
             success("Stored 1."),
@@ -826,17 +860,22 @@ async def test_step_refresh_attaches_only_to_gate_result_step(fake_claude):
     loop = asyncio.get_running_loop()
     runner = runs.Runner()
     runner.start("write", "PDSS", 7, "the prompt")
-    snap, q = runner.subscribe(loop)
-    assert snap is not None and q is not None
-    items = []
-    while (item := await asyncio.wait_for(q.get(), timeout=5.0)) is not None:
-        items.append(item)
-    step_events = [data for name, data in items if name == "step"]
-    assert step_events == [
-        {"id": snap["id"], "step": "Submitting 1 questions", "refresh": False},
-        {"id": snap["id"], "step": "A tool call failed", "refresh": False},
-        {"id": snap["id"], "step": "1 stored, 0 rejected", "refresh": True},
-    ]
+    try:
+        await _await_init(runner)
+        snap, q = runner.subscribe(loop)
+        assert snap is not None and q is not None
+        gate.write_text("1")
+        items = []
+        while (item := await asyncio.wait_for(q.get(), timeout=5.0)) is not None:
+            items.append(item)
+        step_events = [data for name, data in items if name == "step"]
+        assert step_events == [
+            {"id": snap["id"], "step": "Submitting 1 questions", "refresh": False},
+            {"id": snap["id"], "step": "A tool call failed", "refresh": False},
+            {"id": snap["id"], "step": "1 stored, 0 rejected", "refresh": True},
+        ]
+    finally:
+        runner.shutdown()
 
 
 async def test_subscribe_lifecycle_unsubscribe_and_closed_loop_handling(fake_claude, monkeypatch):
@@ -848,6 +887,7 @@ async def test_subscribe_lifecycle_unsubscribe_and_closed_loop_handling(fake_cla
 
     runner.start("write", "PDSS", 7, "the prompt")
     try:
+        await _await_init(runner)
         closed_loop = asyncio.new_event_loop()
         closed_loop.close()
         _, q_closed = runner.subscribe(closed_loop)
@@ -874,14 +914,17 @@ async def test_subscribe_lifecycle_unsubscribe_and_closed_loop_handling(fake_cla
         runner.shutdown()
 
 
-async def test_stop_race_after_result_emits_single_done_and_sentinel(fake_claude):
-    fake_claude.script([FAKE_INIT, success("Stored."), "SLEEP"])
+async def test_stop_race_after_result_emits_single_done_and_sentinel(fake_claude, tmp_path):
+    gate = tmp_path / "go"
+    fake_claude.script([FAKE_INIT, f"WAIT:{gate}", success("Stored."), "SLEEP"])
     loop = asyncio.get_running_loop()
     runner = runs.Runner()
     runner.start("write", "PDSS", 7, "the prompt")
     try:
+        await _await_init(runner)
         _, q = runner.subscribe(loop)
         assert q is not None
+        gate.write_text("1")
         await asyncio.to_thread(wait_until_ended, runner.view)
         runner.stop()
         runner.shutdown()
