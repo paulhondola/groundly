@@ -8,6 +8,7 @@ text reach the run through tools, as data. The page learns what the run did from
 and counts, never from model text, except the final summary, which it shows as text.
 """
 
+import asyncio
 import contextlib
 import json
 import os
@@ -189,9 +190,9 @@ class Steps:
         self._names: dict[str, str] = {}
         self._last: str | None = None
 
-    def _emit(self, step: str | None, out: list[str]) -> None:
+    def _emit(self, step: str | None, out: list[tuple[str, bool]], refresh: bool) -> None:
         if step and step != self._last:
-            out.append(step)
+            out.append((step, refresh))
             self._last = step
 
     def _use(self, block: dict) -> str | None:
@@ -222,22 +223,25 @@ class Steps:
             return f"{recorded} verdicts recorded", recorded > 0
         return None, False
 
-    def feed(self, event: dict) -> tuple[list[str], bool]:
-        out: list[str] = []
-        refresh = False
+    def feed_items(self, event: dict) -> list[tuple[str, bool]]:
+        """Consume one stream-json event and return ``(step_text, refresh)`` pairs."""
+        out: list[tuple[str, bool]] = []
         if event.get("type") not in ("assistant", "user"):
-            return out, refresh
+            return out
         content = (event.get("message") or {}).get("content")
         for block in content if isinstance(content, list) else []:
             if not isinstance(block, dict):
                 continue
             if block.get("type") == "tool_use":
-                self._emit(self._use(block), out)
+                self._emit(self._use(block), out, False)
             elif block.get("type") == "tool_result":
                 step, block_refresh = self._result(block)
-                self._emit(step, out)
-                refresh = refresh or block_refresh
-        return out, refresh
+                self._emit(step, out, block_refresh)
+        return out
+
+    def feed(self, event: dict) -> tuple[list[str], bool]:
+        items = self.feed_items(event)
+        return [step for step, _ in items], any(refresh for _, refresh in items)
 
 
 @dataclass(frozen=True)
@@ -434,6 +438,12 @@ def _clear_live(run: dict) -> None:
     run["thought_channel"] = None
 
 
+_Subscriber = tuple[
+    asyncio.AbstractEventLoop,
+    asyncio.Queue[tuple[str, dict | None] | None],
+]
+
+
 class Runner:
     """At most one run at a time across the page. State lives in memory only."""
 
@@ -443,6 +453,9 @@ class Runner:
         self._run: dict | None = None
         self._proc: subprocess.Popen | None = None
         self._next_id = 1
+        self._subscribers: set[_Subscriber] = set()
+        self._pending_delta: tuple[str, str, bool] | None = None
+        self._delta_timer: threading.Timer | None = None
 
     def view(self) -> dict | None:
         with self._lock:
@@ -454,6 +467,214 @@ class Runner:
         error = self._run["error"]
         return {**self._run, "steps": list(self._run["steps"]), "error": error and dict(error)}
 
+    def subscribe(
+        self, loop: asyncio.AbstractEventLoop
+    ) -> tuple[dict | None, asyncio.Queue[tuple[str, dict | None] | None] | None]:
+        """Snapshot the current run and, if running, register an async subscriber queue."""
+        with self._lock:
+            snapshot = self._snapshot()
+            if snapshot is not None and snapshot["status"] == "running":
+                queue: asyncio.Queue[tuple[str, dict | None] | None] = asyncio.Queue(
+                    maxsize=SUBSCRIBER_QUEUE_MAX
+                )
+                self._subscribers.add((loop, queue))
+                return snapshot, queue
+            return snapshot, None
+
+    def unsubscribe(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        queue: asyncio.Queue[tuple[str, dict | None] | None],
+    ) -> None:
+        """Detach a subscriber queue from future notifications."""
+        with self._lock:
+            self._subscribers.discard((loop, queue))
+
+    @staticmethod
+    def _drain_queue(
+        queue: asyncio.Queue[tuple[str, dict | None] | None],
+    ) -> list[tuple[str, dict | None] | None]:
+        drained: list[tuple[str, dict | None] | None] = []
+        while True:
+            try:
+                drained.append(queue.get_nowait())
+            except asyncio.QueueEmpty:
+                return drained
+
+    @staticmethod
+    def _enqueue(
+        queue: asyncio.Queue[tuple[str, dict | None] | None],
+        event_name: str,
+        data: dict | None,
+        snapshot_fallback: dict | None = None,
+    ) -> None:
+        item: tuple[str, dict | None] | None = None if data is None else (event_name, data)
+        try:
+            queue.put_nowait(item)
+            return
+        except asyncio.QueueFull:
+            pass
+        drained = Runner._drain_queue(queue)
+        if item is None:
+            for old in drained:
+                if (
+                    old is not None
+                    and old[0] == "done"
+                    and (queue.maxsize <= 0 or queue.qsize() < queue.maxsize - 1)
+                ):
+                    with contextlib.suppress(asyncio.QueueFull):
+                        queue.put_nowait(old)
+            with contextlib.suppress(asyncio.QueueFull):
+                queue.put_nowait(None)
+            return
+        if event_name == "done":
+            with contextlib.suppress(asyncio.QueueFull):
+                queue.put_nowait(item)
+            return
+        kept = [x for x in drained if x is None or x[0] == "done"]
+        if kept:
+            for old in kept:
+                with contextlib.suppress(asyncio.QueueFull):
+                    queue.put_nowait(old)
+            return
+        if snapshot_fallback is not None:
+            with contextlib.suppress(asyncio.QueueFull):
+                queue.put_nowait(("snapshot", snapshot_fallback))
+
+    def _publish_locked(
+        self,
+        event_name: str,
+        data: dict | None,
+        *,
+        snapshot_fallback: dict | None = None,
+    ) -> None:
+        if not self._subscribers:
+            return
+        if snapshot_fallback is None and data is not None and event_name != "done":
+            snapshot_fallback = self._snapshot()
+        for loop, queue in list(self._subscribers):
+            try:
+                loop.call_soon_threadsafe(self._enqueue, queue, event_name, data, snapshot_fallback)
+            except RuntimeError:
+                self._subscribers.discard((loop, queue))
+
+    def _publish(
+        self,
+        event_name: str,
+        data: dict | None,
+        *,
+        snapshot_fallback: dict | None = None,
+    ) -> None:
+        """Schedule an event (or None sentinel when data is None) to all subscribers."""
+        with self._lock:
+            self._publish_locked(event_name, data, snapshot_fallback=snapshot_fallback)
+
+    def _cancel_delta_timer_locked(self) -> None:
+        if self._delta_timer is not None:
+            self._delta_timer.cancel()
+            self._delta_timer = None
+
+    def _flush_deltas_locked(self, run: dict) -> None:
+        self._cancel_delta_timer_locked()
+        if self._pending_delta is None:
+            return
+        channel, text, reset = self._pending_delta
+        self._pending_delta = None
+        self._publish_locked(
+            "delta",
+            {"id": run["id"], "channel": channel, "text": text, "reset": reset},
+        )
+
+    def _arm_delta_timer_locked(self, run: dict) -> None:
+        if self._delta_timer is not None:
+            return
+        timer: threading.Timer
+
+        def fire() -> None:
+            with self._lock:
+                if self._delta_timer is not timer:
+                    return
+                self._delta_timer = None
+                if self._run is not run or run["status"] != "running":
+                    self._pending_delta = None
+                    return
+                self._flush_deltas_locked(run)
+
+        timer = threading.Timer(DELTA_COALESCE_S, fire)
+        timer.daemon = True
+        self._delta_timer = timer
+        timer.start()
+
+    def _apply_tracker_events_locked(
+        self, run: dict, events: list[PhaseEvent | DeltaEvent]
+    ) -> None:
+        for ev in events:
+            if isinstance(ev, PhaseEvent):
+                if (ev.phase, ev.active_tool) == (run["phase"], run["active_tool"]):
+                    continue
+                self._flush_deltas_locked(run)
+                run["phase"] = ev.phase
+                run["active_tool"] = ev.active_tool
+                self._publish_locked(
+                    "phase",
+                    {"id": run["id"], "phase": ev.phase, "active_tool": ev.active_tool},
+                )
+            else:
+                if ev.reset or (
+                    self._pending_delta is not None and self._pending_delta[0] != ev.channel
+                ):
+                    self._flush_deltas_locked(run)
+                run["thought"] = (
+                    ev.text[-MAX_STREAM_CHARS:]
+                    if ev.reset
+                    else (run["thought"] + ev.text)[-MAX_STREAM_CHARS:]
+                )
+                run["thought_channel"] = ev.channel
+                if self._pending_delta is None:
+                    self._pending_delta = (ev.channel, ev.text, ev.reset)
+                else:
+                    channel, prev_text, prev_reset = self._pending_delta
+                    self._pending_delta = (channel, prev_text + ev.text, prev_reset)
+                self._arm_delta_timer_locked(run)
+
+    def _apply_steps_locked(self, run: dict, step_items: list[tuple[str, bool]]) -> None:
+        if not step_items:
+            return
+        self._flush_deltas_locked(run)
+        for step_text, refresh in step_items:
+            run["steps"] = (run["steps"] + [step_text])[-MAX_STEPS:]
+            self._publish_locked(
+                "step",
+                {"id": run["id"], "step": step_text, "refresh": refresh},
+            )
+
+    def _settle_locked(
+        self,
+        run: dict,
+        status: str,
+        *,
+        error: tuple[str, str] | None = None,
+        summary: str | None = None,
+        tracker: StreamTracker | None = None,
+    ) -> bool:
+        """Atomically settle ``run`` once, flush buffered deltas, and emit done + sentinel."""
+        if self._run is not run or run["status"] != "running":
+            return False
+        self._flush_deltas_locked(run)
+        if summary is not None:
+            run["summary"] = summary
+        run["status"] = status
+        run["error"] = error and {"reason": error[0], "detail": error[1]}
+        _clear_live(run)
+        if tracker is not None:
+            tracker.reset_settled()
+        snapshot = self._snapshot()
+        if snapshot is not None:
+            self._publish_locked("done", snapshot, snapshot_fallback=snapshot)
+        self._publish_locked("", None)
+        self._subscribers.clear()
+        return True
+
     def start(self, kind: str, subject: str, topic_id: int | None, prompt: str) -> dict:
         claude, reason = availability()
         if reason:
@@ -461,7 +682,7 @@ class Runner:
         assert claude is not None  # availability() gives a path whenever it gives no reason
         with self._lock:
             # The process, not the status: after its result event claude may still be exiting.
-            if self._live():
+            if self._live_locked():
                 raise RunError("run_in_progress", "a run is already working — wait or stop it", 409)
             # One fixed cwd: Claude Code makes a folder per working directory under
             # ~/.claude/projects, so a fresh tempdir per run would leave one per click.
@@ -498,6 +719,8 @@ class Runner:
                 "started_at": datetime.now(UTC).isoformat(timespec="seconds"),
             }
             self._next_id += 1
+            self._cancel_delta_timer_locked()
+            self._pending_delta = None
             self._run, self._proc = run, proc
             snapshot = self._snapshot()
         assert snapshot is not None  # self._run was set just above
@@ -519,73 +742,80 @@ class Runner:
     def _end(self, proc, run, status, error=None) -> None:
         """Settle a running run (first settlement wins), then end its process."""
         with self._lock:
-            if run["status"] == "running":
-                run["status"] = status
-                run["error"] = error and {"reason": error[0], "detail": error[1]}
-                _clear_live(run)
+            self._settle_locked(run, status, error=error)
         _kill(proc)
 
     def _read(self, proc, run, stderr, timer) -> None:
         steps = Steps()
         tracker = StreamTracker()
         checked = False
-        for raw in iter(lambda: proc.stdout.readline(_MAX_LINE_BYTES), b""):
-            try:
-                event = json.loads(raw)
-            except (ValueError, RecursionError):  # junk, or nesting too deep to parse
-                continue
-            if not isinstance(event, dict):
-                continue
-            try:
-                if not checked:
-                    # The init event must come first and list the run's tools; anything else
-                    # before it is a run whose isolation cannot be shown.
-                    is_init = event.get("type") == "system" and event.get("subtype") == "init"
-                    fault = check_init(event) if is_init else None
-                    if is_init and fault is None:
-                        checked = True
-                        tracker.on_init()
-                        with self._lock:
-                            if run["status"] == "running":
-                                run["phase"] = tracker.phase
-                                run["active_tool"] = tracker.active_tool
-                        continue
-                    if not is_init and event.get("type") not in (
-                        "stream_event",
-                        "assistant",
-                        "user",
-                        "result",
-                    ):
-                        continue  # other system events (e.g. hooks) carry no tool use
-                    self._end(
-                        proc,
-                        run,
-                        "failed",
-                        fault or ("isolation_failed", "the run did not report its tools first"),
-                    )
-                    break
-                new, _refresh = steps.feed(event)
-                tracker.feed(event)
+        try:
+            for raw in iter(lambda: proc.stdout.readline(_MAX_LINE_BYTES), b""):
+                try:
+                    event = json.loads(raw)
+                except (ValueError, RecursionError):  # junk, or nesting too deep to parse
+                    continue
+                if not isinstance(event, dict):
+                    continue
                 with self._lock:
-                    if run["status"] == "running":
-                        if new:
-                            run["steps"] = (run["steps"] + new)[-MAX_STEPS:]
-                        run["phase"] = tracker.phase
-                        run["active_tool"] = tracker.active_tool
-                        run["thought"] = tracker.thought
-                        run["thought_channel"] = tracker.thought_channel
-                        if event.get("type") == "result":
-                            summary, error = summary_of(event)
-                            run["summary"] = summary
-                            run["status"] = "failed" if error else "done"
-                            run["error"] = error and {"reason": error[0], "detail": error[1]}
-                            tracker.reset_settled()
-                            _clear_live(run)
-            except Exception as e:  # noqa: BLE001 - an event shape it cannot read fails the run, never hangs it
-                reason = "host_error" if checked else "isolation_failed"
-                detail = f"unreadable output from claude ({type(e).__name__}: {e})"
-                self._end(proc, run, "failed", (reason, detail))
-                break
+                    if self._run is not run or run["status"] != "running":
+                        continue
+                try:
+                    if not checked:
+                        # The init event must come first and list the run's tools; anything else
+                        # before it is a run whose isolation cannot be shown.
+                        is_init = event.get("type") == "system" and event.get("subtype") == "init"
+                        fault = check_init(event) if is_init else None
+                        if is_init and fault is None:
+                            checked = True
+                            phase_ev = tracker.on_init()
+                            with self._lock:
+                                if self._run is run and run["status"] == "running":
+                                    self._apply_tracker_events_locked(run, [phase_ev])
+                            continue
+                        if not is_init and event.get("type") not in (
+                            "stream_event",
+                            "assistant",
+                            "user",
+                            "result",
+                        ):
+                            continue  # other system events (e.g. hooks) carry no tool use
+                        self._end(
+                            proc,
+                            run,
+                            "failed",
+                            fault or ("isolation_failed", "the run did not report its tools first"),
+                        )
+                        break
+                    step_items = steps.feed_items(event)
+                    tracker_events = tracker.feed(event)
+                    with self._lock:
+                        if self._run is run and run["status"] == "running":
+                            if event.get("type") == "user":
+                                self._apply_steps_locked(run, step_items)
+                                self._apply_tracker_events_locked(run, tracker_events)
+                            else:
+                                self._apply_tracker_events_locked(run, tracker_events)
+                                self._apply_steps_locked(run, step_items)
+                            if event.get("type") == "result":
+                                summary, error = summary_of(event)
+                                self._settle_locked(
+                                    run,
+                                    "failed" if error else "done",
+                                    error=error,
+                                    summary=summary,
+                                    tracker=tracker,
+                                )
+                except Exception as e:  # noqa: BLE001 - an event shape it cannot read fails the run, never hangs it
+                    reason = "host_error" if checked else "isolation_failed"
+                    detail = f"unreadable output from claude ({type(e).__name__}: {e})"
+                    self._end(proc, run, "failed", (reason, detail))
+                    break
+        finally:
+            with self._lock:
+                if self._run is run:
+                    self._cancel_delta_timer_locked()
+                    self._pending_delta = None
         proc.stdout.close()
         code = proc.wait()
         timer.cancel()
@@ -594,21 +824,20 @@ class Runner:
         tail = stderr.read().decode("utf-8", "replace").strip()
         stderr.close()
         with self._lock:
-            if run["status"] == "running":
+            if self._run is run and run["status"] == "running":
                 detail = f"claude exited with code {code}" + (f": {tail}" if tail else "")
-                run["status"] = "failed"
-                run["error"] = {"reason": "host_exit", "detail": detail}
-                _clear_live(run)
+                self._settle_locked(run, "failed", error=("host_exit", detail), tracker=tracker)
 
     def stop(self) -> dict | None:
         """Stop the running run, if any; what the gates already stored stays."""
         with self._lock:
             run, proc = self._run, self._proc
-        if run is not None and proc is not None and self._live():
+            live = self._live_locked()
+        if run is not None and proc is not None and live:
             self._end(proc, run, "stopped")
         return self.view()
 
-    def _live(self) -> bool:
+    def _live_locked(self) -> bool:
         """A run is working or its `claude` has not yet exited."""
         run, proc = self._run, self._proc
         return (
@@ -620,3 +849,7 @@ class Runner:
     def shutdown(self) -> None:
         """The page process is exiting: leave no `claude` behind."""
         self.stop()
+        with self._lock:
+            if self._subscribers:
+                self._publish_locked("", None)
+                self._subscribers.clear()
