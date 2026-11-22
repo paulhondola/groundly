@@ -937,3 +937,68 @@ async def test_stop_race_after_result_emits_single_done_and_sentinel(fake_claude
         assert done_events[0]["summary"] == "Stored."
     finally:
         runner.shutdown()
+
+
+async def test_subscribe_mid_coalesce_flushes_pending_delta_without_duplication(
+    fake_claude, tmp_path, monkeypatch
+):
+    gate1 = tmp_path / "gate1"
+    gate2 = tmp_path / "gate2"
+    gate3 = tmp_path / "gate3"
+    fake_claude.script(
+        [
+            FAKE_INIT,
+            f"WAIT:{gate1}",
+            stream_start("thinking"),
+            stream_delta("thinking_delta", "One "),
+            f"WAIT:{gate2}",
+            stream_delta("thinking_delta", "two"),
+            f"WAIT:{gate3}",
+            stream_delta("thinking_delta", "three"),
+            success("Done."),
+        ]
+    )
+    loop = asyncio.get_running_loop()
+    runner = runs.Runner()
+    runner.start("write", "PDSS", 7, "the prompt")
+    try:
+        await _await_init(runner)
+        _, q1 = runner.subscribe(loop)
+        assert q1 is not None
+        gate1.write_text("1")
+
+        first = await asyncio.wait_for(q1.get(), timeout=2.0)
+        assert first is not None and first[0] == "delta" and first[1]["text"] == "One "
+
+        # Hold the next reset=False delta ("two") buffered in _pending_delta while q2 subscribes
+        monkeypatch.setattr(runs, "DELTA_COALESCE_S", 5.0)
+        gate2.write_text("1")
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            view = runner.view()
+            if view is not None and view["thought"] == "One two":
+                break
+            await asyncio.sleep(0.01)
+        assert runner.view()["thought"] == "One two"
+
+        snap2, q2 = runner.subscribe(loop)
+        assert snap2 is not None and q2 is not None
+        assert snap2["thought"] == "One two"
+
+        monkeypatch.setattr(runs, "DELTA_COALESCE_S", 0.04)
+        gate3.write_text("1")
+
+        events1 = [first]
+        while (item := await asyncio.wait_for(q1.get(), timeout=5.0)) is not None:
+            events1.append(item)
+        events2 = []
+        while (item := await asyncio.wait_for(q2.get(), timeout=5.0)) is not None:
+            events2.append(item)
+
+        deltas1 = [data for name, data in events1 if name == "delta"]
+        deltas2 = [data for name, data in events2 if name == "delta"]
+        assert [d["text"] for d in deltas1] == ["One ", "two", "three"]
+        assert [d["text"] for d in deltas2] == ["three"]
+        assert deltas2[0]["reset"] is False
+    finally:
+        runner.shutdown()

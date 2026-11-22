@@ -472,6 +472,8 @@ class Runner:
     ) -> tuple[dict | None, asyncio.Queue[tuple[str, dict | None] | None] | None]:
         """Snapshot the current run and, if running, register an async subscriber queue."""
         with self._lock:
+            if self._run is not None and self._run["status"] == "running":
+                self._flush_deltas_locked(self._run)
             snapshot = self._snapshot()
             if snapshot is not None and snapshot["status"] == "running":
                 queue: asyncio.Queue[tuple[str, dict | None] | None] = asyncio.Queue(
