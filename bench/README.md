@@ -21,6 +21,7 @@ Each module ends with `_worker.main(stack)`, which gives it two modes:
 |---|---|
 | `docling_standard` | docling + RapidOCR on every page |
 | `docling_routed` | the pdf_router: text pages through pypdfium2, image and mixed pages through docling |
+| `docling_paged` | docling on every page as `docling_standard`, then chunked one page at a time so every chunk cites its own page |
 | `mineru` | MinerU2.5 on MLX. Needs the optional extra: `uv sync --extra bench` |
 
 To add a stack, write one module with the three names above. Nothing in `groundly/` changes, and `groundly/` never imports `bench`.
