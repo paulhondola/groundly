@@ -3,6 +3,7 @@ written, so these tests pin what it refuses as much as what it serves."""
 
 import subprocess
 import sys
+import time
 
 import pytest
 from starlette.testclient import TestClient
@@ -16,7 +17,15 @@ from groundly.ingestion.extract import ChunkData
 from groundly.web import runs
 from groundly.web.app import create_app
 from tests.web.conftest import INIT as FAKE_INIT
-from tests.web.conftest import gone, wait_until_ended
+from tests.web.conftest import (
+    gone,
+    stream_delta,
+    stream_start,
+    success,
+    tool_result,
+    use,
+    wait_until_ended,
+)
 
 PDF_BYTES = b"%PDF-1.4 stored lecture"
 
@@ -83,9 +92,17 @@ def test_page_routes_serve_html_under_a_self_only_csp(client, seeded):
         assert r.status_code == 200
         assert r.headers["content-type"].startswith("text/html")
         csp = r.headers["content-security-policy"]
-        assert "script-src 'self'; style-src 'self'; img-src 'self'" in csp
-        assert "unsafe-inline" not in csp and "nonce" not in csp
-        assert "default-src 'none'" in csp and "frame-ancestors 'none'" in csp
+        directives = dict(d.strip().split(" ", 1) for d in csp.split(";"))
+        assert directives["default-src"] == "'none'"
+        assert directives["script-src"] == "'self'"
+        assert "unsafe-inline" not in directives["script-src"] and "nonce" not in csp
+        assert directives["style-src"] == "'self' 'unsafe-inline'"
+        assert directives["img-src"] == "'self'"
+        assert directives["font-src"] == "'self'"
+        assert directives["connect-src"] == "'self'"
+        assert directives["base-uri"] == "'none'"
+        assert directives["form-action"] == "'none'"
+        assert directives["frame-ancestors"] == "'none'"
         assert "/static/page.js" in r.text and "/static/page.css" in r.text
 
 
@@ -322,7 +339,10 @@ def test_a_bad_draw_is_a_400_with_its_reason(client, seeded):
     r = client.get("/api/subjects/PDSS/test?n=7")
     assert r.status_code == 400 and r.json()["error"] == "invalid_text"
     assert client.get("/api/subjects/PDSS/test?topic=999&n=5").json()["error"] == "unknown_topic_id"
-    assert client.get("/api/subjects/PDSS/test?n=five").status_code == 400
+    bad_n = client.get("/api/subjects/PDSS/test?n=five")
+    assert (bad_n.status_code, bad_n.json()["error"]) == (400, "invalid_text")
+    bad_topic = client.get("/api/subjects/PDSS/test?topic=abc&n=5")
+    assert (bad_topic.status_code, bad_topic.json()["error"]) == (400, "invalid_text")
 
 
 def test_submit_grades_and_the_result_shows_the_key_and_source(client, seeded):
@@ -616,7 +636,7 @@ def test_start_app_mcp_refuses_foreign_host_and_origin(start_client):
 
 def test_start_app_keeps_the_page_405s(start_client):
     """The mounted MCP app must not take over wrong-method requests on page routes."""
-    for path in ("/", "/api/subjects", "/api/subjects/PDSS/tree"):
+    for path in ("/", "/api/subjects", "/api/subjects/PDSS/tree", "/api/runs/stream"):
         for method in ("post", "put", "patch", "delete"):
             assert getattr(start_client, method)(path).status_code == 405, (method, path)
     for method in ("put", "patch", "delete"):
@@ -821,3 +841,169 @@ def test_app_shutdown_stops_a_running_run(home, seeded, fake_claude):
         assert _runs_post(c, {"kind": "write", "topic_id": leaf}).status_code == 202
         claude_pid, child_pid = fake_claude.pids()
     assert gone(claude_pid) and gone(child_pid)
+
+
+def test_openapi_and_docs_are_disabled_at_runtime_but_work_offline(client):
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert client.get(path).status_code == 404
+    schema = create_app().openapi()
+    assert "/api/runs/stream" in schema["paths"]
+    assert "/api/subjects/{subject}/runs" in schema["paths"]
+
+
+def test_page_json_enforces_origin_then_content_type_then_size_then_json(
+    client, seeded, fake_claude
+):
+    huge = b'{"kind": "' + b"x" * 300_000 + b'"}'
+    # 1. Missing/foreign Origin fails with 403 even when Content-Type and size are also invalid
+    r = client.post(
+        "/api/subjects/PDSS/runs",
+        content=huge,
+        headers={"Origin": "http://evil.example", "Content-Type": "text/plain"},
+    )
+    assert (r.status_code, r.json()["error"]) == (403, "forbidden")
+    # 2. Wrong Content-Type fails with 415 before reading oversized body
+    r = client.post(
+        "/api/subjects/PDSS/runs",
+        content=huge,
+        headers={**ORIGIN, "Content-Type": "text/plain"},
+    )
+    assert (r.status_code, r.json()["error"]) == (415, "unsupported")
+    # 3. Oversized body fails with 413 before JSON parsing
+    r = client.post(
+        "/api/subjects/PDSS/runs",
+        content=huge,
+        headers={**ORIGIN, "Content-Type": "application/json"},
+    )
+    assert (r.status_code, r.json()["error"]) == (413, "too_large")
+    # 4. Invalid JSON fails with 400 invalid_body
+    r = client.post(
+        "/api/subjects/PDSS/runs",
+        content=b"{not json",
+        headers={**ORIGIN, "Content-Type": "application/json"},
+    )
+    assert (r.status_code, r.json()["error"]) == (400, "invalid_body")
+    assert fake_claude.calls() == []
+
+
+def test_strict_run_request_rejects_bad_ids_and_non_dict_stop(client, seeded, fake_claude):
+    for bad in (
+        {"kind": "write", "topic_id": 2**70},
+        {"kind": "write", "topic_id": None},
+        {"kind": "grade", "topic_id": 1},
+    ):
+        r = _runs_post(client, bad)
+        assert (r.status_code, r.json()["error"]) == (400, "invalid_body")
+        assert r.json()["detail"] == 'expected {kind: "write", topic_id} or {kind: "grade"}'
+    r = client.post("/api/runs/stop", json=["stop"], headers=ORIGIN)
+    assert (r.status_code, r.json()["error"]) == (400, "invalid_body")
+    assert fake_claude.calls() == []
+
+
+def test_runs_stream_closes_immediately_when_idle_or_already_settled(client, seeded, fake_claude):
+    # Review Focus #1: idle or already settled run emits event: snapshot then closes
+    r = client.get("/api/runs/stream")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/event-stream")
+    assert r.headers["cache-control"] == "no-cache"
+    assert r.headers["x-accel-buffering"] == "no"
+    assert r.text == "event: snapshot\ndata: null\n\n"
+    leaf = _leaf(client)
+    _runs_post(client, {"kind": "write", "topic_id": leaf})
+    wait_until_ended(_run_view(client))
+    r2 = client.get("/api/runs/stream")
+    assert r2.status_code == 200
+    assert "event: snapshot\n" in r2.text and '"status": "done"' in r2.text
+
+
+def test_runs_stream_emits_phase_delta_step_and_done(client, seeded, fake_claude, tmp_path):
+    gate = tmp_path / "go"
+    fake_claude.script(
+        [
+            FAKE_INIT,
+            f"WAIT:{gate}",
+            stream_start("thinking"),
+            stream_delta("thinking_delta", "Reading notes"),
+            use("t1", "mcp__groundly__submit_questions", {"questions": [1]}),
+            tool_result("t1", {"accepted": [{}], "rejected": []}),
+            success("Stored 1."),
+        ]
+    )
+    leaf = _leaf(client)
+    assert _runs_post(client, {"kind": "write", "topic_id": leaf}).status_code == 202
+    chunks = []
+    with client.stream("GET", "/api/runs/stream") as resp:
+        for chunk in resp.iter_text():
+            chunks.append(chunk)
+            if not gate.exists() and "event: snapshot" in "".join(chunks):
+                gate.write_text("1")
+    body = "".join(chunks)
+    assert "event: snapshot\n" in body
+    assert "event: phase\n" in body
+    assert "event: delta\n" in body
+    assert "event: step\n" in body and '"refresh": true' in body
+    assert "event: done\n" in body
+
+
+def test_runs_stream_emits_keepalive_before_settling(
+    client, seeded, fake_claude, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(runs, "SSE_KEEPALIVE_S", 0.05)
+    gate = tmp_path / "go"
+    fake_claude.script([FAKE_INIT, f"WAIT:{gate}", success("Done.")])
+    leaf = _leaf(client)
+    assert _runs_post(client, {"kind": "write", "topic_id": leaf}).status_code == 202
+    chunks = []
+    with client.stream("GET", "/api/runs/stream") as resp:
+        for chunk in resp.iter_text():
+            chunks.append(chunk)
+            if not gate.exists() and ": keep-alive" in "".join(chunks):
+                gate.write_text("1")
+    body = "".join(chunks)
+    assert ": keep-alive\n\n" in body
+    assert "event: done\n" in body
+
+
+def test_runs_stream_closes_promptly_on_runner_shutdown(home, seeded, fake_claude):
+    fake_claude.script([FAKE_INIT, "SLEEP"])
+    fake_claude.record_pids()
+    app = create_app()
+    with TestClient(app, base_url="http://127.0.0.1") as c:
+        leaf = c.get("/api/subjects/PDSS/tree").json()["tree"][0]["id"]
+        assert _runs_post(c, {"kind": "write", "topic_id": leaf}).status_code == 202
+        claude_pid, child_pid = fake_claude.pids()
+        chunks = []
+        t0: float | None = None
+        with c.stream("GET", "/api/runs/stream") as resp:
+            for chunk in resp.iter_text():
+                chunks.append(chunk)
+                if t0 is None and "event: snapshot" in "".join(chunks):
+                    t0 = time.monotonic()
+                    app.state.runner.shutdown()
+        assert t0 is not None
+        assert time.monotonic() - t0 < 2.0
+    body = "".join(chunks)
+    assert "event: snapshot\n" in body
+    assert "event: done\n" in body and '"status": "stopped"' in body
+    assert gone(claude_pid) and gone(child_pid)
+
+
+def test_runs_stream_refuses_writes_with_405(client):
+    for method in ("post", "put", "patch", "delete"):
+        assert getattr(client, method)("/api/runs/stream").status_code == 405
+
+
+def test_runs_stream_unsubscribes_on_early_disconnect(home, seeded, fake_claude):
+    fake_claude.script([FAKE_INIT, "SLEEP"])
+    fake_claude.record_pids()
+    app = create_app()
+    with TestClient(app, base_url="http://127.0.0.1") as c:
+        leaf = c.get("/api/subjects/PDSS/tree").json()["tree"][0]["id"]
+        assert _runs_post(c, {"kind": "write", "topic_id": leaf}).status_code == 202
+        fake_claude.pids()
+        with c.stream("GET", "/api/runs/stream") as resp:
+            for chunk in resp.iter_text():
+                if "event: snapshot" in chunk:
+                    assert len(app.state.runner._subscribers) == 1
+                    break
+        assert len(app.state.runner._subscribers) == 0
