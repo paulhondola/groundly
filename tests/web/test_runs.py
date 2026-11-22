@@ -5,6 +5,7 @@ from it (steps from tool names, never model text). No test calls a model."""
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -566,6 +567,16 @@ def test_run_tracks_and_clears_phase_and_thought_on_settlement(fake_claude):
     ) == ("done", None, None, "", None)
 
 
+def _wait_until(view, predicate, timeout=10.0) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        run = view()
+        if run and predicate(run):
+            return run
+        time.sleep(0.02)
+    raise AssertionError(f"condition not met within {timeout}s: {view()}")
+
+
 def test_stop_and_exit_clear_live_phase_and_thought(fake_claude):
     fake_claude.script(
         [
@@ -577,7 +588,19 @@ def test_stop_and_exit_clear_live_phase_and_thought(fake_claude):
     )
     runner = runs.Runner()
     runner.start("write", "PDSS", 7, "the prompt")
-    stopped = runner.stop()
+    try:
+        live = _wait_until(
+            runner.view,
+            lambda r: (
+                r["thought"] == "Working..."
+                and r["phase"] == "thinking"
+                and r["thought_channel"] == "thinking"
+            ),
+        )
+        assert live["active_tool"] is None
+        stopped = runner.stop()
+    finally:
+        runner.shutdown()
     assert stopped is not None
     assert (
         stopped["status"],
@@ -585,6 +608,33 @@ def test_stop_and_exit_clear_live_phase_and_thought(fake_claude):
         stopped["active_tool"],
         stopped["thought"],
         stopped["thought_channel"],
+    ) == ("stopped", None, None, "", None)
+
+    fake_claude.script(
+        [
+            FAKE_INIT,
+            stream_start("tool_use", name="mcp__groundly__submit_questions"),
+            "SLEEP",
+        ]
+    )
+    runner_tool = runs.Runner()
+    runner_tool.start("write", "PDSS", 7, "the prompt")
+    try:
+        live_tool = _wait_until(
+            runner_tool.view,
+            lambda r: r["phase"] == "writing" and r["active_tool"] == "Drafting questions",
+        )
+        assert live_tool["status"] == "running"
+        stopped_tool = runner_tool.stop()
+    finally:
+        runner_tool.shutdown()
+    assert stopped_tool is not None
+    assert (
+        stopped_tool["status"],
+        stopped_tool["phase"],
+        stopped_tool["active_tool"],
+        stopped_tool["thought"],
+        stopped_tool["thought_channel"],
     ) == ("stopped", None, None, "", None)
 
     fake_claude.script(
