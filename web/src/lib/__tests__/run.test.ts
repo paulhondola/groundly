@@ -253,4 +253,99 @@ describe("createRunStore", () => {
     expect(store.message).toBe("Stopped. What was already stored stays.");
     store.destroy();
   });
+
+  it("attach() preserves active SSE stream state and ignores stale running response after SSE settlement", async () => {
+    const store = createRunStore();
+    const onEnd = vi.fn();
+    store.setHooks({ subject: "PDSS", onEnd });
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 66 }), 202));
+    await store.start("PDSS", { kind: "write", topic_id: 7 });
+    const es = MockEventSource.instances[0];
+    es.emit("delta", { id: 66, channel: "thinking", text: "Live SSE tokens", reset: true });
+    es.emit("step", { id: 66, step: "Reading the course", refresh: false });
+
+    // 1. Mid-run route change triggers attach(), which gets an older GET /api/runs snapshot:
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        available: true,
+        reason: null,
+        target: 10,
+        run: makeSnapshot({ id: 66, thought: "", steps: [] }),
+      }),
+    );
+    await store.attach();
+
+    expect(store.run?.thought).toBe("Live SSE tokens");
+    expect(store.run?.steps).toEqual(["Reading the course"]);
+    expect(MockEventSource.instances).toHaveLength(1);
+
+    // 2. Race: attach() is in flight while SSE delivers `done`, then stale attach() resolves with status "running":
+    let resolveAttach!: (res: Response) => void;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveAttach = resolve;
+        }),
+    );
+    const pendingAttach = store.attach();
+
+    es.emit(
+      "done",
+      makeSnapshot({
+        id: 66,
+        status: "done",
+        phase: null,
+        summary: "Stored 3.",
+      }),
+    );
+    resolveAttach(
+      jsonResponse({
+        available: true,
+        reason: null,
+        target: 10,
+        run: makeSnapshot({ id: 66, status: "running" }),
+      }),
+    );
+    await pendingAttach;
+
+    expect(store.run?.status).toBe("done");
+    expect(store.busy).toBe(false);
+    expect(onEnd).toHaveBeenCalledTimes(1);
+    expect(MockEventSource.instances).toHaveLength(1);
+    store.destroy();
+  });
+
+  it("caps repeated EventSource error reconnects when GET /api/runs remains running", async () => {
+    const store = createRunStore();
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 88 }), 202));
+    await store.start("PDSS", { kind: "write", topic_id: 7 });
+
+    const runningInfo = () =>
+      jsonResponse({
+        available: true,
+        reason: null,
+        target: 10,
+        run: makeSnapshot({ id: 88, status: "running" }),
+      });
+
+    for (let i = 0; i < 4; i++) {
+      const currentEs = MockEventSource.instances[MockEventSource.instances.length - 1];
+      if (currentEs.closed) {
+        break;
+      }
+      fetchMock.mockResolvedValueOnce(runningInfo());
+      currentEs.triggerError();
+      await vi.waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledTimes(i + 2);
+      });
+      await new Promise((r) => setTimeout(r, 0));
+    }
+
+    // Initial connect (1) + capped retries (2) = exactly 3 EventSource connections total
+    expect(MockEventSource.instances).toHaveLength(3);
+    expect(store.message).toContain("Lost live stream connection");
+    store.destroy();
+  });
 });

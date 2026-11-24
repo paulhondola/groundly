@@ -19,6 +19,7 @@ import type {
 
 export const MAX_STREAM_CHARS = 2000;
 export const MAX_STEPS = 50;
+export const MAX_STREAM_RETRIES = 2;
 
 export interface RunHooks {
   subject: string | null;
@@ -60,6 +61,8 @@ export function createRunStore() {
   let hooks: RunHooks = { subject: null, onRefresh: null, onEnd: null };
   let source: EventSource | null = null;
   let endedRunId: number | null = null;
+  let streamErrors = 0;
+  let stateSeq = 0;
 
   function closeStream(): void {
     if (source) {
@@ -133,6 +136,7 @@ export function createRunStore() {
       if (!data || !run || run.id !== data.id) {
         return;
       }
+      streamErrors = 0;
       run = {
         ...run,
         phase: data.phase,
@@ -148,6 +152,7 @@ export function createRunStore() {
       if (!data || !run || run.id !== data.id) {
         return;
       }
+      streamErrors = 0;
       const nextThought = data.reset
         ? data.text.slice(-MAX_STREAM_CHARS)
         : (run.thought + data.text).slice(-MAX_STREAM_CHARS);
@@ -166,6 +171,7 @@ export function createRunStore() {
       if (!data || !run || run.id !== data.id) {
         return;
       }
+      streamErrors = 0;
       run = {
         ...run,
         steps: [...run.steps, data.step].slice(-MAX_STEPS),
@@ -189,6 +195,7 @@ export function createRunStore() {
         closeStream();
         return;
       }
+      streamErrors = 0;
       applySettled(snap);
     });
 
@@ -196,18 +203,26 @@ export function createRunStore() {
       if (source !== es) {
         return;
       }
+      streamErrors += 1;
       closeStream();
       void reconcileAfterStreamError();
     };
   }
 
   async function reconcileAfterStreamError(): Promise<void> {
+    const seq = stateSeq;
     let info: RunsInfo;
     try {
       info = await getJSON<RunsInfo>(RUNS_API);
     } catch {
+      if (seq !== stateSeq) {
+        return;
+      }
       run = null;
       message = "Lost the page server — reload the page when it is back.";
+      return;
+    }
+    if (seq !== stateSeq) {
       return;
     }
     available = info.available;
@@ -218,7 +233,11 @@ export function createRunStore() {
       run = current;
       watched = current.id;
       dismissed = false;
-      openStream();
+      if (streamErrors <= MAX_STREAM_RETRIES) {
+        openStream();
+      } else {
+        message = "Lost live stream connection — reload the page to reconnect.";
+      }
       return;
     }
     if (current && (watched === null || current.id === watched)) {
@@ -233,21 +252,40 @@ export function createRunStore() {
   }
 
   async function attach(): Promise<RunsInfo | null> {
+    const seq = ++stateSeq;
     let info: RunsInfo;
     try {
       info = await getJSON<RunsInfo>(RUNS_API);
     } catch {
       return null;
     }
+    if (seq !== stateSeq) {
+      return info;
+    }
     available = info.available;
     reason = info.reason;
     target = info.target;
-    run = info.run;
-    if (info.run && info.run.status === "running") {
+    const incoming = info.run;
+    if (incoming && incoming.id === endedRunId) {
+      return info;
+    }
+    if (
+      incoming &&
+      incoming.status === "running" &&
+      source !== null &&
+      watched === incoming.id &&
+      run?.id === incoming.id &&
+      run.status === "running"
+    ) {
+      return info;
+    }
+    run = incoming;
+    if (incoming && incoming.status === "running") {
       dismissed = false;
-      if (watched !== info.run.id || !source) {
-        watched = info.run.id;
+      if (watched !== incoming.id || !source) {
+        watched = incoming.id;
         endedRunId = null;
+        streamErrors = 0;
         openStream();
       }
     }
@@ -255,9 +293,11 @@ export function createRunStore() {
   }
 
   async function start(subject: string, body: StartRunBody): Promise<void> {
+    stateSeq += 1;
     starting = true;
     watched = null;
     endedRunId = null;
+    streamErrors = 0;
     message = null;
     dismissed = false;
     closeStream();
