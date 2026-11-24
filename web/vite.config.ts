@@ -35,6 +35,13 @@ export default defineConfig({
           host: "127.0.0.1:8765",
         },
       },
+      "/static": {
+        target: "http://127.0.0.1:8765",
+        changeOrigin: true,
+        headers: {
+          host: "127.0.0.1:8765",
+        },
+      },
     },
   },
   build: {

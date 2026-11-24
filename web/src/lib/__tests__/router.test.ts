@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { parseRoute, shouldInterceptLink } from "../router.svelte";
+import { createRouter, parseRoute, shouldInterceptLink } from "../router.svelte";
 
 describe("parseRoute", () => {
   it("parses root, subject tree, test query, attempt result, and unknown paths", () => {
@@ -86,5 +86,23 @@ describe("shouldInterceptLink", () => {
       shouldInterceptLink(makeAnchor(`${location.protocol}//other.example/s/PDSS`), makeClick()),
     ).toBe(false);
     expect(shouldInterceptLink(makeAnchor("/s/PDSS/materials/1"), makeClick())).toBe(false);
+  });
+});
+
+describe("createRouter.navigate", () => {
+  it("scrolls to the top on navigation without a hash and keeps scroll on hash links", () => {
+    const scrollSpy = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    const r = createRouter();
+
+    r.navigate("/s/PDSS");
+    expect(r.route).toEqual({ kind: "tree", subject: "PDSS" });
+    expect(scrollSpy).toHaveBeenCalledWith(0, 0);
+
+    scrollSpy.mockClear();
+    r.navigate("/s/PDSS#section");
+    expect(scrollSpy).not.toHaveBeenCalled();
+
+    r.destroy();
+    scrollSpy.mockRestore();
   });
 });

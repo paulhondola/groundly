@@ -168,7 +168,8 @@ def test_page_inserts_content_only_as_text():
 
 def test_page_loads_nothing_external():
     assert "http://" not in AUTHORED_SOURCE and "https://" not in AUTHORED_SOURCE
-    assert " onclick=" not in AUTHORED_SOURCE
+    assert ' onclick="' not in AUTHORED_SOURCE
+    assert " onclick=" not in (WEB / "page.html").read_text(encoding="utf-8")
 
 
 def test_page_links_a_source_only_when_the_server_says_it_is_a_stored_pdf():
@@ -206,7 +207,9 @@ def test_the_suggested_host_sentence_quotes_the_topic_title():
 
 
 def test_a_test_dropped_for_a_removed_question_is_never_saved_again():
-    assert "function store() { if (!dead) saveTest(key, test); }" in AUTHORED_SOURCE
+    assert "createTestPersister" in AUTHORED_SOURCE
+    assert "markDead()" in AUTHORED_SOURCE
+    assert "if (!dead)" in AUTHORED_SOURCE
 
 
 def test_page_starts_runs_through_the_api_only():

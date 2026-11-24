@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { TopicNode, TopicSource } from "../../types";
-import { dedupeSources, filterTree, findTopicById, writeButtonInfo } from "../tree-filter";
+import type { SourceItem, TopicNode } from "../../types";
+import {
+  dedupeSources,
+  filterTree,
+  findTopicById,
+  writeButtonInfo,
+  writePrompt,
+} from "../tree-filter";
 
 function makeNode(
   id: number,
@@ -97,13 +103,13 @@ describe("writeButtonInfo", () => {
 
 describe("dedupeSources", () => {
   it("deduplicates PDF links on the same filename and page while preserving text chunks", () => {
-    const base: Omit<TopicSource, "chunk_id" | "text" | "pdf"> = {
+    const base: Omit<SourceItem, "chunk_id" | "text" | "pdf"> = {
       material_id: 1,
       filename: "slides.pdf",
       page: 3,
       heading_path: null,
     };
-    const sources: TopicSource[] = [
+    const sources: SourceItem[] = [
       { ...base, chunk_id: 1, text: "A", pdf: true },
       { ...base, chunk_id: 2, text: "B", pdf: true },
       { ...base, chunk_id: 3, page: 4, text: "C", pdf: true },
@@ -111,5 +117,13 @@ describe("dedupeSources", () => {
       { ...base, chunk_id: 5, filename: "notes.txt", page: null, text: "E", pdf: false },
     ];
     expect(dedupeSources(sources).map((s) => s.chunk_id)).toEqual([1, 3, 4, 5]);
+  });
+});
+
+describe("writePrompt", () => {
+  it("quotes the topic title and names the subject", () => {
+    expect(writePrompt("Mutexes & Locks", "PDSS")).toBe(
+      'Write questions on "Mutexes & Locks" for PDSS.',
+    );
   });
 });

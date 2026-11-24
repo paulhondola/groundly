@@ -124,6 +124,9 @@ describe("createRunStore", () => {
     es.emit("step", { id: 10, step: "2 stored, 0 rejected", refresh: true });
     expect(onRefresh).toHaveBeenCalledTimes(1);
 
+    // Switch back to the run's subject before settlement so onEnd fires for it
+    store.setHooks({ subject: "PDSS", onRefresh, onEnd });
+
     const settled = makeSnapshot({
       id: 10,
       subject: "PDSS",
@@ -346,6 +349,39 @@ describe("createRunStore", () => {
     // Initial connect (1) + capped retries (2) = exactly 3 EventSource connections total
     expect(MockEventSource.instances).toHaveLength(3);
     expect(store.message).toContain("Lost live stream connection");
+    store.destroy();
+  });
+
+  it("skips onEnd when settled run belongs to a different subject and guards duplicate stop() calls", async () => {
+    const store = createRunStore();
+    const onEnd = vi.fn();
+    store.setHooks({ subject: "ALGO", onEnd });
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 90, subject: "PDSS" }), 202));
+    await store.start("PDSS", { kind: "write", topic_id: 7 });
+
+    let resolveStop!: (res: Response) => void;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveStop = resolve;
+        }),
+    );
+
+    const p1 = store.stop();
+    const p2 = store.stop();
+    expect(store.stopping).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    resolveStop(
+      jsonResponse({
+        run: makeSnapshot({ id: 90, subject: "PDSS", status: "stopped", phase: null }),
+      }),
+    );
+    await Promise.all([p1, p2]);
+
+    expect(store.stopping).toBe(false);
+    expect(onEnd).not.toHaveBeenCalled();
     store.destroy();
   });
 });

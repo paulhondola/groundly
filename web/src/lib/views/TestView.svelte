@@ -2,7 +2,7 @@
   import { ApiError, api, getJSON, pageURL, postJSON, testQuery } from "../api";
   import Button from "../components/ui/Button.svelte";
   import Card from "../components/ui/Card.svelte";
-  import { cn, onPress } from "../components/ui/utils";
+  import { cn } from "../components/ui/utils";
   import { router } from "../router.svelte";
   import { runStore } from "../run.svelte";
   import type {
@@ -12,6 +12,7 @@
   } from "../types";
   import {
     type StoredTest,
+    createTestPersister,
     dropTest,
     isAnswered,
     loadTest,
@@ -20,6 +21,7 @@
     shuffled,
     storageKey,
   } from "./test-session";
+  import { findTopicById, writePrompt } from "./tree-filter";
 
   interface Props {
     subject: string;
@@ -35,9 +37,8 @@
   let loading = $state(true);
   let loadError = $state<string | null>(null);
   let submitError = $state<string | null>(null);
-  let confirming = $state<number>(0);
+  let confirming = $state(false);
   let sending = $state(false);
-  let dead = $state(false);
 
   const key = $derived(storageKey(subject, topicId));
   const currentQuestion = $derived(test ? test.questions[test.current] ?? null : null);
@@ -45,62 +46,47 @@
   const answeredCount = $derived(
     test ? test.questions.filter((q) => isAnswered(q, test?.answers[q.id])).length : 0,
   );
+  const unansweredCount = $derived(total - answeredCount);
   const progressPercent = $derived(total > 0 ? Math.round((answeredCount / total) * 100) : 0);
 
-  // oxfmt-ignore
-  function writePrompt(title: string, subjectName: string): string {
-    return "Write questions on \"" + title + "\" for " + subjectName + ".";
-  }
+  let persister: ReturnType<typeof createTestPersister> | null = null;
+  let sessionSeq = 0;
 
-  // oxfmt-ignore
-  function store() { if (!dead) saveTest(key, $state.snapshot(test) as StoredTest); }
-
-  // Keep the exact unsplit helper contract present in authored source without changing behavior.
-  const _pinGuard = () => {
-    const current = test;
-    if (!current) {
-      return;
+  function store(): void {
+    if (test && persister) {
+      persister.save($state.snapshot(test) as StoredTest);
     }
-    const testSnapshot = $state.snapshot(current) as StoredTest;
-    void ((key: string, test: StoredTest) => {
-      // oxfmt-ignore
-      function store() { if (!dead) saveTest(key, test); }
-      return store;
-    })(key, testSnapshot);
-  };
-  void _pinGuard;
+  }
 
   $effect(() => {
     const activeSubject = subject;
     const activeTopicId = topicId;
     const activeN = n;
     const activeKey = storageKey(activeSubject, activeTopicId);
+    const seq = ++sessionSeq;
 
     runStore.setHooks({ subject: null });
+    persister = createTestPersister(activeKey);
+    courseTitle = "";
+    scopeTitle = "Whole course";
     loading = true;
     loadError = null;
     submitError = null;
-    confirming = 0;
+    confirming = false;
     sending = false;
-    dead = false;
     test = null;
 
-    let cancelled = false;
     (async () => {
       try {
         const treeRes = await getJSON<TreeResponse>(api(activeSubject, "/tree"));
-        if (cancelled) {
+        if (seq !== sessionSeq) {
           return;
         }
         const course = treeRes.title || activeSubject;
-        let scope = activeTopicId == null ? "Whole course" : "Removed topic";
-        for (const t of treeRes.tree) {
-          for (const node of [t, ...t.subtopics]) {
-            if (node.id === activeTopicId) {
-              scope = node.title;
-            }
-          }
-        }
+        const scope =
+          activeTopicId == null
+            ? "Whole course"
+            : (findTopicById(treeRes.tree, activeTopicId)?.title ?? "Removed topic");
         courseTitle = course;
         scopeTitle = scope;
         document.title = "Test · " + course + " · Groundly";
@@ -110,7 +96,7 @@
           const drawn = await getJSON<DrawTestResponse>(
             api(activeSubject, testQuery(activeTopicId, activeN)),
           );
-          if (cancelled) {
+          if (seq !== sessionSeq) {
             return;
           }
           loaded = {
@@ -124,12 +110,12 @@
             saveTest(activeKey, loaded);
           }
         }
-        if (!cancelled) {
+        if (seq === sessionSeq) {
           test = loaded;
           loading = false;
         }
       } catch (err: unknown) {
-        if (!cancelled) {
+        if (seq === sessionSeq) {
           loadError = err instanceof Error ? err.message : "Could not load test";
           loading = false;
         }
@@ -137,7 +123,7 @@
     })();
 
     return () => {
-      cancelled = true;
+      sessionSeq += 1;
     };
   });
 
@@ -146,7 +132,7 @@
       return;
     }
     test.current = index;
-    confirming = 0;
+    confirming = false;
     submitError = null;
     store();
   }
@@ -156,6 +142,7 @@
       return;
     }
     test.answers[questionId] = value;
+    confirming = false;
     store();
   }
 
@@ -175,6 +162,7 @@
       }
       test.answers[questionId] = [...set];
     }
+    confirming = false;
     store();
   }
 
@@ -182,11 +170,14 @@
     if (!test || sending) {
       return;
     }
-    const unanswered = test.questions.filter((q) => !isAnswered(q, test?.answers[q.id])).length;
-    if (unanswered > 0 && confirming === 0) {
-      confirming = unanswered;
+    if (unansweredCount > 0 && !confirming) {
+      confirming = true;
       return;
     }
+    const activeSubject = subject;
+    const activeKey = key;
+    const activePersister = persister;
+    const seq = sessionSeq;
     sending = true;
     submitError = null;
     const answers = test.questions.map((q) =>
@@ -201,25 +192,30 @@
           },
     );
     try {
-      const created = await postJSON<SubmitAttemptResponse>(api(subject, "/attempts"), {
+      const created = await postJSON<SubmitAttemptResponse>(api(activeSubject, "/attempts"), {
         token: test.token,
         topic_id: topicId,
         answers,
       });
-      dropTest(key);
-      router.navigate(pageURL(subject, "/attempts/" + Number(created.id)));
-    } catch (err: unknown) {
-      confirming = 0;
-      if (err instanceof ApiError && err.code === "unknown_question") {
-        dead = true;
-        dropTest(key);
+      dropTest(activeKey);
+      if (seq === sessionSeq) {
+        router.navigate(pageURL(activeSubject, "/attempts/" + Number(created.id)));
       }
-      submitError =
-        err instanceof Error
-          ? err.message
-          : "the test could not be submitted — try Submit again";
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.code === "unknown_question") {
+        activePersister?.markDead();
+      }
+      if (seq === sessionSeq) {
+        confirming = false;
+        submitError =
+          err instanceof Error
+            ? err.message
+            : "the test could not be submitted — try Submit again";
+      }
     } finally {
-      sending = false;
+      if (seq === sessionSeq) {
+        sending = false;
+      }
     }
   }
 
@@ -304,7 +300,7 @@
             type="button"
             aria-label={"Question " + (i + 1) + (done ? ", answered" : "")}
             aria-current={i === test.current ? "step" : undefined}
-            {...onPress(() => go(i))}
+            onclick={() => go(i)}
             class={cn(
               "dot inline-flex h-8 min-w-8 items-center justify-center rounded-md border px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               i === test.current
@@ -401,34 +397,34 @@
       <Button
         variant="outline"
         disabled={test.current === 0}
-        {...onPress(() => test && go(test.current - 1))}
+        onclick={() => test && go(test.current - 1)}
       >
         Back
       </Button>
       {#if test.current < total - 1}
-        <Button class="primary" {...onPress(() => test && go(test.current + 1))}>Next</Button>
+        <Button class="primary" onclick={() => test && go(test.current + 1)}>Next</Button>
       {:else}
-        <Button class="primary" disabled={sending} {...onPress(() => void submit())}>
+        <Button class="primary" disabled={sending} onclick={() => void submit()}>
           {sending ? "Submitting…" : "Submit"}
         </Button>
       {/if}
     </div>
 
-    {#if confirming > 0}
+    {#if confirming && unansweredCount > 0}
       <div
         role="alertdialog"
         aria-label="Confirm submit"
         class="notice wait flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--status-awaiting)]/40 bg-[color-mix(in_oklab,var(--status-awaiting)_10%,transparent)] p-4 text-sm"
       >
         <p class="text-foreground">
-          {confirming}
-          {confirming === 1 ? " question is" : " questions are"} unanswered and will count as wrong
+          {unansweredCount}
+          {unansweredCount === 1 ? " question is" : " questions are"} unanswered and will count as wrong
         </p>
         <div class="flex items-center gap-2">
-          <Button class="primary" size="sm" disabled={sending} {...onPress(() => void submit())}>
+          <Button class="primary" size="sm" disabled={sending} onclick={() => void submit()}>
             Submit anyway
           </Button>
-          <Button variant="ghost" size="sm" {...onPress(() => (confirming = 0))}>
+          <Button variant="ghost" size="sm" onclick={() => (confirming = false)}>
             Go back
           </Button>
         </div>

@@ -52,6 +52,7 @@ export function createRunStore() {
   let run = $state<RunSnapshot | null>(null);
   let watched = $state<number | null>(null);
   let starting = $state(false);
+  let stopping = $state(false);
   let message = $state<string | null>(null);
   let dismissed = $state(false);
 
@@ -71,14 +72,17 @@ export function createRunStore() {
     }
   }
 
-  async function notifyEnd(runId: number | null): Promise<void> {
+  async function notifyEnd(runId: number | null, runSubject: string | null = null): Promise<void> {
     if (runId !== null && endedRunId === runId) {
       return;
     }
     if (runId !== null) {
       endedRunId = runId;
     }
-    if (hooks.onEnd) {
+    if (
+      hooks.onEnd &&
+      (hooks.subject === null || runSubject === null || runSubject === hooks.subject)
+    ) {
       await hooks.onEnd();
     }
   }
@@ -90,7 +94,7 @@ export function createRunStore() {
       message = outcomeText(settled);
     }
     closeStream();
-    void notifyEnd(settled.id);
+    void notifyEnd(settled.id, settled.subject);
   }
 
   function openStream(): void {
@@ -305,6 +309,7 @@ export function createRunStore() {
       const started = await postJSON<RunSnapshot>(startRunURL(subject), body);
       run = started;
       watched = started.id;
+      dismissed = false;
       if (started.status === "running") {
         openStream();
       } else {
@@ -322,6 +327,10 @@ export function createRunStore() {
   }
 
   async function stop(): Promise<void> {
+    if (stopping) {
+      return;
+    }
+    stopping = true;
     try {
       const res = await postJSON<StopRunResponse>(RUNS_STOP_API, {});
       if (res.run && res.run.status !== "running") {
@@ -330,6 +339,8 @@ export function createRunStore() {
     } catch (err) {
       const detail = err instanceof Error ? err.message : "unknown error";
       message = "Could not stop: " + detail;
+    } finally {
+      stopping = false;
     }
   }
 
@@ -368,6 +379,9 @@ export function createRunStore() {
     },
     get starting() {
       return starting;
+    },
+    get stopping() {
+      return stopping;
     },
     get message() {
       return message;

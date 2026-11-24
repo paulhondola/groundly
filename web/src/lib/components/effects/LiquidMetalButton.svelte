@@ -21,6 +21,20 @@
   let hostEl = $state<HTMLDivElement | null>(null);
   let shaderReady = $state(false);
 
+  function supportsWebGL2(): boolean {
+    try {
+      const probe = document.createElement("canvas");
+      const gl = probe.getContext("webgl2");
+      if (!gl) {
+        return false;
+      }
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   $effect(() => {
     const el = hostEl;
     shaderReady = false;
@@ -31,18 +45,7 @@
     const reducedMotion =
       typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reducedMotion) {
-      return;
-    }
-
-    let hasWebGL = false;
-    try {
-      const probe = document.createElement("canvas");
-      hasWebGL = Boolean(probe.getContext("webgl2") || probe.getContext("webgl"));
-    } catch {
-      hasWebGL = false;
-    }
-    if (!hasWebGL) {
+    if (reducedMotion || !supportsWebGL2()) {
       return;
     }
 
@@ -83,6 +86,7 @@
       shaderReady = false;
       shaderMount?.dispose();
       shaderMount = null;
+      el.replaceChildren();
     }
 
     return () => {

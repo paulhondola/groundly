@@ -5,7 +5,7 @@
   import { phaseLabelFor } from "./effects/orb-state";
   import Badge from "./ui/Badge.svelte";
   import Button from "./ui/Button.svelte";
-  import { cn, onPress } from "./ui/utils";
+  import { cn } from "./ui/utils";
 
   interface Props {
     store?: ReturnType<typeof createRunStore>;
@@ -80,11 +80,16 @@
 
       <div class="flex items-center gap-2">
         {#if activeRun && working}
-          <Button variant="outline" size="sm" {...onPress(() => void store.stop())}>
-            Stop
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={store.stopping}
+            onclick={() => void store.stop()}
+          >
+            {store.stopping ? "Stopping…" : "Stop"}
           </Button>
-        {:else}
-          <Button variant="ghost" size="sm" {...onPress(() => store.dismiss())}>
+        {:else if !working}
+          <Button variant="ghost" size="sm" onclick={() => store.dismiss()}>
             Dismiss
           </Button>
         {/if}

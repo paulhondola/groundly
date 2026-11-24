@@ -109,6 +109,7 @@ describe("LiquidMetalButton fallback", () => {
     expect(btn).not.toBeNull();
     expect(btn?.getAttribute("type")).toBe("button");
     expect(btn?.textContent?.trim()).toBe("Write questions");
+    expect(container.querySelectorAll("canvas")).toHaveLength(0);
     btn?.click();
     expect(onClick).toHaveBeenCalledTimes(1);
 
@@ -277,6 +278,66 @@ describe("RunStrip text-only safety and status output", () => {
     const outcome = container.querySelector("p.outcome");
     expect(outcome?.getAttribute("role")).toBe("status");
     expect(outcome?.textContent).toBe(xssSummary);
+
+    store.destroy();
+    void unmount(instance);
+  });
+
+  it("hides Dismiss while starting and disables Stop while stopping", async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const store = createRunStore();
+
+    let resolveStart!: (res: Response) => void;
+    let resolveStop!: (res: Response) => void;
+    globalThis.fetch = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveStart = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveStop = resolve;
+          }),
+      ) as unknown as typeof fetch;
+
+    const instance = mount(RunStrip, {
+      target: container,
+      props: { store },
+    });
+    flushSync();
+
+    const startPromise = store.start("PDSS", { kind: "write", topic_id: 7 });
+    flushSync();
+
+    expect(container.textContent).toContain("Starting your agent");
+    expect(container.querySelectorAll("button")).toHaveLength(0);
+
+    resolveStart(jsonResponse(makeSnapshot({ id: 78, subject: "PDSS" }), 202));
+    await startPromise;
+    flushSync();
+
+    const stopBtn = container.querySelector("button");
+    expect(stopBtn?.textContent?.trim()).toBe("Stop");
+    expect(stopBtn?.disabled).toBe(false);
+
+    const stopPromise = store.stop();
+    flushSync();
+    expect(stopBtn?.disabled).toBe(true);
+    expect(stopBtn?.textContent?.trim()).toBe("Stopping…");
+
+    resolveStop(
+      jsonResponse({
+        run: makeSnapshot({ id: 78, subject: "PDSS", status: "stopped", phase: null }),
+      }),
+    );
+    await stopPromise;
+    flushSync();
+
+    expect(container.querySelector("button")?.textContent?.trim()).toBe("Dismiss");
 
     store.destroy();
     void unmount(instance);

@@ -9,10 +9,16 @@
   import Card from "../components/ui/Card.svelte";
   import Input from "../components/ui/Input.svelte";
   import Select from "../components/ui/Select.svelte";
-  import { cn, onPress } from "../components/ui/utils";
+  import { cn } from "../components/ui/utils";
   import { runStore } from "../run.svelte";
   import type { AttemptSummary, TopicNode, TreeResponse } from "../types";
-  import { dedupeSources, filterTree, findTopicById, writeButtonInfo } from "./tree-filter";
+  import {
+    dedupeSources,
+    filterTree,
+    findTopicById,
+    writeButtonInfo,
+    writePrompt,
+  } from "./tree-filter";
 
   interface Props {
     subject: string;
@@ -42,20 +48,17 @@
   );
   const selectedSources = $derived(selectedTopic ? dedupeSources(selectedTopic.sources) : []);
 
-  // oxfmt-ignore
-  function writePrompt(topicTitle: string, subjectName: string): string {
-    const title = topicTitle;
-    return "Write questions on \"" + title + "\" for " + subjectName + ".";
-  }
+  let loadSeq = 0;
 
   async function loadData(silent: boolean, activeSubject: string): Promise<void> {
+    const seq = ++loadSeq;
     if (!silent) {
       loading = true;
       error = null;
     }
     try {
       const data = await getJSON<TreeResponse>(api(activeSubject, "/tree"));
-      if (activeSubject !== subject) {
+      if (seq !== loadSeq) {
         return;
       }
       tree = data.tree;
@@ -66,14 +69,14 @@
       }
       try {
         const list = await getJSON<AttemptSummary[]>(api(activeSubject, "/attempts"));
-        if (activeSubject === subject) {
+        if (seq === loadSeq) {
           attempts = list;
         }
       } catch {
         /* attempt history optional if unreachable */
       }
     } catch (err: unknown) {
-      if (!silent && activeSubject === subject) {
+      if (!silent && seq === loadSeq) {
         error = err instanceof Error ? err.message : "Could not load topic tree";
         loading = false;
       }
@@ -83,6 +86,8 @@
   $effect(() => {
     const activeSubject = subject;
     document.title = activeSubject + " · Groundly";
+    title = "";
+    tree = [];
     selectedTopicId = null;
     query = "";
     attempts = [];
@@ -95,6 +100,7 @@
     void loadData(false, activeSubject);
 
     return () => {
+      loadSeq += 1;
       runStore.setHooks({ subject: null, onRefresh: null, onEnd: null });
     };
   });
@@ -215,7 +221,7 @@
                 <button
                   type="button"
                   aria-pressed={selectedTopicId === topic.id}
-                  {...onPress((event) => void openTopic(topic, event))}
+                  onclick={(event) => void openTopic(topic, event)}
                   class={cn(
                     "node big flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     topic.sources.length === 0 ? "nosrc border-dashed" : "border-transparent",
@@ -246,7 +252,7 @@
                         <button
                           type="button"
                           aria-pressed={selectedTopicId === sub.id}
-                          {...onPress((event) => void openTopic(sub, event))}
+                          onclick={(event) => void openTopic(sub, event)}
                           class={cn(
                             "node chip inline-flex flex-wrap items-center gap-2 rounded-lg border px-3 py-1.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                             sub.sources.length === 0 ? "nosrc border-dashed" : "border-border",
@@ -315,7 +321,7 @@
               <h2 bind:this={panelHeadingEl} class="text-lg font-semibold text-foreground">
                 {selectedTopic.title}
               </h2>
-              <Button variant="ghost" size="sm" class="close" {...onPress(closePanel)}>
+              <Button variant="ghost" size="sm" class="close" onclick={closePanel}>
                 Close
               </Button>
             </div>
@@ -352,12 +358,11 @@
               <LiquidMetalButton
                 label={selectedWriteInfo.label}
                 disabled={runStore.busy}
-                {...onPress(() =>
+                onclick={() =>
                   void runStore.start(subject, {
                     kind: "write",
                     topic_id: selectedTopic.id,
-                  }),
-                )}
+                  })}
               />
             {:else if selectedQuestionCount === 0}
               <p class="notice rounded-lg border border-border bg-muted/40 p-3 text-xs leading-relaxed">

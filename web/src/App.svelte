@@ -5,7 +5,6 @@
   import Button from "./lib/components/ui/Button.svelte";
   import Card from "./lib/components/ui/Card.svelte";
   import Select from "./lib/components/ui/Select.svelte";
-  import { onPress } from "./lib/components/ui/utils";
   import { router } from "./lib/router.svelte";
   import { type ThemeMode, theme } from "./lib/theme.svelte";
   import ResultView from "./lib/views/ResultView.svelte";
@@ -14,11 +13,6 @@
   import TreeView from "./lib/views/TreeView.svelte";
 
   const route = $derived(router.route);
-  let themeValue = $state<ThemeMode>(theme.mode);
-
-  $effect(() => {
-    themeValue = theme.mode;
-  });
 
   function onThemeChange(event: Event): void {
     const select = event.currentTarget;
@@ -30,7 +24,7 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="min-h-screen bg-background text-foreground" {...onPress((e) => router.interceptClick(e))}>
+<div class="min-h-screen bg-background text-foreground" onclick={(e) => router.interceptClick(e)}>
   <header class="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur">
     <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-3 sm:px-6">
       <div class="flex flex-wrap items-center gap-3">
@@ -52,7 +46,7 @@
 
       <label class="flex items-center gap-2 text-xs text-muted-foreground">
         <span>Theme</span>
-        <Select bind:value={themeValue} aria-label="Theme" onchange={onThemeChange}>
+        <Select value={theme.mode} aria-label="Theme" onchange={onThemeChange}>
           <option value="system">System</option>
           <option value="light">Light</option>
           <option value="dark">Dark</option>

@@ -5,9 +5,10 @@
   import LiquidMetalButton from "../components/effects/LiquidMetalButton.svelte";
   import Badge, { type BadgeVariant } from "../components/ui/Badge.svelte";
   import Card from "../components/ui/Card.svelte";
-  import { cn, onPress } from "../components/ui/utils";
+  import { cn } from "../components/ui/utils";
   import { runStore } from "../run.svelte";
   import type { AnswerState, AttemptResult, TreeResponse } from "../types";
+  import { findTopicById } from "./tree-filter";
 
   interface Props {
     subject: string;
@@ -44,11 +45,14 @@
 
   const canGrade = $derived(Boolean(result?.provisional && runStore.available));
 
+  let loadSeq = 0;
+
   async function loadResult(
     silent: boolean,
     activeSubject: string,
     activeAttemptId: number,
   ): Promise<void> {
+    const seq = ++loadSeq;
     if (!silent) {
       loading = true;
       error = null;
@@ -58,18 +62,14 @@
         getJSON<AttemptResult>(api(activeSubject, "/attempts/" + activeAttemptId)),
         getJSON<TreeResponse>(api(activeSubject, "/tree")),
       ]);
-      if (activeSubject !== subject || activeAttemptId !== attemptId) {
+      if (seq !== loadSeq) {
         return;
       }
       const course = treeRes.title || activeSubject;
-      let scope = attemptRes.scope_topic_id == null ? "Whole course" : "Removed topic";
-      for (const t of treeRes.tree) {
-        for (const node of [t, ...t.subtopics]) {
-          if (node.id === attemptRes.scope_topic_id) {
-            scope = node.title;
-          }
-        }
-      }
+      const scope =
+        attemptRes.scope_topic_id == null
+          ? "Whole course"
+          : (findTopicById(treeRes.tree, attemptRes.scope_topic_id)?.title ?? "Removed topic");
       result = attemptRes;
       courseTitle = course;
       scopeTitle = scope;
@@ -78,7 +78,7 @@
         loading = false;
       }
     } catch (err: unknown) {
-      if (!silent && activeSubject === subject && activeAttemptId === attemptId) {
+      if (!silent && seq === loadSeq) {
         error = err instanceof Error ? err.message : "Could not load attempt result";
         loading = false;
       }
@@ -88,6 +88,9 @@
   $effect(() => {
     const activeSubject = subject;
     const activeAttemptId = attemptId;
+    result = null;
+    courseTitle = "";
+    scopeTitle = "Whole course";
     void runStore.attach();
     runStore.setHooks({
       subject: activeSubject,
@@ -97,6 +100,7 @@
     void loadResult(false, activeSubject, activeAttemptId);
 
     return () => {
+      loadSeq += 1;
       runStore.setHooks({ subject: null, onRefresh: null, onEnd: null });
     };
   });
@@ -136,7 +140,7 @@
             <LiquidMetalButton
               label="Grade now"
               disabled={runStore.busy}
-              {...onPress(() => void runStore.start(subject, { kind: "grade" }))}
+              onclick={() => void runStore.start(subject, { kind: "grade" })}
             />
           {/if}
         </div>

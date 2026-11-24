@@ -1,4 +1,4 @@
-import type { TopicNode, TopicSource } from "../types";
+import type { SourceItem, TopicNode } from "../types";
 
 function matchesQuery(node: TopicNode, needle: string): boolean {
   return node.title.toLowerCase().includes(needle) || node.summary.toLowerCase().includes(needle);
@@ -57,9 +57,9 @@ export function writeButtonInfo(
   };
 }
 
-export function dedupeSources(sources: TopicSource[]): TopicSource[] {
+export function dedupeSources(sources: SourceItem[]): SourceItem[] {
   const seen = new Set<string>();
-  const out: TopicSource[] = [];
+  const out: SourceItem[] = [];
   for (const src of sources) {
     if (src.pdf === true) {
       const key = `${src.filename}\u0000${src.page}`;
@@ -71,4 +71,9 @@ export function dedupeSources(sources: TopicSource[]): TopicSource[] {
     out.push(src);
   }
   return out;
+}
+
+// oxfmt-ignore
+export function writePrompt(title: string, subjectName: string): string {
+  return "Write questions on \"" + title + "\" for " + subjectName + ".";
 }

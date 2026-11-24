@@ -111,6 +111,9 @@ export function createRouter() {
     }
     pathname = resolved.pathname;
     search = resolved.search;
+    if (!resolved.hash) {
+      window.scrollTo(0, 0);
+    }
   }
 
   function interceptClick(event: MouseEvent): void {

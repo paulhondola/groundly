@@ -1,10 +1,10 @@
 <script lang="ts">
   import { pageURL } from "../api";
-  import type { TopicSource } from "../types";
+  import type { SourceItem } from "../types";
 
   interface Props {
     subject: string;
-    src: TopicSource;
+    src: SourceItem;
   }
 
   let { subject, src }: Props = $props();

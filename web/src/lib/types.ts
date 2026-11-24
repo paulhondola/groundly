@@ -54,8 +54,6 @@ export interface SourceItem {
   pdf: boolean;
 }
 
-export type TopicSource = SourceItem;
-
 export type MasteryState = "not_started" | "in_progress" | "mastered";
 
 export interface TopicProgress {
@@ -158,8 +156,6 @@ export interface AttemptResult {
   topics: AttemptTopicSummary[];
 }
 
-export type AttemptResultResponse = AttemptResult;
-
 export interface SSEPhaseEvent {
   id: number;
   phase: RunPhase;
@@ -178,10 +174,3 @@ export interface SSEStepEvent {
   step: string;
   refresh: boolean;
 }
-
-export type SSEEvent =
-  | { event: "snapshot"; data: RunSnapshot | null }
-  | { event: "phase"; data: SSEPhaseEvent }
-  | { event: "delta"; data: SSEDeltaEvent }
-  | { event: "step"; data: SSEStepEvent }
-  | { event: "done"; data: RunSnapshot };
