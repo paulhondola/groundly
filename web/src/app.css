@@ -1,0 +1,150 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: oklch(0.99 0.002 250);
+  --foreground: oklch(0.16 0.015 255);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.16 0.015 255);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.16 0.015 255);
+  --primary: oklch(0.24 0.025 255);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.955 0.008 250);
+  --secondary-foreground: oklch(0.24 0.02 255);
+  --muted: oklch(0.955 0.006 250);
+  --muted-foreground: oklch(0.48 0.015 255);
+  --accent: oklch(0.945 0.012 245);
+  --accent-foreground: oklch(0.22 0.025 255);
+  --destructive: oklch(0.577 0.215 27);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.9 0.008 250);
+  --input: oklch(0.9 0.008 250);
+  --ring: oklch(0.55 0.12 250);
+  --radius: 0.625rem;
+  --status-mastered: oklch(0.55 0.16 155);
+  --status-progress: oklch(0.58 0.15 245);
+  --status-correct: oklch(0.55 0.16 155);
+  --status-wrong: oklch(0.577 0.215 27);
+  --status-awaiting: oklch(0.68 0.15 75);
+}
+
+.dark {
+  --background: oklch(0.145 0.012 255);
+  --foreground: oklch(0.96 0.006 250);
+  --card: oklch(0.185 0.014 255);
+  --card-foreground: oklch(0.96 0.006 250);
+  --popover: oklch(0.185 0.014 255);
+  --popover-foreground: oklch(0.96 0.006 250);
+  --primary: oklch(0.92 0.01 250);
+  --primary-foreground: oklch(0.17 0.015 255);
+  --secondary: oklch(0.24 0.016 255);
+  --secondary-foreground: oklch(0.96 0.006 250);
+  --muted: oklch(0.23 0.014 255);
+  --muted-foreground: oklch(0.7 0.015 250);
+  --accent: oklch(0.26 0.02 250);
+  --accent-foreground: oklch(0.96 0.006 250);
+  --destructive: oklch(0.64 0.21 25);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.28 0.014 255);
+  --input: oklch(0.28 0.014 255);
+  --ring: oklch(0.68 0.14 245);
+  --status-mastered: oklch(0.68 0.15 155);
+  --status-progress: oklch(0.7 0.14 245);
+  --status-correct: oklch(0.68 0.15 155);
+  --status-wrong: oklch(0.66 0.2 25);
+  --status-awaiting: oklch(0.76 0.14 75);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+}
+
+@keyframes border-beam-spin {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@layer components {
+  .border-beam {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+  }
+
+  .border-beam::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1.5px;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      var(--status-progress) 35%,
+      var(--ring) 50%,
+      var(--status-progress) 65%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: border-beam-spin 3s linear infinite;
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .border-beam::before {
+    animation: none;
+    background-position: 50% 50%;
+  }
+}

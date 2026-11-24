@@ -14,7 +14,7 @@ Expands [`groundly-spec.md`](../groundly-spec.md) §4. Every row is a **decision
 | Retrieval | **A plain `VectorRetriever` returning `Hit`** | One arm left, so an orchestration framework wrapped a SQLite row (decision 36) | — |
 | Answer generation | **The host agent** | It is already an LLM; enforced server-side answering was measured and removed (decision 33) | — |
 | HTTP transport | `groundly start` (with the page, at `/mcp`) or `groundly mcp --http`, loopback-only | fastmcp's own Streamable HTTP app | — |
-| Topic-tree page | **Starlette + uvicorn** (`groundly serve`, loopback-only), one inline-CSS/vanilla-JS HTML file | Both were already installed through `fastmcp`, so declaring them directly adds nothing to the install; one self-contained file means no build step, CDN or external font. Not a second tool-surface framework (decision 41) | — |
+| Topic-tree page | **FastAPI + uvicorn** (`groundly serve`, loopback-only) + **Svelte 5 / TypeScript / Tailwind v4** SPA (`shadcn-svelte`, `thinking-orbs/engine`, `@paper-design/shaders`) compiled via **Vite+** (`vp`) to committed `groundly/web/static/page.{js,css}` | Strict Pydantic v2 contracts (`docs_url=None`), async pub-sub SSE (`/api/runs/stream`), and fine-grained reactive UI without VDOM overhead; Vite+ compiles deterministic single-file static assets (`web/` excluded from wheel, zero Node at install or `pytest` time, zero external fonts). FastMCP stays the sole tool-surface framework (decision 50) | — |
 
 ## Engine per platform
 
