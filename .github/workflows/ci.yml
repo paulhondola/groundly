@@ -63,6 +63,11 @@ jobs:
       - name: Format check (vp fmt)
         run: pnpm exec vp fmt --check
 
+      - name: Generated API types check (up to date)
+        run: |
+          pnpm run gen:api
+          git diff --exit-code src/lib/api/schema.d.ts
+
       - name: Type check (svelte-check)
         run: pnpm exec svelte-check --tsconfig ./tsconfig.json
 

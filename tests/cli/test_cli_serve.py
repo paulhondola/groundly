@@ -215,7 +215,7 @@ def test_a_test_dropped_for_a_removed_question_is_never_saved_again():
 def test_page_starts_runs_through_the_api_only():
     assert (
         "/api/runs" in AUTHORED_SOURCE
-        and '"/runs"' in AUTHORED_SOURCE
+        and '"/api/subjects/{subject}/runs"' in AUTHORED_SOURCE
         and "/api/runs/stream" in AUTHORED_SOURCE
         and "/api/runs/stop" in AUTHORED_SOURCE
     )
