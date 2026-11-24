@@ -1,39 +1,23 @@
-import createClient, { type Middleware } from "openapi-fetch";
+import createClient from "openapi-fetch";
 import type { components, paths } from "./schema.d.ts";
 
-export type { components, paths };
-
-export type SubjectSummary = components["schemas"]["SubjectSummary"];
 export type SourceItem = components["schemas"]["SourceItem"];
 export type TopicProgress = components["schemas"]["TopicProgress"];
-export type MasteryState = TopicProgress["state"];
 export type TopicNode = components["schemas"]["TopicNode"];
 export type TreeResponse = components["schemas"]["TreeResponse"];
-export type QuestionKind = DrawnQuestion["kind"];
-export type QuestionOption = components["schemas"]["QuestionOption"];
 export type DrawnQuestion = components["schemas"]["DrawnQuestion"];
 export type DrawTestResponse = components["schemas"]["DrawTestResponse"];
-export type SubmittedChoiceAnswer = components["schemas"]["SubmittedChoiceAnswer"];
-export type SubmittedOpenAnswer = components["schemas"]["SubmittedOpenAnswer"];
-export type SubmittedAnswer = SubmittedChoiceAnswer | SubmittedOpenAnswer;
-export type SubmitAttemptResponse = components["schemas"]["SubmitAttemptResponse"];
-export type AttemptScore = components["schemas"]["AttemptScore"];
-export type AttemptSummary = components["schemas"]["AttemptSummary"];
-export type AttemptOption = components["schemas"]["AttemptOption"];
-export type AnswerState = AttemptAnswer["state"];
-export type AttemptAnswer = components["schemas"]["AttemptAnswer"];
-export type AttemptTopicSummary = components["schemas"]["AttemptTopicSummary"];
+export type SubmittedAnswer =
+  | components["schemas"]["SubmittedChoiceAnswer"]
+  | components["schemas"]["SubmittedOpenAnswer"];
+export type AnswerState = components["schemas"]["AttemptAnswer"]["state"];
 export type AttemptResult = components["schemas"]["AttemptResultResponse"];
 export type RunPhase = RunSnapshot["phase"];
 export type RunKind = RunSnapshot["kind"];
-export type RunStatus = RunSnapshot["status"];
 export type ThoughtChannel = RunSnapshot["thought_channel"];
-export type RunErrorDetail = components["schemas"]["RunErrorDetail"];
 export type RunSnapshot = components["schemas"]["RunSnapshot"];
 export type RunsInfo = components["schemas"]["RunsInfoResponse"];
 export type StartRunBody = { kind: "write"; topic_id: number } | { kind: "grade" };
-export type StopRunResponse = components["schemas"]["StopRunResponse"];
-export type ErrorResponse = components["schemas"]["ErrorResponse"];
 
 export class ApiError extends Error {
   readonly status: number;
@@ -54,31 +38,6 @@ export class ApiError extends Error {
   }
 }
 
-export interface ClientConfig {
-  baseUrl?: string;
-  getAuthHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
-  onUnauthorized?: (response: Response) => void;
-}
-
-let clientConfig: ClientConfig = {};
-
-export function configureClient(config: ClientConfig): void {
-  clientConfig = { ...clientConfig, ...config };
-}
-
-export function resetClientConfig(): void {
-  clientConfig = {};
-}
-
-function resolveRequestUrl(requestUrl: string, baseUrl: string): string {
-  const trimmedBase = baseUrl.replace(/\/+$/, "");
-  if (requestUrl.startsWith("/")) {
-    return `${trimmedBase}${requestUrl}`;
-  }
-  const parsed = new URL(requestUrl);
-  return `${trimmedBase}${parsed.pathname}${parsed.search}`;
-}
-
 const SafeRequest: typeof Request = class extends Request {
   constructor(input: RequestInfo | URL, init?: RequestInit) {
     if (typeof input === "string" && input.startsWith("/") && typeof location !== "undefined") {
@@ -89,53 +48,6 @@ const SafeRequest: typeof Request = class extends Request {
   }
 };
 
-async function buildRequestInit(request: Request): Promise<RequestInit> {
-  const init: RequestInit = {
-    method: request.method,
-    headers: new Headers(request.headers),
-    cache: request.cache,
-    credentials: request.credentials,
-    integrity: request.integrity,
-    keepalive: request.keepalive,
-    mode: request.mode,
-    redirect: request.redirect,
-    referrer: request.referrer,
-    referrerPolicy: request.referrerPolicy,
-    signal: request.signal,
-  };
-  if (request.body !== null) {
-    init.body = await request.arrayBuffer();
-  }
-  return init;
-}
-
-const clientMiddleware: Middleware = {
-  async onRequest({ request }) {
-    if (clientConfig.getAuthHeaders) {
-      const authHeaders = await clientConfig.getAuthHeaders();
-      for (const [key, value] of Object.entries(authHeaders)) {
-        request.headers.set(key, value);
-      }
-    }
-
-    const targetUrl = clientConfig.baseUrl
-      ? resolveRequestUrl(request.url, clientConfig.baseUrl)
-      : request.url;
-
-    if (targetUrl !== request.url) {
-      return new SafeRequest(targetUrl, await buildRequestInit(request));
-    }
-
-    return request;
-  },
-  onResponse({ response }) {
-    if (response.status === 401) {
-      clientConfig.onUnauthorized?.(response);
-    }
-    return response;
-  },
-};
-
 export const apiClient = createClient<paths>({
   baseUrl: "",
   credentials: "same-origin",
@@ -143,10 +55,8 @@ export const apiClient = createClient<paths>({
   fetch: (request) => globalThis.fetch(request),
 });
 
-apiClient.use(clientMiddleware);
-
 export function unwrap<T>(result: { data?: T; error?: unknown; response: Response }): T {
-  if (result.error !== undefined || !result.response.ok) {
+  if (result.error !== undefined || !result.response.ok || result.data === undefined) {
     const errObj =
       result.error && typeof result.error === "object" && !Array.isArray(result.error)
         ? (result.error as Record<string, unknown>)
@@ -156,7 +66,7 @@ export function unwrap<T>(result: { data?: T; error?: unknown; response: Respons
     const message = detail || code || `request failed (${result.response.status})`;
     throw new ApiError(message, result.response.status, code, detail);
   }
-  return result.data as T;
+  return result.data;
 }
 
 export function pageURL(subject: string, rest = ""): string {

@@ -74,7 +74,7 @@ export function createRunStore(qc: QueryClient = queryClient) {
     if (runSubject !== null) {
       void qc.invalidateQueries({ queryKey: queryKeys.subject(runSubject) });
     } else {
-      void qc.invalidateQueries({ queryKey: ["subject"] });
+      void qc.invalidateQueries({ queryKey: queryKeys.allSubjects() });
     }
   }
 

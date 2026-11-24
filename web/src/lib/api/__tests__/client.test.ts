@@ -1,14 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import {
-  ApiError,
-  apiClient,
-  configureClient,
-  materialURL,
-  pageURL,
-  resetClientConfig,
-  testQuery,
-  unwrap,
-} from "../client";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { ApiError, apiClient, materialURL, pageURL, testQuery, unwrap } from "../client";
 import { createAppQueryClient, queryKeys, shouldRetryQuery } from "../queries";
 import { createEventStream, setEventStreamFactory, type EventSourceLike } from "../sse";
 
@@ -20,6 +11,21 @@ describe("unwrap", () => {
       headers: { "Content-Type": "application/json" },
     });
     expect(unwrap({ data: payload, response })).toEqual(payload);
+  });
+
+  it("throws ApiError on empty 2xx responses with undefined data", () => {
+    const response = new Response(null, { status: 204 });
+    try {
+      unwrap({ data: undefined, response });
+      expect.unreachable("expected unwrap to throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      const apiErr = err as ApiError;
+      expect(apiErr.message).toBe("request failed (204)");
+      expect(apiErr.status).toBe(204);
+      expect(apiErr.code).toBeNull();
+      expect(apiErr.detail).toBeNull();
+    }
   });
 
   it("throws ApiError with detail and code on JSON ErrorResponse (400 and 404)", () => {
@@ -76,7 +82,6 @@ describe("unwrap", () => {
     );
     const originalFetch = globalThis.fetch;
     globalThis.fetch = fetchMock as unknown as typeof fetch;
-    configureClient({ baseUrl: location.origin });
 
     try {
       const result = await apiClient.GET("/api/subjects");
@@ -92,135 +97,8 @@ describe("unwrap", () => {
         expect(apiErr.detail).toBeNull();
       }
     } finally {
-      resetClientConfig();
       globalThis.fetch = originalFetch;
     }
-  });
-});
-
-describe("configureClient", () => {
-  const originalFetch = globalThis.fetch;
-  let fetchMock: ReturnType<typeof vi.fn>;
-
-  beforeEach(() => {
-    resetClientConfig();
-    fetchMock = vi.fn();
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
-  });
-
-  afterEach(() => {
-    resetClientConfig();
-    globalThis.fetch = originalFetch;
-  });
-
-  it("injects getAuthHeaders on outbound requests and updates baseUrl", async () => {
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify([]), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-    const onUnauthorized = vi.fn();
-    configureClient({
-      baseUrl: location.origin,
-      getAuthHeaders: async () => ({ Authorization: "Bearer test-token" }),
-      onUnauthorized,
-    });
-
-    const result = await apiClient.GET("/api/subjects");
-    expect(unwrap(result)).toEqual([]);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const request = fetchMock.mock.calls[0][0] as Request;
-    expect(request.url).toBe(`${location.origin}/api/subjects`);
-    expect(request.headers.get("Authorization")).toBe("Bearer test-token");
-    expect(onUnauthorized).not.toHaveBeenCalled();
-  });
-
-  it("supports POST requests with JSON body when only getAuthHeaders is configured (same URL)", async () => {
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ id: 5 }), {
-        status: 201,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-    configureClient({
-      getAuthHeaders: () => ({ Authorization: "Bearer same-origin-token" }),
-    });
-
-    const payload = {
-      token: "tok-same",
-      topic_id: null,
-      answers: [{ question_id: 2, text: "answer" }],
-    };
-    const result = await apiClient.POST("/api/subjects/{subject}/attempts", {
-      params: { path: { subject: "PDSS" } },
-      body: payload,
-    });
-    expect(unwrap(result)).toEqual({ id: 5 });
-    const request = fetchMock.mock.calls[0][0] as Request;
-    expect(request.method).toBe("POST");
-    expect(request.url).toBe(`${location.origin}/api/subjects/PDSS/attempts`);
-    expect(request.credentials).toBe("same-origin");
-    expect(request.headers.get("Content-Type")).toBe("application/json");
-    expect(request.headers.get("Authorization")).toBe("Bearer same-origin-token");
-    expect(await request.json()).toEqual(payload);
-  });
-
-  it("supports POST requests with JSON body when auth headers and baseUrl are configured", async () => {
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ id: 7 }), {
-        status: 201,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-    configureClient({
-      baseUrl: `${location.origin}/proxy`,
-      getAuthHeaders: () => ({ Authorization: "Bearer post-token" }),
-    });
-
-    const payload = {
-      token: "tok-1",
-      topic_id: null,
-      answers: [{ question_id: 1, selected: [2] }],
-    };
-    const result = await apiClient.POST("/api/subjects/{subject}/attempts", {
-      params: { path: { subject: "PDSS" } },
-      body: payload,
-    });
-    expect(unwrap(result)).toEqual({ id: 7 });
-    const request = fetchMock.mock.calls[0][0] as Request;
-    expect(request.method).toBe("POST");
-    expect(request.url).toBe(`${location.origin}/proxy/api/subjects/PDSS/attempts`);
-    expect(request.credentials).toBe("same-origin");
-    expect(request.headers.get("Content-Type")).toBe("application/json");
-    expect(request.headers.get("Authorization")).toBe("Bearer post-token");
-    expect(await request.json()).toEqual(payload);
-  });
-
-  it("invokes onUnauthorized on 401 responses and not on 200/400/500", async () => {
-    const onUnauthorized = vi.fn();
-    configureClient({ baseUrl: location.origin, onUnauthorized });
-
-    for (const status of [200, 400, 500]) {
-      const body = status === 200 ? [] : { error: "err", detail: "msg" };
-      fetchMock.mockResolvedValueOnce(
-        new Response(JSON.stringify(body), {
-          status,
-          headers: { "Content-Type": "application/json" },
-        }),
-      );
-      await apiClient.GET("/api/subjects");
-    }
-    expect(onUnauthorized).not.toHaveBeenCalled();
-
-    const unauthRes = new Response(
-      JSON.stringify({ error: "unauthorized", detail: "Login required" }),
-      { status: 401, headers: { "Content-Type": "application/json" } },
-    );
-    fetchMock.mockResolvedValueOnce(unauthRes);
-    await apiClient.GET("/api/subjects");
-    expect(onUnauthorized).toHaveBeenCalledTimes(1);
-    expect(onUnauthorized.mock.calls[0][0].status).toBe(401);
   });
 });
 
@@ -254,6 +132,7 @@ describe("queries", () => {
 
   it("queryKeys share subject prefix for invalidation", () => {
     const subjectKey = queryKeys.subject("PDSS");
+    expect(queryKeys.allSubjects()).toEqual(["subject"]);
     expect(subjectKey).toEqual(["subject", "PDSS"]);
     expect(queryKeys.subjects()).toEqual(["subjects"]);
     expect(queryKeys.tree("PDSS").slice(0, subjectKey.length)).toEqual(subjectKey);

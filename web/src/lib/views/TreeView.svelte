@@ -2,7 +2,7 @@
   import { createQuery } from "@tanstack/svelte-query";
   import { tick } from "svelte";
   import { type TopicNode, apiClient, pageURL, testQuery, unwrap } from "../api/client";
-  import { queryKeys } from "../api/queries";
+  import { queryKeys, treeQueryOptions } from "../api/queries";
   import MasteryBadge from "../components/MasteryBadge.svelte";
   import SourceItem from "../components/SourceItem.svelte";
   import LiquidMetalButton from "../components/effects/LiquidMetalButton.svelte";
@@ -27,16 +27,7 @@
 
   let { subject }: Props = $props();
 
-  const treeQuery = createQuery(() => ({
-    queryKey: queryKeys.tree(subject),
-    queryFn: async ({ signal }) =>
-      unwrap(
-        await apiClient.GET("/api/subjects/{subject}/tree", {
-          params: { path: { subject } },
-          signal,
-        }),
-      ),
-  }));
+  const treeQuery = createQuery(() => treeQueryOptions(subject));
 
   const attemptsQuery = createQuery(() => ({
     queryKey: queryKeys.attempts(subject),

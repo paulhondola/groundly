@@ -1,18 +1,11 @@
 import { createSubscriber } from "svelte/reactivity";
-import { createRouter, type HooksContext } from "sv-router";
+import { createRouter } from "sv-router";
 import AttemptResultRoute from "./routes/AttemptResultRoute.svelte";
 import SubjectTestRoute from "./routes/SubjectTestRoute.svelte";
 import SubjectTreeRoute from "./routes/SubjectTreeRoute.svelte";
 import NotFoundView from "./views/NotFoundView.svelte";
 import SubjectsView from "./views/SubjectsView.svelte";
 
-export type BeforeLoadContext = HooksContext;
-
-export type BeforeLoadGuard = (
-  context: BeforeLoadContext,
-) => void | boolean | Promise<void | boolean>;
-
-let beforeLoadGuard: BeforeLoadGuard | null = null;
 let malformedPathnameValue: string | null = null;
 let pendingMalformedPathname: string | null = null;
 let notifyMalformedPathname: (() => void) | undefined;
@@ -35,26 +28,6 @@ function setMalformedPathname(value: string | null): void {
 export function getMalformedPathname(): string | null {
   subscribeMalformedPathname();
   return malformedPathnameValue;
-}
-
-export function setBeforeLoadGuard(guard: BeforeLoadGuard | null): void {
-  beforeLoadGuard = guard;
-}
-
-/**
- * Decode a raw un-decoded URL segment safely.
- * Note: `sv-router`'s `route.params.*` values are already decoded once by `matchRoute`.
- */
-export function decodeParam(segment: string | undefined): string | null {
-  if (!segment) {
-    return null;
-  }
-  try {
-    const decoded = decodeURIComponent(segment);
-    return decoded ? decoded : null;
-  } catch {
-    return null;
-  }
 }
 
 export function parsePositiveInt(raw: string | undefined | null): number | null {
@@ -111,7 +84,6 @@ const router = createRouter({
       if (isMaterialPath(context.pathname)) {
         return false;
       }
-      return beforeLoadGuard?.(context);
     },
     afterLoad(context) {
       if (pendingMalformedPathname !== null && context.pathname === "/not-found") {
@@ -132,8 +104,6 @@ async function navigateNotFound(rawPathname: string) {
     pendingMalformedPathname = null;
   }
 }
-
-export const p: typeof router.p = (...args) => router.p(...args);
 
 export const navigate: typeof router.navigate = async (...args) => {
   const [target] = args;

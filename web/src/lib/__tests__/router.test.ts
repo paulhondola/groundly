@@ -15,31 +15,17 @@ vi.hoisted(() => {
 });
 
 import {
-  decodeParam,
   getMalformedPathname,
   hasMalformedPercentEncoding,
   isMaterialPath,
   navigate,
-  p,
   parsePositiveInt,
   parseTestSearch,
   route,
-  setBeforeLoadGuard,
 } from "../router";
 import AttemptResultRoute from "../routes/AttemptResultRoute.svelte";
 import SubjectTreeRoute from "../routes/SubjectTreeRoute.svelte";
 import NotFoundView from "../views/NotFoundView.svelte";
-
-describe("decodeParam", () => {
-  it("decodes valid segments and returns null on empty, undefined, or malformed percent-encoding", () => {
-    expect(decodeParam("PDSS")).toBe("PDSS");
-    expect(decodeParam("CS%20101")).toBe("CS 101");
-    expect(decodeParam("")).toBeNull();
-    expect(decodeParam(undefined)).toBeNull();
-    expect(() => decodeParam("%E0%A4%A")).not.toThrow();
-    expect(decodeParam("%E0%A4%A")).toBeNull();
-  });
-});
 
 describe("parsePositiveInt", () => {
   it("accepts positive safe integers and rejects zero, negative, non-numeric, float, non-safe, empty, and null", () => {
@@ -95,18 +81,16 @@ describe("isMaterialPath", () => {
   });
 });
 
-describe("sv-router navigation, param encoding, and beforeLoad guard", () => {
+describe("sv-router navigation and param encoding", () => {
   let scrollSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
-    setBeforeLoadGuard(null);
     scrollSpy = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
     await navigate("/");
     scrollSpy.mockClear();
   });
 
   afterEach(() => {
-    setBeforeLoadGuard(null);
     scrollSpy.mockRestore();
   });
 
@@ -117,34 +101,16 @@ describe("sv-router navigation, param encoding, and beforeLoad guard", () => {
     expect(scrollSpy).toHaveBeenCalledWith({ top: 0, left: 0, behavior: undefined });
   });
 
-  it("encodes params once and round-trips spaces through decodeParam without double-encoding", async () => {
-    expect(p("/s/:subject/attempts/:id", { params: { subject: "CS 101", id: "42" } })).toBe(
-      "/s/CS%20101/attempts/42",
-    );
-
+  it("encodes params once and decodes spaces into route.params without double-encoding", async () => {
     await navigate("/s/:subject", { params: { subject: "CS 101" } });
     expect(window.location.pathname).toBe("/s/CS%20101");
-    expect(decodeParam(route.params.subject)).toBe("CS 101");
+    expect(route.params.subject).toBe("CS 101");
   });
 
   it("skips scrolling when scrollToTop is false", async () => {
     await navigate("/s/:subject", { params: { subject: "PDSS" }, scrollToTop: false });
     expect(route.pathname).toBe("/s/PDSS");
     expect(scrollSpy).not.toHaveBeenCalled();
-  });
-
-  it("runs setBeforeLoadGuard before route transitions, cancels when false, and resets cleanly", async () => {
-    const guard = vi.fn().mockReturnValue(false);
-    setBeforeLoadGuard(guard);
-
-    await navigate("/s/:subject", { params: { subject: "PDSS" } });
-    expect(guard).toHaveBeenCalledTimes(1);
-    expect(guard.mock.calls[0][0].pathname).toBe("/s/PDSS");
-    expect(route.pathname).toBe("/");
-
-    setBeforeLoadGuard(null);
-    await navigate("/s/:subject", { params: { subject: "PDSS" } });
-    expect(route.pathname).toBe("/s/PDSS");
   });
 
   it("refuses to match /s/:subject/materials/:id as an SPA transition", async () => {
@@ -235,7 +201,6 @@ describe("NotFoundView, SubjectTreeRoute, and AttemptResultRoute", () => {
   let container: HTMLDivElement;
 
   beforeEach(async () => {
-    setBeforeLoadGuard(null);
     vi.spyOn(window, "scrollTo").mockImplementation(() => {});
     container = document.createElement("div");
     document.body.appendChild(container);

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createMutation, createQuery, useQueryClient } from "@tanstack/svelte-query";
   import { ApiError, type SubmittedAnswer, apiClient, pageURL, unwrap } from "../api/client";
-  import { queryKeys } from "../api/queries";
+  import { queryKeys, treeQueryOptions } from "../api/queries";
   import Button from "../components/ui/Button.svelte";
   import Card from "../components/ui/Card.svelte";
   import { cn } from "../components/ui/utils";
@@ -28,23 +28,14 @@
 
   const qc = useQueryClient();
 
-  const treeQuery = createQuery(() => ({
-    queryKey: queryKeys.tree(subject),
-    queryFn: async ({ signal }) =>
-      unwrap(
-        await apiClient.GET("/api/subjects/{subject}/tree", {
-          params: { path: { subject } },
-          signal,
-        }),
-      ),
-  }));
+  const treeQuery = createQuery(() => treeQueryOptions(subject));
 
   let test = $state<StoredTest | null>(null);
   let loading = $state(true);
   let loadError = $state<string | null>(null);
   let submitError = $state<string | null>(null);
   let confirming = $state(false);
-  let submitting = $state(false);
+  let sending = $state(false);
 
   const courseTitle = $derived(treeQuery.data ? treeQuery.data.title || subject : "");
   const scopeTitle = $derived(
@@ -61,8 +52,8 @@
         : "Could not load test"
       : null,
   );
-  const isLoading = $derived(loading || (treeQuery.isPending && !treeQuery.data));
   const displayError = $derived(loadError ?? treeError);
+  const isLoading = $derived((loading || (treeQuery.isPending && !treeQuery.data)) && !displayError);
 
   const currentQuestion = $derived(test ? (test.questions[test.current] ?? null) : null);
   const total = $derived(test ? test.questions.length : 0);
@@ -94,13 +85,16 @@
           body,
         }),
       ),
-    onSuccess: (created, vars) => {
+    onSuccess: async (created, vars) => {
       vars.persister?.markDead();
       void qc.invalidateQueries({ queryKey: queryKeys.subject(vars.subject) });
       if (vars.seq === sessionSeq) {
-        void navigate("/s/:subject/attempts/:id", {
+        await navigate("/s/:subject/attempts/:id", {
           params: { subject: vars.subject, id: String(created.id) },
         });
+        if (vars.seq === sessionSeq) {
+          sending = false;
+        }
       }
     },
     onError: (err, vars) => {
@@ -108,7 +102,7 @@
         vars.persister?.markDead();
       }
       if (vars.seq === sessionSeq) {
-        submitting = false;
+        sending = false;
         confirming = false;
         submitError =
           err instanceof Error
@@ -117,8 +111,6 @@
       }
     },
   }));
-
-  const sending = $derived(submitting || submitMutation.isPending);
 
   function store(): void {
     if (test && persister) {
@@ -139,7 +131,7 @@
     loadError = null;
     submitError = null;
     confirming = false;
-    submitting = false;
+    sending = false;
     test = null;
 
     (async () => {
@@ -241,7 +233,7 @@
       confirming = true;
       return;
     }
-    submitting = true;
+    sending = true;
     submitError = null;
     const answers: SubmittedAnswer[] = test.questions.map((q) =>
       q.kind === "open"

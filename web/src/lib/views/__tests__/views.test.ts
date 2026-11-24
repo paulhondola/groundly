@@ -318,6 +318,121 @@ describe("TestView", () => {
 
     void unmount(instance);
   });
+
+  it("shows test draw error immediately while tree query is still pending", async () => {
+    const qc = createTestQueryClient();
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const pathname = requestPathname(input);
+      if (pathname === "/api/subjects/PDSS/test") {
+        return Promise.resolve(
+          jsonResponse({ error: "unknown_topic", detail: "Unknown topic 999" }, 400),
+        );
+      }
+      if (pathname === "/api/subjects/PDSS/tree") {
+        return new Promise<Response>(() => {});
+      }
+      return Promise.resolve(jsonResponse({}));
+    }) as unknown as typeof fetch;
+
+    const instance = mount(QueryHarness, {
+      target: container,
+      props: { client: qc, component: TestView, props: { subject: "PDSS", topicId: 999, n: 5 } },
+    });
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain("Unknown topic 999");
+    });
+    expect(container.textContent).not.toContain("Drawing test…");
+
+    void unmount(instance);
+  });
+
+  it("keeps the new test's Submit button enabled when switching topics mid-submit", async () => {
+    const qc = createTestQueryClient();
+    let resolveSlowSubmit!: (res: Response) => void;
+    const tree: TreeResponse = {
+      title: "Parallel Systems",
+      tree: [makeTopic(7, "Locks", 2), makeTopic(8, "Channels", 2)],
+    };
+    const makeDrawn = (qId: number, stem: string): DrawTestResponse => ({
+      questions: [
+        {
+          id: qId,
+          topic_id: qId === 101 ? 7 : 8,
+          kind: "single",
+          stem,
+          code: null,
+          options: [
+            { id: 1, text: "Option A" },
+            { id: 2, text: "Option B" },
+          ],
+        },
+      ],
+    });
+
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url =
+        input instanceof Request ? new URL(input.url) : new URL(String(input), location.origin);
+      if (url.pathname === "/api/subjects/PDSS/tree") {
+        return Promise.resolve(jsonResponse(tree));
+      }
+      if (url.pathname === "/api/subjects/PDSS/test") {
+        const topic = url.searchParams.get("topic");
+        return Promise.resolve(
+          jsonResponse(
+            topic === "7"
+              ? makeDrawn(101, "Locks question?")
+              : makeDrawn(102, "Channels question?"),
+          ),
+        );
+      }
+      if (url.pathname === "/api/subjects/PDSS/attempts") {
+        return new Promise<Response>((resolve) => {
+          resolveSlowSubmit = resolve;
+        });
+      }
+      return Promise.resolve(jsonResponse({}));
+    }) as unknown as typeof fetch;
+
+    const instance = mount(QueryHarness, {
+      target: container,
+      props: { client: qc, component: TestView, props: { subject: "PDSS", topicId: 7, n: 5 } },
+    });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("Locks question?");
+    });
+
+    container.querySelector<HTMLInputElement>('input[type="radio"]')?.click();
+    flushSync();
+    Array.from(container.querySelectorAll("button"))
+      .find((b) => b.textContent?.trim() === "Submit")
+      ?.click();
+    flushSync();
+
+    await vi.waitFor(() => {
+      expect(resolveSlowSubmit).toBeTypeOf("function");
+    });
+
+    // Switch to topic 8 while topic 7's submission is still in flight
+    instance.setProps({ subject: "PDSS", topicId: 8, n: 5 });
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("Channels question?");
+    });
+
+    const submitBtn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Submit",
+    );
+    expect(submitBtn).toBeDefined();
+    expect(submitBtn?.disabled).toBe(false);
+
+    // Resolving the stale submit from topic 7 must not navigate away from topic 8
+    resolveSlowSubmit(jsonResponse({ id: 55 }, 201));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(container.textContent).toContain("Channels question?");
+
+    void unmount(instance);
+  });
 });
 
 describe("SubjectsView", () => {
@@ -775,6 +890,55 @@ describe("ResultView", () => {
       );
     });
     expect(container.textContent).not.toContain("Loading results…");
+
+    void unmount(instance);
+  });
+
+  it("does not flash Whole course header before tree resolves on a topic-scoped attempt", async () => {
+    const qc = createTestQueryClient();
+    let resolveTree!: (res: Response) => void;
+    const attempt: AttemptResult = {
+      id: 4,
+      submitted_at: "2026-11-24 12:00",
+      scope_topic_id: 7,
+      score: { correct: 1, graded: 1, awaiting: 0 },
+      provisional: false,
+      answers: [],
+      topics: [],
+    };
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const pathname = requestPathname(input);
+      if (pathname === "/api/runs") {
+        return Promise.resolve(
+          jsonResponse({ available: false, reason: "no_host", target: 10, run: null }),
+        );
+      }
+      if (pathname === "/api/subjects/PDSS/attempts/4") {
+        return Promise.resolve(jsonResponse(attempt));
+      }
+      if (pathname === "/api/subjects/PDSS/tree") {
+        return new Promise<Response>((resolve) => {
+          resolveTree = resolve;
+        });
+      }
+      return Promise.resolve(jsonResponse({}));
+    }) as unknown as typeof fetch;
+
+    const instance = mount(QueryHarness, {
+      target: container,
+      props: { client: qc, component: ResultView, props: { subject: "PDSS", attemptId: 4 } },
+    });
+
+    await vi.waitFor(() => {
+      expect(resolveTree).toBeTypeOf("function");
+    });
+    expect(container.textContent).toContain("Loading results…");
+    expect(container.textContent).not.toContain("Whole course");
+
+    resolveTree(jsonResponse({ title: "Parallel Systems", tree: [makeTopic(7, "Deadlocks", 5)] }));
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("Deadlocks · 2026-11-24 12:00");
+    });
 
     void unmount(instance);
   });

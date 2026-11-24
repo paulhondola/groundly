@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createQuery } from "@tanstack/svelte-query";
   import { type AnswerState, apiClient, pageURL, unwrap } from "../api/client";
-  import { queryKeys } from "../api/queries";
+  import { queryKeys, treeQueryOptions } from "../api/queries";
   import MasteryBadge from "../components/MasteryBadge.svelte";
   import SourceItem from "../components/SourceItem.svelte";
   import LiquidMetalButton from "../components/effects/LiquidMetalButton.svelte";
@@ -49,16 +49,7 @@
       ),
   }));
 
-  const treeQuery = createQuery(() => ({
-    queryKey: queryKeys.tree(subject),
-    queryFn: async ({ signal }) =>
-      unwrap(
-        await apiClient.GET("/api/subjects/{subject}/tree", {
-          params: { path: { subject } },
-          signal,
-        }),
-      ),
-  }));
+  const treeQuery = createQuery(() => treeQueryOptions(subject));
 
   const result = $derived(attemptQuery.data ?? null);
   const courseTitle = $derived(treeQuery.data ? treeQuery.data.title || subject : subject);
@@ -69,6 +60,7 @@
         ? (findTopicById(treeQuery.data.tree, result.scope_topic_id)?.title ?? "Removed topic")
         : "Whole course",
   );
+  // Read both getters unconditionally so TanStack Query v6 tracks treeQuery.isPending on mount.
   const pending = $derived.by(() => {
     const attemptPending = attemptQuery.isPending;
     const treePending = treeQuery.isPending;
@@ -110,7 +102,7 @@
     >
       ← Back to the map
     </a>
-    {#if result}
+    {#if !loading && !error && result}
       <h1 class="text-2xl font-semibold tracking-tight text-foreground">{courseTitle}</h1>
       <p class="text-sm text-muted-foreground">{scopeTitle} · {result.submitted_at}</p>
     {/if}
