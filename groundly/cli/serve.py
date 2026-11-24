@@ -8,6 +8,7 @@ import socket
 import threading
 import webbrowser
 from collections.abc import Awaitable, Callable
+from types import FrameType
 from typing import Annotated
 
 import typer
@@ -49,11 +50,19 @@ def _run(asgi_app: Callable[..., Awaitable[None]], port: int, lines: list[str]) 
     # SIGTERM only; closing the terminal sends SIGHUP, which takes the SIGTERM path.
     if hasattr(signal, "SIGHUP"):
         signal.signal(signal.SIGHUP, lambda *_: signal.raise_signal(signal.SIGTERM))
+
     # proxy_headers=False: the write route's Origin check compares against the socket's own
     # scheme and host, which an X-Forwarded-* header must not be able to change.
     # timeout_graceful_shutdown: an open /mcp stream (a host session, or a page run's) would
     # otherwise hold shutdown, and the lifespan that stops the run, until it closes.
-    uvicorn.run(
+    class _PageServer(uvicorn.Server):
+        def handle_exit(self, sig: int, frame: FrameType | None) -> None:
+            runner = getattr(getattr(self.config.app, "state", None), "runner", None)
+            if runner is not None and not self.should_exit:
+                threading.Thread(target=runner.shutdown, daemon=True).start()
+            super().handle_exit(sig, frame)
+
+    config = uvicorn.Config(
         asgi_app,
         host="127.0.0.1",
         port=port,
@@ -61,6 +70,7 @@ def _run(asgi_app: Callable[..., Awaitable[None]], port: int, lines: list[str]) 
         proxy_headers=False,
         timeout_graceful_shutdown=3,
     )
+    _PageServer(config).run()
 
 
 def _page_line(port: int) -> str:

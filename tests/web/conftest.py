@@ -20,6 +20,12 @@ for line in open(os.environ["FAKE_CLAUDE_SCRIPT"]).read().splitlines():
     if line == "SLEEP":
         time.sleep(30)
         continue
+    if line.startswith("WAIT:"):
+        target = line.removeprefix("WAIT:")
+        deadline = time.monotonic() + 5.0
+        while not os.path.exists(target) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        continue
     print(line, flush=True)
 sys.stderr.write(os.environ.get("FAKE_CLAUDE_STDERR", ""))
 sys.exit(int(os.environ.get("FAKE_CLAUDE_EXIT", "0")))
@@ -42,6 +48,44 @@ def use(tool_id, name, tool_input=None):
     return {"type": "assistant", "message": {"content": [block]}}
 
 
+_DELTA_KEY = {
+    "thinking_delta": "thinking",
+    "text_delta": "text",
+    "input_json_delta": "partial_json",
+}
+
+
+def stream_start(block_type: str, *, name: str | None = None) -> dict:
+    block: dict = {"type": block_type}
+    if name is not None:
+        block["name"] = name
+    return {
+        "type": "stream_event",
+        "event": {"type": "content_block_start", "content_block": block},
+    }
+
+
+def stream_delta(delta_type: str, value: str) -> dict:
+    return {
+        "type": "stream_event",
+        "event": {
+            "type": "content_block_delta",
+            "delta": {"type": delta_type, _DELTA_KEY[delta_type]: value},
+        },
+    }
+
+
+def tool_result(tool_id: str, payload, *, is_error: bool = False) -> dict:
+    text = payload if isinstance(payload, str) else json.dumps(payload)
+    block = {
+        "type": "tool_result",
+        "tool_use_id": tool_id,
+        "content": [{"type": "text", "text": text}],
+        "is_error": is_error,
+    }
+    return {"type": "user", "message": {"content": [block]}}
+
+
 class FakeClaude:
     def __init__(self, root: Path, monkeypatch):
         self.root = root
@@ -54,7 +98,7 @@ class FakeClaude:
         self.script([INIT, success()])
 
     def script(self, lines, *, exit_code=0, stderr=""):
-        """Lines are events (dicts), raw strings, or "SLEEP" to hang for 30 s."""
+        """Lines are events (dicts), raw strings, "SLEEP" (30 s), or "WAIT:<path>" (up to 5 s)."""
         text = "\n".join(json.dumps(x) if isinstance(x, dict) else x for x in lines)
         self.script_file.write_text(text + "\n")
         self.monkeypatch.setenv("FAKE_CLAUDE_EXIT", str(exit_code))

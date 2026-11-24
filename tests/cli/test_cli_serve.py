@@ -23,7 +23,20 @@ def _patch(monkeypatch, probe_free=True):
 
     runs: list[dict] = []
     opened: list[str] = []
-    monkeypatch.setattr(uvicorn, "run", lambda app_, **kw: runs.append({**kw, "app": app_}))
+
+    def fake_run(self):
+        runs.append(
+            {
+                "app": self.config.app,
+                "host": self.config.host,
+                "port": self.config.port,
+                "proxy_headers": self.config.proxy_headers,
+                "timeout_graceful_shutdown": self.config.timeout_graceful_shutdown,
+                "server": self,
+            }
+        )
+
+    monkeypatch.setattr(uvicorn.Server, "run", fake_run)
     monkeypatch.setattr("groundly.cli.serve._open_browser", opened.append)
     if probe_free:  # the default port may be held by a real `groundly serve` on this machine
         monkeypatch.setattr(socket.socket, "bind", lambda self, address: None)
@@ -181,3 +194,22 @@ def test_page_starts_runs_through_the_api_only():
 
 def test_page_keeps_the_phrases_as_the_fallback():
     assert "Say to your agent" in PAGE and "grade my test" in PAGE
+
+
+def test_handle_exit_shuts_down_runner_once_before_graceful_wait(monkeypatch):
+    import signal
+    import time
+
+    runs, _ = _patch(monkeypatch)
+    assert runner.invoke(app, ["serve"]).exit_code == 0
+    server = runs[0]["server"]
+    calls: list[str] = []
+    monkeypatch.setattr(runs[0]["app"].state.runner, "shutdown", lambda: calls.append("shutdown"))
+
+    server.handle_exit(signal.SIGTERM, None)
+    deadline = time.monotonic() + 2.0
+    while not calls and time.monotonic() < deadline:
+        time.sleep(0.01)
+    server.handle_exit(signal.SIGTERM, None)
+    assert calls == ["shutdown"]
+    assert server.should_exit is True
