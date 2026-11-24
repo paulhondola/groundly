@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import type { RunSnapshot } from "../api/client";
+import { createAppQueryClient } from "../api/queries";
+import { type EventSourceLike, setEventStreamFactory } from "../api/sse";
 import { createRunStore } from "../run.svelte";
-import type { RunSnapshot } from "../types";
 
-class MockEventSource {
+class MockEventSource implements EventSourceLike {
   static instances: MockEventSource[] = [];
 
   readonly url: string;
@@ -65,31 +67,36 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 describe("createRunStore", () => {
   const originalFetch = globalThis.fetch;
-  const originalEventSource = globalThis.EventSource;
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     MockEventSource.instances = [];
     fetchMock = vi.fn();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
-    globalThis.EventSource = MockEventSource as unknown as typeof EventSource;
+    setEventStreamFactory((url) => new MockEventSource(url));
   });
 
   afterEach(() => {
+    setEventStreamFactory(null);
     globalThis.fetch = originalFetch;
-    globalThis.EventSource = originalEventSource;
+    vi.restoreAllMocks();
   });
 
-  it("streams snapshot, phase, coalesced deltas capped at 2000 chars, subject-scoped step refresh, and done", async () => {
-    const store = createRunStore();
-    const onRefresh = vi.fn();
-    const onEnd = vi.fn();
-    store.setHooks({ subject: "PDSS", onRefresh, onEnd });
+  it("streams snapshot, phase, coalesced deltas capped at 2000 chars, subject-scoped step refresh, query invalidation, and done", async () => {
+    const qc = createAppQueryClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const store = createRunStore(qc);
 
     const initial = makeSnapshot({ id: 10, subject: "PDSS" });
     fetchMock.mockResolvedValueOnce(jsonResponse(initial, 202));
 
     await store.start("PDSS", { kind: "write", topic_id: 7 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const startReq = fetchMock.mock.calls[0][0] as Request;
+    expect(startReq.method).toBe("POST");
+    expect(new URL(startReq.url).pathname).toBe("/api/subjects/PDSS/runs");
+    expect(await startReq.json()).toEqual({ kind: "write", topic_id: 7 });
 
     expect(MockEventSource.instances).toHaveLength(1);
     const es = MockEventSource.instances[0];
@@ -114,18 +121,15 @@ describe("createRunStore", () => {
 
     es.emit("step", { id: 10, step: "Submitting 1 questions", refresh: false });
     expect(store.run?.steps).toEqual(["Submitting 1 questions"]);
-    expect(onRefresh).not.toHaveBeenCalled();
+    expect(invalidateSpy).not.toHaveBeenCalled();
 
     es.emit("step", { id: 10, step: "1 stored, 0 rejected", refresh: true });
-    expect(onRefresh).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenLastCalledWith({ queryKey: ["subject", "PDSS"] });
 
-    // Review Focus #4: ignore refresh while viewing another subject
-    store.setHooks({ subject: "ALGO", onRefresh, onEnd });
     es.emit("step", { id: 10, step: "2 stored, 0 rejected", refresh: true });
-    expect(onRefresh).toHaveBeenCalledTimes(1);
-
-    // Switch back to the run's subject before settlement so onEnd fires for it
-    store.setHooks({ subject: "PDSS", onRefresh, onEnd });
+    expect(invalidateSpy).toHaveBeenCalledTimes(2);
+    expect(invalidateSpy).toHaveBeenLastCalledWith({ queryKey: ["subject", "PDSS"] });
 
     const settled = makeSnapshot({
       id: 10,
@@ -141,16 +145,65 @@ describe("createRunStore", () => {
     es.emit("done", settled);
 
     expect(es.closed).toBe(true);
-    expect(onEnd).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledTimes(3);
+    expect(invalidateSpy).toHaveBeenLastCalledWith({ queryKey: ["subject", "PDSS"] });
     expect(store.message).toBe("Stored 2 questions.");
     expect(store.busy).toBe(false);
     store.destroy();
   });
 
+  it("invalidates subject query once on done and never twice for the same settled run ID", async () => {
+    const qc = createAppQueryClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const store = createRunStore(qc);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 15, subject: "PDSS" }), 202));
+    await store.start("PDSS", { kind: "write", topic_id: 7 });
+
+    const es = MockEventSource.instances[0];
+    const settled = makeSnapshot({
+      id: 15,
+      subject: "PDSS",
+      status: "done",
+      phase: null,
+      summary: "Stored 4 questions.",
+    });
+
+    es.emit("done", settled);
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject", "PDSS"] });
+
+    // Duplicate settlement for the same run ID (e.g. an in-flight stop() resolving after done)
+    fetchMock.mockResolvedValueOnce(jsonResponse({ run: settled }));
+    await store.stop();
+
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    store.destroy();
+  });
+
+  it("invalidates all subject queries and reports restart when snapshot is null while watching a running job", async () => {
+    const qc = createAppQueryClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const store = createRunStore(qc);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 19, subject: "PDSS" }), 202));
+    await store.start("PDSS", { kind: "write", topic_id: 7 });
+
+    const es = MockEventSource.instances[0];
+    es.emit("snapshot", null);
+
+    expect(es.closed).toBe(true);
+    expect(store.run).toBeNull();
+    expect(store.message).toBe("Lost track of the run — the page server restarted.");
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject"] });
+    store.destroy();
+  });
+
   it("closes EventSource immediately when initial snapshot is already settled (Review Focus #1)", async () => {
-    const store = createRunStore();
-    const onEnd = vi.fn();
-    store.setHooks({ subject: "PDSS", onEnd });
+    const qc = createAppQueryClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const store = createRunStore(qc);
 
     fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 21 }), 202));
     await store.start("PDSS", { kind: "write", topic_id: 7 });
@@ -167,13 +220,15 @@ describe("createRunStore", () => {
     );
 
     expect(es.closed).toBe(true);
-    expect(onEnd).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject", "PDSS"] });
     expect(store.message).toBe("Stored 5.");
     store.destroy();
   });
 
   it("attaches to an active run when start() receives 409 conflict", async () => {
-    const store = createRunStore();
+    const qc = createAppQueryClient();
+    const store = createRunStore(qc);
     const active = makeSnapshot({ id: 33, kind: "grade", subject: "ALGO", topic_id: null });
 
     fetchMock
@@ -203,9 +258,9 @@ describe("createRunStore", () => {
   });
 
   it("closes EventSource on error, probes GET /api/runs once, and reports lost server on failure (Review Focus #5)", async () => {
-    const store = createRunStore();
-    const onEnd = vi.fn();
-    store.setHooks({ subject: "PDSS", onEnd });
+    const qc = createAppQueryClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const store = createRunStore(qc);
 
     fetchMock
       .mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 44 }), 202))
@@ -222,16 +277,18 @@ describe("createRunStore", () => {
     expect(es.closed).toBe(true);
     expect(store.run).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1][0]).toBe("/api/runs");
+    const probeReq = fetchMock.mock.calls[1][0] as Request;
+    expect(probeReq.method).toBe("GET");
+    expect(new URL(probeReq.url).pathname).toBe("/api/runs");
     expect(MockEventSource.instances).toHaveLength(1);
-    expect(onEnd).not.toHaveBeenCalled();
+    expect(invalidateSpy).not.toHaveBeenCalled();
     store.destroy();
   });
 
   it("reconciles settled run when EventSource errors after backend stopped the run", async () => {
-    const store = createRunStore();
-    const onEnd = vi.fn();
-    store.setHooks({ subject: "PDSS", onEnd });
+    const qc = createAppQueryClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const store = createRunStore(qc);
 
     fetchMock
       .mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 55 }), 202))
@@ -249,18 +306,19 @@ describe("createRunStore", () => {
     es.triggerError();
 
     await vi.waitFor(() => {
-      expect(onEnd).toHaveBeenCalledTimes(1);
+      expect(invalidateSpy).toHaveBeenCalledTimes(1);
     });
 
     expect(es.closed).toBe(true);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject", "PDSS"] });
     expect(store.message).toBe("Stopped. What was already stored stays.");
     store.destroy();
   });
 
   it("attach() preserves active SSE stream state and ignores stale running response after SSE settlement", async () => {
-    const store = createRunStore();
-    const onEnd = vi.fn();
-    store.setHooks({ subject: "PDSS", onEnd });
+    const qc = createAppQueryClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const store = createRunStore(qc);
 
     fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 66 }), 202));
     await store.start("PDSS", { kind: "write", topic_id: 7 });
@@ -292,6 +350,9 @@ describe("createRunStore", () => {
         }),
     );
     const pendingAttach = store.attach();
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
 
     es.emit(
       "done",
@@ -314,13 +375,15 @@ describe("createRunStore", () => {
 
     expect(store.run?.status).toBe("done");
     expect(store.busy).toBe(false);
-    expect(onEnd).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject", "PDSS"] });
     expect(MockEventSource.instances).toHaveLength(1);
     store.destroy();
   });
 
   it("caps repeated EventSource error reconnects when GET /api/runs remains running", async () => {
-    const store = createRunStore();
+    const qc = createAppQueryClient();
+    const store = createRunStore(qc);
 
     fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 88 }), 202));
     await store.start("PDSS", { kind: "write", topic_id: 7 });
@@ -352,10 +415,10 @@ describe("createRunStore", () => {
     store.destroy();
   });
 
-  it("skips onEnd when settled run belongs to a different subject and guards duplicate stop() calls", async () => {
-    const store = createRunStore();
-    const onEnd = vi.fn();
-    store.setHooks({ subject: "ALGO", onEnd });
+  it("invalidates the settled run subject and guards duplicate stop() calls", async () => {
+    const qc = createAppQueryClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const store = createRunStore(qc);
 
     fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 90, subject: "PDSS" }), 202));
     await store.start("PDSS", { kind: "write", topic_id: 7 });
@@ -371,7 +434,13 @@ describe("createRunStore", () => {
     const p1 = store.stop();
     const p2 = store.stop();
     expect(store.stopping).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+    const stopReq = fetchMock.mock.calls[1][0] as Request;
+    expect(stopReq.method).toBe("POST");
+    expect(new URL(stopReq.url).pathname).toBe("/api/runs/stop");
+    expect(await stopReq.json()).toEqual({});
 
     resolveStop(
       jsonResponse({
@@ -381,7 +450,8 @@ describe("createRunStore", () => {
     await Promise.all([p1, p2]);
 
     expect(store.stopping).toBe(false);
-    expect(onEnd).not.toHaveBeenCalled();
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject", "PDSS"] });
     store.destroy();
   });
 });

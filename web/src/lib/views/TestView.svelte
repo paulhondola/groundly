@@ -1,19 +1,14 @@
 <script lang="ts">
-  import { ApiError, api, getJSON, pageURL, postJSON, testQuery } from "../api";
+  import { createMutation, createQuery, useQueryClient } from "@tanstack/svelte-query";
+  import { ApiError, type SubmittedAnswer, apiClient, pageURL, unwrap } from "../api/client";
+  import { queryKeys, treeQueryOptions } from "../api/queries";
   import Button from "../components/ui/Button.svelte";
   import Card from "../components/ui/Card.svelte";
   import { cn } from "../components/ui/utils";
-  import { router } from "../router.svelte";
-  import { runStore } from "../run.svelte";
-  import type {
-    DrawTestResponse,
-    SubmitAttemptResponse,
-    TreeResponse,
-  } from "../types";
+  import { navigate } from "../router";
   import {
     type StoredTest,
     createTestPersister,
-    dropTest,
     isAnswered,
     loadTest,
     saveTest,
@@ -31,8 +26,10 @@
 
   let { subject, topicId, n }: Props = $props();
 
-  let courseTitle = $state("");
-  let scopeTitle = $state("Whole course");
+  const qc = useQueryClient();
+
+  const treeQuery = createQuery(() => treeQueryOptions(subject));
+
   let test = $state<StoredTest | null>(null);
   let loading = $state(true);
   let loadError = $state<string | null>(null);
@@ -40,8 +37,25 @@
   let confirming = $state(false);
   let sending = $state(false);
 
-  const key = $derived(storageKey(subject, topicId));
-  const currentQuestion = $derived(test ? test.questions[test.current] ?? null : null);
+  const courseTitle = $derived(treeQuery.data ? treeQuery.data.title || subject : "");
+  const scopeTitle = $derived(
+    topicId == null
+      ? "Whole course"
+      : treeQuery.data
+        ? (findTopicById(treeQuery.data.tree, topicId)?.title ?? "Removed topic")
+        : "Whole course",
+  );
+  const treeError = $derived(
+    treeQuery.isError && !treeQuery.data
+      ? treeQuery.error instanceof Error
+        ? treeQuery.error.message
+        : "Could not load test"
+      : null,
+  );
+  const displayError = $derived(loadError ?? treeError);
+  const isLoading = $derived((loading || (treeQuery.isPending && !treeQuery.data)) && !displayError);
+
+  const currentQuestion = $derived(test ? (test.questions[test.current] ?? null) : null);
   const total = $derived(test ? test.questions.length : 0);
   const answeredCount = $derived(
     test ? test.questions.filter((q) => isAnswered(q, test?.answers[q.id])).length : 0,
@@ -51,6 +65,52 @@
 
   let persister: ReturnType<typeof createTestPersister> | null = null;
   let sessionSeq = 0;
+
+  interface SubmitVariables {
+    subject: string;
+    persister: ReturnType<typeof createTestPersister> | null;
+    seq: number;
+    body: {
+      token: string;
+      topic_id: number | null;
+      answers: SubmittedAnswer[];
+    };
+  }
+
+  const submitMutation = createMutation(() => ({
+    mutationFn: async ({ subject: activeSubject, body }: SubmitVariables) =>
+      unwrap(
+        await apiClient.POST("/api/subjects/{subject}/attempts", {
+          params: { path: { subject: activeSubject } },
+          body,
+        }),
+      ),
+    onSuccess: async (created, vars) => {
+      vars.persister?.markDead();
+      void qc.invalidateQueries({ queryKey: queryKeys.subject(vars.subject) });
+      if (vars.seq === sessionSeq) {
+        await navigate("/s/:subject/attempts/:id", {
+          params: { subject: vars.subject, id: String(created.id) },
+        });
+        if (vars.seq === sessionSeq) {
+          sending = false;
+        }
+      }
+    },
+    onError: (err, vars) => {
+      if (err instanceof ApiError && err.code === "unknown_question") {
+        vars.persister?.markDead();
+      }
+      if (vars.seq === sessionSeq) {
+        sending = false;
+        confirming = false;
+        submitError =
+          err instanceof Error
+            ? err.message
+            : "the test could not be submitted — try Submit again";
+      }
+    },
+  }));
 
   function store(): void {
     if (test && persister) {
@@ -64,11 +124,9 @@
     const activeN = n;
     const activeKey = storageKey(activeSubject, activeTopicId);
     const seq = ++sessionSeq;
+    const controller = new AbortController();
 
-    runStore.setHooks({ subject: null });
     persister = createTestPersister(activeKey);
-    courseTitle = "";
-    scopeTitle = "Whole course";
     loading = true;
     loadError = null;
     submitError = null;
@@ -78,25 +136,18 @@
 
     (async () => {
       try {
-        const treeRes = await getJSON<TreeResponse>(api(activeSubject, "/tree"));
-        if (seq !== sessionSeq) {
-          return;
-        }
-        const course = treeRes.title || activeSubject;
-        const scope =
-          activeTopicId == null
-            ? "Whole course"
-            : (findTopicById(treeRes.tree, activeTopicId)?.title ?? "Removed topic");
-        courseTitle = course;
-        scopeTitle = scope;
-        document.title = "Test · " + course + " · Groundly";
-
         let loaded = loadTest(activeKey);
         if (!loaded || loaded.n !== activeN || !Array.isArray(loaded.questions)) {
-          const drawn = await getJSON<DrawTestResponse>(
-            api(activeSubject, testQuery(activeTopicId, activeN)),
+          const drawn = unwrap(
+            await apiClient.GET("/api/subjects/{subject}/test", {
+              params: {
+                path: { subject: activeSubject },
+                query: { ...(activeTopicId != null ? { topic: activeTopicId } : {}), n: activeN },
+              },
+              signal: controller.signal,
+            }),
           );
-          if (seq !== sessionSeq) {
+          if (controller.signal.aborted || seq !== sessionSeq) {
             return;
           }
           loaded = {
@@ -110,21 +161,29 @@
             saveTest(activeKey, loaded);
           }
         }
-        if (seq === sessionSeq) {
+        if (!controller.signal.aborted && seq === sessionSeq) {
           test = loaded;
           loading = false;
         }
       } catch (err: unknown) {
-        if (seq === sessionSeq) {
-          loadError = err instanceof Error ? err.message : "Could not load test";
-          loading = false;
+        if (controller.signal.aborted || seq !== sessionSeq) {
+          return;
         }
+        loadError = err instanceof Error ? err.message : "Could not load test";
+        loading = false;
       }
     })();
 
     return () => {
+      controller.abort();
       sessionSeq += 1;
     };
+  });
+
+  $effect(() => {
+    if (courseTitle) {
+      document.title = "Test · " + courseTitle + " · Groundly";
+    }
   });
 
   function go(index: number): void {
@@ -166,7 +225,7 @@
     store();
   }
 
-  async function submit(): Promise<void> {
+  function submit(): void {
     if (!test || sending) {
       return;
     }
@@ -174,13 +233,9 @@
       confirming = true;
       return;
     }
-    const activeSubject = subject;
-    const activeKey = key;
-    const activePersister = persister;
-    const seq = sessionSeq;
     sending = true;
     submitError = null;
-    const answers = test.questions.map((q) =>
+    const answers: SubmittedAnswer[] = test.questions.map((q) =>
       q.kind === "open"
         ? {
             question_id: q.id,
@@ -191,32 +246,16 @@
             selected: Array.isArray(test?.answers[q.id]) ? (test.answers[q.id] as number[]) : [],
           },
     );
-    try {
-      const created = await postJSON<SubmitAttemptResponse>(api(activeSubject, "/attempts"), {
+    submitMutation.mutate({
+      subject,
+      persister,
+      seq: sessionSeq,
+      body: {
         token: test.token,
         topic_id: topicId,
         answers,
-      });
-      dropTest(activeKey);
-      if (seq === sessionSeq) {
-        router.navigate(pageURL(activeSubject, "/attempts/" + Number(created.id)));
-      }
-    } catch (err: unknown) {
-      if (err instanceof ApiError && err.code === "unknown_question") {
-        activePersister?.markDead();
-      }
-      if (seq === sessionSeq) {
-        confirming = false;
-        submitError =
-          err instanceof Error
-            ? err.message
-            : "the test could not be submitted — try Submit again";
-      }
-    } finally {
-      if (seq === sessionSeq) {
-        sending = false;
-      }
-    }
+      },
+    });
   }
 
   function handleWindowKeydown(event: KeyboardEvent): void {
@@ -267,11 +306,11 @@
     {/if}
   </div>
 
-  {#if loading}
+  {#if isLoading}
     <p class="text-sm text-muted-foreground">Drawing test…</p>
-  {:else if loadError}
+  {:else if displayError}
     <Card class="border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
-      {loadError}
+      {displayError}
     </Card>
   {:else if !test || test.questions.length === 0}
     <Card class="notice p-6 text-sm">
@@ -404,7 +443,7 @@
       {#if test.current < total - 1}
         <Button class="primary" onclick={() => test && go(test.current + 1)}>Next</Button>
       {:else}
-        <Button class="primary" disabled={sending} onclick={() => void submit()}>
+        <Button class="primary" disabled={sending} onclick={() => submit()}>
           {sending ? "Submitting…" : "Submit"}
         </Button>
       {/if}
@@ -421,7 +460,7 @@
           {unansweredCount === 1 ? " question is" : " questions are"} unanswered and will count as wrong
         </p>
         <div class="flex items-center gap-2">
-          <Button class="primary" size="sm" disabled={sending} onclick={() => void submit()}>
+          <Button class="primary" size="sm" disabled={sending} onclick={() => submit()}>
             Submit anyway
           </Button>
           <Button variant="ghost" size="sm" onclick={() => (confirming = false)}>

@@ -1,4 +1,4 @@
-import type { SourceItem, TopicNode } from "../types";
+import type { SourceItem, TopicNode } from "../api/client";
 
 function matchesQuery(node: TopicNode, needle: string): boolean {
   return node.title.toLowerCase().includes(needle) || node.summary.toLowerCase().includes(needle);

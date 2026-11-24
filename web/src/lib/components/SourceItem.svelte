@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { pageURL } from "../api";
-  import type { SourceItem } from "../types";
+  import { type SourceItem, materialURL } from "../api/client";
 
   interface Props {
     subject: string;
@@ -12,14 +11,7 @@
   const label = $derived(
     String(src.filename) + (src.page != null ? " · p." + Number(src.page) : ""),
   );
-  const href = $derived(
-    pageURL(
-      subject,
-      "/materials/" +
-        Number(src.material_id) +
-        (src.page != null ? "#page=" + Number(src.page) : ""),
-    ),
-  );
+  const href = $derived(materialURL(subject, src.material_id, src.page));
 </script>
 
 <li class="text-sm">

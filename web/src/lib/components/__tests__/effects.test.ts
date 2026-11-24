@@ -1,7 +1,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { createRunStore } from "../../run.svelte";
-import type { RunSnapshot } from "../../types";
+import type { RunSnapshot } from "../../api/client";
 import RunStrip from "../RunStrip.svelte";
 import SourceItem from "../SourceItem.svelte";
 import LiquidMetalButton from "../effects/LiquidMetalButton.svelte";
@@ -316,6 +316,9 @@ describe("RunStrip text-only safety and status output", () => {
     expect(container.textContent).toContain("Starting your agent");
     expect(container.querySelectorAll("button")).toHaveLength(0);
 
+    await vi.waitFor(() => {
+      expect(resolveStart).toBeTypeOf("function");
+    });
     resolveStart(jsonResponse(makeSnapshot({ id: 78, subject: "PDSS" }), 202));
     await startPromise;
     flushSync();
@@ -329,6 +332,9 @@ describe("RunStrip text-only safety and status output", () => {
     expect(stopBtn?.disabled).toBe(true);
     expect(stopBtn?.textContent?.trim()).toBe("Stopping…");
 
+    await vi.waitFor(() => {
+      expect(resolveStop).toBeTypeOf("function");
+    });
     resolveStop(
       jsonResponse({
         run: makeSnapshot({ id: 78, subject: "PDSS", status: "stopped", phase: null }),

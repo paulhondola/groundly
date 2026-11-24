@@ -1,31 +1,24 @@
+import type { QueryClient } from "@tanstack/svelte-query";
 import {
   ApiError,
-  RUNS_API,
-  RUNS_STOP_API,
-  RUNS_STREAM_API,
-  getJSON,
-  postJSON,
-  startRunURL,
-} from "./api";
-import type {
-  RunSnapshot,
-  RunsInfo,
-  SSEDeltaEvent,
-  SSEPhaseEvent,
-  SSEStepEvent,
-  StartRunBody,
-  StopRunResponse,
-} from "./types";
+  type RunSnapshot,
+  type RunsInfo,
+  type StartRunBody,
+  apiClient,
+  unwrap,
+} from "./api/client";
+import { queryClient, queryKeys } from "./api/queries";
+import {
+  type EventSourceLike,
+  type SSEDeltaEvent,
+  type SSEPhaseEvent,
+  type SSEStepEvent,
+  createEventStream,
+} from "./api/sse";
 
 export const MAX_STREAM_CHARS = 2000;
 export const MAX_STEPS = 50;
 export const MAX_STREAM_RETRIES = 2;
-
-export interface RunHooks {
-  subject: string | null;
-  onRefresh?: (() => void | Promise<void>) | null;
-  onEnd?: (() => void | Promise<void>) | null;
-}
 
 export function outcomeText(run: RunSnapshot): string {
   if (run.status === "done") {
@@ -45,7 +38,7 @@ function parseEventJSON<T>(raw: string): T | null {
   }
 }
 
-export function createRunStore() {
+export function createRunStore(qc: QueryClient = queryClient) {
   let available = $state(false);
   let reason = $state<string | null>(null);
   let target = $state(0);
@@ -59,8 +52,7 @@ export function createRunStore() {
   const busy = $derived(starting || Boolean(run && run.status === "running"));
   const watchedRun = $derived(run && run.id === watched ? run : null);
 
-  let hooks: RunHooks = { subject: null, onRefresh: null, onEnd: null };
-  let source: EventSource | null = null;
+  let source: EventSourceLike | null = null;
   let endedRunId: number | null = null;
   let streamErrors = 0;
   let stateSeq = 0;
@@ -72,18 +64,17 @@ export function createRunStore() {
     }
   }
 
-  async function notifyEnd(runId: number | null, runSubject: string | null = null): Promise<void> {
+  function notifyEnd(runId: number | null, runSubject: string | null = null): void {
     if (runId !== null && endedRunId === runId) {
       return;
     }
     if (runId !== null) {
       endedRunId = runId;
     }
-    if (
-      hooks.onEnd &&
-      (hooks.subject === null || runSubject === null || runSubject === hooks.subject)
-    ) {
-      await hooks.onEnd();
+    if (runSubject !== null) {
+      void qc.invalidateQueries({ queryKey: queryKeys.subject(runSubject) });
+    } else {
+      void qc.invalidateQueries({ queryKey: queryKeys.allSubjects() });
     }
   }
 
@@ -94,15 +85,15 @@ export function createRunStore() {
       message = outcomeText(settled);
     }
     closeStream();
-    void notifyEnd(settled.id, settled.subject);
+    notifyEnd(settled.id, settled.subject);
   }
 
   function openStream(): void {
     closeStream();
-    if (typeof EventSource === "undefined") {
+    const es = createEventStream("/api/runs/stream");
+    if (!es) {
       return;
     }
-    const es = new EventSource(RUNS_STREAM_API);
     source = es;
 
     es.addEventListener("snapshot", (ev: MessageEvent<string>) => {
@@ -115,7 +106,7 @@ export function createRunStore() {
           run = null;
           closeStream();
           message = "Lost track of the run — the page server restarted.";
-          void notifyEnd(watched);
+          notifyEnd(watched);
           return;
         }
         run = null;
@@ -180,13 +171,8 @@ export function createRunStore() {
         ...run,
         steps: [...run.steps, data.step].slice(-MAX_STEPS),
       };
-      if (
-        data.refresh &&
-        hooks.onRefresh &&
-        hooks.subject !== null &&
-        run.subject === hooks.subject
-      ) {
-        void hooks.onRefresh();
+      if (data.refresh) {
+        void qc.invalidateQueries({ queryKey: queryKeys.subject(run.subject) });
       }
     });
 
@@ -217,7 +203,7 @@ export function createRunStore() {
     const seq = stateSeq;
     let info: RunsInfo;
     try {
-      info = await getJSON<RunsInfo>(RUNS_API);
+      info = unwrap(await apiClient.GET("/api/runs"));
     } catch {
       if (seq !== stateSeq) {
         return;
@@ -251,7 +237,7 @@ export function createRunStore() {
     run = current;
     if (watched !== null) {
       message = "Lost track of the run — the page server restarted.";
-      await notifyEnd(watched);
+      notifyEnd(watched);
     }
   }
 
@@ -259,7 +245,7 @@ export function createRunStore() {
     const seq = ++stateSeq;
     let info: RunsInfo;
     try {
-      info = await getJSON<RunsInfo>(RUNS_API);
+      info = unwrap(await apiClient.GET("/api/runs"));
     } catch {
       return null;
     }
@@ -306,7 +292,12 @@ export function createRunStore() {
     dismissed = false;
     closeStream();
     try {
-      const started = await postJSON<RunSnapshot>(startRunURL(subject), body);
+      const started = unwrap(
+        await apiClient.POST("/api/subjects/{subject}/runs", {
+          params: { path: { subject } },
+          body,
+        }),
+      );
       run = started;
       watched = started.id;
       dismissed = false;
@@ -332,7 +323,7 @@ export function createRunStore() {
     }
     stopping = true;
     try {
-      const res = await postJSON<StopRunResponse>(RUNS_STOP_API, {});
+      const res = unwrap(await apiClient.POST("/api/runs/stop", { body: {} }));
       if (res.run && res.run.status !== "running") {
         applySettled(res.run);
       }
@@ -349,13 +340,8 @@ export function createRunStore() {
     message = null;
   }
 
-  function setHooks(next: RunHooks): void {
-    hooks = next;
-  }
-
   function destroy(): void {
     closeStream();
-    hooks = { subject: null, onRefresh: null, onEnd: null };
   }
 
   return {
@@ -396,9 +382,8 @@ export function createRunStore() {
     start,
     stop,
     dismiss,
-    setHooks,
     destroy,
   };
 }
 
-export const runStore = createRunStore();
+export const runStore = createRunStore(queryClient);

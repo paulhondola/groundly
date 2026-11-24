@@ -1,4 +1,4 @@
-import type { RunKind, RunPhase } from "../../types";
+import type { RunKind, RunPhase } from "../../api/client";
 
 export type OrbState =
   | "working"

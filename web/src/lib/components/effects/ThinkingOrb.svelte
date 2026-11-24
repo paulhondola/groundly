@@ -1,6 +1,6 @@
 <script lang="ts">
   import { MODE_FRAMES, paintFrame, resolvePreset } from "thinking-orbs/engine";
-  import type { RunKind, RunPhase } from "../../types";
+  import type { RunKind, RunPhase } from "../../api/client";
   import { theme } from "../../theme.svelte";
   import { cn } from "../ui/utils";
   import { type OrbSize, orbStateFor, phaseLabelFor } from "./orb-state";
