@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { decodeParam, parsePositiveInt, route } from "../router";
+  import { parsePositiveInt, route } from "../router";
   import NotFoundView from "../views/NotFoundView.svelte";
   import ResultView from "../views/ResultView.svelte";
 
-  const subject = $derived(decodeParam(route.params.subject));
+  // sv-router already decodes :subject once via decodeURIComponent in matchRoute.
+  const subject = $derived(route.params.subject || null);
   const attemptId = $derived(parsePositiveInt(route.params.id));
 </script>
 

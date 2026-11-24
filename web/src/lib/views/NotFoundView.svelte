@@ -1,14 +1,14 @@
 <script lang="ts">
   import Button from "../components/ui/Button.svelte";
   import Card from "../components/ui/Card.svelte";
-  import { route } from "../router";
+  import { getMalformedPathname, route } from "../router";
 
   interface Props {
     pathname?: string;
   }
 
   let { pathname }: Props = $props();
-  const displayPath = $derived(pathname ?? route.pathname);
+  const displayPath = $derived(pathname ?? getMalformedPathname() ?? route.pathname);
 </script>
 
 <Card class="mx-auto max-w-md space-y-3 p-6">

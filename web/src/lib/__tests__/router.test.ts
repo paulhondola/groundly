@@ -14,6 +14,8 @@ vi.hoisted(() => {
 
 import {
   decodeParam,
+  getMalformedPathname,
+  hasMalformedPercentEncoding,
   isMaterialPath,
   navigate,
   p,
@@ -23,6 +25,7 @@ import {
   setBeforeLoadGuard,
 } from "../router";
 import AttemptResultRoute from "../routes/AttemptResultRoute.svelte";
+import SubjectTreeRoute from "../routes/SubjectTreeRoute.svelte";
 import NotFoundView from "../views/NotFoundView.svelte";
 
 describe("decodeParam", () => {
@@ -169,9 +172,64 @@ describe("sv-router navigation, param encoding, and beforeLoad guard", () => {
     await navigate("/unknown" as "/");
     expect(route.pathname).toBe("/unknown");
   });
+
+  it("handles malformed percent-encoding without throwing URIError and clears on valid navigation", async () => {
+    expect(hasMalformedPercentEncoding("/s/%E0%A4%A")).toBe(true);
+    expect(hasMalformedPercentEncoding("/s/100%25")).toBe(false);
+
+    await expect(navigate("/s/%E0%A4%A" as "/")).resolves.toBeDefined();
+    expect(route.pathname).toBe("/not-found");
+    expect(getMalformedPathname()).toBe("/s/%E0%A4%A");
+
+    await navigate("/s/:subject", { params: { subject: "PDSS" } });
+    expect(route.pathname).toBe("/s/PDSS");
+    expect(getMalformedPathname()).toBeNull();
+  });
+
+  it("does not hijack clicks on material links lacking target=_blank and prevents URIError on malformed links", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const bubbleListener = vi.fn((e: Event) => e.preventDefault());
+    window.addEventListener("click", bubbleListener);
+
+    try {
+      const materialAnchor = document.createElement("a");
+      materialAnchor.href = "/s/PDSS/materials/1";
+      container.appendChild(materialAnchor);
+
+      const materialClick = new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+      });
+      materialAnchor.dispatchEvent(materialClick);
+      expect(materialClick.defaultPrevented).toBe(false);
+      expect(bubbleListener).not.toHaveBeenCalled();
+
+      const badAnchor = document.createElement("a");
+      badAnchor.href = "/s/%E0%A4%A";
+      container.appendChild(badAnchor);
+
+      const badClick = new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+      });
+      badAnchor.dispatchEvent(badClick);
+      expect(badClick.defaultPrevented).toBe(true);
+      expect(bubbleListener).not.toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(getMalformedPathname()).toBe("/s/%E0%A4%A");
+      });
+    } finally {
+      window.removeEventListener("click", bubbleListener);
+      container.remove();
+    }
+  });
 });
 
-describe("NotFoundView and AttemptResultRoute fallback", () => {
+describe("NotFoundView, SubjectTreeRoute, and AttemptResultRoute", () => {
+  const originalFetch = globalThis.fetch;
   let container: HTMLDivElement;
 
   beforeEach(async () => {
@@ -183,11 +241,18 @@ describe("NotFoundView and AttemptResultRoute fallback", () => {
   });
 
   afterEach(() => {
+    globalThis.fetch = originalFetch;
     container.remove();
     vi.restoreAllMocks();
   });
 
-  it("renders NotFoundView with route.pathname by default or explicit pathname prop", async () => {
+  it("renders NotFoundView with malformed pathname, route.pathname, or explicit pathname prop", async () => {
+    await navigate("/s/%E0%A4%A" as "/");
+    const malformedView = mount(NotFoundView, { target: container });
+    expect(container.textContent).toContain("Page not found");
+    expect(container.textContent).toContain("/s/%E0%A4%A");
+    await unmount(malformedView);
+
     await navigate("/s/PDSS/extra" as "/");
     const defaultView = mount(NotFoundView, { target: container });
     expect(container.textContent).toContain("Page not found");
@@ -205,13 +270,45 @@ describe("NotFoundView and AttemptResultRoute fallback", () => {
     await unmount(customView);
   });
 
-  it("renders NotFoundView inside AttemptResultRoute when attempt id is not a positive integer", async () => {
-    await navigate("/s/:subject/attempts/:id", {
-      params: { subject: "PDSS", id: "notanint" },
-    });
-    const view = mount(AttemptResultRoute, { target: container });
-    expect(container.textContent).toContain("Page not found");
-    expect(container.textContent).toContain("/s/PDSS/attempts/notanint");
+  it("preserves % in SubjectTreeRoute without double-decoding or falling back to NotFoundView", async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/tree")) {
+        return new Response(JSON.stringify({ title: "100% Course", tree: [], attempts: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.endsWith("/attempts")) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ active: null, available: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    await navigate("/s/:subject", { params: { subject: "100%" } });
+    expect(window.location.pathname).toBe("/s/100%25");
+    expect(route.params.subject).toBe("100%");
+
+    const view = mount(SubjectTreeRoute, { target: container });
+    expect(container.textContent).not.toContain("Page not found");
     await unmount(view);
+  });
+
+  it("renders NotFoundView inside AttemptResultRoute when attempt id is invalid", async () => {
+    for (const invalidId of ["0", "-5", "notanint"]) {
+      await navigate("/s/:subject/attempts/:id", {
+        params: { subject: "PDSS", id: invalidId },
+      });
+      const view = mount(AttemptResultRoute, { target: container });
+      expect(container.textContent).toContain("Page not found");
+      expect(container.textContent).toContain(`/s/PDSS/attempts/${invalidId}`);
+      await unmount(view);
+    }
   });
 });

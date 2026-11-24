@@ -1,10 +1,11 @@
 <script lang="ts">
   import { searchParams } from "sv-router";
-  import { decodeParam, parseTestSearch, route } from "../router";
+  import { parseTestSearch, route } from "../router";
   import NotFoundView from "../views/NotFoundView.svelte";
   import TestView from "../views/TestView.svelte";
 
-  const subject = $derived(decodeParam(route.params.subject));
+  // sv-router already decodes :subject once via decodeURIComponent in matchRoute.
+  const subject = $derived(route.params.subject || null);
   const parsed = $derived(parseTestSearch(searchParams.toURLSearchParams()));
 </script>
 

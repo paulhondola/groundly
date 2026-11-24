@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { decodeParam, route } from "../router";
+  import { route } from "../router";
   import NotFoundView from "../views/NotFoundView.svelte";
   import TreeView from "../views/TreeView.svelte";
 
-  const subject = $derived(decodeParam(route.params.subject));
+  // sv-router already decodes :subject once via decodeURIComponent in matchRoute.
+  const subject = $derived(route.params.subject || null);
 </script>
 
 {#if subject !== null}
