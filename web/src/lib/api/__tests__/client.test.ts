@@ -148,18 +148,23 @@ describe("configureClient", () => {
       getAuthHeaders: () => ({ Authorization: "Bearer post-token" }),
     });
 
+    const payload = {
+      token: "tok-1",
+      topic_id: null,
+      answers: [{ question_id: 1, selected: [2] }],
+    };
     const result = await apiClient.POST("/api/subjects/{subject}/attempts", {
       params: { path: { subject: "PDSS" } },
-      body: {
-        token: "tok-1",
-        topic_id: null,
-        answers: [{ question_id: 1, selected: [2] }],
-      },
+      body: payload,
     });
     expect(unwrap(result)).toEqual({ id: 7 });
     const request = fetchMock.mock.calls[0][0] as Request;
+    expect(request.method).toBe("POST");
     expect(request.url).toBe(`${location.origin}/proxy/api/subjects/PDSS/attempts`);
+    expect(request.credentials).toBe("same-origin");
+    expect(request.headers.get("Content-Type")).toBe("application/json");
     expect(request.headers.get("Authorization")).toBe("Bearer post-token");
+    expect(await request.json()).toEqual(payload);
   });
 
   it("invokes onUnauthorized on 401 responses and not on 200/400/500", async () => {

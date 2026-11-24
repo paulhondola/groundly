@@ -89,30 +89,53 @@ const SafeRequest: typeof Request = class extends Request {
   }
 };
 
+type RequestInitWithDuplex = RequestInit & { duplex?: "half" };
+
+function buildRequestInit(request: Request, headers?: Headers): RequestInitWithDuplex {
+  const init: RequestInitWithDuplex = {
+    method: request.method,
+    headers: headers ?? new Headers(request.headers),
+    cache: request.cache,
+    credentials: request.credentials,
+    integrity: request.integrity,
+    keepalive: request.keepalive,
+    mode: request.mode,
+    redirect: request.redirect,
+    referrer: request.referrer,
+    referrerPolicy: request.referrerPolicy,
+    signal: request.signal,
+  };
+  if (request.body !== null) {
+    init.body = request.body;
+    init.duplex = "half";
+  }
+  return init;
+}
+
 const clientMiddleware: Middleware = {
   async onRequest({ request }) {
-    let nextRequest = request;
-
-    if (clientConfig.baseUrl) {
-      const targetUrl = resolveRequestUrl(request.url, clientConfig.baseUrl);
-      if (targetUrl !== request.url) {
-        nextRequest = new SafeRequest(targetUrl, request);
-      }
-    }
+    let headers: Headers | undefined;
 
     if (clientConfig.getAuthHeaders) {
       const authHeaders = await clientConfig.getAuthHeaders();
       const entries = Object.entries(authHeaders);
       if (entries.length > 0) {
-        const headers = new Headers(nextRequest.headers);
+        headers = new Headers(request.headers);
         for (const [key, value] of entries) {
           headers.set(key, value);
         }
-        nextRequest = new SafeRequest(nextRequest, { headers });
       }
     }
 
-    return nextRequest;
+    const targetUrl = clientConfig.baseUrl
+      ? resolveRequestUrl(request.url, clientConfig.baseUrl)
+      : request.url;
+
+    if (targetUrl !== request.url || headers) {
+      return new SafeRequest(targetUrl, buildRequestInit(request, headers));
+    }
+
+    return request;
   },
   onResponse({ response }) {
     if (response.status === 401) {
