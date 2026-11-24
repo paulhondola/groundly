@@ -1,4 +1,4 @@
-import type { DrawnQuestion } from "../types";
+import type { DrawnQuestion } from "../api/client";
 
 export type AnswerMap = Record<number, string | number[]>;
 

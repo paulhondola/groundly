@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { SourceItem, TopicNode } from "../../types";
+import type { SourceItem, TopicNode } from "../../api/client";
 import {
   dedupeSources,
   filterTree,

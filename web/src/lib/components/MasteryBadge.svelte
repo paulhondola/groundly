@@ -1,5 +1,5 @@
 <script module lang="ts">
-  import type { TopicProgress } from "../types";
+  import type { TopicProgress } from "../api/client";
 
   export function progressLine(p: TopicProgress | null): string {
     if (!p || p.state === "not_started") {

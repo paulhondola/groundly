@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import type { DrawnQuestion } from "../../types";
+import type { DrawnQuestion } from "../../api/client";
 import {
   type StoredTest,
   createTestPersister,
