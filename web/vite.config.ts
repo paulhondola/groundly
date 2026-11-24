@@ -45,7 +45,6 @@ export default defineConfig({
       input: "src/main.ts",
       output: {
         format: "iife",
-        inlineDynamicImports: true,
         entryFileNames: "page.js",
         assetFileNames: "page.[ext]",
       },

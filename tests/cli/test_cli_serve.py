@@ -1,6 +1,7 @@
 """CLI: `groundly serve` — loopback topic-tree page, opened in the browser."""
 
 import errno
+import re
 import socket
 from pathlib import Path
 
@@ -10,11 +11,25 @@ from typer.testing import CliRunner
 from groundly.cli import app
 
 runner = CliRunner()
-WEB = Path(__file__).parents[2] / "groundly" / "web"
-# The shell and its script and stylesheet: the guarantees below hold across all three.
-PAGE = "".join(
+ROOT = Path(__file__).parents[2]
+WEB = ROOT / "groundly" / "web"
+WEB_SRC = ROOT / "web" / "src"
+
+AUTHORED_SOURCE = (WEB / "page.html").read_text(encoding="utf-8") + "".join(
+    p.read_text(encoding="utf-8")
+    for p in sorted(WEB_SRC.rglob("*"))
+    if p.is_file() and "__tests__" not in p.parts and p.suffix in {".ts", ".svelte", ".css"}
+)
+SHIPPED_BUNDLE = "".join(
     (WEB / f).read_text(encoding="utf-8")
     for f in ("page.html", "static/page.js", "static/page.css")
+)
+
+_ALLOWED_BUNDLE_URLS = (
+    "http://www.w3.org/2000/svg",
+    "http://www.w3.org/1999/xhtml",
+    "http://www.w3.org/1998/Math/MathML",
+    "http://www.w3.org/1999/xlink",
 )
 
 
@@ -140,30 +155,37 @@ def test_serve_names_the_real_cause_when_the_bind_is_refused(monkeypatch):
 
 
 def test_page_inserts_content_only_as_text():
-    for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval("):
-        assert sink not in PAGE, sink
+    for sink in (
+        "innerHTML",
+        "outerHTML",
+        "insertAdjacentHTML",
+        "document.write",
+        "eval(",
+        "{@html",
+    ):
+        assert sink not in AUTHORED_SOURCE, sink
 
 
 def test_page_loads_nothing_external():
-    assert "http://" not in PAGE and "https://" not in PAGE
-    assert " onclick=" not in PAGE
+    assert "http://" not in AUTHORED_SOURCE and "https://" not in AUTHORED_SOURCE
+    assert " onclick=" not in AUTHORED_SOURCE
 
 
 def test_page_links_a_source_only_when_the_server_says_it_is_a_stored_pdf():
-    assert "src.pdf === true" in PAGE
-    assert '.endsWith(".pdf")' not in PAGE
+    assert "src.pdf === true" in AUTHORED_SOURCE
+    assert '.endsWith(".pdf")' not in AUTHORED_SOURCE
 
 
 def test_the_page_tells_the_student_how_to_get_questions_and_a_review():
-    assert "Write questions on" in PAGE and "grade my test" in PAGE
+    assert "Write questions on" in AUTHORED_SOURCE and "grade my test" in AUTHORED_SOURCE
 
 
 def test_the_page_never_calls_a_key_verified():
-    assert "verified" not in PAGE.lower()
+    assert "verified" not in AUTHORED_SOURCE.lower()
 
 
 def test_the_page_keeps_a_test_in_session_storage_and_sends_a_random_token():
-    assert "sessionStorage" in PAGE and "crypto.randomUUID()" in PAGE
+    assert "sessionStorage" in AUTHORED_SOURCE and "crypto.randomUUID()" in AUTHORED_SOURCE
 
 
 def test_serve_ignores_forwarded_headers(monkeypatch):
@@ -175,25 +197,56 @@ def test_serve_ignores_forwarded_headers(monkeypatch):
 
 
 def test_the_page_drops_a_test_whose_question_was_removed():
-    assert '"unknown_question"' in PAGE
+    assert '"unknown_question"' in AUTHORED_SOURCE
 
 
 def test_the_suggested_host_sentence_quotes_the_topic_title():
     """A title may come from an imported bundle: it reaches the host quoted, as data."""
-    assert '"Write questions on \\"" + title + "\\" for "' in PAGE
+    assert '"Write questions on \\"" + title + "\\" for "' in AUTHORED_SOURCE
 
 
 def test_a_test_dropped_for_a_removed_question_is_never_saved_again():
-    assert "function store() { if (!dead) saveTest(key, test); }" in PAGE
+    assert "function store() { if (!dead) saveTest(key, test); }" in AUTHORED_SOURCE
 
 
 def test_page_starts_runs_through_the_api_only():
-    assert "/api/runs" in PAGE and '"/runs"' in PAGE and "/api/runs/stop" in PAGE
-    assert "Write questions for its subtopics" in PAGE and "Grade now" in PAGE
+    assert (
+        "/api/runs" in AUTHORED_SOURCE
+        and '"/runs"' in AUTHORED_SOURCE
+        and "/api/runs/stream" in AUTHORED_SOURCE
+        and "/api/runs/stop" in AUTHORED_SOURCE
+    )
+    assert "Write questions for its subtopics" in AUTHORED_SOURCE and "Grade now" in AUTHORED_SOURCE
 
 
 def test_page_keeps_the_phrases_as_the_fallback():
-    assert "Say to your agent" in PAGE and "grade my test" in PAGE
+    assert "Say to your agent" in AUTHORED_SOURCE and "grade my test" in AUTHORED_SOURCE
+
+
+def test_shipped_bundle_is_built_clean_and_self_contained():
+    page_js = (WEB / "static" / "page.js").read_text(encoding="utf-8")
+    page_css = (WEB / "static" / "page.css").read_text(encoding="utf-8")
+    assert len(page_js) > 0 and len(page_css) > 0
+    assert "verified" not in SHIPPED_BUNDLE.lower()
+
+    cleaned = SHIPPED_BUNDLE
+    for ns in _ALLOWED_BUNDLE_URLS:
+        cleaned = cleaned.replace(ns, "")
+    cleaned = re.sub(r"https://svelte\.dev/e/[a-z0-9_]+", "", cleaned)
+    cleaned = re.sub(r"/\*! tailwindcss [^*]*https://tailwindcss\.com \*/", "", cleaned)
+    assert "http://" not in cleaned and "https://" not in cleaned
+
+    for marker in (
+        "/api/runs/stream",
+        "/api/runs/stop",
+        "unknown_question",
+        "sessionStorage",
+        "randomUUID",
+        "Write questions for its subtopics",
+        "Grade now",
+        "grade my test",
+    ):
+        assert marker in SHIPPED_BUNDLE, marker
 
 
 def test_handle_exit_shuts_down_runner_once_before_graceful_wait(monkeypatch):
