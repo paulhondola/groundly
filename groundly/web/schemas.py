@@ -19,13 +19,6 @@ def _check_sqlite_id(value: int) -> int:
 SqliteId = Annotated[int, AfterValidator(_check_sqlite_id)]
 
 
-class ErrorResponse(BaseModel):
-    """Structured error payload returned on refused or invalid API requests."""
-
-    error: str
-    detail: str
-
-
 class SubjectSummary(BaseModel):
     """One subject entry returned by GET /api/subjects."""
 

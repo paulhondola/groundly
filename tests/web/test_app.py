@@ -1007,3 +1007,16 @@ def test_runs_stream_unsubscribes_on_early_disconnect(home, seeded, fake_claude)
                     assert len(app.state.runner._subscribers) == 1
                     break
         assert len(app.state.runner._subscribers) == 0
+
+
+def test_chunked_and_malformed_content_length_oversized_bodies_return_413(
+    client, seeded, fake_claude
+):
+    for extra_headers in ({}, {"Content-Length": "not-a-number"}):
+        r = client.post(
+            "/api/subjects/PDSS/runs",
+            content=(b"x" * 65536 for _ in range(5)),
+            headers={**ORIGIN, "Content-Type": "application/json", **extra_headers},
+        )
+        assert (r.status_code, r.json()["error"]) == (413, "too_large")
+    assert fake_claude.calls() == []

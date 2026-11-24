@@ -191,7 +191,7 @@ class Steps:
         self._last: str | None = None
 
     def _emit(self, step: str | None, out: list[tuple[str, bool]], refresh: bool) -> None:
-        if step and step != self._last:
+        if step and (refresh or step != self._last):
             out.append((step, refresh))
             self._last = step
 
@@ -519,11 +519,7 @@ class Runner:
         drained = Runner._drain_queue(queue)
         if item is None:
             for old in drained:
-                if (
-                    old is not None
-                    and old[0] == "done"
-                    and (queue.maxsize <= 0 or queue.qsize() < queue.maxsize - 1)
-                ):
+                if old is not None and old[0] == "done" and queue.qsize() < queue.maxsize - 1:
                     with contextlib.suppress(asyncio.QueueFull):
                         queue.put_nowait(old)
             with contextlib.suppress(asyncio.QueueFull):
@@ -532,12 +528,6 @@ class Runner:
         if event_name == "done":
             with contextlib.suppress(asyncio.QueueFull):
                 queue.put_nowait(item)
-            return
-        kept = [x for x in drained if x is None or x[0] == "done"]
-        if kept:
-            for old in kept:
-                with contextlib.suppress(asyncio.QueueFull):
-                    queue.put_nowait(old)
             return
         if snapshot_fallback is not None:
             with contextlib.suppress(asyncio.QueueFull):
@@ -633,10 +623,13 @@ class Runner:
                 )
                 run["thought_channel"] = ev.channel
                 if self._pending_delta is None:
-                    self._pending_delta = (ev.channel, ev.text, ev.reset)
+                    text, reset = ev.text, ev.reset
                 else:
-                    channel, prev_text, prev_reset = self._pending_delta
-                    self._pending_delta = (channel, prev_text + ev.text, prev_reset)
+                    _, prev_text, prev_reset = self._pending_delta
+                    text, reset = prev_text + ev.text, prev_reset
+                if len(text) > MAX_STREAM_CHARS:
+                    text, reset = text[-MAX_STREAM_CHARS:], True
+                self._pending_delta = (ev.channel, text, reset)
                 self._arm_delta_timer_locked(run)
 
     def _apply_steps_locked(self, run: dict, step_items: list[tuple[str, bool]]) -> None:
@@ -657,7 +650,6 @@ class Runner:
         *,
         error: tuple[str, str] | None = None,
         summary: str | None = None,
-        tracker: StreamTracker | None = None,
     ) -> bool:
         """Atomically settle ``run`` once, flush buffered deltas, and emit done + sentinel."""
         if self._run is not run or run["status"] != "running":
@@ -668,8 +660,6 @@ class Runner:
         run["status"] = status
         run["error"] = error and {"reason": error[0], "detail": error[1]}
         _clear_live(run)
-        if tracker is not None:
-            tracker.reset_settled()
         snapshot = self._snapshot()
         if snapshot is not None:
             self._publish_locked("done", snapshot, snapshot_fallback=snapshot)
@@ -806,7 +796,6 @@ class Runner:
                                     "failed" if error else "done",
                                     error=error,
                                     summary=summary,
-                                    tracker=tracker,
                                 )
                 except Exception as e:  # noqa: BLE001 - an event shape it cannot read fails the run, never hangs it
                     reason = "host_error" if checked else "isolation_failed"
@@ -816,8 +805,11 @@ class Runner:
         finally:
             with self._lock:
                 if self._run is run:
-                    self._cancel_delta_timer_locked()
-                    self._pending_delta = None
+                    if run["status"] == "running":
+                        self._flush_deltas_locked(run)
+                    else:
+                        self._cancel_delta_timer_locked()
+                        self._pending_delta = None
         proc.stdout.close()
         code = proc.wait()
         timer.cancel()
@@ -828,7 +820,7 @@ class Runner:
         with self._lock:
             if self._run is run and run["status"] == "running":
                 detail = f"claude exited with code {code}" + (f": {tail}" if tail else "")
-                self._settle_locked(run, "failed", error=("host_exit", detail), tracker=tracker)
+                self._settle_locked(run, "failed", error=("host_exit", detail))
 
     def stop(self) -> dict | None:
         """Stop the running run, if any; what the gates already stored stays."""

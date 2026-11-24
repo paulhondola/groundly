@@ -1002,3 +1002,140 @@ async def test_subscribe_mid_coalesce_flushes_pending_delta_without_duplication(
         assert deltas2[0]["reset"] is False
     finally:
         runner.shutdown()
+
+
+async def test_coalesced_deltas_cap_at_max_stream_chars_with_reset(
+    fake_claude, tmp_path, monkeypatch
+):
+    gate = tmp_path / "go"
+    fake_claude.script(
+        [
+            FAKE_INIT,
+            f"WAIT:{gate}",
+            stream_start("thinking"),
+            stream_delta("thinking_delta", "prefix"),
+            f"WAIT:{tmp_path / 'go2'}",
+            stream_delta("thinking_delta", "x" * 1500),
+            stream_delta("thinking_delta", "y" * 1000),
+            success("Done."),
+        ]
+    )
+    loop = asyncio.get_running_loop()
+    runner = runs.Runner()
+    runner.start("write", "PDSS", 7, "the prompt")
+    try:
+        await _await_init(runner)
+        snap, q = runner.subscribe(loop)
+        assert snap is not None and q is not None
+        gate.write_text("1")
+
+        first = await asyncio.wait_for(q.get(), timeout=2.0)
+        while first is not None and first[0] != "delta":
+            first = await asyncio.wait_for(q.get(), timeout=2.0)
+        assert first is not None and first[1]["text"] == "prefix"
+
+        monkeypatch.setattr(runs, "DELTA_COALESCE_S", 5.0)
+        (tmp_path / "go2").write_text("1")
+        items = []
+        while (item := await asyncio.wait_for(q.get(), timeout=5.0)) is not None:
+            items.append(item)
+        deltas = [data for name, data in items if name == "delta"]
+        assert len(deltas) == 1
+        assert deltas[0]["reset"] is True
+        assert len(deltas[0]["text"]) == runs.MAX_STREAM_CHARS
+        assert deltas[0]["text"] == ("x" * 1000) + ("y" * 1000)
+        assert items[-1][0] == "done" and items[-1][1]["status"] == "done"
+    finally:
+        runner.shutdown()
+
+
+def test_steps_preserve_repeated_gate_writes_with_refresh():
+    s = runs.Steps()
+    assert s.feed_items(use("s1", "mcp__groundly__search")) == [("Reading the course", False)]
+    assert s.feed_items(use("s2", "mcp__groundly__search")) == []
+    s.feed_items(use("q1", "mcp__groundly__submit_questions", {"questions": [1]}))
+    s.feed_items(use("q2", "mcp__groundly__submit_questions", {"questions": [1]}))
+    assert s.feed_items(tool_result("q1", {"accepted": [{}], "rejected": []})) == [
+        ("1 stored, 0 rejected", True)
+    ]
+    assert s.feed_items(tool_result("q2", {"accepted": [{}], "rejected": []})) == [
+        ("1 stored, 0 rejected", True)
+    ]
+
+
+async def test_crashing_run_flushes_buffered_delta_before_done(fake_claude, tmp_path, monkeypatch):
+    gate = tmp_path / "go"
+    monkeypatch.setattr(runs, "DELTA_COALESCE_S", 5.0)
+    fake_claude.script(
+        [
+            FAKE_INIT,
+            f"WAIT:{gate}",
+            stream_start("text"),
+            stream_delta("text_delta", "Before crash"),
+        ],
+        exit_code=2,
+        stderr="boom",
+    )
+    loop = asyncio.get_running_loop()
+    runner = runs.Runner()
+    runner.start("write", "PDSS", 7, "the prompt")
+    try:
+        await _await_init(runner)
+        snap, q = runner.subscribe(loop)
+        assert snap is not None and q is not None
+        gate.write_text("1")
+        items = []
+        while (item := await asyncio.wait_for(q.get(), timeout=5.0)) is not None:
+            items.append(item)
+        deltas = [data for name, data in items if name == "delta"]
+        assert deltas == [
+            {"id": snap["id"], "channel": "text", "text": "Before crash", "reset": True}
+        ]
+        assert items[-1][0] == "done"
+        assert items[-1][1]["status"] == "failed"
+        assert items[-1][1]["error"] == {
+            "reason": "host_exit",
+            "detail": "claude exited with code 2: boom",
+        }
+    finally:
+        runner.shutdown()
+
+
+async def test_non_partial_assistant_fallback_streams_delta_and_phase_to_subscribers(
+    fake_claude, tmp_path
+):
+    gate = tmp_path / "go"
+    fake_claude.script(
+        [
+            FAKE_INIT,
+            f"WAIT:{gate}",
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "thinking", "thinking": "Step one"}]},
+            },
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": "Final note"}]},
+            },
+            success("Done."),
+        ]
+    )
+    loop = asyncio.get_running_loop()
+    runner = runs.Runner()
+    runner.start("write", "PDSS", 7, "the prompt")
+    try:
+        await _await_init(runner)
+        snap, q = runner.subscribe(loop)
+        assert snap is not None and q is not None
+        gate.write_text("1")
+        items = []
+        while (item := await asyncio.wait_for(q.get(), timeout=5.0)) is not None:
+            items.append(item)
+        deltas = [data for name, data in items if name == "delta"]
+        assert [(d["channel"], d["text"], d["reset"]) for d in deltas] == [
+            ("thinking", "Step one", True),
+            ("text", "Final note", True),
+        ]
+        assert items[-1][0] == "done" and items[-1][1]["status"] == "done"
+    finally:
+        runner.shutdown()
