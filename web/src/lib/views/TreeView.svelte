@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { createQuery } from "@tanstack/svelte-query";
   import { tick } from "svelte";
-  import { api, getJSON, pageURL, testQuery } from "../api";
+  import { type TopicNode, apiClient, pageURL, testQuery, unwrap } from "../api/client";
+  import { queryKeys } from "../api/queries";
   import MasteryBadge from "../components/MasteryBadge.svelte";
   import SourceItem from "../components/SourceItem.svelte";
   import LiquidMetalButton from "../components/effects/LiquidMetalButton.svelte";
@@ -11,7 +13,6 @@
   import Select from "../components/ui/Select.svelte";
   import { cn } from "../components/ui/utils";
   import { runStore } from "../run.svelte";
-  import type { AttemptSummary, TopicNode, TreeResponse } from "../types";
   import {
     dedupeSources,
     filterTree,
@@ -26,11 +27,28 @@
 
   let { subject }: Props = $props();
 
-  let title = $state("");
-  let tree = $state<TopicNode[]>([]);
-  let attempts = $state<AttemptSummary[]>([]);
-  let loading = $state(true);
-  let error = $state<string | null>(null);
+  const treeQuery = createQuery(() => ({
+    queryKey: queryKeys.tree(subject),
+    queryFn: async ({ signal }) =>
+      unwrap(
+        await apiClient.GET("/api/subjects/{subject}/tree", {
+          params: { path: { subject } },
+          signal,
+        }),
+      ),
+  }));
+
+  const attemptsQuery = createQuery(() => ({
+    queryKey: queryKeys.attempts(subject),
+    queryFn: async ({ signal }) =>
+      unwrap(
+        await apiClient.GET("/api/subjects/{subject}/attempts", {
+          params: { path: { subject } },
+          signal,
+        }),
+      ),
+  }));
+
   let query = $state("");
   let selectedTopicId = $state<number | null>(null);
   let selectedCount = $state("10");
@@ -38,6 +56,17 @@
   let panelEl = $state<HTMLElement | null>(null);
   let panelHeadingEl = $state<HTMLHeadingElement | null>(null);
   let lastTriggerEl = $state<HTMLButtonElement | null>(null);
+
+  const tree = $derived(treeQuery.data?.tree ?? []);
+  const title = $derived(treeQuery.data?.title ?? "");
+  const attempts = $derived(attemptsQuery.data ?? []);
+  const error = $derived(
+    treeQuery.isError && !treeQuery.data
+      ? treeQuery.error instanceof Error
+        ? treeQuery.error.message
+        : "Could not load topic tree"
+      : null,
+  );
 
   const visibleTree = $derived(filterTree(tree, query));
   const selectedTopic = $derived(findTopicById(tree, selectedTopicId));
@@ -48,61 +77,15 @@
   );
   const selectedSources = $derived(selectedTopic ? dedupeSources(selectedTopic.sources) : []);
 
-  let loadSeq = 0;
-
-  async function loadData(silent: boolean, activeSubject: string): Promise<void> {
-    const seq = ++loadSeq;
-    if (!silent) {
-      loading = true;
-      error = null;
-    }
-    try {
-      const data = await getJSON<TreeResponse>(api(activeSubject, "/tree"));
-      if (seq !== loadSeq) {
-        return;
-      }
-      tree = data.tree;
-      title = data.title;
-      document.title = (data.title || activeSubject) + " · Groundly";
-      if (!silent) {
-        loading = false;
-      }
-      try {
-        const list = await getJSON<AttemptSummary[]>(api(activeSubject, "/attempts"));
-        if (seq === loadSeq) {
-          attempts = list;
-        }
-      } catch {
-        /* attempt history optional if unreachable */
-      }
-    } catch (err: unknown) {
-      if (!silent && seq === loadSeq) {
-        error = err instanceof Error ? err.message : "Could not load topic tree";
-        loading = false;
-      }
-    }
-  }
-
   $effect(() => {
-    const activeSubject = subject;
-    document.title = activeSubject + " · Groundly";
-    title = "";
-    tree = [];
+    void subject;
     selectedTopicId = null;
     query = "";
-    attempts = [];
     void runStore.attach();
-    runStore.setHooks({
-      subject: activeSubject,
-      onRefresh: () => loadData(true, activeSubject),
-      onEnd: () => loadData(true, activeSubject),
-    });
-    void loadData(false, activeSubject);
+  });
 
-    return () => {
-      loadSeq += 1;
-      runStore.setHooks({ subject: null, onRefresh: null, onEnd: null });
-    };
+  $effect(() => {
+    document.title = (title || subject) + " · Groundly";
   });
 
   async function openTopic(node: TopicNode, event: MouseEvent): Promise<void> {
@@ -168,7 +151,7 @@
     {/if}
   </div>
 
-  {#if loading}
+  {#if treeQuery.isPending}
     <p class="text-sm text-muted-foreground">Loading topic map…</p>
   {:else if error}
     <Card class="border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive" role="alert">

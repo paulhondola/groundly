@@ -1,12 +1,36 @@
+import { QueryClient } from "@tanstack/svelte-query";
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import type { AttemptResult, DrawTestResponse, TopicNode, TreeResponse } from "../../api/client";
+import { queryKeys } from "../../api/queries";
 import { runStore } from "../../run.svelte";
 import { createThemeStore } from "../../theme.svelte";
-import type { AttemptResult, DrawTestResponse, TopicNode, TreeResponse } from "../../types";
 import ResultView from "../ResultView.svelte";
+import SubjectsView from "../SubjectsView.svelte";
 import TestView from "../TestView.svelte";
 import TreeView from "../TreeView.svelte";
+import QueryHarness from "./QueryHarness.svelte";
 import { loadTest, storageKey } from "../test-session";
+
+function createTestQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+}
+
+function requestPathname(input: RequestInfo | URL): string {
+  if (input instanceof Request) {
+    return new URL(input.url).pathname;
+  }
+  if (input instanceof URL) {
+    return input.pathname;
+  }
+  return new URL(String(input), location.origin).pathname;
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -122,6 +146,93 @@ describe("TestView", () => {
   });
 });
 
+describe("SubjectsView", () => {
+  const originalFetch = globalThis.fetch;
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    container.remove();
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("renders subjects from GET /api/subjects and caches them in QueryClient", async () => {
+    const qc = createTestQueryClient();
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const pathname = requestPathname(input);
+      if (pathname === "/api/runs") {
+        return Promise.resolve(
+          jsonResponse({ available: false, reason: "no_host", target: 10, run: null }),
+        );
+      }
+      if (pathname === "/api/subjects") {
+        return Promise.resolve(
+          jsonResponse([
+            { subject: "PDSS", title: "Parallel Systems", has_tree: true, error: null },
+            { subject: "OS", title: "", has_tree: false, error: null },
+          ]),
+        );
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const instance = mount(QueryHarness, {
+      target: container,
+      props: { client: qc, component: SubjectsView },
+    });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("Parallel Systems");
+    });
+
+    expect(document.title).toBe("Groundly");
+    expect(container.textContent).toContain("PDSS");
+    expect(container.textContent).toContain("topic map ready");
+    expect(container.textContent).toContain("OS");
+    expect(container.textContent).toContain("no map yet");
+    expect(container.querySelector('a[href="/s/PDSS"]')).not.toBeNull();
+    expect(qc.getQueryData(queryKeys.subjects())).toHaveLength(2);
+
+    void unmount(instance);
+  });
+
+  it("displays an alert when GET /api/subjects fails", async () => {
+    const qc = createTestQueryClient();
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const pathname = requestPathname(input);
+      if (pathname === "/api/runs") {
+        return Promise.resolve(
+          jsonResponse({ available: false, reason: "no_host", target: 10, run: null }),
+        );
+      }
+      if (pathname === "/api/subjects") {
+        return Promise.resolve(
+          jsonResponse({ error: "db_error", detail: "Database unavailable" }, 500),
+        );
+      }
+      return Promise.resolve(jsonResponse({}));
+    }) as unknown as typeof fetch;
+
+    const instance = mount(QueryHarness, {
+      target: container,
+      props: { client: qc, component: SubjectsView },
+    });
+
+    await vi.waitFor(() => {
+      const alert = container.querySelector('[role="alert"]');
+      expect(alert?.textContent).toContain("Database unavailable");
+    });
+
+    void unmount(instance);
+  });
+});
+
 describe("TreeView", () => {
   const originalFetch = globalThis.fetch;
   let container: HTMLDivElement;
@@ -139,14 +250,16 @@ describe("TreeView", () => {
   });
 
   it("resets stale title and actions on unmount and ignores late responses after unmount", async () => {
+    const qc = createTestQueryClient();
     let resolveSlowTree!: (res: Response) => void;
-    const fetchMock = vi.fn().mockImplementation((url: string) => {
-      if (url === "/api/runs") {
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const pathname = requestPathname(input);
+      if (pathname === "/api/runs") {
         return Promise.resolve(
           jsonResponse({ available: false, reason: "no_host", target: 10, run: null }),
         );
       }
-      if (url === "/api/subjects/PDSS/tree") {
+      if (pathname === "/api/subjects/PDSS/tree") {
         return new Promise<Response>((resolve) => {
           resolveSlowTree = resolve;
         });
@@ -155,11 +268,15 @@ describe("TreeView", () => {
     });
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    const instance = mount(TreeView, {
+    const instance = mount(QueryHarness, {
       target: container,
-      props: { subject: "PDSS" },
+      props: { client: qc, component: TreeView, props: { subject: "PDSS" } },
     });
     flushSync();
+
+    await vi.waitFor(() => {
+      expect(resolveSlowTree).toBeTypeOf("function");
+    });
 
     // Navigate away before /tree resolves
     void unmount(instance);
@@ -169,6 +286,142 @@ describe("TreeView", () => {
     await new Promise((r) => setTimeout(r, 0));
 
     expect(document.title).toBe("Groundly");
+  });
+
+  it("updates the open topic drawer question count in place on SSE invalidation without closing the drawer", async () => {
+    const qc = createTestQueryClient();
+    let treeCalls = 0;
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const pathname = requestPathname(input);
+      if (pathname === "/api/runs") {
+        return Promise.resolve(
+          jsonResponse({ available: false, reason: "no_host", target: 10, run: null }),
+        );
+      }
+      if (pathname === "/api/subjects/PDSS/tree") {
+        treeCalls += 1;
+        const questions = treeCalls === 1 ? 2 : 10;
+        return Promise.resolve(
+          jsonResponse({ title: "Parallel Systems", tree: [makeTopic(7, "Locks", questions)] }),
+        );
+      }
+      if (pathname === "/api/subjects/PDSS/attempts") {
+        return Promise.resolve(jsonResponse([]));
+      }
+      return Promise.resolve(jsonResponse({}));
+    }) as unknown as typeof fetch;
+
+    const instance = mount(QueryHarness, {
+      target: container,
+      props: { client: qc, component: TreeView, props: { subject: "PDSS" } },
+    });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("Locks");
+    });
+
+    const topicBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Locks"),
+    );
+    topicBtn?.click();
+    flushSync();
+
+    const drawer = container.querySelector('aside[aria-label="Topic details"]');
+    expect(drawer?.classList.contains("open")).toBe(true);
+    expect(drawer?.textContent?.replace(/\s+/g, " ")).toContain("2 questions");
+
+    await qc.invalidateQueries({ queryKey: queryKeys.subject("PDSS") });
+
+    await vi.waitFor(() => {
+      expect(drawer?.textContent?.replace(/\s+/g, " ")).toContain("10 questions");
+    });
+    expect(drawer?.classList.contains("open")).toBe(true);
+    expect(drawer?.textContent).toContain("Locks");
+
+    void unmount(instance);
+  });
+
+  it("clears open drawer and filter and does not flash PDSS topics when switching to pending PASSC", async () => {
+    const qc = createTestQueryClient();
+    let resolvePasscTree!: (res: Response) => void;
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const pathname = requestPathname(input);
+      if (pathname === "/api/runs") {
+        return Promise.resolve(
+          jsonResponse({ available: false, reason: "no_host", target: 10, run: null }),
+        );
+      }
+      if (pathname === "/api/subjects/PDSS/tree") {
+        return Promise.resolve(
+          jsonResponse({ title: "Parallel Systems", tree: [makeTopic(7, "Locks", 2)] }),
+        );
+      }
+      if (pathname === "/api/subjects/PASSC/tree") {
+        return new Promise<Response>((resolve) => {
+          resolvePasscTree = resolve;
+        });
+      }
+      if (
+        pathname === "/api/subjects/PDSS/attempts" ||
+        pathname === "/api/subjects/PASSC/attempts"
+      ) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      return Promise.resolve(jsonResponse({}));
+    }) as unknown as typeof fetch;
+
+    const instance = mount(QueryHarness, {
+      target: container,
+      props: { client: qc, component: TreeView, props: { subject: "PDSS" } },
+    });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("Locks");
+    });
+
+    // Open Locks drawer and set search filter
+    const topicBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Locks"),
+    );
+    topicBtn?.click();
+    flushSync();
+
+    const searchInput = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Filter topics"]',
+    );
+    expect(searchInput).not.toBeNull();
+    if (searchInput) {
+      searchInput.value = "Lock";
+      searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    flushSync();
+    expect(container.querySelector("aside.open")?.textContent?.replace(/\s+/g, " ")).toContain(
+      "2 questions",
+    );
+
+    // Switch subject from cached PDSS to pending PASSC
+    instance.setProps({ subject: "PASSC" });
+    flushSync();
+
+    // Must immediately show loading and NOT flash PDSS topic titles or open drawer
+    expect(container.textContent).toContain("Loading topic map…");
+    expect(container.textContent).not.toContain("Locks");
+    expect(container.querySelector("aside.open")).toBeNull();
+    expect(container.textContent?.replace(/\s+/g, " ")).not.toContain("2 questions");
+
+    // Resolve PASSC and ensure filter was reset (Capabilities is visible) and drawer remains closed
+    await vi.waitFor(() => {
+      expect(resolvePasscTree).toBeTypeOf("function");
+    });
+    resolvePasscTree(
+      jsonResponse({ title: "Applied Security", tree: [makeTopic(9, "Capabilities", 4)] }),
+    );
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("Capabilities");
+    });
+    expect(container.querySelector("aside.open")).toBeNull();
+
+    void unmount(instance);
   });
 });
 

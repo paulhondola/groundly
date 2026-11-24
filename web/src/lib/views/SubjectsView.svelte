@@ -1,39 +1,28 @@
 <script lang="ts">
-  import { getJSON, pageURL } from "../api";
+  import { createQuery } from "@tanstack/svelte-query";
+  import { apiClient, pageURL, unwrap } from "../api/client";
+  import { queryKeys } from "../api/queries";
   import Badge from "../components/ui/Badge.svelte";
   import Card from "../components/ui/Card.svelte";
   import { runStore } from "../run.svelte";
-  import type { SubjectSummary } from "../types";
 
-  let subjects = $state<SubjectSummary[]>([]);
-  let loading = $state(true);
-  let error = $state<string | null>(null);
+  const subjectsQuery = createQuery(() => ({
+    queryKey: queryKeys.subjects(),
+    queryFn: async ({ signal }) => unwrap(await apiClient.GET("/api/subjects", { signal })),
+  }));
+
+  const subjects = $derived(subjectsQuery.data ?? []);
+  const error = $derived(
+    subjectsQuery.isError && !subjectsQuery.data
+      ? subjectsQuery.error instanceof Error
+        ? subjectsQuery.error.message
+        : "Could not load subjects"
+      : null,
+  );
 
   $effect(() => {
     document.title = "Groundly";
-    runStore.setHooks({ subject: null });
     void runStore.attach();
-
-    let cancelled = false;
-    loading = true;
-    error = null;
-    getJSON<SubjectSummary[]>("/api/subjects")
-      .then((list) => {
-        if (!cancelled) {
-          subjects = list;
-          loading = false;
-        }
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          error = err instanceof Error ? err.message : "Could not load subjects";
-          loading = false;
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
   });
 </script>
 
@@ -43,7 +32,7 @@
     <p class="text-sm text-muted-foreground">Pick a subject to see its topic map.</p>
   </div>
 
-  {#if loading}
+  {#if subjectsQuery.isPending}
     <p class="text-sm text-muted-foreground">Loading subjects…</p>
   {:else if error}
     <Card class="border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive" role="alert">

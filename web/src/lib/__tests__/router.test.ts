@@ -1,6 +1,8 @@
+import { QueryClient } from "@tanstack/svelte-query";
 import { mount, unmount } from "svelte";
 import { searchParams } from "sv-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import QueryHarness from "../views/__tests__/QueryHarness.svelte";
 
 vi.hoisted(() => {
   if (typeof globalThis.IntersectionObserver === "undefined") {
@@ -295,7 +297,11 @@ describe("NotFoundView, SubjectTreeRoute, and AttemptResultRoute", () => {
     expect(window.location.pathname).toBe("/s/100%25");
     expect(route.params.subject).toBe("100%");
 
-    const view = mount(SubjectTreeRoute, { target: container });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = mount(QueryHarness, {
+      target: container,
+      props: { client: qc, component: SubjectTreeRoute },
+    });
     expect(container.textContent).not.toContain("Page not found");
     await unmount(view);
   });
