@@ -4,6 +4,17 @@ import { defineConfig } from "vite-plus";
 
 export default defineConfig({
   plugins: [svelte(), tailwindcss()],
+  lint: {
+    options: {
+      typeAware: true,
+    },
+  },
+  fmt: {
+    printWidth: 100,
+    singleQuote: false,
+    semi: true,
+    trailingComma: "all",
+  },
   resolve: {
     conditions: ["browser"],
   },

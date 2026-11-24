@@ -20,3 +20,16 @@ pre-commit:
     - name: test
       glob: "*.py"
       run: uv run pytest -q
+    - name: web-fix+format
+      root: web/
+      glob: "*.{ts,js,mjs,cjs,svelte,css,html,json}"
+      group:
+        jobs:
+          - run: vp lint --fix --no-error-on-unmatched-pattern {staged_files}
+            stage_fixed: true
+          - run: vp fmt --write --no-error-on-unmatched-pattern {staged_files}
+            stage_fixed: true
+    - name: web-svelte-check
+      root: web/
+      glob: "*.{ts,svelte,json}"
+      run: vp exec svelte-check --tsconfig ./tsconfig.json
