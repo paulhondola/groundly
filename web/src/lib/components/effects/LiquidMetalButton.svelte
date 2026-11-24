@@ -12,7 +12,7 @@
   interface Props {
     label: string;
     disabled?: boolean;
-    onclick: () => void;
+    onclick: (event: MouseEvent) => void;
     class?: string;
   }
 
