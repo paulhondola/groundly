@@ -69,7 +69,11 @@
         ? (findTopicById(treeQuery.data.tree, result.scope_topic_id)?.title ?? "Removed topic")
         : "Whole course",
   );
-  const loading = $derived(attemptQuery.isPending || treeQuery.isPending);
+  const pending = $derived.by(() => {
+    const attemptPending = attemptQuery.isPending;
+    const treePending = treeQuery.isPending;
+    return attemptPending || treePending;
+  });
   const error = $derived(
     attemptQuery.isError && !attemptQuery.data
       ? attemptQuery.error instanceof Error
@@ -81,6 +85,7 @@
           : "Could not load attempt result"
         : null,
   );
+  const loading = $derived(pending && !error);
 
   const canGrade = $derived(Boolean(result?.provisional && runStore.available));
 

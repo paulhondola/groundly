@@ -89,12 +89,10 @@ const SafeRequest: typeof Request = class extends Request {
   }
 };
 
-type RequestInitWithDuplex = RequestInit & { duplex?: "half" };
-
-function buildRequestInit(request: Request, headers?: Headers): RequestInitWithDuplex {
-  const init: RequestInitWithDuplex = {
+async function buildRequestInit(request: Request): Promise<RequestInit> {
+  const init: RequestInit = {
     method: request.method,
-    headers: headers ?? new Headers(request.headers),
+    headers: new Headers(request.headers),
     cache: request.cache,
     credentials: request.credentials,
     integrity: request.integrity,
@@ -106,24 +104,17 @@ function buildRequestInit(request: Request, headers?: Headers): RequestInitWithD
     signal: request.signal,
   };
   if (request.body !== null) {
-    init.body = request.body;
-    init.duplex = "half";
+    init.body = await request.arrayBuffer();
   }
   return init;
 }
 
 const clientMiddleware: Middleware = {
   async onRequest({ request }) {
-    let headers: Headers | undefined;
-
     if (clientConfig.getAuthHeaders) {
       const authHeaders = await clientConfig.getAuthHeaders();
-      const entries = Object.entries(authHeaders);
-      if (entries.length > 0) {
-        headers = new Headers(request.headers);
-        for (const [key, value] of entries) {
-          headers.set(key, value);
-        }
+      for (const [key, value] of Object.entries(authHeaders)) {
+        request.headers.set(key, value);
       }
     }
 
@@ -131,8 +122,8 @@ const clientMiddleware: Middleware = {
       ? resolveRequestUrl(request.url, clientConfig.baseUrl)
       : request.url;
 
-    if (targetUrl !== request.url || headers) {
-      return new SafeRequest(targetUrl, buildRequestInit(request, headers));
+    if (targetUrl !== request.url) {
+      return new SafeRequest(targetUrl, await buildRequestInit(request));
     }
 
     return request;

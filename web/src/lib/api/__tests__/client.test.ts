@@ -136,6 +136,36 @@ describe("configureClient", () => {
     expect(onUnauthorized).not.toHaveBeenCalled();
   });
 
+  it("supports POST requests with JSON body when only getAuthHeaders is configured (same URL)", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ id: 5 }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    configureClient({
+      getAuthHeaders: () => ({ Authorization: "Bearer same-origin-token" }),
+    });
+
+    const payload = {
+      token: "tok-same",
+      topic_id: null,
+      answers: [{ question_id: 2, text: "answer" }],
+    };
+    const result = await apiClient.POST("/api/subjects/{subject}/attempts", {
+      params: { path: { subject: "PDSS" } },
+      body: payload,
+    });
+    expect(unwrap(result)).toEqual({ id: 5 });
+    const request = fetchMock.mock.calls[0][0] as Request;
+    expect(request.method).toBe("POST");
+    expect(request.url).toBe(`${location.origin}/api/subjects/PDSS/attempts`);
+    expect(request.credentials).toBe("same-origin");
+    expect(request.headers.get("Content-Type")).toBe("application/json");
+    expect(request.headers.get("Authorization")).toBe("Bearer same-origin-token");
+    expect(await request.json()).toEqual(payload);
+  });
+
   it("supports POST requests with JSON body when auth headers and baseUrl are configured", async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ id: 7 }), {

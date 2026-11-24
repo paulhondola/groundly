@@ -743,6 +743,41 @@ describe("ResultView", () => {
 
     void unmount(instance);
   });
+
+  it("renders attempt 404 error immediately while tree query is still pending", async () => {
+    const qc = createTestQueryClient();
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const pathname = requestPathname(input);
+      if (pathname === "/api/runs") {
+        return Promise.resolve(
+          jsonResponse({ available: false, reason: "no_host", target: 10, run: null }),
+        );
+      }
+      if (pathname === "/api/subjects/PDSS/attempts/999") {
+        return Promise.resolve(
+          jsonResponse({ error: "unknown_attempt", detail: "Unknown attempt 999" }, 404),
+        );
+      }
+      if (pathname === "/api/subjects/PDSS/tree") {
+        return new Promise<Response>(() => {});
+      }
+      return Promise.resolve(jsonResponse({}));
+    }) as unknown as typeof fetch;
+
+    const instance = mount(QueryHarness, {
+      target: container,
+      props: { client: qc, component: ResultView, props: { subject: "PDSS", attemptId: 999 } },
+    });
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+        "Unknown attempt 999",
+      );
+    });
+    expect(container.textContent).not.toContain("Loading results…");
+
+    void unmount(instance);
+  });
 });
 
 describe("App shell", () => {

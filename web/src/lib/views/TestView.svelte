@@ -9,7 +9,6 @@
   import {
     type StoredTest,
     createTestPersister,
-    dropTest,
     isAnswered,
     loadTest,
     saveTest,
@@ -65,7 +64,6 @@
   const isLoading = $derived(loading || (treeQuery.isPending && !treeQuery.data));
   const displayError = $derived(loadError ?? treeError);
 
-  const key = $derived(storageKey(subject, topicId));
   const currentQuestion = $derived(test ? (test.questions[test.current] ?? null) : null);
   const total = $derived(test ? test.questions.length : 0);
   const answeredCount = $derived(
@@ -79,7 +77,6 @@
 
   interface SubmitVariables {
     subject: string;
-    key: string;
     persister: ReturnType<typeof createTestPersister> | null;
     seq: number;
     body: {
@@ -98,7 +95,7 @@
         }),
       ),
     onSuccess: (created, vars) => {
-      dropTest(vars.key);
+      vars.persister?.markDead();
       void qc.invalidateQueries({ queryKey: queryKeys.subject(vars.subject) });
       if (vars.seq === sessionSeq) {
         void navigate("/s/:subject/attempts/:id", {
@@ -111,16 +108,12 @@
         vars.persister?.markDead();
       }
       if (vars.seq === sessionSeq) {
+        submitting = false;
         confirming = false;
         submitError =
           err instanceof Error
             ? err.message
             : "the test could not be submitted — try Submit again";
-      }
-    },
-    onSettled: (_data, _err, vars) => {
-      if (vars.seq === sessionSeq) {
-        submitting = false;
       }
     },
   }));
@@ -263,7 +256,6 @@
     );
     submitMutation.mutate({
       subject,
-      key,
       persister,
       seq: sessionSeq,
       body: {

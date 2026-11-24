@@ -77,10 +77,15 @@
   );
   const selectedSources = $derived(selectedTopic ? dedupeSources(selectedTopic.sources) : []);
 
-  $effect(() => {
+  $effect.pre(() => {
     void subject;
     selectedTopicId = null;
     query = "";
+    lastTriggerEl = null;
+  });
+
+  $effect(() => {
+    void subject;
     void runStore.attach();
   });
 
