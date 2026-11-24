@@ -86,9 +86,6 @@ describe("createRunStore", () => {
     const qc = createAppQueryClient();
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
     const store = createRunStore(qc);
-    const onRefresh = vi.fn();
-    const onEnd = vi.fn();
-    store.setHooks({ subject: "PDSS", onRefresh, onEnd });
 
     const initial = makeSnapshot({ id: 10, subject: "PDSS" });
     fetchMock.mockResolvedValueOnce(jsonResponse(initial, 202));
@@ -124,23 +121,15 @@ describe("createRunStore", () => {
 
     es.emit("step", { id: 10, step: "Submitting 1 questions", refresh: false });
     expect(store.run?.steps).toEqual(["Submitting 1 questions"]);
-    expect(onRefresh).not.toHaveBeenCalled();
     expect(invalidateSpy).not.toHaveBeenCalled();
 
     es.emit("step", { id: 10, step: "1 stored, 0 rejected", refresh: true });
-    expect(onRefresh).toHaveBeenCalledTimes(1);
     expect(invalidateSpy).toHaveBeenCalledTimes(1);
     expect(invalidateSpy).toHaveBeenLastCalledWith({ queryKey: ["subject", "PDSS"] });
 
-    // Review Focus #4: ignore hook refresh while viewing another subject, while still invalidating the run's subject cache
-    store.setHooks({ subject: "ALGO", onRefresh, onEnd });
     es.emit("step", { id: 10, step: "2 stored, 0 rejected", refresh: true });
-    expect(onRefresh).toHaveBeenCalledTimes(1);
     expect(invalidateSpy).toHaveBeenCalledTimes(2);
     expect(invalidateSpy).toHaveBeenLastCalledWith({ queryKey: ["subject", "PDSS"] });
-
-    // Switch back to the run's subject before settlement so onEnd fires for it
-    store.setHooks({ subject: "PDSS", onRefresh, onEnd });
 
     const settled = makeSnapshot({
       id: 10,
@@ -156,7 +145,6 @@ describe("createRunStore", () => {
     es.emit("done", settled);
 
     expect(es.closed).toBe(true);
-    expect(onEnd).toHaveBeenCalledTimes(1);
     expect(invalidateSpy).toHaveBeenCalledTimes(3);
     expect(invalidateSpy).toHaveBeenLastCalledWith({ queryKey: ["subject", "PDSS"] });
     expect(store.message).toBe("Stored 2 questions.");
@@ -168,8 +156,6 @@ describe("createRunStore", () => {
     const qc = createAppQueryClient();
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
     const store = createRunStore(qc);
-    const onEnd = vi.fn();
-    store.setHooks({ subject: "PDSS", onEnd });
 
     fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 15, subject: "PDSS" }), 202));
     await store.start("PDSS", { kind: "write", topic_id: 7 });
@@ -186,14 +172,12 @@ describe("createRunStore", () => {
     es.emit("done", settled);
     expect(invalidateSpy).toHaveBeenCalledTimes(1);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject", "PDSS"] });
-    expect(onEnd).toHaveBeenCalledTimes(1);
 
     // Duplicate settlement for the same run ID (e.g. an in-flight stop() resolving after done)
     fetchMock.mockResolvedValueOnce(jsonResponse({ run: settled }));
     await store.stop();
 
     expect(invalidateSpy).toHaveBeenCalledTimes(1);
-    expect(onEnd).toHaveBeenCalledTimes(1);
     store.destroy();
   });
 
@@ -201,8 +185,6 @@ describe("createRunStore", () => {
     const qc = createAppQueryClient();
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
     const store = createRunStore(qc);
-    const onEnd = vi.fn();
-    store.setHooks({ subject: "PDSS", onEnd });
 
     fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 19, subject: "PDSS" }), 202));
     await store.start("PDSS", { kind: "write", topic_id: 7 });
@@ -215,7 +197,6 @@ describe("createRunStore", () => {
     expect(store.message).toBe("Lost track of the run — the page server restarted.");
     expect(invalidateSpy).toHaveBeenCalledTimes(1);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject"] });
-    expect(onEnd).toHaveBeenCalledTimes(1);
     store.destroy();
   });
 
@@ -223,8 +204,6 @@ describe("createRunStore", () => {
     const qc = createAppQueryClient();
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
     const store = createRunStore(qc);
-    const onEnd = vi.fn();
-    store.setHooks({ subject: "PDSS", onEnd });
 
     fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 21 }), 202));
     await store.start("PDSS", { kind: "write", topic_id: 7 });
@@ -241,7 +220,6 @@ describe("createRunStore", () => {
     );
 
     expect(es.closed).toBe(true);
-    expect(onEnd).toHaveBeenCalledTimes(1);
     expect(invalidateSpy).toHaveBeenCalledTimes(1);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject", "PDSS"] });
     expect(store.message).toBe("Stored 5.");
@@ -281,9 +259,8 @@ describe("createRunStore", () => {
 
   it("closes EventSource on error, probes GET /api/runs once, and reports lost server on failure (Review Focus #5)", async () => {
     const qc = createAppQueryClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
     const store = createRunStore(qc);
-    const onEnd = vi.fn();
-    store.setHooks({ subject: "PDSS", onEnd });
 
     fetchMock
       .mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 44 }), 202))
@@ -304,7 +281,7 @@ describe("createRunStore", () => {
     expect(probeReq.method).toBe("GET");
     expect(new URL(probeReq.url).pathname).toBe("/api/runs");
     expect(MockEventSource.instances).toHaveLength(1);
-    expect(onEnd).not.toHaveBeenCalled();
+    expect(invalidateSpy).not.toHaveBeenCalled();
     store.destroy();
   });
 
@@ -312,8 +289,6 @@ describe("createRunStore", () => {
     const qc = createAppQueryClient();
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
     const store = createRunStore(qc);
-    const onEnd = vi.fn();
-    store.setHooks({ subject: "PDSS", onEnd });
 
     fetchMock
       .mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 55 }), 202))
@@ -331,11 +306,10 @@ describe("createRunStore", () => {
     es.triggerError();
 
     await vi.waitFor(() => {
-      expect(onEnd).toHaveBeenCalledTimes(1);
+      expect(invalidateSpy).toHaveBeenCalledTimes(1);
     });
 
     expect(es.closed).toBe(true);
-    expect(invalidateSpy).toHaveBeenCalledTimes(1);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject", "PDSS"] });
     expect(store.message).toBe("Stopped. What was already stored stays.");
     store.destroy();
@@ -343,9 +317,8 @@ describe("createRunStore", () => {
 
   it("attach() preserves active SSE stream state and ignores stale running response after SSE settlement", async () => {
     const qc = createAppQueryClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
     const store = createRunStore(qc);
-    const onEnd = vi.fn();
-    store.setHooks({ subject: "PDSS", onEnd });
 
     fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 66 }), 202));
     await store.start("PDSS", { kind: "write", topic_id: 7 });
@@ -402,7 +375,8 @@ describe("createRunStore", () => {
 
     expect(store.run?.status).toBe("done");
     expect(store.busy).toBe(false);
-    expect(onEnd).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject", "PDSS"] });
     expect(MockEventSource.instances).toHaveLength(1);
     store.destroy();
   });
@@ -441,12 +415,10 @@ describe("createRunStore", () => {
     store.destroy();
   });
 
-  it("skips onEnd when settled run belongs to a different subject and guards duplicate stop() calls", async () => {
+  it("invalidates the settled run subject and guards duplicate stop() calls", async () => {
     const qc = createAppQueryClient();
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
     const store = createRunStore(qc);
-    const onEnd = vi.fn();
-    store.setHooks({ subject: "ALGO", onEnd });
 
     fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 90, subject: "PDSS" }), 202));
     await store.start("PDSS", { kind: "write", topic_id: 7 });
@@ -478,7 +450,6 @@ describe("createRunStore", () => {
     await Promise.all([p1, p2]);
 
     expect(store.stopping).toBe(false);
-    expect(onEnd).not.toHaveBeenCalled();
     expect(invalidateSpy).toHaveBeenCalledTimes(1);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject", "PDSS"] });
     store.destroy();

@@ -20,12 +20,6 @@ export const MAX_STREAM_CHARS = 2000;
 export const MAX_STEPS = 50;
 export const MAX_STREAM_RETRIES = 2;
 
-export interface RunHooks {
-  subject: string | null;
-  onRefresh?: (() => void | Promise<void>) | null;
-  onEnd?: (() => void | Promise<void>) | null;
-}
-
 export function outcomeText(run: RunSnapshot): string {
   if (run.status === "done") {
     return run.summary || "Done.";
@@ -58,7 +52,6 @@ export function createRunStore(qc: QueryClient = queryClient) {
   const busy = $derived(starting || Boolean(run && run.status === "running"));
   const watchedRun = $derived(run && run.id === watched ? run : null);
 
-  let hooks: RunHooks = { subject: null, onRefresh: null, onEnd: null };
   let source: EventSourceLike | null = null;
   let endedRunId: number | null = null;
   let streamErrors = 0;
@@ -71,7 +64,7 @@ export function createRunStore(qc: QueryClient = queryClient) {
     }
   }
 
-  async function notifyEnd(runId: number | null, runSubject: string | null = null): Promise<void> {
+  function notifyEnd(runId: number | null, runSubject: string | null = null): void {
     if (runId !== null && endedRunId === runId) {
       return;
     }
@@ -83,12 +76,6 @@ export function createRunStore(qc: QueryClient = queryClient) {
     } else {
       void qc.invalidateQueries({ queryKey: ["subject"] });
     }
-    if (
-      hooks.onEnd &&
-      (hooks.subject === null || runSubject === null || runSubject === hooks.subject)
-    ) {
-      await hooks.onEnd();
-    }
   }
 
   function applySettled(settled: RunSnapshot): void {
@@ -98,7 +85,7 @@ export function createRunStore(qc: QueryClient = queryClient) {
       message = outcomeText(settled);
     }
     closeStream();
-    void notifyEnd(settled.id, settled.subject);
+    notifyEnd(settled.id, settled.subject);
   }
 
   function openStream(): void {
@@ -119,7 +106,7 @@ export function createRunStore(qc: QueryClient = queryClient) {
           run = null;
           closeStream();
           message = "Lost track of the run — the page server restarted.";
-          void notifyEnd(watched);
+          notifyEnd(watched);
           return;
         }
         run = null;
@@ -186,9 +173,6 @@ export function createRunStore(qc: QueryClient = queryClient) {
       };
       if (data.refresh) {
         void qc.invalidateQueries({ queryKey: queryKeys.subject(run.subject) });
-        if (hooks.onRefresh && hooks.subject !== null && run.subject === hooks.subject) {
-          void hooks.onRefresh();
-        }
       }
     });
 
@@ -253,7 +237,7 @@ export function createRunStore(qc: QueryClient = queryClient) {
     run = current;
     if (watched !== null) {
       message = "Lost track of the run — the page server restarted.";
-      await notifyEnd(watched);
+      notifyEnd(watched);
     }
   }
 
@@ -356,13 +340,8 @@ export function createRunStore(qc: QueryClient = queryClient) {
     message = null;
   }
 
-  function setHooks(next: RunHooks): void {
-    hooks = next;
-  }
-
   function destroy(): void {
     closeStream();
-    hooks = { subject: null, onRefresh: null, onEnd: null };
   }
 
   return {
@@ -403,7 +382,6 @@ export function createRunStore(qc: QueryClient = queryClient) {
     start,
     stop,
     dismiss,
-    setHooks,
     destroy,
   };
 }

@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { api, getJSON, pageURL } from "../api";
+  import { createQuery } from "@tanstack/svelte-query";
+  import { type AnswerState, apiClient, pageURL, unwrap } from "../api/client";
+  import { queryKeys } from "../api/queries";
   import MasteryBadge from "../components/MasteryBadge.svelte";
   import SourceItem from "../components/SourceItem.svelte";
   import LiquidMetalButton from "../components/effects/LiquidMetalButton.svelte";
@@ -7,7 +9,6 @@
   import Card from "../components/ui/Card.svelte";
   import { cn } from "../components/ui/utils";
   import { runStore } from "../run.svelte";
-  import type { AnswerState, AttemptResult, TreeResponse } from "../types";
   import { findTopicById } from "./tree-filter";
 
   interface Props {
@@ -37,72 +38,62 @@
 
   let { subject, attemptId }: Props = $props();
 
-  let result = $state<AttemptResult | null>(null);
-  let courseTitle = $state("");
-  let scopeTitle = $state("Whole course");
-  let loading = $state(true);
-  let error = $state<string | null>(null);
+  const attemptQuery = createQuery(() => ({
+    queryKey: queryKeys.attempt(subject, attemptId),
+    queryFn: async ({ signal }) =>
+      unwrap(
+        await apiClient.GET("/api/subjects/{subject}/attempts/{id}", {
+          params: { path: { subject, id: attemptId } },
+          signal,
+        }),
+      ),
+  }));
+
+  const treeQuery = createQuery(() => ({
+    queryKey: queryKeys.tree(subject),
+    queryFn: async ({ signal }) =>
+      unwrap(
+        await apiClient.GET("/api/subjects/{subject}/tree", {
+          params: { path: { subject } },
+          signal,
+        }),
+      ),
+  }));
+
+  const result = $derived(attemptQuery.data ?? null);
+  const courseTitle = $derived(treeQuery.data ? treeQuery.data.title || subject : subject);
+  const scopeTitle = $derived(
+    !result || result.scope_topic_id == null
+      ? "Whole course"
+      : treeQuery.data
+        ? (findTopicById(treeQuery.data.tree, result.scope_topic_id)?.title ?? "Removed topic")
+        : "Whole course",
+  );
+  const loading = $derived(attemptQuery.isPending || treeQuery.isPending);
+  const error = $derived(
+    attemptQuery.isError && !attemptQuery.data
+      ? attemptQuery.error instanceof Error
+        ? attemptQuery.error.message
+        : "Could not load attempt result"
+      : treeQuery.isError && !treeQuery.data
+        ? treeQuery.error instanceof Error
+          ? treeQuery.error.message
+          : "Could not load attempt result"
+        : null,
+  );
 
   const canGrade = $derived(Boolean(result?.provisional && runStore.available));
 
-  let loadSeq = 0;
-
-  async function loadResult(
-    silent: boolean,
-    activeSubject: string,
-    activeAttemptId: number,
-  ): Promise<void> {
-    const seq = ++loadSeq;
-    if (!silent) {
-      loading = true;
-      error = null;
-    }
-    try {
-      const [attemptRes, treeRes] = await Promise.all([
-        getJSON<AttemptResult>(api(activeSubject, "/attempts/" + activeAttemptId)),
-        getJSON<TreeResponse>(api(activeSubject, "/tree")),
-      ]);
-      if (seq !== loadSeq) {
-        return;
-      }
-      const course = treeRes.title || activeSubject;
-      const scope =
-        attemptRes.scope_topic_id == null
-          ? "Whole course"
-          : (findTopicById(treeRes.tree, attemptRes.scope_topic_id)?.title ?? "Removed topic");
-      result = attemptRes;
-      courseTitle = course;
-      scopeTitle = scope;
-      document.title = "Result · " + course + " · Groundly";
-      if (!silent) {
-        loading = false;
-      }
-    } catch (err: unknown) {
-      if (!silent && seq === loadSeq) {
-        error = err instanceof Error ? err.message : "Could not load attempt result";
-        loading = false;
-      }
-    }
-  }
+  $effect(() => {
+    void subject;
+    void attemptId;
+    void runStore.attach();
+  });
 
   $effect(() => {
-    const activeSubject = subject;
-    const activeAttemptId = attemptId;
-    result = null;
-    courseTitle = "";
-    scopeTitle = "Whole course";
-    void runStore.attach();
-    runStore.setHooks({
-      subject: activeSubject,
-      onRefresh: () => loadResult(true, activeSubject, activeAttemptId),
-      onEnd: () => loadResult(true, activeSubject, activeAttemptId),
-    });
-    void loadResult(false, activeSubject, activeAttemptId);
-
-    return () => {
-      loadSeq += 1;
-      runStore.setHooks({ subject: null, onRefresh: null, onEnd: null });
-    };
+    if (result) {
+      document.title = "Result · " + courseTitle + " · Groundly";
+    }
   });
 </script>
 

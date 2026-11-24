@@ -1,9 +1,21 @@
 import { QueryClient } from "@tanstack/svelte-query";
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+
+vi.hoisted(() => {
+  if (typeof globalThis.IntersectionObserver === "undefined") {
+    globalThis.IntersectionObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof IntersectionObserver;
+  }
+});
+
+import App from "../../../App.svelte";
 import type { AttemptResult, DrawTestResponse, TopicNode, TreeResponse } from "../../api/client";
-import { queryKeys } from "../../api/queries";
-import { runStore } from "../../run.svelte";
+import { queryClient, queryKeys } from "../../api/queries";
+import { navigate, route } from "../../router";
 import { createThemeStore } from "../../theme.svelte";
 import ResultView from "../ResultView.svelte";
 import SubjectsView from "../SubjectsView.svelte";
@@ -62,19 +74,23 @@ describe("TestView", () => {
   const originalFetch = globalThis.fetch;
   let container: HTMLDivElement;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     sessionStorage.clear();
+    vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    await navigate("/");
     container = document.createElement("div");
     document.body.appendChild(container);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await navigate("/");
     container.remove();
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
   });
 
   it("clears unanswered warning when the question is answered, and never re-saves after unknown_question", async () => {
+    const qc = createTestQueryClient();
     const tree: TreeResponse = { title: "Parallel Systems", tree: [makeTopic(7, "Locks", 2)] };
     const drawn: DrawTestResponse = {
       questions: [
@@ -92,18 +108,26 @@ describe("TestView", () => {
       ],
     };
 
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse(tree))
-      .mockResolvedValueOnce(jsonResponse(drawn))
-      .mockResolvedValueOnce(
-        jsonResponse({ error: "unknown_question", detail: "question 101 was removed" }, 400),
-      );
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const pathname = requestPathname(input);
+      if (pathname === "/api/subjects/PDSS/tree") {
+        return Promise.resolve(jsonResponse(tree));
+      }
+      if (pathname === "/api/subjects/PDSS/test") {
+        return Promise.resolve(jsonResponse(drawn));
+      }
+      if (pathname === "/api/subjects/PDSS/attempts") {
+        return Promise.resolve(
+          jsonResponse({ error: "unknown_question", detail: "question 101 was removed" }, 400),
+        );
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    const instance = mount(TestView, {
+    const instance = mount(QueryHarness, {
       target: container,
-      props: { subject: "PDSS", topicId: 7, n: 5 },
+      props: { client: qc, component: TestView, props: { subject: "PDSS", topicId: 7, n: 5 } },
     });
 
     await vi.waitFor(() => {
@@ -141,6 +165,156 @@ describe("TestView", () => {
     radios[1]?.click();
     flushSync();
     expect(loadTest(key)).toBeNull();
+
+    void unmount(instance);
+  });
+
+  it("refreshes tree title on subject invalidation without redrawing GET /api/subjects/{subject}/test (Review Focus #4)", async () => {
+    const qc = createTestQueryClient();
+    let treeCalls = 0;
+    let testCalls = 0;
+    const drawn: DrawTestResponse = {
+      questions: [
+        {
+          id: 101,
+          topic_id: 7,
+          kind: "single",
+          stem: "What prevents race conditions?",
+          code: null,
+          options: [
+            { id: 1, text: "Mutex" },
+            { id: 2, text: "Sleep" },
+          ],
+        },
+      ],
+    };
+
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const pathname = requestPathname(input);
+      if (pathname === "/api/subjects/PDSS/tree") {
+        treeCalls += 1;
+        return Promise.resolve(
+          jsonResponse({
+            title: treeCalls === 1 ? "Parallel Systems" : "Parallel & Distributed Systems",
+            tree: [makeTopic(7, treeCalls === 1 ? "Locks" : "Locks & Mutexes", 2)],
+          }),
+        );
+      }
+      if (pathname === "/api/subjects/PDSS/test") {
+        testCalls += 1;
+        return Promise.resolve(jsonResponse(drawn));
+      }
+      return Promise.resolve(jsonResponse({}));
+    }) as unknown as typeof fetch;
+
+    const instance = mount(QueryHarness, {
+      target: container,
+      props: { client: qc, component: TestView, props: { subject: "PDSS", topicId: 7, n: 5 } },
+    });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("What prevents race conditions?");
+    });
+    expect(container.textContent).toContain("Parallel Systems");
+    expect(container.textContent).toContain("Locks");
+    expect(treeCalls).toBe(1);
+    expect(testCalls).toBe(1);
+
+    const radio = container.querySelector<HTMLInputElement>('input[type="radio"]');
+    radio?.click();
+    flushSync();
+    expect(radio?.checked).toBe(true);
+    const key = storageKey("PDSS", 7);
+    const initialToken = loadTest(key)?.token;
+    expect(initialToken).toBeTruthy();
+
+    await qc.invalidateQueries({ queryKey: queryKeys.subject("PDSS") });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("Parallel & Distributed Systems");
+    });
+    expect(container.textContent).toContain("Locks & Mutexes");
+    expect(treeCalls).toBe(2);
+    expect(testCalls).toBe(1);
+    expect(radio?.checked).toBe(true);
+    expect(loadTest(key)?.token).toBe(initialToken);
+
+    void unmount(instance);
+  });
+
+  it("submits answers, drops draft, invalidates subject queries, and navigates to attempt result", async () => {
+    const qc = createTestQueryClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    let submittedBody: unknown = null;
+    const tree: TreeResponse = { title: "Intro CS", tree: [makeTopic(7, "Basics", 2)] };
+    const drawn: DrawTestResponse = {
+      questions: [
+        {
+          id: 101,
+          topic_id: 7,
+          kind: "single",
+          stem: "What prevents race conditions?",
+          code: null,
+          options: [
+            { id: 1, text: "Mutex" },
+            { id: 2, text: "Sleep" },
+          ],
+        },
+      ],
+    };
+
+    globalThis.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const pathname = requestPathname(input);
+      if (pathname === "/api/subjects/CS%20101/tree") {
+        return jsonResponse(tree);
+      }
+      if (pathname === "/api/subjects/CS%20101/test") {
+        return jsonResponse(drawn);
+      }
+      if (pathname === "/api/subjects/CS%20101/attempts" && input instanceof Request) {
+        submittedBody = await input.json();
+        return jsonResponse({ id: 42 }, 201);
+      }
+      return jsonResponse({});
+    }) as unknown as typeof fetch;
+
+    const instance = mount(QueryHarness, {
+      target: container,
+      props: { client: qc, component: TestView, props: { subject: "CS 101", topicId: 7, n: 5 } },
+    });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("What prevents race conditions?");
+    });
+
+    const key = storageKey("CS 101", 7);
+    const storedToken = loadTest(key)?.token;
+    expect(storedToken).toBeTruthy();
+
+    const mutexLabel = Array.from(container.querySelectorAll("label")).find((l) =>
+      l.textContent?.includes("Mutex"),
+    );
+    mutexLabel?.querySelector<HTMLInputElement>('input[type="radio"]')?.click();
+    flushSync();
+
+    const submitBtn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Submit",
+    );
+    submitBtn?.click();
+
+    await vi.waitFor(() => {
+      expect(window.location.pathname).toBe("/s/CS%20101/attempts/42");
+    });
+
+    expect(submittedBody).toEqual({
+      token: storedToken,
+      topic_id: 7,
+      answers: [{ question_id: 101, selected: [1] }],
+    });
+    expect(loadTest(key)).toBeNull();
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.subject("CS 101") });
+    expect(route.params.subject).toBe("CS 101");
+    expect(route.params.id).toBe("42");
 
     void unmount(instance);
   });
@@ -245,7 +419,6 @@ describe("TreeView", () => {
   afterEach(() => {
     container.remove();
     globalThis.fetch = originalFetch;
-    runStore.setHooks({ subject: null, onRefresh: null, onEnd: null });
     vi.restoreAllMocks();
   });
 
@@ -437,11 +610,11 @@ describe("ResultView", () => {
   afterEach(() => {
     container.remove();
     globalThis.fetch = originalFetch;
-    runStore.setHooks({ subject: null, onRefresh: null, onEnd: null });
     vi.restoreAllMocks();
   });
 
   it("renders fallback phrase when host is unavailable and resolves topic scope via tree", async () => {
+    const qc = createTestQueryClient();
     const attempt: AttemptResult = {
       id: 4,
       submitted_at: "2026-11-24 12:00",
@@ -468,24 +641,25 @@ describe("ResultView", () => {
     };
     const tree: TreeResponse = { title: "Parallel Systems", tree: [makeTopic(7, "Deadlocks", 5)] };
 
-    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
-      if (url === "/api/runs") {
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const pathname = requestPathname(input);
+      if (pathname === "/api/runs") {
         return Promise.resolve(
           jsonResponse({ available: false, reason: "no_host", target: 10, run: null }),
         );
       }
-      if (url === "/api/subjects/PDSS/attempts/4") {
+      if (pathname === "/api/subjects/PDSS/attempts/4") {
         return Promise.resolve(jsonResponse(attempt));
       }
-      if (url === "/api/subjects/PDSS/tree") {
+      if (pathname === "/api/subjects/PDSS/tree") {
         return Promise.resolve(jsonResponse(tree));
       }
       return Promise.resolve(jsonResponse({}));
     }) as unknown as typeof fetch;
 
-    const instance = mount(ResultView, {
+    const instance = mount(QueryHarness, {
       target: container,
-      props: { subject: "PDSS", attemptId: 4 },
+      props: { client: qc, component: ResultView, props: { subject: "PDSS", attemptId: 4 } },
     });
 
     await vi.waitFor(() => {
@@ -495,6 +669,178 @@ describe("ResultView", () => {
     expect(container.textContent).not.toContain("Grade now");
 
     void unmount(instance);
+  });
+
+  it("refreshes awaiting open-answer verdicts in place when subject queries are invalidated", async () => {
+    const qc = createTestQueryClient();
+    let attemptCalls = 0;
+    const makeAttempt = (graded: boolean): AttemptResult => ({
+      id: 4,
+      submitted_at: "2026-11-24 12:00",
+      scope_topic_id: 7,
+      score: graded
+        ? { correct: 1, graded: 1, awaiting: 0 }
+        : { correct: 0, graded: 0, awaiting: 1 },
+      provisional: !graded,
+      answers: [
+        {
+          answer_id: 10,
+          question_id: 101,
+          kind: "open",
+          state: graded ? "correct" : "awaiting",
+          removed: false,
+          stem: "Explain deadlock.",
+          code: null,
+          options: [],
+          text: "Four Coffman conditions.",
+          reference_answer: "Mutual exclusion, hold and wait, no preemption, circular wait.",
+          comment: graded ? "Covers all four Coffman conditions." : null,
+          sources: [],
+        },
+      ],
+      topics: [],
+    });
+    const tree: TreeResponse = { title: "Parallel Systems", tree: [makeTopic(7, "Deadlocks", 5)] };
+
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const pathname = requestPathname(input);
+      if (pathname === "/api/runs") {
+        return Promise.resolve(
+          jsonResponse({ available: false, reason: "no_host", target: 10, run: null }),
+        );
+      }
+      if (pathname === "/api/subjects/PDSS/attempts/4") {
+        attemptCalls += 1;
+        return Promise.resolve(jsonResponse(makeAttempt(attemptCalls > 1)));
+      }
+      if (pathname === "/api/subjects/PDSS/tree") {
+        return Promise.resolve(jsonResponse(tree));
+      }
+      return Promise.resolve(jsonResponse({}));
+    }) as unknown as typeof fetch;
+
+    const instance = mount(QueryHarness, {
+      target: container,
+      props: { client: qc, component: ResultView, props: { subject: "PDSS", attemptId: 4 } },
+    });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("Awaiting review");
+    });
+    expect(container.textContent).toContain("0 / 0 correct");
+    expect(container.textContent).toContain("provisional, 1 awaiting review");
+    expect(attemptCalls).toBe(1);
+
+    await qc.invalidateQueries({ queryKey: queryKeys.subject("PDSS") });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("1 / 1 correct");
+    });
+    expect(attemptCalls).toBe(2);
+    expect(container.textContent).toContain("Correct");
+    expect(container.textContent).toContain("Covers all four Coffman conditions.");
+    expect(container.textContent).not.toContain("Awaiting review");
+
+    void unmount(instance);
+  });
+});
+
+describe("App shell", () => {
+  const originalFetch = globalThis.fetch;
+  let container: HTMLDivElement;
+
+  beforeEach(async () => {
+    sessionStorage.clear();
+    queryClient.clear();
+    vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    await navigate("/");
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(async () => {
+    await navigate("/");
+    queryClient.clear();
+    container.remove();
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("renders QueryClientProvider + sv-router views and derives breadcrumb without double-decoding %", async () => {
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const pathname = requestPathname(input);
+      if (pathname === "/api/runs") {
+        return Promise.resolve(
+          jsonResponse({ available: false, reason: "no_host", target: 10, run: null }),
+        );
+      }
+      if (pathname === "/api/subjects") {
+        return Promise.resolve(
+          jsonResponse([{ subject: "100%", title: "100% Course", has_tree: true, error: null }]),
+        );
+      }
+      if (pathname === "/api/subjects/100%25/tree" || pathname === "/api/subjects/PDSS/tree") {
+        return Promise.resolve(jsonResponse({ title: "Course Title", tree: [] }));
+      }
+      if (
+        pathname === "/api/subjects/100%25/attempts" ||
+        pathname === "/api/subjects/PDSS/attempts"
+      ) {
+        return Promise.resolve(jsonResponse([]));
+      }
+      if (pathname === "/api/subjects/100%25/test") {
+        return Promise.resolve(jsonResponse({ questions: [] }));
+      }
+      if (pathname === "/api/subjects/PDSS/attempts/42") {
+        return Promise.resolve(
+          jsonResponse({
+            id: 42,
+            submitted_at: "2026-11-24 12:00",
+            scope_topic_id: null,
+            score: { correct: 1, graded: 1, awaiting: 0 },
+            provisional: false,
+            answers: [],
+            topics: [],
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse({}));
+    }) as unknown as typeof fetch;
+
+    const instance = mount(App, { target: container });
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("100% Course");
+    });
+    expect(container.querySelector('nav[aria-label="Breadcrumb"]')).toBeNull();
+
+    await navigate("/s/:subject", { params: { subject: "100%" } });
+    await vi.waitFor(() => {
+      const nav = container.querySelector('nav[aria-label="Breadcrumb"]');
+      expect(nav?.textContent?.replace(/\s+/g, " ").trim()).toBe("/ 100%");
+    });
+
+    await navigate("/s/:subject/test", { params: { subject: "100%" }, search: { n: 5 } });
+    await vi.waitFor(() => {
+      const nav = container.querySelector('nav[aria-label="Breadcrumb"]');
+      expect(nav?.textContent?.replace(/\s+/g, " ").trim()).toBe("/ 100% / Test");
+    });
+    const breadcrumbLink = container.querySelector('nav[aria-label="Breadcrumb"] a');
+    expect(breadcrumbLink?.getAttribute("href")).toBe("/s/100%25");
+
+    await navigate("/s/:subject/attempts/:id", { params: { subject: "PDSS", id: "42" } });
+    await vi.waitFor(() => {
+      const nav = container.querySelector('nav[aria-label="Breadcrumb"]');
+      expect(nav?.textContent?.replace(/\s+/g, " ").trim()).toBe("/ PDSS / Result");
+    });
+
+    await navigate("/s/:subject/attempts/:id", { params: { subject: "PDSS", id: "abc" } });
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("Page not found");
+    });
+    expect(container.querySelector('nav[aria-label="Breadcrumb"]')).toBeNull();
+
+    await unmount(instance);
   });
 });
 
