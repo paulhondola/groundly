@@ -26,8 +26,10 @@ function readSystemDark(): boolean {
 }
 
 export function createThemeStore() {
-  let mode = $state<ThemeMode>(readStoredMode());
-  let systemDark = $state<boolean>(readSystemDark());
+  const initialMode = readStoredMode();
+  const initialSystemDark = readSystemDark();
+  let mode = $state<ThemeMode>(initialMode);
+  let systemDark = $state<boolean>(initialSystemDark);
   const resolved = $derived<ResolvedTheme>(
     mode === "system" ? (systemDark ? "dark" : "light") : mode,
   );
@@ -39,12 +41,14 @@ export function createThemeStore() {
     document.documentElement.classList.toggle("dark", next === "dark");
   }
 
-  applyDocumentClass(resolved);
+  applyDocumentClass(
+    initialMode === "system" ? (initialSystemDark ? "dark" : "light") : initialMode,
+  );
 
   let mediaQuery: MediaQueryList | null = null;
   function onMediaChange(event: MediaQueryListEvent): void {
     systemDark = event.matches;
-    applyDocumentClass(resolved);
+    applyDocumentClass(mode === "system" ? (systemDark ? "dark" : "light") : mode);
   }
 
   if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
@@ -61,7 +65,7 @@ export function createThemeStore() {
         /* storage unavailable */
       }
     }
-    applyDocumentClass(resolved);
+    applyDocumentClass(mode === "system" ? (systemDark ? "dark" : "light") : mode);
   }
 
   function destroy(): void {
