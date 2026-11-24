@@ -41,12 +41,14 @@ from groundly.web.schemas import (
     AttemptResultResponse,
     AttemptSummary,
     DrawTestResponse,
+    ErrorResponse,
     RunsInfoResponse,
     RunSnapshot,
     StartRunRequest,
     StopRunRequest,
     StopRunResponse,
     SubjectSummary,
+    SubmitAttemptOpenAPIBody,
     SubmitAttemptRequest,
     SubmitAttemptResponse,
     TreeResponse,
@@ -173,13 +175,56 @@ def _require_page_json(forbidden: str) -> Callable[[Request], Any]:
     return dependency
 
 
+_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    code: {"model": ErrorResponse} for code in (400, 403, 404, 409, 413, 415, 500, 503)
+}
+
+
+def _error_responses(*codes: int) -> dict[int | str, dict[str, Any]]:
+    return {code: _ERROR_RESPONSES[code] for code in codes}
+
+
 def _json_body_schema(model: type[BaseModel]) -> dict[str, Any]:
     return {
         "requestBody": {
             "required": True,
-            "content": {"application/json": {"schema": model.model_json_schema()}},
+            "content": {
+                "application/json": {
+                    "schema": model.model_json_schema(ref_template="#/components/schemas/{model}")
+                }
+            },
         }
     }
+
+
+def _hoist_body_defs(schema: dict[str, Any]) -> None:
+    """Move Pydantic $defs from inline requestBody schemas into components.schemas."""
+    schemas = schema.setdefault("components", {}).setdefault("schemas", {})
+    for path_item in schema.get("paths", {}).values():
+        if not isinstance(path_item, dict):
+            continue
+        for operation in path_item.values():
+            if not isinstance(operation, dict):
+                continue
+            body_schema = (
+                operation.get("requestBody", {})
+                .get("content", {})
+                .get("application/json", {})
+                .get("schema")
+            )
+            if isinstance(body_schema, dict) and "$defs" in body_schema:
+                defs = body_schema.pop("$defs")
+                if isinstance(defs, dict):
+                    schemas.update(defs)
+
+
+class _GroundlyApp(FastAPI):
+    """FastAPI subclass that hoists inline requestBody $defs into components.schemas."""
+
+    def openapi(self) -> dict[str, Any]:
+        schema = super().openapi()
+        _hoist_body_defs(schema)
+        return schema
 
 
 def create_app(mcp_app: ASGIApp | None = None, mcp_url: str | None = None) -> FastAPI:
@@ -200,7 +245,7 @@ def create_app(mcp_app: ASGIApp | None = None, mcp_url: str | None = None) -> Fa
         finally:
             runner.shutdown()  # no `claude` outlives the page
 
-    app = FastAPI(
+    app = _GroundlyApp(
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
@@ -219,27 +264,27 @@ def create_app(mcp_app: ASGIApp | None = None, mcp_url: str | None = None) -> Fa
         detail = str(first.get("msg") or "invalid request parameter")
         return _error("invalid_text", detail, 400)
 
-    @app.get("/")
+    @app.get("/", include_in_schema=False)
     def _root() -> HTMLResponse:
         return _html()
 
     app.mount("/static", StaticFiles(directory=_WEB / "static"), name="static")
 
-    @app.get("/s/{subject}")
+    @app.get("/s/{subject}", include_in_schema=False)
     def _subject_page(subject: str) -> HTMLResponse:
         # An unknown subject still gets the page: its tree request fails and the page shows why.
         known = _open_subject(subject) is not None
         return _html(status_code=200 if known else 404)
 
-    @app.get("/s/{subject}/test")
+    @app.get("/s/{subject}/test", include_in_schema=False)
     def _test_page(subject: str) -> HTMLResponse:
         return _subject_page(subject)
 
-    @app.get("/s/{subject}/attempts/{id:int}")
+    @app.get("/s/{subject}/attempts/{id:int}", include_in_schema=False)
     def _attempt_page(subject: str, id: int) -> HTMLResponse:
         return _subject_page(subject)
 
-    @app.get("/s/{subject}/materials/{id:int}")
+    @app.get("/s/{subject}/materials/{id:int}", include_in_schema=False)
     def _material(subject: str, id: int) -> Response:
         opened = _open_subject(subject)
         if opened is None:
@@ -264,6 +309,7 @@ def create_app(mcp_app: ASGIApp | None = None, mcp_url: str | None = None) -> Fa
         "/api/subjects",
         response_model=list[SubjectSummary],
         response_model_exclude_none=True,
+        operation_id="listSubjects",
     )
     def _subjects() -> list[dict[str, Any]]:
         out = []
@@ -283,7 +329,12 @@ def create_app(mcp_app: ASGIApp | None = None, mcp_url: str | None = None) -> Fa
             out.append(entry)
         return out
 
-    @app.get("/api/subjects/{subject}/tree", response_model=TreeResponse)
+    @app.get(
+        "/api/subjects/{subject}/tree",
+        response_model=TreeResponse,
+        responses=_error_responses(404, 500),
+        operation_id="getSubjectTree",
+    )
     def _tree(subject: str) -> Any:
         opened = _open_subject(subject)
         if opened is None:
@@ -320,7 +371,12 @@ def create_app(mcp_app: ASGIApp | None = None, mcp_url: str | None = None) -> Fa
         flag(result["tree"])
         return result
 
-    @app.get("/api/subjects/{subject}/test", response_model=DrawTestResponse)
+    @app.get(
+        "/api/subjects/{subject}/test",
+        response_model=DrawTestResponse,
+        responses=_error_responses(400, 404, 500, 503),
+        operation_id="drawTest",
+    )
     def _draw(subject: str, topic: int | None = None, n: int = 10) -> Any:
         return _quiz(
             subject,
@@ -331,7 +387,9 @@ def create_app(mcp_app: ASGIApp | None = None, mcp_url: str | None = None) -> Fa
         "/api/subjects/{subject}/attempts",
         status_code=201,
         response_model=SubmitAttemptResponse,
-        openapi_extra=_json_body_schema(SubmitAttemptRequest),
+        responses=_error_responses(400, 403, 404, 413, 415, 500, 503),
+        openapi_extra=_json_body_schema(SubmitAttemptOpenAPIBody),
+        operation_id="submitAttempt",
     )
     async def _submit(
         subject: str,
@@ -350,11 +408,21 @@ def create_app(mcp_app: ASGIApp | None = None, mcp_url: str | None = None) -> Fa
 
         return await run_in_threadpool(_quiz, subject, submit)
 
-    @app.get("/api/subjects/{subject}/attempts", response_model=list[AttemptSummary])
+    @app.get(
+        "/api/subjects/{subject}/attempts",
+        response_model=list[AttemptSummary],
+        responses=_error_responses(400, 404, 500, 503),
+        operation_id="listAttempts",
+    )
     def _history(subject: str) -> Any:
         return _quiz(subject, quiz.attempt_history)
 
-    @app.get("/api/subjects/{subject}/attempts/{id:int}", response_model=AttemptResultResponse)
+    @app.get(
+        "/api/subjects/{subject}/attempts/{id:int}",
+        response_model=AttemptResultResponse,
+        responses=_error_responses(400, 404, 500, 503),
+        operation_id="getAttemptResult",
+    )
     def _result(subject: str, id: int) -> Any:
         opened = _open_subject(subject)
         if opened is None:
@@ -371,7 +439,7 @@ def create_app(mcp_app: ASGIApp | None = None, mcp_url: str | None = None) -> Fa
 
         return _quiz(subject, read, opened)
 
-    @app.get("/api/runs", response_model=RunsInfoResponse)
+    @app.get("/api/runs", response_model=RunsInfoResponse, operation_id="getRuns")
     def _runs(request: Request) -> dict[str, Any]:
         _, reason = runs.availability()
         return {
@@ -381,7 +449,7 @@ def create_app(mcp_app: ASGIApp | None = None, mcp_url: str | None = None) -> Fa
             "run": request.app.state.runner.view(),
         }
 
-    @app.get("/api/runs/stream")
+    @app.get("/api/runs/stream", operation_id="streamRuns")
     async def _stream_runs(request: Request) -> StreamingResponse:
         active_runner: Runner = request.app.state.runner
         loop = asyncio.get_running_loop()
@@ -423,7 +491,9 @@ def create_app(mcp_app: ASGIApp | None = None, mcp_url: str | None = None) -> Fa
         "/api/subjects/{subject}/runs",
         status_code=202,
         response_model=RunSnapshot,
+        responses=_error_responses(400, 403, 404, 409, 413, 415, 500, 503),
         openapi_extra=_json_body_schema(StartRunRequest),
+        operation_id="startRun",
     )
     async def _start_run(
         subject: str,
@@ -465,7 +535,9 @@ def create_app(mcp_app: ASGIApp | None = None, mcp_url: str | None = None) -> Fa
     @app.post(
         "/api/runs/stop",
         response_model=StopRunResponse,
+        responses=_error_responses(400, 403, 413, 415),
         openapi_extra=_json_body_schema(StopRunRequest),
+        operation_id="stopRun",
     )
     async def _stop_run(
         request: Request,

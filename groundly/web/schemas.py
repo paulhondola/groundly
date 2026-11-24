@@ -19,6 +19,13 @@ def _check_sqlite_id(value: int) -> int:
 SqliteId = Annotated[int, AfterValidator(_check_sqlite_id)]
 
 
+class ErrorResponse(BaseModel):
+    """Structured JSON error payload returned by Groundly's local web API."""
+
+    error: str
+    detail: str | None = None
+
+
 class SubjectSummary(BaseModel):
     """One subject entry returned by GET /api/subjects."""
 
@@ -109,6 +116,28 @@ class SubmitAttemptRequest(BaseModel):
         if not _TOKEN.fullmatch(value):
             raise ValueError("token must match [A-Za-z0-9-]{8,64}")
         return value
+
+
+class SubmittedChoiceAnswer(BaseModel):
+    """OpenAPI schema for one submitted single/multiple-choice answer."""
+
+    question_id: SqliteId
+    selected: list[SqliteId]
+
+
+class SubmittedOpenAnswer(BaseModel):
+    """OpenAPI schema for one submitted open-ended text answer."""
+
+    question_id: SqliteId
+    text: str
+
+
+class SubmitAttemptOpenAPIBody(BaseModel):
+    """OpenAPI-only request body schema for POST /api/subjects/{subject}/attempts."""
+
+    token: str
+    topic_id: SqliteId | None = None
+    answers: list[SubmittedChoiceAnswer | SubmittedOpenAnswer]
 
 
 class SubmitAttemptResponse(BaseModel):
