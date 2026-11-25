@@ -73,9 +73,9 @@ def _model_step(fn):
 
 
 def _first_frame(path: Path) -> Path:
-    """Frame 0 of a standalone image, after the pixel cap. A multi-frame raster would become
-    N docling pages merged into chunks cited to page 1, so only the first frame is indexed;
-    a multi-page scan belongs in a PDF."""
+    """Frame 0 of a standalone image, after the pixel cap. Only the first frame is indexed,
+    so a crafted many-frame image cannot multiply the work; a multi-page scan belongs in a
+    PDF."""
     from PIL import Image, ImageSequence
 
     img = Image.open(path)  # lazy: reads header (size) without decoding pixels
@@ -175,7 +175,8 @@ def chunk_document(doc: "DoclingDocument", page: int | None = None) -> list[dict
     if not chunks:
         # HybridChunker drops a doc whose only content is headings (a title-only slide), though
         # OCR read its text: keep that as one chunk rather than exit with a false "found nothing".
-        salvaged = [t for t in doc.texts if t.text and t.text.strip()]
+        # body text only: a page footer or number is not what the page says
+        salvaged = _body_texts(doc)
         if salvaged:
             text = "\n".join(t.text.strip() for t in salvaged)
             chunk_page = next((t.prov[0].page_no for t in salvaged if t.prov), None)
@@ -251,6 +252,14 @@ def _no_progress(n: int) -> None:
     """The default page callback: nothing listens."""
 
 
+def _body_texts(doc: "DoclingDocument") -> list:
+    """The document's non-empty text items in the body layer (no headers, footers or
+    page numbers)."""
+    from docling_core.types.doc import ContentLayer
+
+    return [t for t in doc.texts if t.content_layer == ContentLayer.BODY and t.text.strip()]
+
+
 def last_heading(doc: "DoclingDocument") -> str | None:
     """Text of the document's last section header or title, the heading a following
     untitled page carries."""
@@ -261,11 +270,12 @@ def last_heading(doc: "DoclingDocument") -> str | None:
 
 
 def _carry_heading(doc: "DoclingDocument", heading: str) -> None:
-    """Puts `heading` first on a page that has text but does not open with a heading of
-    its own, so the chunker treats it as the page's heading and embeds it."""
+    """Puts `heading` first on a page that has body text but does not open with a heading
+    of its own, so the chunker treats it as the page's heading and embeds it. A page with
+    no body text gets nothing: the heading would become a chunk cited to that page alone."""
     from docling_core.types.doc import DocItemLabel
 
-    if not doc.texts or not doc.body.children:
+    if not _body_texts(doc) or not doc.body.children:
         return
     first = doc.body.children[0].resolve(doc)
     if getattr(first, "label", None) in (DocItemLabel.SECTION_HEADER, DocItemLabel.TITLE):

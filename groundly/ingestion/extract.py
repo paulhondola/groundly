@@ -1,8 +1,8 @@
 """Parent side of extraction: drive one warm worker per indexing run and map its replies
 to specific causes.
 
-Subprocess controls: argv exec (no shell), temp working directory, per-file wall-clock
-timeout, output size cap. A worker that crashes or times out is replaced before the next
+Subprocess controls: argv exec (no shell), temp working directory, a wall-clock timeout
+that restarts on every finished page, output size cap. A worker that crashes or times out is replaced before the next
 file. Worker stderr goes to a file on disk, never an in-memory buffer, and only the tail
 written during the current file is read."""
 

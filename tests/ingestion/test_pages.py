@@ -10,6 +10,7 @@ import pytest
 from docling.datamodel.base_models import InputFormat
 from docling_core.types.doc import (
     BoundingBox,
+    ContentLayer,
     DocItemLabel,
     DoclingDocument,
     ProvenanceItem,
@@ -186,3 +187,18 @@ def test_carried_heading_is_embedded_like_contextualize():
     page2 = [c for c in extract_worker.chunk_pages(pages)["chunks"] if c["page"] == 2]
     assert page2[0]["heading_path"] == "Deadlock"
     assert page2[0]["text"].startswith("Deadlock\n")
+
+
+@pytest.mark.slow
+def test_a_page_with_only_a_picture_and_a_footer_gets_no_chunk():
+    """No carried heading and no furniture may become a chunk cited to a page whose body
+    holds no text: that chunk's citation would point at content the page does not have."""
+    page2 = _docling_doc(2, text=None)
+    prov = ProvenanceItem(page_no=2, bbox=BoundingBox(l=0, t=540, r=960, b=0), charspan=(0, 0))
+    page2.add_picture(prov=prov)
+    page2.add_text(DocItemLabel.PAGE_FOOTER, "2", prov=prov, content_layer=ContentLayer.FURNITURE)
+    pages = [
+        (1, _docling_doc(1, text="Mutual exclusion is required.", header="Deadlock")),
+        (2, page2),
+    ]
+    assert [c["page"] for c in extract_worker.chunk_pages(pages)["chunks"]] == [1]
