@@ -77,7 +77,7 @@ def discover_tailscale() -> TailscaleInfo | None:
         return None
     try:
         proc = subprocess.run(
-            [binary, "status", "--json"],
+            [binary, "status", "--json", "--peers=false"],
             capture_output=True,
             text=True,
             stdin=subprocess.DEVNULL,

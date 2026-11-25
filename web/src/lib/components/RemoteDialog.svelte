@@ -23,6 +23,7 @@
     queryKey: queryKeys.remote(),
     queryFn: async ({ signal }) => unwrap(await apiClient.GET("/api/remote", { signal })),
     enabled: open,
+    staleTime: 0,
     refetchInterval: open ? 3000 : false,
   }));
 

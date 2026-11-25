@@ -1,4 +1,6 @@
+import asyncio
 import hashlib
+import json
 import os
 import sqlite3
 import stat
@@ -278,7 +280,6 @@ def test_socket_perimeter_pairing_multi_device_and_revocation(monkeypatch, tmp_p
         remote_lb = loopback.get("/api/remote")
         assert remote_lb.status_code == 200
         assert remote_lb.json()["active"] is True
-        assert remote_lb.json()["host"] == "macbook.tail1234.ts.net"
         assert remote_lb.json()["pairing_url"] == runtime.pairing.pairing_url
         assert remote_lb.json()["qr_matrix"]
         assert remote_lb.json()["devices"] == []
@@ -560,7 +561,6 @@ def test_loopback_without_runtime_does_not_create_db_and_reads_existing_db(monke
     assert remote.status_code == 200
     assert remote.json() == {
         "active": False,
-        "host": None,
         "pairing_url": None,
         "qr_matrix": None,
         "devices": [],
@@ -575,10 +575,10 @@ def test_loopback_without_runtime_does_not_create_db_and_reads_existing_db(monke
     assert client.get("/api/auth").json()["paired_devices"] == 2
     info = client.get("/api/remote").json()
     assert info["active"] is False
-    assert info["host"] is None
     assert info["pairing_url"] is None
     assert info["qr_matrix"] is None
     assert len(info["devices"]) == 2
+    assert set(info["devices"][0]) == {"id", "label", "peer_ip", "last_seen_at"}
 
     origin = {"Origin": "http://127.0.0.1:8765"}
     rev_all = client.post("/api/remote/revoke-all", json={}, headers=origin)
@@ -626,3 +626,204 @@ async def test_perimeter_rejects_non_ascii_host_port_with_400(monkeypatch, tmp_p
         await app(scope, receive, send)
         assert sent[0]["status"] == 400
         assert sent[1]["body"] == b"Invalid host header"
+
+
+async def test_sse_stream_closes_immediately_on_device_revoke_and_revoke_all(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+
+    ts_info = TailscaleInfo(ipv4="100.101.102.103", dns_name="macbook.tail1234.ts.net")
+    runtime = RemoteRuntime(ts_info, 8765)
+    phone_dev = runtime.store.create_session("phone-tok", _IPHONE_UA, "100.64.0.10")
+    tablet_dev = runtime.store.create_session("tablet-tok", _IPAD_UA, "100.64.0.11")
+    app = create_app(remote=runtime)
+    app.state.runner._run = {
+        "id": 1,
+        "kind": "write",
+        "subject": "PDSS",
+        "topic_id": 7,
+        "status": "running",
+        "phase": "thinking",
+        "active_tool": None,
+        "thought": "",
+        "thought_channel": None,
+        "steps": [],
+        "summary": None,
+        "error": None,
+        "started_at": "2026-11-25T08:00:00+00:00",
+    }
+
+    async def open_stream(token: str, client_ip: str):
+        disconnect = asyncio.Event()
+        chunks: list[bytes] = []
+        snapshot_seen = asyncio.Event()
+        step_seen = asyncio.Event()
+
+        async def receive():
+            await disconnect.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message: dict):
+            if message["type"] == "http.response.body":
+                body = message.get("body", b"")
+                if body:
+                    chunks.append(body)
+                    if b"event: snapshot" in body:
+                        snapshot_seen.set()
+                    if b"event: step" in body:
+                        step_seen.set()
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/api/runs/stream",
+            "raw_path": b"/api/runs/stream",
+            "query_string": b"",
+            "headers": [
+                (b"host", b"macbook.tail1234.ts.net:8765"),
+                (b"cookie", f"{SESSION_COOKIE}={token}".encode()),
+            ],
+            "server": (ts_info.ipv4, 8765),
+            "client": (client_ip, 51234),
+        }
+        task = asyncio.create_task(app(scope, receive, send))
+        await asyncio.wait_for(snapshot_seen.wait(), timeout=2.0)
+        return task, chunks, step_seen, disconnect
+
+    async def loopback_post(path: str) -> dict:
+        sent: list[dict] = []
+        payload = b"{}"
+
+        async def receive():
+            return {"type": "http.request", "body": payload, "more_body": False}
+
+        async def send(message: dict):
+            sent.append(message)
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": b"",
+            "headers": [
+                (b"host", b"127.0.0.1:8765"),
+                (b"origin", b"http://127.0.0.1:8765"),
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(payload)).encode()),
+            ],
+            "server": ("127.0.0.1", 8765),
+            "client": ("127.0.0.1", 51234),
+        }
+        await app(scope, receive, send)
+        assert sent[0]["status"] == 200
+        return json.loads(sent[1]["body"])
+
+    phone_task, phone_chunks, phone_step_seen, phone_disc = await open_stream(
+        "phone-tok", "100.64.0.10"
+    )
+    tablet_task, _, _, tablet_disc = await open_stream("tablet-tok", "100.64.0.11")
+    try:
+        assert await loopback_post(f"/api/remote/devices/{tablet_dev['id']}/revoke") == {
+            "revoked": True
+        }
+        await asyncio.wait_for(tablet_task, timeout=2.0)
+        assert not phone_task.done()
+
+        app.state.runner._publish("step", {"id": 1, "step": "Reading the course", "refresh": False})
+        await asyncio.wait_for(phone_step_seen.wait(), timeout=2.0)
+        assert any(b"Reading the course" in c for c in phone_chunks)
+        assert phone_dev["id"] != tablet_dev["id"]
+
+        assert await loopback_post("/api/remote/revoke-all") == {"revoked": 1}
+        await asyncio.wait_for(phone_task, timeout=2.0)
+        assert runtime._stream_events == set()
+    finally:
+        phone_disc.set()
+        tablet_disc.set()
+        for task in (phone_task, tablet_task):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(phone_task, tablet_task, return_exceptions=True)
+
+
+def test_corrupt_or_newer_remote_db_never_locks_out_loopback_and_fails_closed(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    with sqlite3.connect(remote_db_path()) as conn:
+        conn.execute("PRAGMA user_version = 2")
+
+    ts_info = TailscaleInfo(ipv4="100.101.102.103", dns_name="macbook.tail1234.ts.net")
+    runtime = RemoteRuntime(ts_info, 8765)
+    app = create_app(remote=runtime)
+    loopback_headers = {"Origin": "http://127.0.0.1:8765"}
+    ts_origin = {
+        "Host": "macbook.tail1234.ts.net:8765",
+        "Origin": "http://macbook.tail1234.ts.net:8765",
+    }
+
+    with TestClient(
+        _socket_wrapper(app, "127.0.0.1", "127.0.0.1"), base_url="http://127.0.0.1:8765"
+    ) as loopback:
+        auth = loopback.get("/api/auth")
+        assert auth.status_code == 200
+        assert auth.json() == {
+            "access": "loopback",
+            "paired": True,
+            "tailscale_enabled": True,
+            "paired_devices": 0,
+        }
+
+        remote_res = loopback.get("/api/remote")
+        assert remote_res.status_code == 500
+        assert remote_res.json()["error"] == "store_error"
+
+        rev_all = loopback.post("/api/remote/revoke-all", json={}, headers=loopback_headers)
+        assert rev_all.status_code == 500
+        assert rev_all.json()["error"] == "store_error"
+
+    with TestClient(
+        _socket_wrapper(app, ts_info.ipv4, "100.64.0.10"),
+        base_url="http://macbook.tail1234.ts.net:8765",
+    ) as phone:
+        phone.cookies.set(SESSION_COOKIE, "stale-cookie")
+        assert phone.get("/static/page.css").status_code == 200
+        ts_auth = phone.get("/api/auth")
+        assert ts_auth.status_code == 200
+        assert ts_auth.json()["paired"] is False
+        assert phone.get("/api/subjects").status_code == 401
+
+        def fail_busy(*args, **kwargs):
+            raise sqlite3.OperationalError("database is locked")
+
+        monkeypatch.setattr(runtime.store, "create_session", fail_busy)
+        token = runtime.pairing.pairing_url.split("#", 1)[1]
+        pair_res = phone.post("/api/pair", json={"token": token}, headers=ts_origin)
+        assert pair_res.status_code == 503
+        assert pair_res.json()["error"] == "busy"
+
+
+def test_perimeter_restricts_head_to_static_only(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    ts_info = TailscaleInfo(ipv4="100.101.102.103", dns_name="macbook.tail1234.ts.net")
+    app = create_app(remote=RemoteRuntime(ts_info, 8765))
+
+    with TestClient(
+        _socket_wrapper(app, ts_info.ipv4, "100.64.0.10"),
+        base_url="http://macbook.tail1234.ts.net:8765",
+    ) as phone:
+        assert phone.head("/static/page.css").status_code == 200
+        for path in ("/", "/pair", "/s/PDSS", "/api/auth"):
+            assert phone.head(path).status_code == 401

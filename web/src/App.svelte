@@ -8,6 +8,7 @@
   import Brand from "./lib/components/Brand.svelte";
   import RemoteDialog from "./lib/components/RemoteDialog.svelte";
   import RunStrip from "./lib/components/RunStrip.svelte";
+  import Card from "./lib/components/ui/Card.svelte";
   import Select from "./lib/components/ui/Select.svelte";
   import { isActive, parsePositiveInt, route } from "./lib/router";
   import { type ThemeMode, theme } from "./lib/theme.svelte";
@@ -89,7 +90,16 @@
       {#if !authStore.ready}
         <p class="text-sm text-muted-foreground">Connecting…</p>
       {:else if !authStore.paired}
-        <PairView />
+        {#if authStore.access === "tailscale"}
+          <PairView />
+        {:else}
+          <Card
+            class="border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive"
+            role="alert"
+          >
+            {authStore.error ?? "Could not connect to Groundly."}
+          </Card>
+        {/if}
       {:else}
         <RunStrip />
         <Router />

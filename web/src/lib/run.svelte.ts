@@ -276,12 +276,9 @@ export function createRunStore(qc: QueryClient = queryClient) {
     const incoming = info.run;
     let invalidatedAllSubjects = false;
     if (incoming && incoming.id === endedRunId) {
-      if (options?.fromWake) {
-        void qc.invalidateQueries({ queryKey: queryKeys.allSubjects() });
-      }
-      return info;
-    }
-    if (
+      // Already settled locally; keep current view state and let the wake check below refresh subjects.
+    } else if (
+      !options?.fromWake &&
       incoming &&
       incoming.status === "running" &&
       source !== null &&
@@ -289,15 +286,11 @@ export function createRunStore(qc: QueryClient = queryClient) {
       run?.id === incoming.id &&
       run.status === "running"
     ) {
-      if (options?.fromWake) {
-        void qc.invalidateQueries({ queryKey: queryKeys.allSubjects() });
-      }
       return info;
-    }
-    if (incoming && incoming.status === "running") {
+    } else if (incoming && incoming.status === "running") {
       run = incoming;
       dismissed = false;
-      if (watched !== incoming.id || !source) {
+      if (watched !== incoming.id || !source || options?.fromWake) {
         watched = incoming.id;
         endedRunId = null;
         streamErrors = 0;
@@ -387,8 +380,8 @@ export function createRunStore(qc: QueryClient = queryClient) {
   }
 
   function onWake(): void {
-    // Check authStore.paired lazily to avoid top-level circular ESM access with auth.svelte.ts.
-    if (!authStore.paired) {
+    // Check authStore lazily to avoid top-level circular ESM access with auth.svelte.ts.
+    if (!authStore.ready || !authStore.paired) {
       return;
     }
     void attach({ fromWake: true });

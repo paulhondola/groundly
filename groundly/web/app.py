@@ -255,6 +255,16 @@ def _active_remote_store(remote: RemoteRuntime | None) -> RemoteStore | None:
     return RemoteStore() if remote_db_path().exists() else None
 
 
+def _remote_db_error(exc: Exception) -> JSONResponse:
+    if isinstance(exc, sqlite3.OperationalError) and ("locked" in str(exc) or "busy" in str(exc)):
+        return _error(
+            "busy",
+            "remote session store is busy — try again in a moment",
+            503,
+        )
+    return _error("store_error", str(exc), 500)
+
+
 def create_app(
     mcp_app: ASGIApp | None = None,
     mcp_url: str | None = None,
@@ -496,21 +506,76 @@ def create_app(
     async def _stream_runs(request: Request) -> StreamingResponse:
         active_runner: Runner = request.app.state.runner
         loop = asyncio.get_running_loop()
+        is_ts_stream = (
+            remote is not None and getattr(request.state, "access", "loopback") == "tailscale"
+        )
+        session_token = request.cookies.get(SESSION_COOKIE) if is_ts_stream else None
+
+        async def _session_revoked() -> bool:
+            if not is_ts_stream or remote is None:
+                return False
+            if not session_token:
+                return True
+            try:
+                return not await run_in_threadpool(remote.store.authenticate, session_token)
+            except (sqlite3.DatabaseError, RuntimeError):
+                return True
 
         async def events():
-            snapshot, queue = active_runner.subscribe(loop)
+            revoke_event = asyncio.Event() if is_ts_stream and remote is not None else None
+            queue = None
             try:
+                if revoke_event is not None and remote is not None:
+                    remote.register_stream(loop, revoke_event)
+                snapshot, queue = active_runner.subscribe(loop)
+                if await _session_revoked():
+                    return
                 yield f"event: snapshot\ndata: {json.dumps(snapshot)}\n\n"
                 if queue is None or snapshot is None or snapshot["status"] != "running":
                     return
                 while True:
-                    try:
-                        item = await asyncio.wait_for(queue.get(), timeout=runs.SSE_KEEPALIVE_S)
-                    except TimeoutError:
-                        if await request.is_disconnected():
-                            break
-                        yield ": keep-alive\n\n"
-                        continue
+                    if revoke_event is None:
+                        try:
+                            item = await asyncio.wait_for(queue.get(), timeout=runs.SSE_KEEPALIVE_S)
+                        except TimeoutError:
+                            if await request.is_disconnected():
+                                break
+                            yield ": keep-alive\n\n"
+                            continue
+                    else:
+                        get_task = asyncio.create_task(queue.get())
+                        revoke_task = asyncio.create_task(revoke_event.wait())
+                        wait_tasks: tuple[asyncio.Task[Any], asyncio.Task[Any]] = (
+                            get_task,
+                            revoke_task,
+                        )
+                        try:
+                            done, pending = await asyncio.wait(
+                                wait_tasks,
+                                timeout=runs.SSE_KEEPALIVE_S,
+                                return_when=asyncio.FIRST_COMPLETED,
+                            )
+                        except BaseException:
+                            for task in wait_tasks:
+                                if not task.done():
+                                    task.cancel()
+                            await asyncio.gather(*wait_tasks, return_exceptions=True)
+                            raise
+                        for task in pending:
+                            task.cancel()
+                        await asyncio.gather(*pending, return_exceptions=True)
+                        if revoke_task in done:
+                            revoke_event.clear()
+                            if await _session_revoked():
+                                break
+                            if get_task not in done:
+                                continue
+                        elif get_task not in done:
+                            if await request.is_disconnected() or await _session_revoked():
+                                break
+                            yield ": keep-alive\n\n"
+                            continue
+                        item = get_task.result()
                     if item is None:
                         break
                     event_name, payload = item
@@ -523,6 +588,8 @@ def create_app(
             finally:
                 if queue is not None:
                     active_runner.unsubscribe(loop, queue)
+                if revoke_event is not None and remote is not None:
+                    remote.unregister_stream(loop, revoke_event)
 
         return StreamingResponse(
             events(),
@@ -602,7 +669,10 @@ def create_app(
         if access == "loopback":
             store = _active_remote_store(remote)
             if store is not None:
-                paired_devices = store.count_devices()
+                try:
+                    paired_devices = store.count_devices()
+                except (sqlite3.DatabaseError, RuntimeError):
+                    paired_devices = 0
         return {
             "access": access,
             "paired": paired,
@@ -613,7 +683,7 @@ def create_app(
     @app.post(
         "/api/pair",
         response_model=PairDeviceResponse,
-        responses=_error_responses(400, 401, 403, 404, 413, 415, 429),
+        responses=_error_responses(400, 401, 403, 404, 413, 415, 429, 500, 503),
         openapi_extra=_json_body_schema(PairDeviceRequest),
         operation_id="pairDevice",
     )
@@ -633,13 +703,16 @@ def create_app(
         raw_session = secrets.token_urlsafe(32)
         user_agent = request.headers.get("user-agent", "")
         replace_token = request.cookies.get(SESSION_COOKIE)
-        device = await run_in_threadpool(
-            remote.store.create_session,
-            raw_session,
-            user_agent,
-            peer_ip,
-            replace_raw_token=replace_token,
-        )
+        try:
+            device = await run_in_threadpool(
+                remote.store.create_session,
+                raw_session,
+                user_agent,
+                peer_ip,
+                replace_raw_token=replace_token,
+            )
+        except (sqlite3.DatabaseError, RuntimeError) as exc:
+            return _remote_db_error(exc)
         if remote.on_paired is not None:
             remote.on_paired(device["label"], peer_ip, next_url)
         response = JSONResponse({"paired": True}, status_code=200)
@@ -654,14 +727,21 @@ def create_app(
         )
         return response
 
-    @app.get("/api/remote", response_model=RemoteInfoResponse, operation_id="getRemoteInfo")
-    def _remote_info() -> dict[str, Any]:
+    @app.get(
+        "/api/remote",
+        response_model=RemoteInfoResponse,
+        responses=_error_responses(500, 503),
+        operation_id="getRemoteInfo",
+    )
+    def _remote_info() -> Any:
         store = _active_remote_store(remote)
-        devices = store.list_devices() if store is not None else []
+        try:
+            devices = store.list_devices() if store is not None else []
+        except (sqlite3.DatabaseError, RuntimeError) as exc:
+            return _remote_db_error(exc)
         if remote is None:
             return {
                 "active": False,
-                "host": None,
                 "pairing_url": None,
                 "qr_matrix": None,
                 "devices": devices,
@@ -669,7 +749,6 @@ def create_app(
         pairing_url = remote.pairing.pairing_url
         return {
             "active": True,
-            "host": remote.ts_info.preferred_host,
             "pairing_url": pairing_url,
             "qr_matrix": qr_matrix(pairing_url),
             "devices": devices,
@@ -678,7 +757,7 @@ def create_app(
     @app.post(
         "/api/remote/devices/{id:int}/revoke",
         response_model=RevokeDeviceResponse,
-        responses=_error_responses(400, 403, 404, 413, 415),
+        responses=_error_responses(400, 403, 404, 413, 415, 500, 503),
         openapi_extra=_json_body_schema(StopRunRequest),
         operation_id="revokeRemoteDevice",
     )
@@ -695,16 +774,22 @@ def create_app(
         if not quiz.is_id(id):
             return _error("unknown_device", "no such device", 404)
 
-        def revoke() -> bool:
-            store = _active_remote_store(remote)
-            return store.revoke_device(id) if store is not None else False
+        def revoke() -> Any:
+            try:
+                store = _active_remote_store(remote)
+                revoked = store.revoke_device(id) if store is not None else False
+            except (sqlite3.DatabaseError, RuntimeError) as exc:
+                return _remote_db_error(exc)
+            if revoked and remote is not None:
+                remote.notify_revoked()
+            return {"revoked": revoked}
 
-        return {"revoked": await run_in_threadpool(revoke)}
+        return await run_in_threadpool(revoke)
 
     @app.post(
         "/api/remote/revoke-all",
         response_model=RevokeAllResponse,
-        responses=_error_responses(400, 403, 413, 415),
+        responses=_error_responses(400, 403, 413, 415, 500, 503),
         openapi_extra=_json_body_schema(StopRunRequest),
         operation_id="revokeAllRemoteDevices",
     )
@@ -718,14 +803,19 @@ def create_app(
         except ValidationError:
             return _error("invalid_body", "expected {}")
 
-        def revoke_all() -> int:
-            store = _active_remote_store(remote)
-            count = store.revoke_all() if store is not None else 0
+        def revoke_all() -> Any:
+            try:
+                store = _active_remote_store(remote)
+                count = store.revoke_all() if store is not None else 0
+            except (sqlite3.DatabaseError, RuntimeError) as exc:
+                return _remote_db_error(exc)
             if remote is not None:
                 remote.pairing.rotate()
-            return count
+                if count > 0:
+                    remote.notify_revoked()
+            return {"revoked": count}
 
-        return {"revoked": await run_in_threadpool(revoke_all)}
+        return await run_in_threadpool(revoke_all)
 
     if mcp_app is not None:
         # A Route, not Mount(""): a catch-all mount would answer wrong-method page requests

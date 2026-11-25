@@ -300,7 +300,6 @@ class PairedDevice(BaseModel):
     id: int
     label: str
     peer_ip: str
-    created_at: str
     last_seen_at: int
 
 
@@ -308,7 +307,6 @@ class RemoteInfoResponse(BaseModel):
     """Loopback-only Tailscale runtime state, QR matrix, and paired devices."""
 
     active: bool
-    host: str | None
     pairing_url: str | None
     qr_matrix: list[list[bool]] | None
     devices: list[PairedDevice]

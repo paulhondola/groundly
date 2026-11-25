@@ -85,7 +85,6 @@ describe("RemoteDialog", () => {
         id: 7,
         label: "iPhone · Safari",
         peer_ip: "100.64.0.10",
-        created_at: "2026-11-25T08:00:00+00:00",
         last_seen_at: 1764057600,
       },
     ];
@@ -103,7 +102,6 @@ describe("RemoteDialog", () => {
           return Promise.resolve(
             jsonResponse({
               active: true,
-              host: "macbook.tail1234.ts.net",
               pairing_url: pairingUrl,
               qr_matrix: [
                 [true, false],
@@ -173,7 +171,6 @@ describe("RemoteDialog", () => {
         id: 8,
         label: "iPad · Safari",
         peer_ip: "100.64.0.11",
-        created_at: "2026-11-25T08:05:00+00:00",
         last_seen_at: 1764057900,
       },
     ];
@@ -215,7 +212,6 @@ describe("RemoteDialog", () => {
         return Promise.resolve(
           jsonResponse({
             active: false,
-            host: null,
             pairing_url: null,
             qr_matrix: null,
             devices: [
@@ -223,7 +219,6 @@ describe("RemoteDialog", () => {
                 id: 3,
                 label: "Android · Chrome",
                 peer_ip: "100.64.0.22",
-                created_at: "2026-11-25T07:00:00+00:00",
                 last_seen_at: 1764054000,
               },
             ],
@@ -274,14 +269,12 @@ describe("RemoteDialog", () => {
         id: 12,
         label: "iPhone · Safari",
         peer_ip: "100.64.0.12",
-        created_at: "2026-11-25T08:00:00+00:00",
         last_seen_at: 1764057600,
       },
       {
         id: 13,
         label: "iPad · Safari",
         peer_ip: "100.64.0.13",
-        created_at: "2026-11-25T08:01:00+00:00",
         last_seen_at: 1764057660,
       },
     ];
@@ -297,7 +290,6 @@ describe("RemoteDialog", () => {
           return Promise.resolve(
             jsonResponse({
               active: true,
-              host: "macbook.tail1234.ts.net",
               pairing_url: "macbook.tail1234.ts.net:8765/pair#tok1",
               qr_matrix: [[true]],
               devices,
@@ -390,6 +382,67 @@ describe("RemoteDialog", () => {
     await vi.waitFor(() => {
       expect(container.textContent).not.toContain("iPhone · Safari");
     });
+
+    void unmount(instance);
+  });
+
+  it("refetches /api/remote immediately when re-opened within QueryClient staleTime", async () => {
+    const qc = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, staleTime: 10_000 },
+      },
+    });
+
+    let pairingUrl = "http://macbook.tail1234.ts.net:8765/pair#tok1";
+    let remoteCalls = 0;
+
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      if (requestPathname(input) === "/api/remote") {
+        remoteCalls += 1;
+        return Promise.resolve(
+          jsonResponse({
+            active: true,
+            pairing_url: pairingUrl,
+            qr_matrix: [[true]],
+            devices: [],
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse({}));
+    }) as unknown as typeof fetch;
+
+    const instance = mount(QueryHarness, {
+      target: container,
+      props: {
+        client: qc,
+        component: RemoteDialog,
+        props: { pairedCount: 0 },
+      },
+    });
+    flushSync();
+
+    const trigger = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Devices"),
+    );
+    trigger?.click();
+    flushSync();
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("tok1");
+    });
+    expect(remoteCalls).toBe(1);
+
+    // Close and rotate token on server, then re-open immediately within 10 s staleTime.
+    trigger?.click();
+    flushSync();
+    pairingUrl = "http://macbook.tail1234.ts.net:8765/pair#tok2";
+    trigger?.click();
+    flushSync();
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("tok2");
+    });
+    expect(remoteCalls).toBe(2);
 
     void unmount(instance);
   });

@@ -28,17 +28,15 @@ export function createAuthStore(qc: QueryClient = queryClient, onUnpaired?: () =
   let paired = $state(true);
   let tailscaleEnabled = $state(false);
   let pairedDevices = $state(0);
-  let pairing = $state(false);
   let error = $state<string | null>(null);
   let inFlight: Promise<void> | null = null;
 
-  function resetForTests(): void {
-    ready = false;
+  function resetForTests(options?: { ready?: boolean }): void {
+    ready = options?.ready ?? false;
     access = "loopback";
     paired = true;
     tailscaleEnabled = false;
     pairedDevices = 0;
-    pairing = false;
     error = null;
     inFlight = null;
   }
@@ -47,7 +45,6 @@ export function createAuthStore(qc: QueryClient = queryClient, onUnpaired?: () =
     ready = true;
     access = "tailscale";
     paired = false;
-    pairing = false;
     error = UNPAIRED_MESSAGE;
     onUnpaired?.();
     qc.clear();
@@ -60,9 +57,6 @@ export function createAuthStore(qc: QueryClient = queryClient, onUnpaired?: () =
     }
 
     const run = (async () => {
-      if (pendingToken) {
-        pairing = true;
-      }
       try {
         const status = unwrap(await apiClient.GET("/api/auth"));
         access = status.access;
@@ -70,7 +64,6 @@ export function createAuthStore(qc: QueryClient = queryClient, onUnpaired?: () =
         pairedDevices = status.paired_devices;
 
         if (status.access === "tailscale" && pendingToken) {
-          pairing = true;
           try {
             unwrap(await apiClient.POST("/api/pair", { body: { token: pendingToken } }));
             paired = true;
@@ -88,7 +81,6 @@ export function createAuthStore(qc: QueryClient = queryClient, onUnpaired?: () =
         paired = false;
         error = err instanceof Error ? err.message : "Could not connect to Groundly.";
       } finally {
-        pairing = false;
         ready = true;
       }
     })();
@@ -119,9 +111,6 @@ export function createAuthStore(qc: QueryClient = queryClient, onUnpaired?: () =
     get pairedDevices() {
       return pairedDevices;
     },
-    get pairing() {
-      return pairing;
-    },
     get error() {
       return error;
     },
@@ -132,4 +121,8 @@ export function createAuthStore(qc: QueryClient = queryClient, onUnpaired?: () =
 }
 
 export const authStore = createAuthStore(queryClient, () => runStore.disconnect());
-setOnUnpaired(() => authStore.handleUnpaired());
+setOnUnpaired(() => {
+  if (authStore.ready) {
+    authStore.handleUnpaired();
+  }
+});

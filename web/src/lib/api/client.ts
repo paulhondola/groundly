@@ -17,9 +17,6 @@ export type RunKind = RunSnapshot["kind"];
 export type ThoughtChannel = RunSnapshot["thought_channel"];
 export type RunSnapshot = components["schemas"]["RunSnapshot"];
 export type RunsInfo = components["schemas"]["RunsInfoResponse"];
-export type AuthStatusResponse = components["schemas"]["AuthStatusResponse"];
-export type RemoteInfoResponse = components["schemas"]["RemoteInfoResponse"];
-export type PairedDevice = components["schemas"]["PairedDevice"];
 export type StartRunBody = { kind: "write"; topic_id: number } | { kind: "grade" };
 
 export class ApiError extends Error {

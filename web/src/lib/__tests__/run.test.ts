@@ -472,6 +472,7 @@ describe("createRunStore", () => {
   });
 
   it("resets retry state and re-attaches SSE on visibilitychange/online wake-up, skips when unpaired, and stops after destroy()", async () => {
+    authStore.resetForTests({ ready: true });
     const qc = createAppQueryClient();
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
     const store = createRunStore(qc);
@@ -554,7 +555,7 @@ describe("createRunStore", () => {
     expect(fetchMock).toHaveBeenCalledTimes(callsWhileUnpaired);
 
     // After destroy(), wake listeners no longer fire even when paired
-    authStore.resetForTests();
+    authStore.resetForTests({ ready: true });
     store.destroy();
     const callsAfterDestroy = fetchMock.mock.calls.length;
     const esCountAfterDestroy = MockEventSource.instances.length;
@@ -570,6 +571,7 @@ describe("createRunStore", () => {
   });
 
   it("reconciles settled watched run on wake-up: calls applySettled, updates message, closes stream, and invalidates subject queries", async () => {
+    authStore.resetForTests({ ready: true });
     const qc = createAppQueryClient();
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
     const store = makeStore(qc);
@@ -613,6 +615,7 @@ describe("createRunStore", () => {
   });
 
   it("handles server restart on wake-up when watched run disappears: sets restart message, clears watched, and invalidates queries", async () => {
+    authStore.resetForTests({ ready: true });
     const qc = createAppQueryClient();
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
     const store = makeStore(qc);
@@ -659,6 +662,7 @@ describe("createRunStore", () => {
   });
 
   it("preserves or restores Lost error banner when wake-up GET /api/runs probe rejects", async () => {
+    authStore.resetForTests({ ready: true });
     const qc = createAppQueryClient();
     const store = makeStore(qc);
 
@@ -725,6 +729,69 @@ describe("createRunStore", () => {
     expect(store2.busy).toBe(false);
     expect(es2.closed).toBe(true);
 
+    visibilitySpy.mockRestore();
+  });
+
+  it("replaces an active SSE stream and applies fresh snapshot steps on visibilitychange wake-up", async () => {
+    authStore.resetForTests({ ready: true });
+    const qc = createAppQueryClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const store = makeStore(qc);
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        makeSnapshot({ id: 105, subject: "PDSS", steps: ["Checking the subject"] }),
+        202,
+      ),
+    );
+    await store.start("PDSS", { kind: "write", topic_id: 7 });
+    expect(MockEventSource.instances).toHaveLength(1);
+    const es1 = MockEventSource.instances[0];
+    expect(es1.closed).toBe(false);
+
+    const visibilitySpy = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        available: true,
+        reason: null,
+        target: 10,
+        run: makeSnapshot({
+          id: 105,
+          subject: "PDSS",
+          status: "running",
+          phase: "reading",
+          active_tool: "Reading the course",
+          steps: ["Checking the subject", "Reading the course"],
+        }),
+      }),
+    );
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await vi.waitFor(() => {
+      expect(MockEventSource.instances).toHaveLength(2);
+    });
+    expect(es1.closed).toBe(true);
+    expect(MockEventSource.instances[1].closed).toBe(false);
+    expect(store.run?.steps).toEqual(["Checking the subject", "Reading the course"]);
+    expect(store.run?.phase).toBe("reading");
+    expect(store.run?.active_tool).toBe("Reading the course");
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject"] });
+
+    visibilitySpy.mockRestore();
+  });
+
+  it("skips wake-up probes while authStore.ready is false", async () => {
+    authStore.resetForTests();
+    const qc = createAppQueryClient();
+    makeStore(qc);
+
+    const visibilitySpy = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("online"));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(fetchMock).not.toHaveBeenCalled();
     visibilitySpy.mockRestore();
   });
 });

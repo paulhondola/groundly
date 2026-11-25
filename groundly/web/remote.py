@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import io
@@ -205,36 +206,36 @@ class RemoteStore:
             return True
 
     def list_devices(self) -> list[dict[str, Any]]:
-        """Prune expired rows and return active paired devices newest-seen first."""
+        """Return active paired devices newest-seen first."""
         now = self._now()
         with self._lock, self._connect() as conn:
-            conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
-            conn.commit()
             rows = conn.execute(
                 """
-                SELECT id, label, peer_ip, created_at, last_seen_at
+                SELECT id, label, peer_ip, last_seen_at
                 FROM sessions
+                WHERE expires_at > ?
                 ORDER BY last_seen_at DESC, id DESC
-                """
+                """,
+                (now,),
             ).fetchall()
         return [
             {
                 "id": int(row["id"]),
                 "label": str(row["label"]),
                 "peer_ip": str(row["peer_ip"]),
-                "created_at": str(row["created_at"]),
                 "last_seen_at": int(row["last_seen_at"]),
             }
             for row in rows
         ]
 
     def count_devices(self) -> int:
-        """Prune expired rows and return the number of active paired devices."""
+        """Return the number of active paired devices."""
         now = self._now()
         with self._lock, self._connect() as conn:
-            conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
-            conn.commit()
-            row = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()
+            row = conn.execute(
+                "SELECT COUNT(*) FROM sessions WHERE expires_at > ?",
+                (now,),
+            ).fetchone()
         return int(row[0])
 
     def revoke_device(self, device_id: int) -> bool:
@@ -340,14 +341,36 @@ class RemoteRuntime:
         self,
         ts_info: TailscaleInfo,
         port: int,
-        store: RemoteStore | None = None,
         on_paired: Callable[[str, str, str], None] | None = None,
     ) -> None:
         self.ts_info = ts_info
         self.port = port
-        self.store = store if store is not None else RemoteStore()
+        self.store = RemoteStore()
         self.pairing = PairingManager(ts_info, port)
         self.on_paired = on_paired
+        self._stream_lock = threading.Lock()
+        self._stream_events: set[tuple[asyncio.AbstractEventLoop, asyncio.Event]] = set()
+
+    def register_stream(self, loop: asyncio.AbstractEventLoop, event: asyncio.Event) -> None:
+        """Register an active Tailscale SSE stream to wake immediately on device revocation."""
+        with self._stream_lock:
+            self._stream_events.add((loop, event))
+
+    def unregister_stream(self, loop: asyncio.AbstractEventLoop, event: asyncio.Event) -> None:
+        """Remove a closed Tailscale SSE stream from revocation wake-ups."""
+        with self._stream_lock:
+            self._stream_events.discard((loop, event))
+
+    def notify_revoked(self) -> None:
+        """Wake all active Tailscale SSE streams so revoked sessions disconnect immediately."""
+        with self._stream_lock:
+            targets = list(self._stream_events)
+        for loop, event in targets:
+            try:
+                loop.call_soon_threadsafe(event.set)
+            except RuntimeError:
+                with self._stream_lock:
+                    self._stream_events.discard((loop, event))
 
 
 _SUBJECT_SHELL_RE = re.compile(r"^/s/[^/]+(?:/test|/attempts/\d+)?$")
@@ -425,20 +448,28 @@ class _SocketPerimeterMiddleware:
             )(scope, receive, send)
             return
 
-        session_token = Request(scope).cookies.get(SESSION_COOKIE)
-        paired = bool(
-            session_token and await run_in_threadpool(remote.store.authenticate, session_token)
-        )
-        state["paired"] = paired
-
         method = scope.get("method", "GET").upper()
-        if method in ("GET", "HEAD") and (path.startswith("/static/") or path == "/api/auth"):
+        if method in ("GET", "HEAD") and path.startswith("/static/"):
             await self._app(scope, receive, send)
             return
         if method == "POST" and path == "/api/pair":
             await self._app(scope, receive, send)
             return
-        if method in ("GET", "HEAD") and (
+
+        session_token = Request(scope).cookies.get(SESSION_COOKIE)
+        if session_token:
+            try:
+                paired = bool(await run_in_threadpool(remote.store.authenticate, session_token))
+            except (sqlite3.DatabaseError, RuntimeError):
+                paired = False
+        else:
+            paired = False
+        state["paired"] = paired
+
+        if method == "GET" and path == "/api/auth":
+            await self._app(scope, receive, send)
+            return
+        if method == "GET" and (
             path in {"/", "/pair"} or _SUBJECT_SHELL_RE.fullmatch(path) is not None
         ):
             if not paired:

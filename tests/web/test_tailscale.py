@@ -84,7 +84,7 @@ def test_discover_uses_macos_app_fallback(monkeypatch, tmp_path):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     assert discover_tailscale() == TailscaleInfo(ipv4="100.101.102.103", dns_name=None)
-    assert seen_cmd == [[str(fake_bin), "status", "--json"]]
+    assert seen_cmd == [[str(fake_bin), "status", "--json", "--peers=false"]]
 
 
 def test_discover_falls_back_to_self_tailscale_ips(monkeypatch):

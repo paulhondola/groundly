@@ -516,10 +516,6 @@
       "PairedDevice": {
         "description": "One active paired Tailscale device session.",
         "properties": {
-          "created_at": {
-            "title": "Created At",
-            "type": "string"
-          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -541,7 +537,6 @@
           "id",
           "label",
           "peer_ip",
-          "created_at",
           "last_seen_at"
         ],
         "title": "PairedDevice",
@@ -580,17 +575,6 @@
             "title": "Devices",
             "type": "array"
           },
-          "host": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Host"
-          },
           "pairing_url": {
             "anyOf": [
               {
@@ -622,7 +606,6 @@
         },
         "required": [
           "active",
-          "host",
           "pairing_url",
           "qr_matrix",
           "devices"
@@ -1334,6 +1317,26 @@
               }
             },
             "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": " Pair Device"
@@ -1352,6 +1355,26 @@
               }
             },
             "description": "Successful Response"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": " Remote Info"
@@ -1454,6 +1477,26 @@
               }
             },
             "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": " Revoke Remote Device"
@@ -1525,6 +1568,26 @@
               }
             },
             "description": "Unsupported Media Type"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": " Revoke All Remote Devices"

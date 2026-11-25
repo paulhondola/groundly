@@ -76,7 +76,11 @@ describe("authStore", () => {
     authStore.resetForTests();
     queryClient.clear();
     setEventStreamFactory(null);
-    setOnUnpaired(() => authStore.handleUnpaired());
+    setOnUnpaired(() => {
+      if (authStore.ready) {
+        authStore.handleUnpaired();
+      }
+    });
     window.history.replaceState(null, "", "/");
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
@@ -107,7 +111,6 @@ describe("authStore", () => {
     expect(store.paired).toBe(true);
     expect(store.tailscaleEnabled).toBe(true);
     expect(store.pairedDevices).toBe(2);
-    expect(store.pairing).toBe(false);
     expect(store.error).toBeNull();
   });
 
@@ -265,7 +268,6 @@ describe("authStore", () => {
     expect(store.ready).toBe(true);
     expect(store.access).toBe("tailscale");
     expect(store.paired).toBe(false);
-    expect(store.pairing).toBe(false);
     expect(store.error).toBe(
       "pairing link is invalid or was already used — scan the current QR code",
     );
@@ -460,5 +462,49 @@ describe("authStore", () => {
     await navigate("/pair");
     expect(route.pathname).toBe("/");
     expect(window.location.pathname).toBe("/");
+  });
+
+  it("ignores non-/api/pair 401 responses while authStore.ready is false", async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ error: "unpaired", detail: "scan the pairing QR code" }, 401),
+      ) as unknown as typeof fetch;
+
+    const handleUnpairedSpy = vi.spyOn(authStore, "handleUnpaired");
+    expect(authStore.ready).toBe(false);
+
+    const res = await apiClient.GET("/api/subjects");
+    expect(res.response.status).toBe(401);
+    expect(handleUnpairedSpy).not.toHaveBeenCalled();
+    expect(authStore.ready).toBe(false);
+    expect(authStore.paired).toBe(true);
+    expect(authStore.error).toBeNull();
+  });
+
+  it("renders a connection error alert instead of PairView when GET /api/auth fails on loopback", async () => {
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      if (requestPathname(input) === "/api/auth") {
+        return Promise.reject(new TypeError("Failed to fetch"));
+      }
+      return Promise.resolve(jsonResponse({}));
+    }) as unknown as typeof fetch;
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const app = mount(App, { target: container });
+
+    try {
+      await vi.waitFor(() => {
+        expect(authStore.ready).toBe(true);
+      });
+      const alert = container.querySelector('[role="alert"]');
+      expect(alert?.textContent).toContain("Failed to fetch");
+      expect(container.textContent).not.toContain("Pair this device");
+      expect(container.textContent).not.toContain("Devices");
+    } finally {
+      await unmount(app);
+      container.remove();
+    }
   });
 });
