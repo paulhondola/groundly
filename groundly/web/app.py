@@ -13,7 +13,9 @@ addressed by id and its file must resolve inside the subject's materials dir.
 import asyncio
 import atexit
 import json
+import os
 import sqlite3
+import tempfile
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -24,12 +26,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware import Middleware
 from starlette.routing import Route
 from starlette.types import ASGIApp
 
 from groundly.agents import quiz
+from groundly.core import bundle
 from groundly.core.paths import discover_subjects, remote_db_path
 from groundly.core.progress import ProgressStore
 from groundly.core.store import SubjectStore
@@ -54,6 +58,7 @@ from groundly.web.schemas import (
     CheckAnswerResponse,
     DrawTestResponse,
     ErrorResponse,
+    ExportInfoResponse,
     PairDeviceRequest,
     PairDeviceResponse,
     RemoteInfoResponse,
@@ -501,6 +506,63 @@ def create_app(
             return result
 
         return await run_in_threadpool(_quiz, subject, check, opened)
+
+    # Export reads store.db, the manifest and materials/ only: progress.db, remote.db and
+    # activity.db never enter a bundle. Paired devices may export (decision 53); the
+    # Tailscale perimeter already requires their session on these routes.
+    @app.get(
+        "/api/subjects/{subject}/export/info",
+        response_model=ExportInfoResponse,
+        responses=_protected_responses(404),
+        operation_id="exportInfo",
+    )
+    def _export_info(subject: str) -> Any:
+        opened = _open_subject(subject)
+        if opened is None:
+            return _error("unknown_subject", f"unknown subject {subject!r}", 404)
+        try:
+            materials = bundle.material_files(opened)
+        except (sqlite3.DatabaseError, RuntimeError) as e:
+            return _error("store_error", str(e), 500)
+        return {
+            "filename": f"{subject}.groundly",
+            "store_bytes": opened.store_db_path.stat().st_size,
+            "materials_bytes": sum(f.stat().st_size for f in materials),
+        }
+
+    @app.get(
+        "/api/subjects/{subject}/export",
+        response_class=FileResponse,
+        responses={
+            200: {"content": {"application/zip": {}}, "description": "The subject's bundle."},
+            **_protected_responses(404, 409),
+        },
+        operation_id="exportSubject",
+    )
+    def _export(subject: str, materials: bool = True) -> Any:
+        opened = _open_subject(subject)
+        if opened is None:
+            return _error("unknown_subject", f"unknown subject {subject!r}", 404)
+        try:
+            opened.load_manifest()
+        except (OSError, ValueError) as e:  # pydantic's ValidationError is a ValueError
+            return _error("manifest_invalid", f"manifest.json is corrupt or unreadable: {e}", 409)
+        # ponytail: the whole bundle is built before the first byte is sent; stream the zip as
+        # it is written if a large materials folder makes the wait hurt.
+        fd, name = tempfile.mkstemp(suffix=".groundly")
+        os.close(fd)
+        path = Path(name)
+        try:
+            bundle.export_subject(opened, path, include_materials=materials)
+        except BaseException:
+            path.unlink(missing_ok=True)
+            raise
+        return FileResponse(
+            path,
+            media_type="application/zip",
+            filename=f"{subject}.groundly",
+            background=BackgroundTask(path.unlink, missing_ok=True),
+        )
 
     @app.get(
         "/api/subjects/{subject}/attempts",

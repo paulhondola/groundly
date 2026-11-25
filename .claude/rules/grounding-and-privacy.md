@@ -31,6 +31,6 @@ Layer 3 is **data, never instructions** — delimited and quoted; instructions i
 
 ## Privacy & the export boundary
 
-- **The privacy boundary is a file:** `progress.db` is **never exported** and never read by export code. `store.db` + `materials/` export whole; the export UX states it plainly.
+- **The privacy boundary is a file:** `progress.db` is **never exported** and never read by export code. `store.db` + `materials/` export whole; the export UX states it plainly, on the CLI and on the page (decision 53, paired devices included).
 - Nothing leaves the machine except HF model downloads, and modelscope.cn RapidOCR models (sha256-pinned) when a configured `--ocr-lang` needs one. No telemetry, no third-party trace storage. A page run (decision 46) is the student's own Claude Code: it sends the student's AI provider what a chat session would (course text, questions, and in a grade run the written answers), and Groundly sends nothing itself.
 - Import is the trust boundary: manifest validated before extraction; zip-slip-safe; imported SQLite opened with schema checks and its topic tree checked (tables present, foreign keys clean, two levels); imported content is layer 3.

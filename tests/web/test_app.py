@@ -1117,3 +1117,56 @@ def test_an_unreadable_progress_db_costs_only_the_progress_fields(client, seeded
     (entry,) = r.json()
     assert entry["leaves_mastered"] == 0 and "last_test_at" not in entry
     assert not progress_db.exists()
+
+
+# --- export --------------------------------------------------------------------------------
+
+
+def test_export_info_reports_on_disk_sizes(client, seeded):
+    info = client.get("/api/subjects/PDSS/export/info").json()
+    assert info["filename"] == "PDSS.groundly"
+    assert info["store_bytes"] == (subject_dir("PDSS") / "store.db").stat().st_size
+    assert info["materials_bytes"] == len(PDF_BYTES) + len("<script>alert(1)</script>")
+
+
+@pytest.mark.parametrize(("materials", "with_pdf"), [("true", True), ("false", False)])
+def test_export_downloads_a_bundle_without_private_files(client, seeded, materials, with_pdf):
+    import io
+    import zipfile
+
+    r = client.get(f"/api/subjects/PDSS/export?materials={materials}")
+    assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
+    assert 'filename="PDSS.groundly"' in r.headers["content-disposition"]
+    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    assert "store.db" in names and "manifest.json" in names
+    assert not any(word in n for n in names for word in ("progress", "activity", "remote"))
+    assert ("materials/lec.pdf" in names) is with_pdf
+
+
+def test_export_leaves_no_temp_file(client, seeded, tmp_path, monkeypatch):
+    import tempfile
+
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+    assert client.get("/api/subjects/PDSS/export").status_code == 200
+    assert list(scratch.iterdir()) == []
+
+
+def test_export_of_a_corrupt_manifest_is_409_and_leaves_nothing(
+    client, seeded, tmp_path, monkeypatch
+):
+    import tempfile
+
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+    Subject("PDSS").manifest_path.write_text("{not json")
+    r = client.get("/api/subjects/PDSS/export")
+    assert (r.status_code, r.json()["error"]) == (409, "manifest_invalid")
+    assert list(scratch.iterdir()) == []
+
+
+def test_export_of_an_unknown_subject_is_404(client, seeded):
+    assert client.get("/api/subjects/NOPE/export").status_code == 404
+    assert client.get("/api/subjects/NOPE/export/info").status_code == 404

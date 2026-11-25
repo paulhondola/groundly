@@ -122,6 +122,15 @@ class CheckAnswerResponse(BaseModel):
     sources: list[SourceItem]
 
 
+class ExportInfoResponse(BaseModel):
+    """What a subject's bundle would hold: its file name and the on-disk bytes of store.db
+    and of the materials it ships (the zip itself is compressed, so smaller)."""
+
+    filename: str
+    store_bytes: int
+    materials_bytes: int
+
+
 class SubmitAttemptRequest(BaseModel):
     """Strict request body for POST /api/subjects/{subject}/attempts."""
 

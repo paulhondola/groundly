@@ -17,7 +17,7 @@ def test_committed_openapi_json_matches_fastapi_schema():
 def test_openapi_schema_contains_only_api_paths_and_typed_errors():
     spec = export_openapi()
     paths = spec["paths"]
-    assert len(paths) == 15
+    assert len(paths) == 17
     for expected_path in (
         "/api/auth",
         "/api/pair",
