@@ -340,6 +340,11 @@ export function createRunStore(qc: QueryClient = queryClient) {
     message = null;
   }
 
+  function disconnect(): void {
+    stateSeq += 1;
+    closeStream();
+  }
+
   function destroy(): void {
     closeStream();
   }
@@ -382,6 +387,7 @@ export function createRunStore(qc: QueryClient = queryClient) {
     start,
     stop,
     dismiss,
+    disconnect,
     destroy,
   };
 }

@@ -1,13 +1,21 @@
 <script lang="ts">
   import { QueryClientProvider } from "@tanstack/svelte-query";
+  import { onMount } from "svelte";
   import { Router } from "sv-router";
   import { pageURL } from "./lib/api/client";
   import { queryClient } from "./lib/api/queries";
+  import { authStore } from "./lib/auth.svelte";
   import Brand from "./lib/components/Brand.svelte";
+  import RemoteDialog from "./lib/components/RemoteDialog.svelte";
   import RunStrip from "./lib/components/RunStrip.svelte";
   import Select from "./lib/components/ui/Select.svelte";
   import { isActive, parsePositiveInt, route } from "./lib/router";
   import { type ThemeMode, theme } from "./lib/theme.svelte";
+  import PairView from "./lib/views/PairView.svelte";
+
+  onMount(() => {
+    void authStore.bootstrap();
+  });
 
   const breadcrumb = $derived.by(() => {
     const subject = route.params.subject || null;
@@ -26,6 +34,12 @@
     return null;
   });
 
+  const showRemoteDialog = $derived(
+    authStore.ready &&
+      authStore.access === "loopback" &&
+      (authStore.tailscaleEnabled || authStore.pairedDevices > 0),
+  );
+
   function onThemeChange(event: Event): void {
     const select = event.currentTarget;
     if (select instanceof HTMLSelectElement) {
@@ -40,7 +54,7 @@
       <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-3 sm:px-6">
         <div class="flex flex-wrap items-center gap-3">
           <Brand />
-          {#if breadcrumb}
+          {#if authStore.ready && authStore.paired && breadcrumb}
             <nav aria-label="Breadcrumb" class="flex items-center gap-2 text-xs text-muted-foreground">
               <span>/</span>
               <a href={pageURL(breadcrumb.subject)} class="hover:text-foreground">
@@ -54,20 +68,32 @@
           {/if}
         </div>
 
-        <label class="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>Theme</span>
-          <Select value={theme.mode} aria-label="Theme" onchange={onThemeChange}>
-            <option value="system">System</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
-          </Select>
-        </label>
+        <div class="flex items-center gap-3">
+          {#if showRemoteDialog}
+            <RemoteDialog pairedCount={authStore.pairedDevices} />
+          {/if}
+
+          <label class="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>Theme</span>
+            <Select value={theme.mode} aria-label="Theme" onchange={onThemeChange}>
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </Select>
+          </label>
+        </div>
       </div>
     </header>
 
     <main class="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6">
-      <RunStrip />
-      <Router />
+      {#if !authStore.ready}
+        <p class="text-sm text-muted-foreground">Connecting…</p>
+      {:else if !authStore.paired}
+        <PairView />
+      {:else}
+        <RunStrip />
+        <Router />
+      {/if}
     </main>
   </div>
 </QueryClientProvider>

@@ -17,6 +17,9 @@ export type RunKind = RunSnapshot["kind"];
 export type ThoughtChannel = RunSnapshot["thought_channel"];
 export type RunSnapshot = components["schemas"]["RunSnapshot"];
 export type RunsInfo = components["schemas"]["RunsInfoResponse"];
+export type AuthStatusResponse = components["schemas"]["AuthStatusResponse"];
+export type RemoteInfoResponse = components["schemas"]["RemoteInfoResponse"];
+export type PairedDevice = components["schemas"]["PairedDevice"];
 export type StartRunBody = { kind: "write"; topic_id: number } | { kind: "grade" };
 
 export class ApiError extends Error {
@@ -53,6 +56,27 @@ export const apiClient = createClient<paths>({
   credentials: "same-origin",
   Request: SafeRequest,
   fetch: (request) => globalThis.fetch(request),
+});
+
+let onUnpairedHandler: (() => void) | null = null;
+
+export function setOnUnpaired(handler: (() => void) | null): void {
+  onUnpairedHandler = handler;
+}
+
+apiClient.use({
+  onResponse({ request, response }) {
+    if (response.status === 401 && onUnpairedHandler) {
+      const requestPath =
+        typeof location !== "undefined"
+          ? new URL(request.url, location.origin).pathname
+          : request.url;
+      if (!requestPath.endsWith("/api/pair")) {
+        onUnpairedHandler();
+      }
+    }
+    return undefined;
+  },
 });
 
 export function unwrap<T>(result: { data?: T; error?: unknown; response: Response }): T {
