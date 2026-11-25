@@ -581,6 +581,9 @@ def create_app(
         path = Path(name)
         try:
             bundle.export_subject(opened, path, include_materials=materials)
+        except (sqlite3.DatabaseError, RuntimeError) as e:
+            path.unlink(missing_ok=True)
+            return _error("store_error", str(e), 500)
         except BaseException:
             path.unlink(missing_ok=True)
             raise

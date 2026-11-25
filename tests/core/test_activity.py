@@ -73,8 +73,8 @@ def test_http_host_expires_after_ten_minutes(db):
     rec(
         db, "mcp_http", "tool_end", T0 + 11, session="s3", client="codex", detail={"tool": "search"}
     )
-    assert snap(db, T0 + 11 + activity.HTTP_LIVE_SECONDS, alive=())["hosts"]
-    assert snap(db, T0 + 12 + activity.HTTP_LIVE_SECONDS, alive=())["hosts"] == []
+    assert snap(db, T0 + 11 + activity.HTTP_LIVE_SECONDS)["hosts"]
+    assert snap(db, T0 + 12 + activity.HTTP_LIVE_SECONDS)["hosts"] == []
 
 
 def test_http_hosts_are_one_per_client_whatever_the_session_ids(db):
@@ -188,3 +188,35 @@ def test_two_processes_write_at_once(db):
         )
     finally:
         conn.close()
+
+
+def _create_and_write(args):
+    path, pid = args
+    activity.record("index", "index_start", path=path, pid=pid, detail={"files": 1})
+    return pid
+
+
+def test_processes_creating_the_file_at_once_lose_no_rows(tmp_path):
+    # Switching a fresh file to WAL takes an exclusive lock that busy_timeout does not wait on.
+    paths = [tmp_path / f"a{i}.db" for i in range(30)]
+    with ProcessPoolExecutor(max_workers=6) as pool:
+        for path in paths:
+            list(pool.map(_create_and_write, [(path, pid) for pid in range(1, 7)]))
+    for path in paths:
+        conn = sqlite3.connect(path)
+        try:
+            assert conn.execute("SELECT COUNT(*) FROM events").fetchone() == (6,), path.name
+        finally:
+            conn.close()
+
+
+def test_http_host_goes_with_its_server_process(db):
+    rec(db, "mcp_http", "tool_call", T0, client="codex", detail={"tool": "search"})
+    assert snap(db, T0 + 1)["hosts"]
+    assert snap(db, T0 + 1, alive=())["hosts"] == []
+
+
+def test_an_index_run_that_indexed_nothing_is_not_recent(db):
+    rec(db, "index", "index_done", T0, subject="apd", detail={"indexed": 0, "failed": 0})
+    rec(db, "index", "index_done", T0 + 1, subject="apd", detail={"indexed": 0, "failed": 2})
+    assert snap(db, T0 + 2)["recent"] == []

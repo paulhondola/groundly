@@ -1034,3 +1034,20 @@ async def test_activity_names_the_client_on_every_row_in_both_handshakes(activit
     rows = activity_log()
     assert rows[0][0] == "session_start"
     assert {c for _, _, c, _ in rows} == {"mcp"}
+
+
+async def test_activity_logs_only_valid_subject_names_and_known_tools(activity_log):
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError):
+            await client.call_tool("search", {"subject": "explain the proof of X", "query": "q"})
+        with pytest.raises(ToolError):
+            await client.call_tool("no_such_tool", {"subject": "TEST"})
+    calls = [(s, d) for e, s, _, d in activity_log() if e == "tool_call"]
+    assert calls == [(None, {"tool": "search"}), ("TEST", {"tool": "unknown"})]
+
+
+def test_activity_client_names_are_capped():
+    from groundly.mcp.activity import _name
+
+    assert _name({"name": "x" * 500}) == "x" * 64
+    assert _name({"name": 7}) is None

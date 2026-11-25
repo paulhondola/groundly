@@ -1167,6 +1167,27 @@ def test_export_of_a_corrupt_manifest_is_409_and_leaves_nothing(
     assert list(scratch.iterdir()) == []
 
 
+def test_export_of_a_damaged_store_names_the_cause_and_leaves_nothing(
+    client, seeded, tmp_path, monkeypatch
+):
+    import sqlite3
+    import tempfile
+
+    from groundly.core import bundle
+
+    def broken(*_a, **_kw):
+        raise sqlite3.DatabaseError("database disk image is malformed")
+
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+    monkeypatch.setattr(bundle, "export_subject", broken)
+    r = client.get("/api/subjects/PDSS/export")
+    assert (r.status_code, r.json()["error"]) == (500, "store_error")
+    assert "malformed" in r.json()["detail"]
+    assert list(scratch.iterdir()) == []
+
+
 def test_export_of_an_unknown_subject_is_404(client, seeded):
     assert client.get("/api/subjects/NOPE/export").status_code == 404
     assert client.get("/api/subjects/NOPE/export/info").status_code == 404

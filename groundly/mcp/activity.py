@@ -6,6 +6,7 @@ the log except the counts and ids named below: no queries, no course text."""
 from fastmcp.server.middleware import Middleware
 
 from groundly.core import activity
+from groundly.core.paths import validate_subject_name
 
 
 def _accepted(tool: str, args: dict, result: dict) -> tuple[str, dict] | None:
@@ -27,8 +28,21 @@ _CLIENT_INFO = "io.modelcontextprotocol/clientInfo"
 
 
 def _name(info) -> str | None:
+    """The host's self-reported name, capped: it is free text from the client."""
     name = info.get("name") if isinstance(info, dict) else getattr(info, "name", None)
-    return name if isinstance(name, str) else None
+    return name[:64] if isinstance(name, str) else None
+
+
+def _subject(args: dict) -> str | None:
+    """The `subject` argument only when it is a valid subject name: a host may pass anything."""
+    subject = args.get("subject")
+    if not isinstance(subject, str):
+        return None
+    try:
+        validate_subject_name(subject)
+    except ValueError:
+        return None
+    return subject
 
 
 class ActivityMiddleware(Middleware):
@@ -59,15 +73,16 @@ class ActivityMiddleware(Middleware):
         return await call_next(context)
 
     async def on_call_tool(self, context, call_next):
-        tool = context.message.name
+        name = context.message.name
+        tool = name if name in activity.TOOL_ORB else "unknown"
         args = context.message.arguments or {}
-        subject = args.get("subject") if isinstance(args.get("subject"), str) else None
+        subject = _subject(args)
         self._log("tool_call", context, subject=subject, detail={"tool": tool})
         try:
             result = await call_next(context)
         finally:
             self._log("tool_end", context, subject=subject, detail={"tool": tool})
-        accepted = _accepted(tool, args, result.structured_content or {})
+        accepted = _accepted(name, args, result.structured_content or {})
         if accepted:
             self._log(accepted[0], context, subject=subject, detail=accepted[1])
         return result

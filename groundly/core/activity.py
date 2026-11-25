@@ -2,8 +2,9 @@
 
 MCP servers (stdio and `/mcp`) and `groundly index` append events; the page reads a snapshot.
 Every write is best-effort and never fails the work it describes. The file is private local
-state: never exported, never read by export or import, and it holds no course text (subject
-names, tool names, counts, file names and the host's self-reported name only).
+state: never exported, never read by export or import, and it holds no course text (valid
+subject names, Groundly's tool names, counts, file names, an index run's failure message and the
+host's capped self-reported name only; callers check what they pass).
 """
 
 import functools
@@ -11,6 +12,7 @@ import json
 import logging
 import os
 import sqlite3
+import tempfile
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -67,27 +69,44 @@ def iso(ts: float) -> str:
     return datetime.fromtimestamp(ts, UTC).isoformat(timespec="milliseconds")
 
 
+def _create(path: Path) -> None:
+    """Make the file whole, in WAL mode, before anyone can open it: switching a shared fresh file
+    to WAL takes an exclusive lock that busy_timeout does not wait on, so two processes creating
+    it at once would drop a row. The loser of the link race uses the winner's file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".activity-")  # mode 0600
+    os.close(fd)
+    try:
+        conn = sqlite3.connect(tmp)
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.executescript(_SCHEMA)
+        finally:
+            conn.close()
+        try:
+            os.link(tmp, path)
+        except FileExistsError:
+            pass
+    finally:
+        os.unlink(tmp)
+
+
 def _connect(path: Path, *, create: bool) -> sqlite3.Connection | None:
-    """Open the log, or None when it holds no schema yet (and `create` is false)."""
+    """Open the log, or None when it holds no schema."""
     if create and not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        os.close(os.open(path, os.O_RDWR | os.O_CREAT, 0o600))
-        os.chmod(path, 0o600)
+        _create(path)
     conn = sqlite3.connect(path, timeout=5)
     try:
         conn.execute("PRAGMA busy_timeout = 5000")
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         if version > ACTIVITY_USER_VERSION:
             raise RuntimeError(f"activity.db is version {version}, newer than this Groundly")
-        if version == 0:
-            if not create:
-                conn.close()
-                return None
-            conn.execute("PRAGMA journal_mode = WAL")
-            conn.executescript(_SCHEMA)
     except BaseException:
         conn.close()
         raise
+    if version == 0:
+        conn.close()
+        return None
     return conn
 
 
@@ -106,7 +125,8 @@ def record(
     """Append one event. Never raises: a broken log must not fail a tool call or an index run."""
     try:
         conn = _connect(path or paths.activity_db_path(), create=True)
-        assert conn is not None
+        if conn is None:
+            raise RuntimeError("activity.db holds no schema")
         at = time.time() if now is None else now
         try:
             with conn:
@@ -197,16 +217,18 @@ def snapshot(
     # ponytail: pid reuse can make a dead stdio host look alive until the 7-day prune; add a
     # start-time check if it shows up.
     def live(source: str, pid: int, last_at: float) -> bool:
+        alive = pid_alive is None or pid_alive(pid)
         if source == "mcp_http" or pid_alive is None:
-            return now - last_at <= HTTP_LIVE_SECONDS
-        return pid_alive(pid)
+            # An HTTP server outlives its hosts: recency says the host, the pid the server.
+            return alive and now - last_at <= HTTP_LIVE_SECONDS
+        return alive
 
     hosts: dict[tuple, dict] = {}
     runs: dict[int, dict] = {}
     recent: list[tuple[float, str, str | None, dict]] = []
     for at, pid, source, session, client, subject, event, raw in rows:
         detail = json.loads(raw)
-        if event in _ACCEPTED or event == "index_done":
+        if event in _ACCEPTED or (event == "index_done" and detail.get("indexed")):
             recent.append((at, event, subject, detail))
         if source == "index":
             if event == "index_start":
