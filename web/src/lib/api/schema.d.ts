@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+  "/api/activity": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Activity */
+    get: operations["getActivity"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/auth": {
     parameters: {
       query?: never;
@@ -301,6 +318,73 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /**
+     * ActivityHost
+     * @description One live MCP host: who it is, how it connects, and what the orb shows for it. `done` is
+     *     not a state: the page shows it briefly when `last_done_at` moves on.
+     */
+    ActivityHost: {
+      /** Client */
+      client: string | null;
+      /** Last Call At */
+      last_call_at: string | null;
+      /** Last Done At */
+      last_done_at: string | null;
+      /**
+       * Orb
+       * @enum {string}
+       */
+      orb: "listening" | "reading" | "mapping" | "writing";
+      /** Started At */
+      started_at: string;
+      /** Subject */
+      subject: string | null;
+      /**
+       * Transport
+       * @enum {string}
+       */
+      transport: "stdio" | "http";
+    };
+    /**
+     * ActivityIndexing
+     * @description One `groundly index` run still going.
+     */
+    ActivityIndexing: {
+      /** Current File */
+      current_file: string | null;
+      /** Done */
+      done: number;
+      /** Started At */
+      started_at: string;
+      /** Subject */
+      subject: string;
+      /** Total */
+      total: number;
+    };
+    /**
+     * ActivityRecent
+     * @description One recent result: a map built, questions written, answers graded or files indexed.
+     */
+    ActivityRecent: {
+      /** At */
+      at: string;
+      /** Subject */
+      subject: string | null;
+      /** Text */
+      text: string;
+    };
+    /**
+     * ActivityResponse
+     * @description What Groundly's processes are doing, read from activity.db by GET /api/activity.
+     */
+    ActivityResponse: {
+      /** Hosts */
+      hosts: components["schemas"]["ActivityHost"][];
+      /** Indexing */
+      indexing: components["schemas"]["ActivityIndexing"][];
+      /** Recent */
+      recent: components["schemas"]["ActivityRecent"][];
+    };
     /**
      * AttemptAnswer
      * @description One graded or awaiting answer in an attempt result.
@@ -787,6 +871,53 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  getActivity: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ActivityResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
   getAuthStatus: {
     parameters: {
       query?: never;

@@ -19,6 +19,10 @@ def remote_db_path() -> Path:
     return groundly_home() / "remote.db"
 
 
+def activity_db_path() -> Path:
+    return groundly_home() / "activity.db"
+
+
 def validate_subject_name(name: str) -> None:
     """Subject names become path components and MCP identifiers."""
     if not _SUBJECT_RE.fullmatch(name):  # fullmatch: `$` alone accepts a trailing newline

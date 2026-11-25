@@ -131,6 +131,45 @@ class ExportInfoResponse(BaseModel):
     materials_bytes: int
 
 
+class ActivityHost(BaseModel):
+    """One live MCP host: who it is, how it connects, and what the orb shows for it. `done` is
+    not a state: the page shows it briefly when `last_done_at` moves on."""
+
+    client: str | None
+    transport: Literal["stdio", "http"]
+    started_at: str
+    last_call_at: str | None
+    subject: str | None
+    orb: Literal["listening", "reading", "mapping", "writing"]
+    last_done_at: str | None
+
+
+class ActivityIndexing(BaseModel):
+    """One `groundly index` run still going."""
+
+    subject: str
+    done: int
+    total: int
+    current_file: str | None
+    started_at: str
+
+
+class ActivityRecent(BaseModel):
+    """One recent result: a map built, questions written, answers graded or files indexed."""
+
+    at: str
+    subject: str | None
+    text: str
+
+
+class ActivityResponse(BaseModel):
+    """What Groundly's processes are doing, read from activity.db by GET /api/activity."""
+
+    hosts: list[ActivityHost]
+    indexing: list[ActivityIndexing]
+    recent: list[ActivityRecent]
+
+
 class SubmitAttemptRequest(BaseModel):
     """Strict request body for POST /api/subjects/{subject}/attempts."""
 

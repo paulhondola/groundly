@@ -1,6 +1,193 @@
 {
   "components": {
     "schemas": {
+      "ActivityHost": {
+        "description": "One live MCP host: who it is, how it connects, and what the orb shows for it. `done` is\nnot a state: the page shows it briefly when `last_done_at` moves on.",
+        "properties": {
+          "client": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client"
+          },
+          "last_call_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Call At"
+          },
+          "last_done_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Done At"
+          },
+          "orb": {
+            "enum": [
+              "listening",
+              "reading",
+              "mapping",
+              "writing"
+            ],
+            "title": "Orb",
+            "type": "string"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "transport": {
+            "enum": [
+              "stdio",
+              "http"
+            ],
+            "title": "Transport",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client",
+          "transport",
+          "started_at",
+          "last_call_at",
+          "subject",
+          "orb",
+          "last_done_at"
+        ],
+        "title": "ActivityHost",
+        "type": "object"
+      },
+      "ActivityIndexing": {
+        "description": "One `groundly index` run still going.",
+        "properties": {
+          "current_file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current File"
+          },
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "subject",
+          "done",
+          "total",
+          "current_file",
+          "started_at"
+        ],
+        "title": "ActivityIndexing",
+        "type": "object"
+      },
+      "ActivityRecent": {
+        "description": "One recent result: a map built, questions written, answers graded or files indexed.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "subject",
+          "text"
+        ],
+        "title": "ActivityRecent",
+        "type": "object"
+      },
+      "ActivityResponse": {
+        "description": "What Groundly's processes are doing, read from activity.db by GET /api/activity.",
+        "properties": {
+          "hosts": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityHost"
+            },
+            "title": "Hosts",
+            "type": "array"
+          },
+          "indexing": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityIndexing"
+            },
+            "title": "Indexing",
+            "type": "array"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityRecent"
+            },
+            "title": "Recent",
+            "type": "array"
+          }
+        },
+        "required": [
+          "hosts",
+          "indexing",
+          "recent"
+        ],
+        "title": "ActivityResponse",
+        "type": "object"
+      },
       "AttemptAnswer": {
         "description": "One graded or awaiting answer in an attempt result.",
         "properties": {
@@ -1290,6 +1477,54 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/activity": {
+      "get": {
+        "operationId": "getActivity",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": " Activity"
+      }
+    },
     "/api/auth": {
       "get": {
         "operationId": "getAuthStatus",

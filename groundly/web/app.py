@@ -33,7 +33,7 @@ from starlette.routing import Route
 from starlette.types import ASGIApp
 
 from groundly.agents import quiz
-from groundly.core import bundle
+from groundly.core import activity, bundle
 from groundly.core.paths import discover_subjects, remote_db_path
 from groundly.core.progress import ProgressStore
 from groundly.core.store import SubjectStore
@@ -51,6 +51,7 @@ from groundly.web.remote import (
 )
 from groundly.web.runs import Runner
 from groundly.web.schemas import (
+    ActivityResponse,
     AttemptResultResponse,
     AttemptSummary,
     AuthStatusResponse,
@@ -110,6 +111,23 @@ def _open_subject(name: str) -> Subject | None:
     except ValueError:
         return None
     return subject if subject.exists() else None
+
+
+def _topic_title(name: str, topic_id: int) -> str | None:
+    """A topic's title for the activity feed, or None when the subject or topic is gone."""
+    opened = _open_subject(name)
+    if opened is None:
+        return None
+    try:
+        stack = SubjectStore(opened.store_db_path).tree(with_sources=False)
+    except (sqlite3.DatabaseError, RuntimeError):
+        return None
+    while stack:
+        node = stack.pop()
+        if node["id"] == topic_id:
+            return node["title"]
+        stack.extend(node["subtopics"])
+    return None
 
 
 def _read(subject: Subject, reader: Callable[[SubjectStore], T]) -> T | JSONResponse:
@@ -510,6 +528,15 @@ def create_app(
     # Export reads store.db, the manifest and materials/ only: progress.db, remote.db and
     # activity.db never enter a bundle. Paired devices may export (decision 53); the
     # Tailscale perimeter already requires their session on these routes.
+    @app.get(
+        "/api/activity",
+        response_model=ActivityResponse,
+        responses=_protected_responses(),
+        operation_id="getActivity",
+    )
+    def _activity() -> Any:
+        return activity.snapshot(topic_title=_topic_title)
+
     @app.get(
         "/api/subjects/{subject}/export/info",
         response_model=ExportInfoResponse,

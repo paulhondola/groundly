@@ -13,6 +13,7 @@ The storage backbone for [`overview.md`](overview.md). SQLite (WAL) per subject;
     materials/               # original files — citation targets
     store.db                 # the knowledge base            → EXPORTED
     progress.db              # the student's private state   → NEVER EXPORTED
+  activity.db                # what hosts and index runs are doing → NEVER EXPORTED
 ```
 
 `list_subjects` = a scan of `~/.groundly/*/manifest.json`. No registry database.
@@ -39,6 +40,10 @@ The two tree tables sit in the base schema. The question tables arrived at `user
 ## progress.db (never exported)
 
 Two tables at `PRAGMA user_version = 2` (decision 44): `attempts` (one per submitted test, unique by the page's submit token so a repeated Submit writes nothing) and `answers` (one per question shown, with the response, whether it was right, and for an open answer the host's later verdict and comment). Question and topic ids are plain integers, never foreign keys into `store.db`, so history survives a question or topic that is later removed. A version-1 file (created empty) gets its tables on first open. `search` and the topic tree write nothing here.
+
+## activity.db (never exported)
+
+One machine-wide table, `events` (`at`, `pid`, `source` in `mcp_stdio`/`mcp_http`/`index`, `session`, `client`, `subject`, `event`, a small JSON `detail`), at `PRAGMA user_version = 1`, mode `0600`, created on first write (decision 53). The MCP middleware and `groundly index` append to it, best-effort; the page reads it for the host card, the orb, indexing progress and recent results. It holds no course text: subject names, tool names, counts, file names and the host's self-reported name. Rows older than 7 days are pruned when a session or index run starts. Export and import never read it.
 
 ## manifest.json — the interchange contract
 

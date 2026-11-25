@@ -1170,3 +1170,27 @@ def test_export_of_a_corrupt_manifest_is_409_and_leaves_nothing(
 def test_export_of_an_unknown_subject_is_404(client, seeded):
     assert client.get("/api/subjects/NOPE/export").status_code == 404
     assert client.get("/api/subjects/NOPE/export/info").status_code == 404
+
+
+# --- activity ------------------------------------------------------------------------
+
+
+def test_activity_route_reads_the_log(client, seeded):
+    from groundly.core import activity
+
+    leaf = SubjectStore(subject_dir("PDSS") / "store.db").tree(with_sources=False)[0]["id"]
+    activity.record("mcp_stdio", "session_start", client="claude-code")
+    activity.record("mcp_stdio", "questions_accepted", subject="PDSS",
+                    detail={"topic_id": leaf, "count": 4})  # fmt: skip
+    activity.record("mcp_stdio", "questions_accepted", subject="PDSS",
+                    detail={"topic_id": leaf + 99, "count": 1})  # fmt: skip
+    body = client.get("/api/activity").json()
+    (host,) = body["hosts"]
+    assert host["client"] == "claude-code" and host["orb"] == "listening"
+    assert host["transport"] == "stdio" and host["last_done_at"]
+    assert [r["text"] for r in body["recent"]] == ["Wrote 1 question", "Wrote 4 questions · Locks"]
+
+
+def test_activity_route_without_a_log_is_empty_and_creates_none(client, home):
+    assert client.get("/api/activity").json() == {"hosts": [], "indexing": [], "recent": []}
+    assert not (home / "activity.db").exists()
