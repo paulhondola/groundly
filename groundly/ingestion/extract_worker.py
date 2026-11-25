@@ -18,7 +18,7 @@ import re
 import sys
 import tempfile
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, TextIO
 
@@ -47,6 +47,9 @@ MAX_IMAGE_PIXELS = 100_000_000
 # or a hyper-thread sibling makes the whole pool wait on it, which measured slower than
 # docling's default of 4.
 INFERENCE_THREADS = 8
+# Pages per docling conversion: the worker reports progress (and the parent's timeout
+# restarts) once per batch, so a batch of slow OCR pages must finish within the timeout.
+PAGE_BATCH = 16
 
 
 @functools.cache
@@ -200,6 +203,50 @@ def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
     chunks = chunk_document(doc)
     pages = len(doc.pages) if doc.pages else None
     return {"pages": pages, "chunks": chunks}
+
+
+def _page_runs(pages: list[int]) -> list[tuple[int, int]]:
+    """Sorted contiguous runs of `pages`, each at most PAGE_BATCH pages long."""
+    runs: list[tuple[int, int]] = []
+    for n in sorted(set(pages)):
+        if runs and n == runs[-1][1] + 1 and n - runs[-1][0] < PAGE_BATCH:
+            runs[-1] = (runs[-1][0], n)
+        else:
+            runs.append((n, n))
+    return runs
+
+
+def docling_pages(
+    path: Path, pages: list[int] | None, ocr_lang: str | None
+) -> "Iterator[tuple[int, DoclingDocument]]":
+    """The product's page reader: docling + RapidOCR, PAGE_BATCH pages per conversion.
+
+    Yields (page_no, one-page document) for every requested page (every page when `pages`
+    is None) in ascending order, pages with no text included, as each batch finishes. No
+    conversion ever starts past the last page: docling rejects that range."""
+    from docling.datamodel.base_models import InputFormat
+
+    input_format = InputFormat(DOCLING_FORMATS[path.suffix.lower()])
+    converter = _converter(ocr_lang)
+    # models load before the document is touched: a fetch failure is retryable, never this
+    # document's parse failure
+    _model_step(lambda: converter.initialize_pipeline(input_format))
+
+    def convert(start: int, end: int):
+        result = converter.convert(path, page_range=(start, end))
+        doc = result.document
+        for n in range(start, end + 1):
+            if n in doc.pages:
+                yield n, doc.filter(page_nrs={n})
+        return result.input.page_count
+
+    if pages is not None:
+        for start, end in _page_runs(pages):
+            yield from convert(start, end)
+        return
+    total = yield from convert(1, PAGE_BATCH)
+    for start in range(PAGE_BATCH + 1, total + 1, PAGE_BATCH):
+        yield from convert(start, min(start + PAGE_BATCH - 1, total))
 
 
 def _extract_plain_text(path: Path) -> dict:
