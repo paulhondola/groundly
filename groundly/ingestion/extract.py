@@ -84,6 +84,7 @@ class SubprocessExtractor:
         settings = settings or IngestionSettings()
         self.timeout = settings.timeout_seconds
         self.max_image_pixels = settings.max_image_pixels
+        self.max_pages = settings.max_pages
         self.max_file_size_mb = settings.max_file_size_mb
         self.argv = argv or [sys.executable, "-m", "groundly.ingestion.extract_worker", "--serve"]
         self._proc: subprocess.Popen | None = None
@@ -99,8 +100,12 @@ class SubprocessExtractor:
     def _start(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         tmp = Path(self._tmp.name)
-        # image-pixel cap via env, read once at worker start
-        env = {**os.environ, "GROUNDLY_MAX_IMAGE_PIXELS": str(int(self.max_image_pixels))}
+        # image-pixel and page caps via env, read by the worker, never via the document
+        env = {
+            **os.environ,
+            "GROUNDLY_MAX_IMAGE_PIXELS": str(int(self.max_image_pixels)),
+            "GROUNDLY_MAX_PAGES": str(int(self.max_pages)),
+        }
         # Never let the worker turn on logging: this parent reads only the *last line* of
         # its stderr to name the failure cause, so a log line written after the cause
         # would silently replace it.

@@ -42,6 +42,8 @@ EXIT_INPUT_TOO_LARGE = 5
 # ~100 MP (10000×10000), far above any course image: bounds decompression-bomb memory
 # before docling rasterizes an image.
 MAX_IMAGE_PIXELS = 100_000_000
+# the timeout restarts on every page, so only a page ceiling bounds a file's total time
+MAX_PAGES = 2000
 # CPU threads for docling's models — RapidOCR dominates a scanned page. One worker runs at a
 # time, so it may take every performance core; a thread on an efficiency core (Apple Silicon)
 # or a hyper-thread sibling makes the whole pool wait on it, which measured slower than
@@ -222,7 +224,8 @@ def docling_pages(
 
     Yields (page_no, one-page document) for every requested page (every page when `pages`
     is None) in ascending order, pages with no text included, as each batch finishes. No
-    conversion ever starts past the last page: docling rejects that range."""
+    conversion ever starts past the last page: docling rejects that range. A whole-document
+    read over the page ceiling is refused after its first batch, before any page is yielded."""
     from docling.datamodel.base_models import InputFormat
 
     input_format = InputFormat(DOCLING_FORMATS[path.suffix.lower()])
@@ -231,21 +234,33 @@ def docling_pages(
     # document's parse failure
     _model_step(lambda: converter.initialize_pipeline(input_format))
 
-    def convert(start: int, end: int):
-        result = converter.convert(path, page_range=(start, end))
+    def split(result, start: int, end: int):
         doc = result.document
         for n in range(start, end + 1):
             if n in doc.pages:
                 yield n, doc.filter(page_nrs={n})
-        return result.input.page_count
+
+    def convert(start: int, end: int):
+        return converter.convert(path, page_range=(start, end))
 
     if pages is not None:
         for start, end in _page_runs(pages):
-            yield from convert(start, end)
+            yield from split(convert(start, end), start, end)
         return
-    total = yield from convert(1, PAGE_BATCH)
+    first = convert(1, PAGE_BATCH)
+    total = first.input.page_count
+    cap = int(os.environ.get("GROUNDLY_MAX_PAGES") or MAX_PAGES)
+    if total > cap:
+        print(
+            f"too many pages — {total} exceeds the {cap}-page limit "
+            "(raise it with: groundly config set ingestion.max_pages <N>)",
+            file=sys.stderr,
+        )
+        sys.exit(EXIT_INPUT_TOO_LARGE)
+    yield from split(first, 1, PAGE_BATCH)
     for start in range(PAGE_BATCH + 1, total + 1, PAGE_BATCH):
-        yield from convert(start, min(start + PAGE_BATCH - 1, total))
+        end = min(start + PAGE_BATCH - 1, total)
+        yield from split(convert(start, end), start, end)
 
 
 def _no_progress(n: int) -> None:
@@ -376,7 +391,7 @@ def _handle(
 ) -> None:
     suffix = in_path.suffix.lower()
     if suffix == ".pdf" or suffix in IMAGE_SUFFIXES:
-        # the pixel cap and first-frame cut guard every image before any reader sees it
+        # the pixel cap and first-frame cut guard every image-suffixed file before a reader sees it
         path = _first_frame(in_path) if suffix in IMAGE_SUFFIXES else in_path
         result = chunk_pages(docling_pages(path, None, ocr_lang), on_page)
     elif in_path.suffix.lower() in DOCLING_SUFFIXES:

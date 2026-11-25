@@ -24,6 +24,7 @@ def test_settings_default_when_no_file():
     s = load_settings()
     assert s.ingestion.timeout_seconds == 300
     assert s.ingestion.max_image_pixels == 100_000_000
+    assert s.ingestion.max_pages == 2000
     assert s.ingestion.max_file_size_mb is None  # unlimited by default
     assert s.retrieval.top_k == 8
     assert s.retrieval.rerank is True

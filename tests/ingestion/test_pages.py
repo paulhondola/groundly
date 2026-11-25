@@ -97,6 +97,23 @@ def test_requested_pages_are_read_in_contiguous_runs(install):
     assert stub.calls == [(3, 4), (9, 9)]
 
 
+def test_a_document_over_the_page_ceiling_is_refused_before_any_page(install, monkeypatch, capsys):
+    stub = install(_StubConverter(50))
+    monkeypatch.setenv("GROUNDLY_MAX_PAGES", "20")
+    read: list[int] = []
+    with pytest.raises(SystemExit) as exc:
+        read += [n for n, _ in extract_worker.docling_pages(PDF, None, None)]
+    assert exc.value.code == extract_worker.EXIT_INPUT_TOO_LARGE
+    assert read == [] and stub.calls == [(1, 16)]
+    assert "too many pages — 50 exceeds the 20-page limit" in capsys.readouterr().err
+
+
+def test_a_document_at_the_page_ceiling_is_read(install, monkeypatch):
+    install(_StubConverter(20))
+    monkeypatch.setenv("GROUNDLY_MAX_PAGES", "20")
+    assert len(list(extract_worker.docling_pages(PDF, None, None))) == 20
+
+
 def test_ocr_lang_reaches_the_converter(install):
     install(_StubConverter(2))
     list(extract_worker.docling_pages(PDF, None, "ro"))

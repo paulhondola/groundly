@@ -117,3 +117,11 @@ def test_a_worker_that_dies_after_a_page_is_not_resent(tmp_path):
     with _ex() as ex, pytest.raises(ExtractionFailure, match="^parser failed: exit code 9$"):
         ex.extract(tmp_path / "pagedie.pdf")
     assert len((tmp_path / "pagedie.pdf.seen").read_text().splitlines()) == 1
+
+
+def test_the_page_ceiling_reaches_the_worker(tmp_path):
+    f = tmp_path / "env.pdf"
+    f.write_bytes(b"%PDF-")
+    extractor = SubprocessExtractor(IngestionSettings(max_pages=7), argv=STUB)
+    with extractor:
+        assert extractor.extract(f).chunks[0].text == "7"

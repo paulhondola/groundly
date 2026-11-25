@@ -42,7 +42,8 @@ for line in sys.stdin:
     elif name.startswith("notext"):
         status = "no_text"
     else:
-        chunk = {"text": str(os.getpid()), "heading_path": None, "page": 1, "token_count": 1}
+        text = os.environ.get("GROUNDLY_MAX_PAGES", "") if name.startswith("env") else os.getpid()
+        chunk = {"text": str(text), "heading_path": None, "page": 1, "token_count": 1}
         Path(req["out"]).write_text(json.dumps({"pages": 1, "chunks": [chunk]}))
         status = "ok"
     sys.stdout.write(json.dumps({"status": status}) + "\n")
