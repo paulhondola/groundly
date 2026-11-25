@@ -18,7 +18,7 @@ import re
 import sys
 import tempfile
 import traceback
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, TextIO
 
@@ -247,6 +247,52 @@ def docling_pages(
     total = yield from convert(1, PAGE_BATCH)
     for start in range(PAGE_BATCH + 1, total + 1, PAGE_BATCH):
         yield from convert(start, min(start + PAGE_BATCH - 1, total))
+
+
+def _no_progress(n: int) -> None:
+    """The default page callback: nothing listens."""
+
+
+def last_heading(doc: "DoclingDocument") -> str | None:
+    """Text of the document's last section header or title, the heading a following
+    untitled page carries."""
+    from docling_core.types.doc import DocItemLabel
+
+    labels = {DocItemLabel.SECTION_HEADER, DocItemLabel.TITLE}
+    return next((t.text for t in reversed(doc.texts) if t.label in labels), None)
+
+
+def _carry_heading(doc: "DoclingDocument", heading: str) -> None:
+    """Puts `heading` first on a page that has text but does not open with a heading of
+    its own, so the chunker treats it as the page's heading and embeds it."""
+    from docling_core.types.doc import DocItemLabel
+
+    if not doc.texts or not doc.body.children:
+        return
+    first = doc.body.children[0].resolve(doc)
+    if getattr(first, "label", None) in (DocItemLabel.SECTION_HEADER, DocItemLabel.TITLE):
+        return
+    doc.insert_heading(sibling=first, text=heading, level=1, after=False)
+
+
+def chunk_pages(
+    pages: "Iterable[tuple[int, DoclingDocument]]",
+    on_page: Callable[[int], None] = _no_progress,
+) -> dict:
+    """Worker output for a document read page by page: each page chunked on its own, so
+    every chunk cites its page. A page that opens without a heading carries the last one
+    from an earlier page. `on_page` hears every page, blank ones included, in order."""
+    chunks: list[dict] = []
+    carried: str | None = None
+    count = 0
+    for n, doc in pages:
+        if carried:
+            _carry_heading(doc, carried)
+        chunks += chunk_document(doc, page=n)
+        carried = last_heading(doc) or carried
+        count += 1
+        on_page(n)
+    return {"pages": count, "chunks": chunks}
 
 
 def _extract_plain_text(path: Path) -> dict:
