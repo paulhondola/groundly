@@ -192,6 +192,22 @@ def _grade(q: dict, answer: dict) -> AnswerWrite:
     )
 
 
+def check_answer(store: SubjectStore, question_id: int, selected: list[int]) -> dict:
+    """One choice answer graded before its test is submitted: whether it is right, the key,
+    and the question's cited sources. Grades through `_grade`, so a check and a submit of
+    the same choice agree; writes nothing, so the answer counts only once submitted."""
+    found = store.questions(ids=[question_id])
+    if not found:
+        raise QuizError("unknown_question", _REMOVED)
+    (q,) = found
+    graded = _grade(q, {"selected": selected})
+    return {
+        "correct": bool(graded.correct),
+        "key": [o["id"] for o in q["options"] if o["correct"]],
+        "sources": q["sources"],
+    }
+
+
 def submit_attempt(
     store: SubjectStore,
     progress: ProgressStore,

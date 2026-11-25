@@ -101,6 +101,23 @@ class DrawTestResponse(BaseModel):
     questions: list[DrawnQuestion]
 
 
+class CheckAnswerRequest(BaseModel):
+    """Strict request body for POST /api/subjects/{subject}/questions/{id}/check."""
+
+    model_config = ConfigDict(strict=True)
+
+    selected: list[SqliteId]
+
+
+class CheckAnswerResponse(BaseModel):
+    """One choice answer graded before submit: whether it is right, the key, and the
+    question's cited sources. Nothing is recorded."""
+
+    correct: bool
+    key: list[int]
+    sources: list[SourceItem]
+
+
 class SubmitAttemptRequest(BaseModel):
     """Strict request body for POST /api/subjects/{subject}/attempts."""
 

@@ -1020,3 +1020,55 @@ def test_chunked_and_malformed_content_length_oversized_bodies_return_413(
         )
         assert (r.status_code, r.json()["error"]) == (413, "too_large")
     assert fake_claude.calls() == []
+
+
+# --- check one answer ----------------------------------------------------------------------
+
+
+def _check(client, qid, body, headers=ORIGIN, subject="PDSS"):
+    return client.post(f"/api/subjects/{subject}/questions/{qid}/check", json=body, headers=headers)
+
+
+def test_check_returns_key_and_pdf_flagged_sources_and_writes_nothing(client, seeded):
+    _, (q, *_) = _bank(seeded)
+    r = _check(client, q["id"], {"selected": _key(q)})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["correct"] is True and body["key"] == _key(q)
+    (src,) = body["sources"]
+    assert src["filename"] == "extra.pdf" and src["pdf"] is False and src["text"]
+    assert "verified" not in r.text
+    wrong = [o["id"] for o in q["options"] if not o["correct"]]
+    assert _check(client, q["id"], {"selected": wrong}).json()["correct"] is False
+    assert client.get("/api/subjects/PDSS/attempts").json() == []
+
+
+def test_check_errors_name_their_cause(client, seeded):
+    _, (q, _, open_q) = _bank(seeded)
+    r = _check(client, open_q["id"], {"selected": []})
+    assert (r.status_code, r.json()["error"]) == (400, "invalid_text")
+    r = _check(client, 999_999, {"selected": []})
+    assert (r.status_code, r.json()["error"]) == (404, "unknown_question")
+    r = _check(client, q["id"], {"selected": []}, subject="NOPE")
+    assert (r.status_code, r.json()["error"]) == (404, "unknown_subject")
+    r = _check(client, q["id"], {"selected": "x"})
+    assert (r.status_code, r.json()["error"]) == (400, "invalid_body")
+
+
+@pytest.mark.parametrize("headers", [{}, {"Origin": "http://evil.example"}])
+def test_a_check_from_elsewhere_is_refused(client, seeded, headers):
+    _, (q, *_) = _bank(seeded)
+    assert _check(client, q["id"], {"selected": _key(q)}, headers=headers).status_code == 403
+
+
+def test_a_check_on_a_question_removed_with_its_chunk_is_404(client, seeded):
+    _, (q, *_) = _bank(seeded)
+    s = SubjectStore(subject_dir("PDSS") / "store.db")
+    conn = s.connect()
+    try:
+        (extra,) = conn.execute("SELECT id FROM materials WHERE filename = 'extra.pdf'").fetchone()
+    finally:
+        conn.close()
+    s.remove_material(extra)
+    r = _check(client, q["id"], {"selected": _key(q)})
+    assert (r.status_code, r.json()["error"]) == (404, "unknown_question")

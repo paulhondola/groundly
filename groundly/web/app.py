@@ -50,6 +50,8 @@ from groundly.web.schemas import (
     AttemptResultResponse,
     AttemptSummary,
     AuthStatusResponse,
+    CheckAnswerRequest,
+    CheckAnswerResponse,
     DrawTestResponse,
     ErrorResponse,
     PairDeviceRequest,
@@ -455,6 +457,42 @@ def create_app(
             return {"id": attempt_id}
 
         return await run_in_threadpool(_quiz, subject, submit)
+
+    @app.post(
+        "/api/subjects/{subject}/questions/{id}/check",
+        response_model=CheckAnswerResponse,
+        responses=_protected_responses(400, 403, 404, 415),
+        openapi_extra=_json_body_schema(CheckAnswerRequest),
+        operation_id="checkAnswer",
+    )
+    async def _check(
+        subject: str,
+        id: int,
+        body: object = Depends(_require_page_json("an answer is checked from this page only")),
+    ) -> Any:
+        try:
+            payload = CheckAnswerRequest.model_validate(body)
+        except ValidationError:
+            return _error("invalid_body", "expected {selected}")
+        opened = _open_subject(subject)
+        if opened is None:
+            return _error("unknown_subject", f"unknown subject {subject!r}", 404)
+
+        def check(store: SubjectStore, _progress: ProgressStore) -> Any:
+            # ponytail: the lock on a checked answer lives in the page; a hand-made call could
+            # check, then submit another choice. One user, the student; a server lock would
+            # need per-test state and a write before submit.
+            try:
+                result = quiz.check_answer(store, id, payload.selected)
+            except quiz.QuizError as e:
+                if e.reason != "unknown_question":
+                    raise
+                return _error(e.reason, e.detail, 404)
+            for src in result["sources"]:
+                src["pdf"] = _stored_pdf(opened, src["filename"]) is not None
+            return result
+
+        return await run_in_threadpool(_quiz, subject, check, opened)
 
     @app.get(
         "/api/subjects/{subject}/attempts",
