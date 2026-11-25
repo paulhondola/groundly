@@ -39,12 +39,13 @@ def _patch(monkeypatch, probe_free=True):
     runs: list[dict] = []
     opened: list[str] = []
 
-    def fake_run(self):
+    def fake_run(self, sockets=None):
         runs.append(
             {
                 "app": self.config.app,
                 "host": self.config.host,
                 "port": self.config.port,
+                "sockets": sockets,
                 "proxy_headers": self.config.proxy_headers,
                 "timeout_graceful_shutdown": self.config.timeout_graceful_shutdown,
                 "server": self,
@@ -151,6 +152,130 @@ def test_serve_names_the_real_cause_when_the_bind_is_refused(monkeypatch):
     assert result.exit_code == 1
     assert "cannot bind port 80: Permission denied" in result.output
     assert "already in use" not in result.output
+    assert runs == [] and opened == []
+
+
+@pytest.mark.parametrize("verb", ["serve", "start"])
+def test_tailscale_flag_binds_both_sockets_attaches_remote_and_prints_qr(
+    monkeypatch, tmp_path, verb
+):
+    from groundly.cli.app import console
+    from groundly.web.remote import RemoteRuntime, render_terminal_qr
+    from groundly.web.tailscale import TailscaleInfo
+
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
+    runs, opened = _patch(monkeypatch)
+    bound: list[tuple[str, int]] = []
+    monkeypatch.setattr(socket.socket, "bind", lambda self, address: bound.append(address))
+    ts_info = TailscaleInfo(ipv4="100.101.102.103", dns_name="mybox.tailnet.ts.net")
+    monkeypatch.setattr("groundly.web.tailscale.discover_tailscale", lambda: ts_info)
+
+    result = runner.invoke(app, [verb, "--tailscale"])
+    assert result.exit_code == 0, result.output
+    assert bound == [("127.0.0.1", 8765), ("100.101.102.103", 8765)]
+    assert len(runs) == 1
+    assert runs[0]["host"] == "127.0.0.1" and runs[0]["port"] == 8765
+    assert len(runs[0]["sockets"]) == 2
+    assert all(sock.fileno() == -1 for sock in runs[0]["sockets"])
+    assert opened == ["http://groundly.localhost:8765/"]
+
+    remote = runs[0]["app"].user_middleware[0].kwargs["remote"]
+    assert isinstance(remote, RemoteRuntime)
+    assert remote.ts_info == ts_info and remote.port == 8765
+    assert f"Tailscale: http://{ts_info.preferred_host}:8765/" in result.output
+    assert "Pair URL:" in result.output and "/pair#" in result.output
+    assert render_terminal_qr(remote.pairing.pairing_url).rstrip("\n") in result.output
+    if verb == "start":
+        assert runs[0]["app"].state.runner.mcp_url == "http://127.0.0.1:8765/mcp"
+        assert "http://127.0.0.1:8765/mcp" in result.output
+
+    assert remote.on_paired is not None
+    with console.capture() as capture:
+        remote.on_paired(
+            "[red]iPhone[/red]", "100.64.0.9", "http://mybox.tailnet.ts.net:8765/pair#next"
+        )
+    assert (
+        "Paired [red]iPhone[/red] (100.64.0.9) — next pair link: "
+        "http://mybox.tailnet.ts.net:8765/pair#next"
+    ) in capture.get()
+
+
+@pytest.mark.parametrize("verb", ["serve", "start"])
+def test_explicit_tailscale_fails_when_unavailable(monkeypatch, tmp_path, verb):
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
+    runs, opened = _patch(monkeypatch)
+    monkeypatch.setattr("groundly.web.tailscale.discover_tailscale", lambda: None)
+
+    result = runner.invoke(app, [verb, "--tailscale"])
+    assert result.exit_code == 1
+    assert "--no-tailscale" in result.output
+    assert runs == [] and opened == []
+
+
+def test_config_tailscale_warns_and_falls_back_to_loopback_when_unavailable(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "config.toml").write_text("[web]\ntailscale = true\n", encoding="utf-8")
+    monkeypatch.setenv("GROUNDLY_HOME", str(home))
+    runs, opened = _patch(monkeypatch)
+    bound: list[tuple[str, int]] = []
+    monkeypatch.setattr(socket.socket, "bind", lambda self, address: bound.append(address))
+    monkeypatch.setattr("groundly.web.tailscale.discover_tailscale", lambda: None)
+
+    result = runner.invoke(app, ["serve"])
+    assert result.exit_code == 0, result.output
+    assert "127.0.0.1 only" in result.output
+    assert bound == [("127.0.0.1", 8765)]
+    assert len(runs[0]["sockets"]) == 1
+    assert runs[0]["app"].user_middleware[0].kwargs["remote"] is None
+    assert opened == ["http://groundly.localhost:8765/"]
+
+
+def test_no_tailscale_flag_overrides_config_without_discovery(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "config.toml").write_text("[web]\ntailscale = true\n", encoding="utf-8")
+    monkeypatch.setenv("GROUNDLY_HOME", str(home))
+    runs, opened = _patch(monkeypatch)
+    bound: list[tuple[str, int]] = []
+    monkeypatch.setattr(socket.socket, "bind", lambda self, address: bound.append(address))
+
+    def fail_if_called():
+        raise AssertionError("discover_tailscale should not be called")
+
+    monkeypatch.setattr("groundly.web.tailscale.discover_tailscale", fail_if_called)
+
+    result = runner.invoke(app, ["serve", "--no-tailscale"])
+    assert result.exit_code == 0, result.output
+    assert "127.0.0.1 only" not in result.output
+    assert bound == [("127.0.0.1", 8765)]
+    assert len(runs[0]["sockets"]) == 1
+    assert runs[0]["app"].user_middleware[0].kwargs["remote"] is None
+    assert opened == ["http://groundly.localhost:8765/"]
+
+
+def test_second_socket_bind_failure_closes_first_socket_and_exits_cleanly(monkeypatch, tmp_path):
+    from groundly.web.tailscale import TailscaleInfo
+
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
+    runs, opened = _patch(monkeypatch)
+    ts_info = TailscaleInfo(ipv4="100.101.102.103")
+    monkeypatch.setattr("groundly.web.tailscale.discover_tailscale", lambda: ts_info)
+    bound_sockets: list[socket.socket] = []
+
+    def bind_fail_second(self, address):
+        if address[0] == "127.0.0.1":
+            bound_sockets.append(self)
+            return
+        raise OSError(errno.EADDRNOTAVAIL, "Can't assign requested address")
+
+    monkeypatch.setattr(socket.socket, "bind", bind_fail_second)
+
+    result = runner.invoke(app, ["serve", "--tailscale"])
+    assert result.exit_code == 1
+    assert "Can't assign requested address" in result.output
+    assert "Traceback" not in result.output
+    assert len(bound_sockets) == 1 and bound_sockets[0].fileno() == -1
     assert runs == [] and opened == []
 
 
