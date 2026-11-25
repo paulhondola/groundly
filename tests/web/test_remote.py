@@ -288,6 +288,8 @@ def test_socket_perimeter_pairing_multi_device_and_revocation(monkeypatch, tmp_p
             loopback.get("/api/subjects", headers={"Host": "100.101.102.103:8765"}).status_code
             == 400
         )
+        for bad_lb_host in ("127.0.0.1:", "[::1]"):
+            assert loopback.get("/api/auth", headers={"Host": bad_lb_host}).status_code == 400
 
         phone = TestClient(
             _socket_wrapper(app, ts_info.ipv4, "100.64.0.10"),
@@ -299,7 +301,13 @@ def test_socket_perimeter_pairing_multi_device_and_revocation(monkeypatch, tmp_p
         )
 
         # 2. Pre-auth Tailscale client checks: Host enforcement, no subject oracle, 401/404 gates.
-        for bad_host in ("localhost:8765", "127.0.0.1:8765", "evil.example:8765"):
+        for bad_host in (
+            "localhost:8765",
+            "127.0.0.1:8765",
+            "evil.example:8765",
+            "macbook.tail1234.ts.net:",
+            "[::1]:8765",
+        ):
             assert phone.get("/api/auth", headers={"Host": bad_host}).status_code == 400
 
         called_open: list[str] = []
@@ -576,3 +584,45 @@ def test_loopback_without_runtime_does_not_create_db_and_reads_existing_db(monke
     rev_all = client.post("/api/remote/revoke-all", json={}, headers=origin)
     assert rev_all.status_code == 200 and rev_all.json() == {"revoked": 2}
     assert client.get("/api/auth").json()["paired_devices"] == 0
+
+
+async def test_perimeter_rejects_non_ascii_host_port_with_400(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    ts_info = TailscaleInfo(ipv4="100.101.102.103", dns_name="macbook.tail1234.ts.net")
+    app = create_app(remote=RemoteRuntime(ts_info, 8765))
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    for server_ip, raw_host in (
+        ("127.0.0.1", b"127.0.0.1:\xb2"),
+        (ts_info.ipv4, b"macbook.tail1234.ts.net:\xb2"),
+        ("127.0.0.1", b"[::1]"),
+        ("127.0.0.1", b"[::1]:8765"),
+        ("127.0.0.1", b"127.0.0.1:0"),
+        ("127.0.0.1", b"127.0.0.1:65536"),
+        (ts_info.ipv4, b"macbook.tail1234.ts.net:"),
+    ):
+        sent: list[dict] = []
+
+        async def send(message, *, sink: list[dict] = sent):
+            sink.append(message)
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/api/auth",
+            "raw_path": b"/api/auth",
+            "query_string": b"",
+            "headers": [(b"host", raw_host)],
+            "server": (server_ip, 8765),
+            "client": ("100.64.0.10", 51234),
+        }
+        await app(scope, receive, send)
+        assert sent[0]["status"] == 400
+        assert sent[1]["body"] == b"Invalid host header"

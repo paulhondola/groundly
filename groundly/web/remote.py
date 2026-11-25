@@ -362,7 +362,9 @@ def _extract_host(headers: Headers) -> str | None:
     if not raw:
         return None
     hostname, sep, port = raw.partition(":")
-    if not hostname or (sep and (not port.isdigit() or not (1 <= int(port) <= 65535))):
+    if not hostname or (
+        sep and (not port.isascii() or not port.isdigit() or not (1 <= int(port) <= 65535))
+    ):
         return None
     return hostname.lower()
 
