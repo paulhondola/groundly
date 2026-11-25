@@ -383,20 +383,24 @@ def _handle(
     out_path.write_text(json.dumps(result))
 
 
-def serve(
-    stdin: TextIO,
-    stdout: TextIO,
-    handle: Callable[[Path, Path, str | None], None] = _handle,
-) -> None:
-    """One JSON request per line in ({"in", "out", "ocr_lang"}), one reply per line out
-    ({"status": ok|no_text|model_unavailable|input_too_large|error}). The cause goes to
-    stderr before the reply, so the parent can read it once the reply arrives. A failing
-    file never ends the loop."""
+Handler = Callable[[Path, Path, str | None, Callable[[int], None]], None]
+
+
+def serve(stdin: TextIO, stdout: TextIO, handle: Handler = _handle) -> None:
+    """One JSON request per line in ({"in", "out", "ocr_lang"}). Out: one {"page": n} line per
+    page as it finishes, then one status line ({"status": ok|no_text|model_unavailable|
+    input_too_large|error}). The cause goes to stderr before the status, so the parent can
+    read it once the status arrives. A failing file never ends the loop."""
+
+    def on_page(n: int) -> None:
+        stdout.write(json.dumps({"page": n}) + "\n")
+        stdout.flush()
+
     for line in stdin:
         req = json.loads(line)
         status = "ok"
         try:
-            handle(Path(req["in"]), Path(req["out"]), req["ocr_lang"])
+            handle(Path(req["in"]), Path(req["out"]), req["ocr_lang"], on_page)
         except SystemExit as exc:
             if isinstance(exc.code, int):
                 status = _SERVE_STATUS.get(exc.code, "error")
@@ -413,7 +417,7 @@ def serve(
         stdout.flush()
 
 
-def serve_stdio(handle: Callable[[Path, Path, str | None], None] = _handle) -> None:
+def serve_stdio(handle: Handler = _handle) -> None:
     """`serve` on the process's stdin and a private copy of fd 1. fd 1 itself is pointed at
     stderr, so anything a library prints (even from C) can never corrupt the protocol."""
     reply = os.fdopen(os.dup(1), "w")

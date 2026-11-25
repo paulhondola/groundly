@@ -149,17 +149,22 @@ class SubprocessExtractor:
             out_json.unlink(missing_ok=True)
             start = (tmp / "stderr.log").stat().st_size
             request = {"in": in_path, "out": str(out_json), "ocr_lang": ocr_lang}
+            paged = False  # a page line proves the worker read this request
             try:
                 proc.stdin.write(json.dumps(request) + "\n")
                 proc.stdin.flush()
-                line = self._replies.get(timeout=self.timeout)
+                # the wait restarts on every finished page: the limit is per page, not per file
+                while (line := self._replies.get(timeout=self.timeout)) is not None:
+                    if "page" not in json.loads(line):
+                        break
+                    paged = True
             except OSError:  # broken pipe: the worker is gone
                 line = None
             except queue.Empty:
                 proc.kill()
                 self.close()
                 raise ExtractionFailure(
-                    f"extraction timed out after {int(self.timeout)}s"
+                    f"extraction timed out — no page finished within {int(self.timeout)}s"
                 ) from None
             if line is not None:
                 return line, tmp, start
@@ -169,7 +174,7 @@ class SubprocessExtractor:
             # A death with nothing said since this request may have happened before the
             # worker read it: resend once to a fresh worker. A file that kills workers
             # silently still fails on the second try.
-            if tail or attempt:
+            if tail or attempt or paged:
                 raise ExtractionFailure(f"parser failed: {tail or f'exit code {rc}'}")
         raise AssertionError("unreachable: the second attempt returns or raises")
 
