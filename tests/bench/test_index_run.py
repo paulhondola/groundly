@@ -1,7 +1,14 @@
 import sqlite3
 import sys
 
-from bench.index.run import schedule, scratch_home, stage_seconds, store_stats, worker_argv
+from bench.index.run import (
+    ingestion_settings,
+    schedule,
+    scratch_home,
+    stage_seconds,
+    store_stats,
+    worker_argv,
+)
 from groundly.core.store import create_store
 
 
@@ -53,3 +60,19 @@ def test_stage_seconds_counts_a_failed_extraction_as_extract_time():
         "big.pdf": {"extracting": 15.5, "end": 315.5},
     }
     assert stage_seconds(marks) == (304.0, 1.5)
+
+
+def test_product_arm_runs_the_shipped_worker():
+    assert worker_argv("product", None)[1:] == [
+        "-m",
+        "groundly.ingestion.extract_worker",
+        "--serve",
+    ]
+
+
+def test_timeout_overrides_only_the_timeout(monkeypatch, tmp_path):
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path))  # no config file: shipped defaults
+    s = ingestion_settings(3600)
+    assert s.timeout_seconds == 3600
+    assert s.max_pages == ingestion_settings(None).max_pages
+    assert ingestion_settings(None).timeout_seconds == 300

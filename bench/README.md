@@ -20,9 +20,10 @@ Each module ends with `_worker.main(stack)`, which gives it two modes:
 | Stack | What it is |
 |---|---|
 | `docling_standard` | docling + RapidOCR on every page |
-| `docling_routed` | the pdf_router: text pages through pypdfium2, image and mixed pages through docling |
-| `docling_paged` | docling on every page as `docling_standard`, then chunked one page at a time so every chunk cites its own page |
+| `product` | the shipped worker (`groundly.ingestion.extract_worker`): every PDF and image read and chunked page by page (decision 49) |
 | `mineru` | MinerU2.5 on MLX. Needs the optional extra: `uv sync --extra bench` |
+
+`docling_routed` and `docling_paged` were retired when the page reader shipped; their rows stay in `index.jsonl`. The router's text-layer reading and page classification live on in `bench/stacks/text_layer.py` for the corpus census.
 
 To add a stack, write one module with the three names above. Nothing in `groundly/` changes, and `groundly/` never imports `bench`.
 
@@ -33,7 +34,7 @@ Every run appends one row per arm and run to `bench/results/<bench>.jsonl`. Each
 ### index: end-to-end speed and memory
 
 ```bash
-uv run python -m bench.index.run --stacks docling_standard docling_routed --runs 5 \
+uv run python -m bench.index.run --stacks docling_standard product --runs 5 [--timeout 3600] \
     --subject apd --input ~/.groundly/apd/materials [--keep-homes] [--memray]
 uv run python -m bench.common.compare index --baseline docling_standard --gate 0.85
 ```
@@ -55,7 +56,7 @@ The stacks run interleaved. Each run is a fresh child process with its own scrat
 
 ```bash
 uv run python -m bench.extract.sample --version 1          # build bench/corpus/manifest.json
-uv run python -m bench.extract.run --stack docling_routed --only-ref [--session S]
+uv run python -m bench.extract.run --stack docling_standard --only-ref [--session S]
 ```
 
 The manifest is a frozen, stratified sample of pages: kind (text, image, mixed) × language (ro, en). Files are pinned by sha256, and loading the manifest refuses a missing or changed file. About 40 pages are reference pages. Their hand-checked text lives in `bench/reference/<sha256>-<page>.txt`, and pages with no checked text are skipped.
@@ -74,7 +75,7 @@ To compare stacks, pass the session id the first run prints to the next run's `-
 
 ```bash
 uv run python -m bench.retrieval.run --home <home> --subject apd \
-    --queries bench/retrieval/queries/apd.json --arm docling_routed [--session S]
+    --queries bench/retrieval/queries/apd.json --arm product [--session S]
 uv run python -m bench.common.compare retrieval --baseline docling_standard --metric hit_within1@8
 ```
 

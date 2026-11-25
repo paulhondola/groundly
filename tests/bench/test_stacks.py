@@ -29,7 +29,7 @@ def touch(path: Path) -> Path:
 
 def test_claimed_suffix_goes_to_the_stack(tmp_path):
     stack = fake_stack(result={"pages": 1, "chunks": [{"text": "hi"}]})
-    handler(stack)(touch(tmp_path / "a.pdf"), tmp_path / "out.json", None)
+    handler(stack)(touch(tmp_path / "a.pdf"), tmp_path / "out.json", None, print)
     assert json.loads((tmp_path / "out.json").read_text())["pages"] == 1
     assert stack.calls == 1
 
@@ -38,15 +38,16 @@ def test_other_suffixes_use_groundly_default(tmp_path, monkeypatch):
     seen = []
     monkeypatch.setattr(extract_worker, "_handle", lambda *a: seen.append(a))
     stack = fake_stack()
-    handler(stack)(tmp_path / "n.txt", tmp_path / "out.json", "ro")
+    pages: list[int] = []
+    handler(stack)(tmp_path / "n.txt", tmp_path / "out.json", "ro", pages.append)
     assert stack.calls == 0
-    assert seen == [(tmp_path / "n.txt", tmp_path / "out.json", "ro")]
+    assert seen == [(tmp_path / "n.txt", tmp_path / "out.json", "ro", pages.append)]
 
 
 def test_blank_stack_output_exits_no_text(tmp_path):
     stack = fake_stack(result={"pages": 1, "chunks": [{"text": "  "}]})
     with pytest.raises(SystemExit) as e:
-        handler(stack)(touch(tmp_path / "a.pdf"), tmp_path / "out.json", None)
+        handler(stack)(touch(tmp_path / "a.pdf"), tmp_path / "out.json", None, print)
     assert e.value.code == extract_worker.EXIT_NO_TEXT
     assert not (tmp_path / "out.json").exists()
 

@@ -15,10 +15,12 @@ from types import ModuleType
 from groundly.ingestion import extract_worker
 
 
-def handler(stack: ModuleType) -> Callable[[Path, Path, str | None], None]:
-    def handle(in_path: Path, out_path: Path, ocr_lang: str | None) -> None:
+def handler(stack: ModuleType) -> extract_worker.Handler:
+    def handle(
+        in_path: Path, out_path: Path, ocr_lang: str | None, on_page: Callable[[int], None]
+    ) -> None:
         if in_path.suffix.lower() not in stack.SUFFIXES:
-            extract_worker._handle(in_path, out_path, ocr_lang)
+            extract_worker._handle(in_path, out_path, ocr_lang, on_page)
             return
         result = stack.extract(in_path, ocr_lang)
         if not any(c["text"].strip() for c in result["chunks"]):

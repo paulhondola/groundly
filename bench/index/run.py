@@ -13,8 +13,12 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from bench.common import monitor, results
+
+if TYPE_CHECKING:
+    from groundly.core.config import IngestionSettings
 
 ROOT = Path(__file__).parents[2]
 MODELS = Path.home() / ".groundly/models"
@@ -33,7 +37,9 @@ def scratch_home(models: Path = MODELS) -> Path:
 
 
 def worker_argv(stack: str, memray_out: Path | None) -> list[str]:
-    serve = ["-m", f"bench.stacks.{stack}", "--serve"]
+    """The worker for an arm: `product` is the shipped extraction worker itself."""
+    module = "groundly.ingestion.extract_worker" if stack == "product" else f"bench.stacks.{stack}"
+    serve = ["-m", module, "--serve"]
     if memray_out is None:
         return [sys.executable, *serve]
     return [sys.executable, "-m", "memray", "run", "-q", "-o", str(memray_out), *serve]
@@ -68,10 +74,22 @@ def stage_seconds(marks: dict) -> tuple[float, float]:
     return extract_s, embed_s
 
 
-def _one(
-    stack: str, subject: str, input_path: Path, memray_out: Path | None, timing_out: Path | None
-) -> None:
+def ingestion_settings(timeout: float | None) -> "IngestionSettings":
+    """This machine's ingestion settings, the timeout overridden when given."""
     from groundly.core.config import load_settings
+
+    settings = load_settings().ingestion
+    return settings if timeout is None else settings.model_copy(update={"timeout_seconds": timeout})
+
+
+def _one(
+    stack: str,
+    subject: str,
+    input_path: Path,
+    memray_out: Path | None,
+    timing_out: Path | None,
+    timeout: float | None = None,
+) -> None:
     from groundly.core.subject import Subject
     from groundly.ingestion.extract import SubprocessExtractor
     from groundly.ingestion.pipeline import IngestionPipeline
@@ -87,7 +105,8 @@ def _one(
         )
 
     t0 = time.perf_counter()
-    with SubprocessExtractor(load_settings().ingestion, argv=worker_argv(stack, memray_out)) as ex:
+    settings = ingestion_settings(timeout)
+    with SubprocessExtractor(settings, argv=worker_argv(stack, memray_out)) as ex:
         IngestionPipeline(subj, extractor=ex, on_event=on_event).run([input_path])
     pipeline_s = time.perf_counter() - t0
 
@@ -112,12 +131,15 @@ def main() -> None:
     ap.add_argument("--timing-out", type=Path)
     ap.add_argument("--memray", action="store_true")
     ap.add_argument("--keep-homes", action="store_true")
+    ap.add_argument("--timeout", type=float, help="ingestion.timeout_seconds for this run")
     args = ap.parse_args()
     args.input = args.input.expanduser()
     if not args.one and not args.stacks:
         ap.error("--stacks is required unless --one is given")
     if args.one:
-        return _one(args.stack, args.subject, args.input, args.memray_out, args.timing_out)
+        return _one(
+            args.stack, args.subject, args.input, args.memray_out, args.timing_out, args.timeout
+        )
 
     session = results.new_session()
     sha = results._sh("git", "-C", str(ROOT), "rev-parse", "--short", "HEAD")
@@ -129,6 +151,8 @@ def main() -> None:
         home = scratch_home()
         cmd = [sys.executable, "-m", "bench.index.run", "--one", "--stack", stack]
         cmd += ["--subject", args.subject, "--input", str(args.input)]
+        if args.timeout is not None:
+            cmd += ["--timeout", str(args.timeout)]
         if args.memray:
             cmd += ["--memray-out", str(memray_dir / f"{session}-{stack}-{run}.bin")]
         timing = home / "timing.json"  # outside the subject dir, so it never reaches store stats
@@ -160,6 +184,7 @@ def main() -> None:
                     "machine": results.machine(),
                     "versions": results.versions(Path(sys.executable)),
                     "ocr_lang": None,
+                    "timeout_s": ingestion_settings(args.timeout).timeout_seconds,
                     "manifest_version": None,
                     "run": run,
                     "memray": args.memray,

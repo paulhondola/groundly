@@ -16,7 +16,7 @@ from typing import Literal
 
 import pypdfium2 as pdfium
 
-from groundly.ingestion.pdf_router import classify_page, is_slide_deck
+from bench.stacks.text_layer import classify_page, is_slide_deck
 
 _RO = {
     "și",
