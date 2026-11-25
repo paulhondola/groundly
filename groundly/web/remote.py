@@ -6,19 +6,25 @@ import hashlib
 import hmac
 import io
 import os
+import re
 import secrets
 import sqlite3
 import stat
 import threading
 import time
 from collections import deque
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import segno
+from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import Headers
+from starlette.requests import Request
+from starlette.responses import JSONResponse, PlainTextResponse, Response
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from groundly.core.paths import remote_db_path
 from groundly.web.tailscale import TailscaleInfo
@@ -342,3 +348,111 @@ class RemoteRuntime:
         self.store = store if store is not None else RemoteStore()
         self.pairing = PairingManager(ts_info, port)
         self.on_paired = on_paired
+
+
+_SUBJECT_SHELL_RE = re.compile(r"^/s/[^/]+(?:/test|/attempts/\d+)?$")
+
+
+def _extract_host(headers: Headers) -> str | None:
+    """Extract and lowercase hostname from a single Host header, validating optional port."""
+    values = headers.getlist("host")
+    if len(values) != 1:
+        return None
+    raw = values[0].strip()
+    if not raw:
+        return None
+    hostname, sep, port = raw.partition(":")
+    if not hostname or (sep and (not port.isdigit() or not (1 <= int(port) <= 65535))):
+        return None
+    return hostname.lower()
+
+
+class _SocketPerimeterMiddleware:
+    """Enforce loopback vs Tailscale socket host rules, /mcp isolation, and session cookies."""
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        loopback_hosts: Sequence[str],
+        html_shell: Callable[[], Response],
+        remote: RemoteRuntime | None = None,
+    ) -> None:
+        self._app = app
+        self._loopback_hosts = frozenset(host.lower() for host in loopback_hosts)
+        self._html_shell = html_shell
+        self._remote = remote
+        self._tailscale_hosts = (
+            frozenset(host.lower() for host in remote.ts_info.allowed_hosts)
+            if remote is not None
+            else frozenset()
+        )
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+
+        server = scope.get("server")
+        server_ip = server[0] if server else None
+        remote = self._remote
+        is_tailscale = remote is not None and server_ip == remote.ts_info.ipv4
+
+        host = _extract_host(Headers(scope=scope))
+        allowed_hosts = self._tailscale_hosts if is_tailscale else self._loopback_hosts
+        if host is None or host not in allowed_hosts:
+            await PlainTextResponse("Invalid host header", status_code=400)(scope, receive, send)
+            return
+
+        state = scope.setdefault("state", {})
+        if not is_tailscale or remote is None:
+            state["access"] = "loopback"
+            state["paired"] = True
+            await self._app(scope, receive, send)
+            return
+
+        state["access"] = "tailscale"
+        path = scope.get("path", "")
+        if path == "/mcp" or path.startswith("/mcp/"):
+            await Response("not found", status_code=404)(scope, receive, send)
+            return
+        if path == "/api/remote" or path.startswith("/api/remote/"):
+            await JSONResponse(
+                {"error": "not_found", "detail": "remote management is local only"},
+                status_code=404,
+            )(scope, receive, send)
+            return
+
+        session_token = Request(scope).cookies.get(SESSION_COOKIE)
+        paired = bool(
+            session_token and await run_in_threadpool(remote.store.authenticate, session_token)
+        )
+        state["paired"] = paired
+
+        method = scope.get("method", "GET").upper()
+        if method in ("GET", "HEAD") and (path.startswith("/static/") or path == "/api/auth"):
+            await self._app(scope, receive, send)
+            return
+        if method == "POST" and path == "/api/pair":
+            await self._app(scope, receive, send)
+            return
+        if method in ("GET", "HEAD") and (
+            path in {"/", "/pair"} or _SUBJECT_SHELL_RE.fullmatch(path) is not None
+        ):
+            if not paired:
+                await self._html_shell()(scope, receive, send)
+                return
+            await self._app(scope, receive, send)
+            return
+
+        if not paired:
+            await JSONResponse(
+                {
+                    "error": "unpaired",
+                    "detail": "scan the pairing QR code on your computer",
+                },
+                status_code=401,
+            )(scope, receive, send)
+            return
+
+        await self._app(scope, receive, send)
