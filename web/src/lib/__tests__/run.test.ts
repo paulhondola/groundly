@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import type { RunSnapshot } from "../api/client";
 import { createAppQueryClient } from "../api/queries";
 import { type EventSourceLike, setEventStreamFactory } from "../api/sse";
-import { createRunStore } from "../run.svelte";
+import { authStore } from "../auth.svelte";
+import { createRunStore, runStore } from "../run.svelte";
 
 class MockEventSource implements EventSourceLike {
   static instances: MockEventSource[] = [];
@@ -70,6 +71,8 @@ describe("createRunStore", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    runStore.destroy();
+    authStore.resetForTests();
     MockEventSource.instances = [];
     fetchMock = vi.fn();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
@@ -77,6 +80,7 @@ describe("createRunStore", () => {
   });
 
   afterEach(() => {
+    authStore.resetForTests();
     setEventStreamFactory(null);
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
@@ -453,5 +457,103 @@ describe("createRunStore", () => {
     expect(invalidateSpy).toHaveBeenCalledTimes(1);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject", "PDSS"] });
     store.destroy();
+  });
+
+  it("resets retry state and re-attaches SSE on visibilitychange/online wake-up, skips when unpaired, and stops after destroy()", async () => {
+    const qc = createAppQueryClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const store = createRunStore(qc);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 99 }), 202));
+    await store.start("PDSS", { kind: "write", topic_id: 7 });
+
+    const runningInfo = () =>
+      jsonResponse({
+        available: true,
+        reason: null,
+        target: 10,
+        run: makeSnapshot({ id: 99, status: "running" }),
+      });
+
+    const exhaustRetries = async () => {
+      for (let i = 0; i < 4; i++) {
+        const currentEs = MockEventSource.instances[MockEventSource.instances.length - 1];
+        if (currentEs.closed) {
+          break;
+        }
+        const beforeCalls = fetchMock.mock.calls.length;
+        fetchMock.mockResolvedValueOnce(runningInfo());
+        currentEs.triggerError();
+        await vi.waitFor(() => {
+          expect(fetchMock).toHaveBeenCalledTimes(beforeCalls + 1);
+        });
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    };
+
+    await exhaustRetries();
+    expect(MockEventSource.instances).toHaveLength(3);
+    expect(store.message).toContain("Lost live stream connection");
+
+    // Hidden visibilitychange must not wake up
+    const visibilitySpy = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    const callsBeforeHidden = fetchMock.mock.calls.length;
+    document.dispatchEvent(new Event("visibilitychange"));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fetchMock).toHaveBeenCalledTimes(callsBeforeHidden);
+    expect(MockEventSource.instances).toHaveLength(3);
+
+    // Visible visibilitychange resets retries, clears Lost message, probes GET /api/runs, opens SSE, invalidates queries
+    visibilitySpy.mockReturnValue("visible");
+    fetchMock.mockResolvedValueOnce(runningInfo());
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await vi.waitFor(() => {
+      expect(MockEventSource.instances).toHaveLength(4);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(callsBeforeHidden + 1);
+    const wakeReq1 = fetchMock.mock.calls[callsBeforeHidden][0] as Request;
+    expect(wakeReq1.method).toBe("GET");
+    expect(new URL(wakeReq1.url).pathname).toBe("/api/runs");
+    expect(store.message).toBeNull();
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject"] });
+
+    // Exhaust retries again, then wake via window "online"
+    await exhaustRetries();
+    expect(MockEventSource.instances).toHaveLength(6);
+    expect(store.message).toContain("Lost live stream connection");
+
+    const callsBeforeOnline = fetchMock.mock.calls.length;
+    fetchMock.mockResolvedValueOnce(runningInfo());
+    window.dispatchEvent(new Event("online"));
+
+    await vi.waitFor(() => {
+      expect(MockEventSource.instances).toHaveLength(7);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(callsBeforeOnline + 1);
+    expect(store.message).toBeNull();
+
+    // Unpaired state skips wake-up resync
+    authStore.handleUnpaired();
+    const callsWhileUnpaired = fetchMock.mock.calls.length;
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("online"));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fetchMock).toHaveBeenCalledTimes(callsWhileUnpaired);
+
+    // After destroy(), wake listeners no longer fire even when paired
+    authStore.resetForTests();
+    store.destroy();
+    const callsAfterDestroy = fetchMock.mock.calls.length;
+    const esCountAfterDestroy = MockEventSource.instances.length;
+    const invalidatesAfterDestroy = invalidateSpy.mock.calls.length;
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("online"));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(fetchMock).toHaveBeenCalledTimes(callsAfterDestroy);
+    expect(MockEventSource.instances).toHaveLength(esCountAfterDestroy);
+    expect(invalidateSpy).toHaveBeenCalledTimes(invalidatesAfterDestroy);
   });
 });

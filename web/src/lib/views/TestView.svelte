@@ -9,6 +9,7 @@
   import {
     type StoredTest,
     createTestPersister,
+    generateAttemptToken,
     isAnswered,
     loadTest,
     saveTest,
@@ -152,7 +153,7 @@
           }
           loaded = {
             n: activeN,
-            token: crypto.randomUUID(),
+            token: generateAttemptToken(),
             questions: drawn.questions.map((q) => ({ ...q, options: shuffled(q.options) })),
             answers: {},
             current: 0,

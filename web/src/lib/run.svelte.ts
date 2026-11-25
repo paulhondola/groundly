@@ -15,6 +15,7 @@ import {
   type SSEStepEvent,
   createEventStream,
 } from "./api/sse";
+import { authStore } from "./auth.svelte";
 
 export const MAX_STREAM_CHARS = 2000;
 export const MAX_STEPS = 50;
@@ -345,8 +346,40 @@ export function createRunStore(qc: QueryClient = queryClient) {
     closeStream();
   }
 
+  function onWake(): void {
+    // Check authStore.paired lazily to avoid top-level circular ESM access with auth.svelte.ts.
+    if (!authStore.paired) {
+      return;
+    }
+    streamErrors = 0;
+    if (message?.startsWith("Lost ")) {
+      message = null;
+    }
+    void attach();
+    void qc.invalidateQueries({ queryKey: queryKeys.allSubjects() });
+  }
+
+  function onVisibilityChange(): void {
+    if (document.visibilityState === "visible") {
+      onWake();
+    }
+  }
+
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", onVisibilityChange);
+  }
+  if (typeof window !== "undefined") {
+    window.addEventListener("online", onWake);
+  }
+
   function destroy(): void {
     closeStream();
+    if (typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    }
+    if (typeof window !== "undefined") {
+      window.removeEventListener("online", onWake);
+    }
   }
 
   return {
