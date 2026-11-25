@@ -1,7 +1,7 @@
-"""The topic-tree and test page server: loopback, one process for every subject.
+"""The topic-tree and test page server on loopback and, optionally, Tailscale.
 
 Titles, summaries, questions and chunk text come from stores that an imported bundle may have
-written. The page writes one thing, a submitted test attempt to the student's `progress.db`,
+written. The page manages remote sessions in `remote.db` and writes attempts to the student's `progress.db`,
 through `agents/quiz.py`, and only from a JSON POST carrying the page's own Origin; it never
 writes store.db and loads no model; under `groundly start` the same process also serves
 the MCP tools at `/mcp`, whose first search loads the models. Two more page POSTs start
@@ -13,7 +13,6 @@ addressed by id and its file must resolve inside the subject's materials dir.
 import asyncio
 import atexit
 import json
-import secrets
 import sqlite3
 from collections.abc import Callable
 from contextlib import asynccontextmanager
@@ -44,6 +43,7 @@ from groundly.web.remote import (
     RemoteStore,
     _SocketPerimeterMiddleware,
     qr_matrix,
+    remote_db_error,
 )
 from groundly.web.runs import Runner
 from groundly.web.schemas import (
@@ -205,6 +205,10 @@ def _error_responses(*codes: int) -> dict[int | str, dict[str, Any]]:
     return {code: _ERROR_RESPONSES[code] for code in codes}
 
 
+def _protected_responses(*codes: int) -> dict[int | str, dict[str, Any]]:
+    return _error_responses(401, 500, 503, *codes)
+
+
 def _json_body_schema(model: type[BaseModel]) -> dict[str, Any]:
     return {
         "requestBody": {
@@ -253,16 +257,6 @@ def _active_remote_store(remote: RemoteRuntime | None) -> RemoteStore | None:
     if remote is not None:
         return remote.store
     return RemoteStore() if remote_db_path().exists() else None
-
-
-def _remote_db_error(exc: Exception) -> JSONResponse:
-    if isinstance(exc, sqlite3.OperationalError) and ("locked" in str(exc) or "busy" in str(exc)):
-        return _error(
-            "busy",
-            "remote session store is busy — try again in a moment",
-            503,
-        )
-    return _error("store_error", str(exc), 500)
 
 
 def create_app(
@@ -362,6 +356,7 @@ def create_app(
         "/api/subjects",
         response_model=list[SubjectSummary],
         response_model_exclude_none=True,
+        responses=_protected_responses(),
         operation_id="listSubjects",
     )
     def _subjects() -> list[dict[str, Any]]:
@@ -385,7 +380,7 @@ def create_app(
     @app.get(
         "/api/subjects/{subject}/tree",
         response_model=TreeResponse,
-        responses=_error_responses(404, 500),
+        responses=_protected_responses(404),
         operation_id="getSubjectTree",
     )
     def _tree(subject: str) -> Any:
@@ -427,7 +422,7 @@ def create_app(
     @app.get(
         "/api/subjects/{subject}/test",
         response_model=DrawTestResponse,
-        responses=_error_responses(400, 404, 500, 503),
+        responses=_protected_responses(400, 404),
         operation_id="drawTest",
     )
     def _draw(subject: str, topic: int | None = None, n: int = 10) -> Any:
@@ -440,7 +435,7 @@ def create_app(
         "/api/subjects/{subject}/attempts",
         status_code=201,
         response_model=SubmitAttemptResponse,
-        responses=_error_responses(400, 403, 404, 413, 415, 500, 503),
+        responses=_protected_responses(400, 403, 404, 413, 415),
         openapi_extra=_json_body_schema(SubmitAttemptOpenAPIBody),
         operation_id="submitAttempt",
     )
@@ -464,7 +459,7 @@ def create_app(
     @app.get(
         "/api/subjects/{subject}/attempts",
         response_model=list[AttemptSummary],
-        responses=_error_responses(400, 404, 500, 503),
+        responses=_protected_responses(400, 404),
         operation_id="listAttempts",
     )
     def _history(subject: str) -> Any:
@@ -473,7 +468,7 @@ def create_app(
     @app.get(
         "/api/subjects/{subject}/attempts/{id:int}",
         response_model=AttemptResultResponse,
-        responses=_error_responses(400, 404, 500, 503),
+        responses=_protected_responses(400, 404),
         operation_id="getAttemptResult",
     )
     def _result(subject: str, id: int) -> Any:
@@ -492,7 +487,12 @@ def create_app(
 
         return _quiz(subject, read, opened)
 
-    @app.get("/api/runs", response_model=RunsInfoResponse, operation_id="getRuns")
+    @app.get(
+        "/api/runs",
+        response_model=RunsInfoResponse,
+        responses=_protected_responses(),
+        operation_id="getRuns",
+    )
     def _runs(request: Request) -> dict[str, Any]:
         _, reason = runs.availability()
         return {
@@ -502,7 +502,7 @@ def create_app(
             "run": request.app.state.runner.view(),
         }
 
-    @app.get("/api/runs/stream", operation_id="streamRuns")
+    @app.get("/api/runs/stream", responses=_protected_responses(), operation_id="streamRuns")
     async def _stream_runs(request: Request) -> StreamingResponse:
         active_runner: Runner = request.app.state.runner
         loop = asyncio.get_running_loop()
@@ -530,6 +530,7 @@ def create_app(
                 snapshot, queue = active_runner.subscribe(loop)
                 if await _session_revoked():
                     return
+                next_auth_check = loop.time() + runs.SSE_KEEPALIVE_S
                 yield f"event: snapshot\ndata: {json.dumps(snapshot)}\n\n"
                 if queue is None or snapshot is None or snapshot["status"] != "running":
                     return
@@ -552,7 +553,7 @@ def create_app(
                         try:
                             done, pending = await asyncio.wait(
                                 wait_tasks,
-                                timeout=runs.SSE_KEEPALIVE_S,
+                                timeout=max(0, next_auth_check - loop.time()),
                                 return_when=asyncio.FIRST_COMPLETED,
                             )
                         except BaseException:
@@ -564,14 +565,13 @@ def create_app(
                         for task in pending:
                             task.cancel()
                         await asyncio.gather(*pending, return_exceptions=True)
-                        if revoke_task in done:
+                        if revoke_task in done or loop.time() >= next_auth_check:
                             revoke_event.clear()
                             if await _session_revoked():
                                 break
-                            if get_task not in done:
-                                continue
-                        elif get_task not in done:
-                            if await request.is_disconnected() or await _session_revoked():
+                            next_auth_check = loop.time() + runs.SSE_KEEPALIVE_S
+                        if get_task not in done:
+                            if await request.is_disconnected():
                                 break
                             yield ": keep-alive\n\n"
                             continue
@@ -601,7 +601,7 @@ def create_app(
         "/api/subjects/{subject}/runs",
         status_code=202,
         response_model=RunSnapshot,
-        responses=_error_responses(400, 403, 404, 409, 413, 415, 500, 503),
+        responses=_protected_responses(400, 403, 404, 409, 413, 415),
         openapi_extra=_json_body_schema(StartRunRequest),
         operation_id="startRun",
     )
@@ -645,7 +645,7 @@ def create_app(
     @app.post(
         "/api/runs/stop",
         response_model=StopRunResponse,
-        responses=_error_responses(400, 403, 413, 415),
+        responses=_protected_responses(400, 403, 413, 415),
         openapi_extra=_json_body_schema(StopRunRequest),
         operation_id="stopRun",
     )
@@ -661,7 +661,12 @@ def create_app(
         # run's own /mcp calls under `groundly start`.
         return {"run": await run_in_threadpool(request.app.state.runner.stop)}
 
-    @app.get("/api/auth", response_model=AuthStatusResponse, operation_id="getAuthStatus")
+    @app.get(
+        "/api/auth",
+        response_model=AuthStatusResponse,
+        responses=_error_responses(500, 503),
+        operation_id="getAuthStatus",
+    )
     def _auth_status(request: Request) -> dict[str, Any]:
         access = getattr(request.state, "access", "loopback")
         paired = bool(getattr(request.state, "paired", access == "loopback"))
@@ -697,24 +702,17 @@ def create_app(
             return _error("invalid_body", "expected {token}")
         peer_ip = request.client.host if request.client is not None else "unknown"
         try:
-            next_url = remote.pairing.consume_and_rotate(payload.token, peer_ip)
+            raw_session = await run_in_threadpool(
+                remote.pair_device,
+                payload.token,
+                peer_ip,
+                request.headers.get("user-agent", ""),
+                request.cookies.get(SESSION_COOKIE),
+            )
         except PairAuthError as e:
             return _error(e.error, e.detail, e.status_code)
-        raw_session = secrets.token_urlsafe(32)
-        user_agent = request.headers.get("user-agent", "")
-        replace_token = request.cookies.get(SESSION_COOKIE)
-        try:
-            device = await run_in_threadpool(
-                remote.store.create_session,
-                raw_session,
-                user_agent,
-                peer_ip,
-                replace_raw_token=replace_token,
-            )
         except (sqlite3.DatabaseError, RuntimeError) as exc:
-            return _remote_db_error(exc)
-        if remote.on_paired is not None:
-            remote.on_paired(device["label"], peer_ip, next_url)
+            return remote_db_error(exc)
         response = JSONResponse({"paired": True}, status_code=200)
         response.set_cookie(
             key=SESSION_COOKIE,
@@ -730,7 +728,7 @@ def create_app(
     @app.get(
         "/api/remote",
         response_model=RemoteInfoResponse,
-        responses=_error_responses(500, 503),
+        responses=_error_responses(404, 500, 503),
         operation_id="getRemoteInfo",
     )
     def _remote_info() -> Any:
@@ -738,7 +736,7 @@ def create_app(
         try:
             devices = store.list_devices() if store is not None else []
         except (sqlite3.DatabaseError, RuntimeError) as exc:
-            return _remote_db_error(exc)
+            return remote_db_error(exc)
         if remote is None:
             return {
                 "active": False,
@@ -746,7 +744,7 @@ def create_app(
                 "qr_matrix": None,
                 "devices": devices,
             }
-        pairing_url = remote.pairing.pairing_url
+        pairing_url = remote.pairing_url
         return {
             "active": True,
             "pairing_url": pairing_url,
@@ -779,7 +777,7 @@ def create_app(
                 store = _active_remote_store(remote)
                 revoked = store.revoke_device(id) if store is not None else False
             except (sqlite3.DatabaseError, RuntimeError) as exc:
-                return _remote_db_error(exc)
+                return remote_db_error(exc)
             if revoked and remote is not None:
                 remote.notify_revoked()
             return {"revoked": revoked}
@@ -789,7 +787,7 @@ def create_app(
     @app.post(
         "/api/remote/revoke-all",
         response_model=RevokeAllResponse,
-        responses=_error_responses(400, 403, 413, 415, 500, 503),
+        responses=_error_responses(400, 403, 404, 413, 415, 500, 503),
         openapi_extra=_json_body_schema(StopRunRequest),
         operation_id="revokeAllRemoteDevices",
     )
@@ -805,14 +803,13 @@ def create_app(
 
         def revoke_all() -> Any:
             try:
-                store = _active_remote_store(remote)
-                count = store.revoke_all() if store is not None else 0
+                if remote is not None:
+                    count = remote.revoke_all()
+                else:
+                    store = _active_remote_store(None)
+                    count = store.revoke_all() if store is not None else 0
             except (sqlite3.DatabaseError, RuntimeError) as exc:
-                return _remote_db_error(exc)
-            if remote is not None:
-                remote.pairing.rotate()
-                if count > 0:
-                    remote.notify_revoked()
+                return remote_db_error(exc)
             return {"revoked": count}
 
         return await run_in_threadpool(revoke_all)

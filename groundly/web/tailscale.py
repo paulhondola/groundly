@@ -103,5 +103,8 @@ def discover_tailscale() -> TailscaleInfo | None:
     if not ipv4:
         return None
 
+    tailnet = data.get("CurrentTailnet")
+    if isinstance(tailnet, dict) and tailnet.get("MagicDNSEnabled") is False:
+        return TailscaleInfo(ipv4=ipv4)
     dns_name = _valid_ts_dns(self_dict.get("DNSName"))
     return TailscaleInfo(ipv4=ipv4, dns_name=dns_name)

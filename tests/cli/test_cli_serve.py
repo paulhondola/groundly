@@ -189,7 +189,7 @@ def test_tailscale_flag_binds_both_sockets_attaches_remote_and_prints_qr(monkeyp
     assert remote.ts_info == ts_info and remote.port == 8765
     assert f"Tailscale: http://{ts_info.preferred_host}:8765/" in result.output
     assert "Pair URL:" in result.output and "/pair#" in result.output
-    assert render_terminal_qr(remote.pairing.pairing_url).rstrip("\n") in result.output
+    assert render_terminal_qr(remote.pairing_url).rstrip("\n") in result.output
     if verb == "start":
         assert runs[0]["app"].state.runner.mcp_url == "http://127.0.0.1:8765/mcp"
         assert "http://127.0.0.1:8765/mcp" in result.output

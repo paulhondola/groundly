@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/svelte-query";
-import { apiClient, setOnUnpaired, unwrap } from "./api/client";
+import { ApiError, apiClient, setOnUnpaired, unwrap } from "./api/client";
 import { queryClient } from "./api/queries";
 import { runStore } from "./run.svelte";
 
@@ -29,6 +29,8 @@ export function createAuthStore(qc: QueryClient = queryClient, onUnpaired?: () =
   let tailscaleEnabled = $state(false);
   let pairedDevices = $state(0);
   let error = $state<string | null>(null);
+  let canRetry = $state(false);
+  let pendingToken: string | null = null;
   let inFlight: Promise<void> | null = null;
 
   function resetForTests(options?: { ready?: boolean }): void {
@@ -39,6 +41,8 @@ export function createAuthStore(qc: QueryClient = queryClient, onUnpaired?: () =
     pairedDevices = 0;
     error = null;
     inFlight = null;
+    canRetry = false;
+    pendingToken = null;
   }
 
   function handleUnpaired(): void {
@@ -46,53 +50,54 @@ export function createAuthStore(qc: QueryClient = queryClient, onUnpaired?: () =
     access = "tailscale";
     paired = false;
     error = UNPAIRED_MESSAGE;
+    canRetry = false;
+    pendingToken = null;
     onUnpaired?.();
     qc.clear();
   }
 
-  async function bootstrap(): Promise<void> {
-    const pendingToken = takePendingPairToken();
-    if (inFlight && !pendingToken) {
-      return inFlight;
-    }
-
-    const run = (async () => {
-      try {
-        const status = unwrap(await apiClient.GET("/api/auth"));
-        access = status.access;
-        tailscaleEnabled = status.tailscale_enabled;
-        pairedDevices = status.paired_devices;
-
-        if (status.access === "tailscale" && pendingToken) {
-          try {
-            unwrap(await apiClient.POST("/api/pair", { body: { token: pendingToken } }));
-            paired = true;
-            error = null;
-            qc.clear();
-          } catch (err) {
-            paired = false;
-            error = err instanceof Error ? err.message : "Could not pair this device.";
-          }
-        } else {
-          paired = status.paired;
-          error = null;
-        }
-      } catch (err) {
-        paired = false;
-        error = err instanceof Error ? err.message : "Could not connect to Groundly.";
-      } finally {
-        ready = true;
-      }
-    })();
-
-    inFlight = run;
+  async function loadSession(): Promise<void> {
+    ready = false;
+    canRetry = false;
+    error = null;
     try {
-      await run;
-    } finally {
-      if (inFlight === run) {
-        inFlight = null;
+      const status = unwrap(await apiClient.GET("/api/auth"));
+      access = status.access;
+      tailscaleEnabled = status.tailscale_enabled;
+      pairedDevices = status.paired_devices;
+      paired = status.paired;
+
+      if (access === "tailscale" && pendingToken) {
+        try {
+          unwrap(await apiClient.POST("/api/pair", { body: { token: pendingToken } }));
+          paired = true;
+          qc.clear();
+        } catch (err) {
+          if (!(err instanceof ApiError) || err.status >= 500 || err.status === 429) {
+            throw err;
+          }
+          // A rejected QR leaves the session confirmed by /api/auth intact.
+          if (!paired) error = err.message;
+        }
       }
+      pendingToken = null;
+    } catch (err) {
+      paired = false;
+      canRetry = true;
+      error = err instanceof Error ? err.message : "Could not connect to Groundly.";
+    } finally {
+      ready = true;
     }
+  }
+
+  function bootstrap(): Promise<void> {
+    if (!inFlight) {
+      pendingToken = takePendingPairToken() ?? pendingToken;
+      inFlight = loadSession().finally(() => {
+        inFlight = null;
+      });
+    }
+    return inFlight;
   }
 
   return {
@@ -110,6 +115,9 @@ export function createAuthStore(qc: QueryClient = queryClient, onUnpaired?: () =
     },
     get pairedDevices() {
       return pairedDevices;
+    },
+    get canRetry() {
+      return canRetry;
     },
     get error() {
       return error;

@@ -708,7 +708,7 @@ class Runner:
                 "steps": [],
                 "summary": None,
                 "error": None,
-                "started_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                "started_at": datetime.now(UTC).isoformat(timespec="microseconds"),
             }
             self._next_id += 1
             self._cancel_delta_timer_locked()

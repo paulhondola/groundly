@@ -197,6 +197,37 @@ describe("createRunStore", () => {
     store.destroy();
   });
 
+  it.each(["running", "done"] as const)(
+    "adopts a %s replacement run with a reused ID on wake",
+    async (status) => {
+      const store = createRunStore(createAppQueryClient());
+      const first = makeSnapshot({ id: 1, subject: "PDSS" });
+      try {
+        fetchMock.mockResolvedValueOnce(jsonResponse(first, 202));
+        await store.start("PDSS", { kind: "write", topic_id: 7 });
+        MockEventSource.instances[0].emit("done", {
+          ...first,
+          status: "done",
+          summary: "Old outcome",
+        });
+        const replacement = makeSnapshot({
+          id: 1,
+          subject: "APD",
+          started_at: "2026-11-25T12:00:00Z",
+          status,
+          summary: "New outcome",
+        });
+        fetchMock.mockResolvedValueOnce(jsonResponse({ run: replacement }));
+        await store.attach({ fromWake: true });
+        expect(store.watchedRun?.subject).toBe("APD");
+        expect(store.message).toBe(status === "running" ? null : "New outcome");
+        expect(MockEventSource.instances).toHaveLength(status === "running" ? 2 : 1);
+      } finally {
+        store.destroy();
+      }
+    },
+  );
+
   it("invalidates all subject queries and reports restart when snapshot is null while watching a running job", async () => {
     const qc = createAppQueryClient();
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");

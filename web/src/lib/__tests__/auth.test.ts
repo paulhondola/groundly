@@ -231,7 +231,7 @@ describe("authStore", () => {
     expect(store.paired).toBe(true);
   });
 
-  it("surfaces detail error and resolves paired=false on burned/invalid token 401", async () => {
+  it.each([false, true])("preserves paired=%s when a QR has already been used", async (paired) => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const store = createAuthStore(qc);
 
@@ -241,7 +241,7 @@ describe("authStore", () => {
         return Promise.resolve(
           jsonResponse({
             access: "tailscale",
-            paired: false,
+            paired,
             tailscale_enabled: true,
             paired_devices: 0,
           }),
@@ -267,9 +267,10 @@ describe("authStore", () => {
 
     expect(store.ready).toBe(true);
     expect(store.access).toBe("tailscale");
-    expect(store.paired).toBe(false);
+    expect(store.paired).toBe(paired);
+    expect(store.canRetry).toBe(false);
     expect(store.error).toBe(
-      "pairing link is invalid or was already used — scan the current QR code",
+      paired ? null : "pairing link is invalid or was already used — scan the current QR code",
     );
   });
 
@@ -481,6 +482,57 @@ describe("authStore", () => {
     expect(authStore.paired).toBe(true);
     expect(authStore.error).toBeNull();
   });
+
+  it.each(["auth", "pair"])(
+    "retries a scrubbed QR after a transient %s failure",
+    async (failedStep) => {
+      const calls: string[] = [];
+      const tokens: unknown[] = [];
+      let failing = true;
+      globalThis.fetch = vi.fn(async (request: Request) => {
+        const path = requestPathname(request);
+        calls.push(path);
+        if (path === "/api/auth") {
+          if (failing && failedStep === "auth") throw new TypeError("Offline");
+          return jsonResponse({
+            access: "tailscale",
+            paired: false,
+            tailscale_enabled: true,
+            paired_devices: 0,
+          });
+        }
+        if (path === "/api/pair") {
+          tokens.push(await request.json());
+          if (failing) return jsonResponse({ error: "busy", detail: "Database busy" }, 503);
+          return jsonResponse({ paired: true });
+        }
+        return jsonResponse(path === "/api/subjects" ? [] : { available: false, run: null });
+      }) as unknown as typeof fetch;
+      window.history.replaceState(null, "", "/pair#retry-token");
+      const container = document.createElement("div");
+      const app = mount(App, { target: container });
+      try {
+        await vi.waitFor(() => expect(authStore.canRetry).toBe(true));
+        expect(window.location.hash).toBe("");
+        failing = false;
+        if (failedStep === "auth") {
+          window.dispatchEvent(new Event("online"));
+        } else {
+          const retry = Array.from(container.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "Retry",
+          );
+          expect(retry).toBeDefined();
+          retry?.click();
+        }
+        await vi.waitFor(() => expect(calls).toContain("/api/subjects"));
+        expect(authStore.paired).toBe(true);
+        expect(authStore.canRetry).toBe(false);
+        expect(tokens).toEqual(Array(failedStep === "pair" ? 2 : 1).fill({ token: "retry-token" }));
+      } finally {
+        await unmount(app);
+      }
+    },
+  );
 
   it("renders a connection error alert instead of PairView when GET /api/auth fails on loopback", async () => {
     globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {

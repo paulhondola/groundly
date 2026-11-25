@@ -52,6 +52,18 @@ def test_discover_handles_disabled_magicdns_and_invalid_dns(monkeypatch):
         assert info.preferred_host == "100.101.102.103"
 
 
+def test_disabled_magicdns_uses_ipv4_even_with_a_dns_name(monkeypatch):
+    payload = json.loads(_status())
+    payload["CurrentTailnet"] = {"MagicDNSEnabled": False}
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/local/bin/tailscale")
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **kw: subprocess.CompletedProcess(args, 0, stdout=json.dumps(payload)),
+    )
+    assert discover_tailscale() == TailscaleInfo("100.101.102.103")
+
+
 def test_discover_returns_none_when_stopped_non_cgnat_or_timed_out(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda name: "/usr/local/bin/tailscale")
     for payload in (_status(state="Stopped"), _status(ips=["192.168.1.10", "::1"])):

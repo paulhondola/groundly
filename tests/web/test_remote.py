@@ -4,6 +4,8 @@ import json
 import os
 import sqlite3
 import stat
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,7 +25,6 @@ from groundly.web.remote import (
     SESSION_COOKIE,
     SESSION_TTL_S,
     PairAuthError,
-    PairingManager,
     RemoteRuntime,
     RemoteStore,
     parse_device_label,
@@ -87,32 +88,71 @@ def test_remote_store_permissions_sha256_dedupe_throttle_and_revoke(tmp_path):
     assert store.list_devices() == []
 
 
-def test_pairing_manager_single_use_rotation_and_rate_limit():
+def test_pairing_manager_single_use_rotation_and_rate_limit(monkeypatch, tmp_path):
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path))
     now = [100.0]
     ts = TailscaleInfo(ipv4="100.101.102.103", dns_name="macbook.tail1234.ts.net")
-    mgr = PairingManager(ts, 8765, monotonic=lambda: now[0])
+    mgr = RemoteRuntime(ts, 8765)
+    monkeypatch.setattr("groundly.web.remote.time.monotonic", lambda: now[0])
+
+    def pair(candidate, peer_ip):
+        mgr.pair_device(candidate, peer_ip, "Browser", None)
+        return mgr.pairing_url
 
     first_url = mgr.pairing_url
     assert first_url.startswith("http://macbook.tail1234.ts.net:8765/pair#")
     first_token = first_url.split("#", 1)[1]
 
-    second_url = mgr.consume_and_rotate(first_token, "100.64.0.10")
+    second_url = pair(first_token, "100.64.0.10")
     assert second_url != first_url
 
     # Replaying a burned token fails with 401 and counts toward the rate limit.
     for _ in range(MAX_PAIR_FAILURES):
         with pytest.raises(PairAuthError) as exc:
-            mgr.consume_and_rotate(first_token, "100.64.0.10")
+            pair(first_token, "100.64.0.10")
         assert (exc.value.status_code, exc.value.error) == (401, "invalid_pairing_token")
 
     with pytest.raises(PairAuthError) as exc:
-        mgr.consume_and_rotate(second_url.split("#", 1)[1], "100.64.0.10")
+        pair(second_url.split("#", 1)[1], "100.64.0.10")
     assert (exc.value.status_code, exc.value.error) == (429, "rate_limited")
 
     # Different peer IP is unaffected; original peer recovers after window expires.
-    third_url = mgr.consume_and_rotate(second_url.split("#", 1)[1], "100.64.0.11")
+    third_url = pair(second_url.split("#", 1)[1], "100.64.0.11")
     now[0] += PAIR_WINDOW_S + 1.0
-    assert mgr.consume_and_rotate(third_url.split("#", 1)[1], "100.64.0.10") != third_url
+    assert pair(third_url.split("#", 1)[1], "100.64.0.10") != third_url
+
+
+def test_pair_commit_and_revoke_all_are_serialized(monkeypatch, tmp_path):
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path))
+    runtime = RemoteRuntime(TailscaleInfo("100.64.0.1"), 8765)
+    token = runtime.pairing_url.split("#")[1]
+    create = runtime.store.create_session
+    writing = threading.Event()
+    resume = threading.Event()
+    revoking = threading.Event()
+
+    def delayed_insert(*args, **kwargs):
+        writing.set()
+        assert resume.wait(5)
+        return create(*args, **kwargs)
+
+    def revoke():
+        revoking.set()
+        return runtime.revoke_all()
+
+    monkeypatch.setattr(runtime.store, "create_session", delayed_insert)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        pairing = pool.submit(runtime.pair_device, token, "100.64.0.2", "Browser", None)
+        try:
+            assert writing.wait(5)
+            revocation = pool.submit(revoke)
+            assert revoking.wait(5)
+            with pytest.raises(TimeoutError):
+                revocation.result(timeout=0.05)
+        finally:
+            resume.set()
+        assert revocation.result(timeout=5) == 1
+        assert not runtime.store.authenticate(pairing.result(timeout=5))
 
 
 def test_device_label_and_qr_helpers():
@@ -157,15 +197,16 @@ def test_remote_runtime_rotate_and_additional_device_labels(monkeypatch, tmp_pat
 
     assert SESSION_COOKIE == "groundly_session"
     assert runtime.on_paired is not None
-    initial = runtime.pairing.pairing_url
-    rotated = runtime.pairing.rotate()
+    initial = runtime.pairing_url
+    assert runtime.revoke_all() == 0
+    rotated = runtime.pairing_url
     assert rotated != initial
     assert rotated.startswith("http://100.101.102.103:8765/pair#")
     assert runtime.store.count_devices() == 0
     assert (tmp_path / "remote.db").exists()
 
     with pytest.raises(PairAuthError) as exc:
-        runtime.pairing.consume_and_rotate("", "100.64.0.10")
+        runtime.pair_device("", "100.64.0.10", "Browser", None)
     assert (exc.value.status_code, exc.value.error) == (401, "invalid_pairing_token")
 
     assert (
@@ -280,7 +321,7 @@ def test_socket_perimeter_pairing_multi_device_and_revocation(monkeypatch, tmp_p
         remote_lb = loopback.get("/api/remote")
         assert remote_lb.status_code == 200
         assert remote_lb.json()["active"] is True
-        assert remote_lb.json()["pairing_url"] == runtime.pairing.pairing_url
+        assert remote_lb.json()["pairing_url"] == runtime.pairing_url
         assert remote_lb.json()["qr_matrix"]
         assert remote_lb.json()["devices"] == []
         assert loopback.post("/mcp", json=_MCP_INIT, headers=_MCP_HEADERS).status_code == 200
@@ -368,7 +409,7 @@ def test_socket_perimeter_pairing_multi_device_and_revocation(monkeypatch, tmp_p
         assert phone.post("/mcp", json=_MCP_INIT, headers=_MCP_HEADERS).status_code == 404
 
         # 3. Pair phone with mixed-case Host + lowercased Origin; check cookie, callback, rotation.
-        initial_url = runtime.pairing.pairing_url
+        initial_url = runtime.pairing_url
         token_1 = initial_url.split("#", 1)[1]
         assert (
             phone.post(
@@ -406,7 +447,7 @@ def test_socket_perimeter_pairing_multi_device_and_revocation(monkeypatch, tmp_p
         phone_cookie_1 = phone.cookies.get(SESSION_COOKIE)
         assert phone_cookie_1
 
-        second_url = runtime.pairing.pairing_url
+        second_url = runtime.pairing_url
         assert second_url != initial_url
         assert paired_events == [("iPhone · Safari", "100.64.0.10", second_url)]
         assert runtime.store.count_devices() == 1
@@ -468,7 +509,7 @@ def test_socket_perimeter_pairing_multi_device_and_revocation(monkeypatch, tmp_p
         assert phone.get("/api/subjects").status_code == 200
 
         # 5. Tablet pairs concurrently with third token; loopback inspects and revokes individually & all.
-        token_3 = runtime.pairing.pairing_url.split("#", 1)[1]
+        token_3 = runtime.pairing_url.split("#", 1)[1]
         assert (
             tablet.post(
                 "/api/pair",
@@ -519,11 +560,11 @@ def test_socket_perimeter_pairing_multi_device_and_revocation(monkeypatch, tmp_p
             == 404
         )
 
-        before_revoke_all_url = runtime.pairing.pairing_url
+        before_revoke_all_url = runtime.pairing_url
         rev_all = loopback.post("/api/remote/revoke-all", json={}, headers=loopback_headers)
         assert rev_all.status_code == 200 and rev_all.json() == {"revoked": 1}
         assert phone.get("/api/subjects").status_code == 401
-        assert runtime.pairing.pairing_url != before_revoke_all_url
+        assert runtime.pairing_url != before_revoke_all_url
 
         # Rate-limit via POST /api/pair returns 429 rate_limited after MAX_PAIR_FAILURES bad attempts.
         for _ in range(MAX_PAIR_FAILURES):
@@ -535,7 +576,7 @@ def test_socket_perimeter_pairing_multi_device_and_revocation(monkeypatch, tmp_p
             assert (r.status_code, r.json()["error"]) == (401, "invalid_pairing_token")
         limited = tablet.post(
             "/api/pair",
-            json={"token": runtime.pairing.pairing_url.split("#", 1)[1]},
+            json={"token": runtime.pairing_url.split("#", 1)[1]},
             headers=ts_origin,
         )
         assert (limited.status_code, limited.json()["error"]) == (429, "rate_limited")
@@ -628,13 +669,18 @@ async def test_perimeter_rejects_non_ascii_host_port_with_400(monkeypatch, tmp_p
         assert sent[1]["body"] == b"Invalid host header"
 
 
-async def test_sse_stream_closes_immediately_on_device_revoke_and_revoke_all(monkeypatch, tmp_path):
+@pytest.mark.parametrize("invalidation", ["revoke", "replace", "expire"])
+async def test_active_stream_closes_on_session_invalidation(monkeypatch, tmp_path, invalidation):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
     (tmp_path / "home").mkdir()
 
     ts_info = TailscaleInfo(ipv4="100.101.102.103", dns_name="macbook.tail1234.ts.net")
     runtime = RemoteRuntime(ts_info, 8765)
+    now = [1_700_000_000]
+    runtime.store = RemoteStore(now=lambda: now[0])
+    if invalidation == "expire":
+        monkeypatch.setattr(web_app.runs, "SSE_KEEPALIVE_S", 0.03)
     phone_dev = runtime.store.create_session("phone-tok", _IPHONE_UA, "100.64.0.10")
     tablet_dev = runtime.store.create_session("tablet-tok", _IPAD_UA, "100.64.0.11")
     app = create_app(remote=runtime)
@@ -731,9 +777,32 @@ async def test_sse_stream_closes_immediately_on_device_revoke_and_revoke_all(mon
     )
     tablet_task, _, _, tablet_disc = await open_stream("tablet-tok", "100.64.0.11")
     try:
-        assert await loopback_post(f"/api/remote/devices/{tablet_dev['id']}/revoke") == {
-            "revoked": True
-        }
+        if invalidation == "expire":
+            now[0] += SESSION_TTL_S
+
+            # Keep the queue nonempty past the auth deadline.
+            async def publish():
+                while not tablet_task.done():
+                    app.state.runner._publish(
+                        "step", {"id": 1, "step": "Reading", "refresh": False}
+                    )
+                    await asyncio.sleep(0)
+
+            publisher = asyncio.create_task(publish())
+            try:
+                await asyncio.wait_for(tablet_task, timeout=2)
+                await asyncio.wait_for(phone_task, timeout=2)
+            finally:
+                publisher.cancel()
+                await asyncio.gather(publisher, return_exceptions=True)
+            return
+        if invalidation == "replace":
+            token = runtime.pairing_url.split("#")[1]
+            runtime.pair_device(token, "100.64.0.11", _IPAD_UA, "tablet-tok")
+        else:
+            assert await loopback_post(f"/api/remote/devices/{tablet_dev['id']}/revoke") == {
+                "revoked": True
+            }
         await asyncio.wait_for(tablet_task, timeout=2.0)
         assert not phone_task.done()
 
@@ -742,7 +811,9 @@ async def test_sse_stream_closes_immediately_on_device_revoke_and_revoke_all(mon
         assert any(b"Reading the course" in c for c in phone_chunks)
         assert phone_dev["id"] != tablet_dev["id"]
 
-        assert await loopback_post("/api/remote/revoke-all") == {"revoked": 1}
+        assert await loopback_post("/api/remote/revoke-all") == {
+            "revoked": 2 if invalidation == "replace" else 1
+        }
         await asyncio.wait_for(phone_task, timeout=2.0)
         assert runtime._stream_events == set()
     finally:
@@ -799,18 +870,25 @@ def test_corrupt_or_newer_remote_db_never_locks_out_loopback_and_fails_closed(
         phone.cookies.set(SESSION_COOKIE, "stale-cookie")
         assert phone.get("/static/page.css").status_code == 200
         ts_auth = phone.get("/api/auth")
-        assert ts_auth.status_code == 200
-        assert ts_auth.json()["paired"] is False
-        assert phone.get("/api/subjects").status_code == 401
+        assert ts_auth.status_code == 500
+        assert ts_auth.json()["error"] == "store_error"
+        assert phone.get("/api/subjects").status_code == 500
 
         def fail_busy(*args, **kwargs):
             raise sqlite3.OperationalError("database is locked")
 
+        monkeypatch.setattr(runtime.store, "authenticate", fail_busy)
+        assert phone.get("/").status_code == 200
+        for path in ("/api/auth", "/api/subjects"):
+            unavailable = phone.get(path)
+            assert unavailable.status_code == 503
+            assert unavailable.json()["error"] == "busy"
         monkeypatch.setattr(runtime.store, "create_session", fail_busy)
-        token = runtime.pairing.pairing_url.split("#", 1)[1]
+        token = runtime.pairing_url.split("#", 1)[1]
         pair_res = phone.post("/api/pair", json={"token": token}, headers=ts_origin)
         assert pair_res.status_code == 503
         assert pair_res.json()["error"] == "busy"
+        assert runtime.pairing_url.split("#")[1] == token
 
 
 def test_perimeter_restricts_head_to_static_only(monkeypatch, tmp_path):
