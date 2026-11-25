@@ -627,10 +627,18 @@ export interface components {
       error?: string | null;
       /** Has Tree */
       has_tree: boolean;
+      /** Last Test At */
+      last_test_at?: string | null;
+      /** Leaves */
+      leaves?: number | null;
+      /** Leaves Mastered */
+      leaves_mastered?: number | null;
       /** Subject */
       subject: string;
       /** Title */
       title: string;
+      /** Topics */
+      topics?: number | null;
     };
     /**
      * SubmitAttemptResponse

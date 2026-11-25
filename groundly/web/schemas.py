@@ -33,6 +33,10 @@ class SubjectSummary(BaseModel):
     title: str
     has_tree: bool
     error: str | None = None
+    topics: int | None = None
+    leaves: int | None = None
+    leaves_mastered: int | None = None
+    last_test_at: str | None = None
 
 
 class SourceItem(BaseModel):

@@ -373,7 +373,15 @@ def create_app(
                 "has_tree": False,
             }
             try:
-                entry["has_tree"] = bool(SubjectStore(subject.store_db_path).topic_ids())
+                store = SubjectStore(subject.store_db_path)
+                entry["has_tree"] = bool(store.topic_ids())
+                # ponytail: every listing reads each subject's tree and answers; cache per
+                # store.db/progress.db mtime if subjects reach the hundreds.
+                try:
+                    card = quiz.subject_card(store, ProgressStore(subject.progress_db_path))
+                except (sqlite3.DatabaseError, RuntimeError):
+                    card = quiz.subject_card(store, None)  # unreadable progress: counts only
+                entry.update(card)
             except (sqlite3.DatabaseError, RuntimeError) as e:
                 entry["error"] = str(e)
             out.append(entry)

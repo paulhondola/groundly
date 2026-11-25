@@ -204,6 +204,7 @@ Live decisions only, one line each where possible. Gaps in the numbering are ret
 
 53. **Endpoints behind the "Quiet dark" page design** (Paul, 2026-11-25, amending decisions 44 and 52; design in [`superpowers/specs/2026-11-25-design-endpoints-design.md`](superpowers/specs/2026-11-25-design-endpoints-design.md)):
     - *Check one answer before submit (`POST /api/subjects/{subject}/questions/{id}/check`).* For a single or multiple question, returns whether the chosen options are right, the key, and the question's cited sources (verbatim chunk text, no explanation field: choice questions store none). It grades through the same function as submit and writes nothing, so decision 44's one page write is still the submitted attempt; the page locks a checked answer on its side (client-side lock, the student is the only user). Open questions have no check.
+    - *Subject card fields (`GET /api/subjects`).* Each entry may carry `topics` (top-level nodes), `leaves` (subtopics plus topics with none), `leaves_mastered` (by the topic map's own mastery rule) and `last_test_at` (the newest attempt's time). They are left out for a subject with no map, and an unreadable `progress.db` costs only the progress fields; the listing never creates one.
 
 ## 8. Roadmap
 

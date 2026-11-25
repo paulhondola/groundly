@@ -966,6 +966,39 @@
             "title": "Has Tree",
             "type": "boolean"
           },
+          "last_test_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Test At"
+          },
+          "leaves": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leaves"
+          },
+          "leaves_mastered": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leaves Mastered"
+          },
           "subject": {
             "title": "Subject",
             "type": "string"
@@ -973,6 +1006,17 @@
           "title": {
             "title": "Title",
             "type": "string"
+          },
+          "topics": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topics"
           }
         },
         "required": [

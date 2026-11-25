@@ -599,3 +599,38 @@ def test_check_answer_refuses_open_foreign_options_and_unknown_ids(bank):
         with pytest.raises(QuizError) as err:
             quiz.check_answer(bank.store, qid, selected)
         assert err.value.reason == reason
+
+
+# --- subject card ------------------------------------------------------------------------
+
+
+def test_subject_card_counts_leaves_mastery_and_last_test(bank):
+    qid = bank.ids[bank.leaf()][0]
+    for _ in range(quiz.MASTERY_WINDOW):
+        bank.record([(qid, True)])
+    card = quiz.subject_card(bank.store, bank.progress)
+    assert card == {
+        "topics": 1,
+        "leaves": 2,
+        "leaves_mastered": 1,
+        "last_test_at": bank.progress.attempts()[0]["submitted_at"],
+    }
+
+
+def test_subject_card_without_tests_or_readable_progress(bank):
+    assert quiz.subject_card(bank.store, bank.progress) == {
+        "topics": 1,
+        "leaves": 2,
+        "leaves_mastered": 0,
+    }
+    bank.record([(bank.ids[bank.leaf()][0], True)])
+    assert quiz.subject_card(bank.store, None) == {"topics": 1, "leaves": 2, "leaves_mastered": 0}
+
+
+def test_subject_card_of_an_unmapped_subject_is_empty(bank):
+    from groundly.core.subject import Subject
+
+    Subject("BARE").initialize()
+    root = subject_dir("BARE")
+    card = quiz.subject_card(SubjectStore(root / "store.db"), ProgressStore(root / "progress.db"))
+    assert card == {}

@@ -127,7 +127,14 @@ def test_api_lists_subjects_with_has_tree(client, seeded):
     Subject("EMPTY").initialize()
     assert client.get("/api/subjects").json() == [
         {"subject": "EMPTY", "title": "", "has_tree": False},
-        {"subject": "PDSS", "title": "", "has_tree": True},
+        {
+            "subject": "PDSS",
+            "title": "",
+            "has_tree": True,
+            "topics": 1,
+            "leaves": 1,
+            "leaves_mastered": 0,
+        },
     ]
 
 
@@ -148,7 +155,14 @@ def test_api_reports_the_title_in_the_list_and_the_tree(client, seeded):
 def test_corrupt_manifest_loses_the_title_not_the_listing(client, seeded):
     Subject("PDSS").manifest_path.write_text("{not json")
     (entry,) = client.get("/api/subjects").json()
-    assert entry == {"subject": "PDSS", "title": "", "has_tree": True}
+    assert entry == {
+        "subject": "PDSS",
+        "title": "",
+        "has_tree": True,
+        "topics": 1,
+        "leaves": 1,
+        "leaves_mastered": 0,
+    }
     assert client.get("/api/subjects/PDSS/tree").json()["title"] == ""
 
 
@@ -1072,3 +1086,34 @@ def test_a_check_on_a_question_removed_with_its_chunk_is_404(client, seeded):
     s.remove_material(extra)
     r = _check(client, q["id"], {"selected": _key(q)})
     assert (r.status_code, r.json()["error"]) == (404, "unknown_question")
+
+
+# --- subject cards -------------------------------------------------------------------------
+
+
+def test_subjects_carry_card_fields_once_mapped_and_tested(client, seeded):
+    leaf, (q, *_) = _bank(seeded)
+    assert _post(client, _attempt(q, _key(q), topic_id=leaf)).status_code == 201
+    (entry,) = client.get("/api/subjects").json()
+    assert (entry["topics"], entry["leaves"], entry["leaves_mastered"]) == (1, 1, 0)
+    (attempt,) = client.get("/api/subjects/PDSS/attempts").json()
+    assert entry["last_test_at"] == attempt["submitted_at"]
+
+
+def test_subjects_omit_card_fields_without_a_map(client, home):
+    Subject("BARE").initialize()
+    (entry,) = client.get("/api/subjects").json()
+    assert set(entry) == {"subject", "title", "has_tree"}
+
+
+def test_an_unreadable_progress_db_costs_only_the_progress_fields(client, seeded):
+    leaf, (q, *_) = _bank(seeded)
+    _post(client, _attempt(q, _key(q), topic_id=leaf))
+    progress_db = subject_dir("PDSS") / "progress.db"
+    for suffix in ("", "-wal", "-shm"):
+        progress_db.with_name(progress_db.name + suffix).unlink(missing_ok=True)
+    r = client.get("/api/subjects")
+    assert r.status_code == 200
+    (entry,) = r.json()
+    assert entry["leaves_mastered"] == 0 and "last_test_at" not in entry
+    assert not progress_db.exists()
