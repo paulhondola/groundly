@@ -1,8 +1,8 @@
 """Parent side of extraction: drive one warm worker per indexing run and map its replies
 to specific causes.
 
-Subprocess controls: argv exec (no shell), temp working directory, per-file wall-clock
-timeout, output size cap. A worker that crashes or times out is replaced before the next
+Subprocess controls: argv exec (no shell), temp working directory, a wall-clock timeout
+that restarts on every finished page, output size cap. A worker that crashes or times out is replaced before the next
 file. Worker stderr goes to a file on disk, never an in-memory buffer, and only the tail
 written during the current file is read."""
 
@@ -84,6 +84,7 @@ class SubprocessExtractor:
         settings = settings or IngestionSettings()
         self.timeout = settings.timeout_seconds
         self.max_image_pixels = settings.max_image_pixels
+        self.max_pages = settings.max_pages
         self.max_file_size_mb = settings.max_file_size_mb
         self.argv = argv or [sys.executable, "-m", "groundly.ingestion.extract_worker", "--serve"]
         self._proc: subprocess.Popen | None = None
@@ -99,8 +100,12 @@ class SubprocessExtractor:
     def _start(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         tmp = Path(self._tmp.name)
-        # image-pixel cap via env, read once at worker start
-        env = {**os.environ, "GROUNDLY_MAX_IMAGE_PIXELS": str(int(self.max_image_pixels))}
+        # image-pixel and page caps via env, read by the worker, never via the document
+        env = {
+            **os.environ,
+            "GROUNDLY_MAX_IMAGE_PIXELS": str(int(self.max_image_pixels)),
+            "GROUNDLY_MAX_PAGES": str(int(self.max_pages)),
+        }
         # Never let the worker turn on logging: this parent reads only the *last line* of
         # its stderr to name the failure cause, so a log line written after the cause
         # would silently replace it.
@@ -149,17 +154,22 @@ class SubprocessExtractor:
             out_json.unlink(missing_ok=True)
             start = (tmp / "stderr.log").stat().st_size
             request = {"in": in_path, "out": str(out_json), "ocr_lang": ocr_lang}
+            paged = False  # a page line proves the worker read this request
             try:
                 proc.stdin.write(json.dumps(request) + "\n")
                 proc.stdin.flush()
-                line = self._replies.get(timeout=self.timeout)
+                # the wait restarts on every finished page: the limit is per page, not per file
+                while (line := self._replies.get(timeout=self.timeout)) is not None:
+                    if "page" not in json.loads(line):
+                        break
+                    paged = True
             except OSError:  # broken pipe: the worker is gone
                 line = None
             except queue.Empty:
                 proc.kill()
                 self.close()
                 raise ExtractionFailure(
-                    f"extraction timed out after {int(self.timeout)}s"
+                    f"extraction timed out — no page finished within {int(self.timeout)}s"
                 ) from None
             if line is not None:
                 return line, tmp, start
@@ -169,7 +179,7 @@ class SubprocessExtractor:
             # A death with nothing said since this request may have happened before the
             # worker read it: resend once to a fresh worker. A file that kills workers
             # silently still fails on the second try.
-            if tail or attempt:
+            if tail or attempt or paged:
                 raise ExtractionFailure(f"parser failed: {tail or f'exit code {rc}'}")
         raise AssertionError("unreachable: the second attempt returns or raises")
 

@@ -1,4 +1,4 @@
-"""Builds small text-layer PDFs with pypdfium2 for the page-router tests."""
+"""Builds small text-layer PDFs with pypdfium2 for the extraction worker tests."""
 
 from __future__ import annotations
 

@@ -33,3 +33,48 @@ jobs:
 
       - name: Test (pytest)
         run: uv run pytest
+
+  web:
+    name: web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.23.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint (vp lint)
+        run: pnpm exec vp lint
+
+      - name: Format check (vp fmt)
+        run: pnpm exec vp fmt --check
+
+      - name: Generated API types check (up to date)
+        run: |
+          pnpm run gen:api
+          git diff --exit-code src/lib/api/schema.d.ts
+
+      - name: Type check (svelte-check)
+        run: pnpm exec svelte-check --tsconfig ./tsconfig.json
+
+      - name: Test (vp test)
+        run: pnpm exec vp test run
+
+      - name: Build check (committed bundle up to date)
+        run: |
+          pnpm run build
+          git diff --exit-code ../groundly/web/static

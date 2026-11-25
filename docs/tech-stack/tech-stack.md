@@ -8,13 +8,13 @@ Expands [`groundly-spec.md`](../groundly-spec.md) §4. Every row is a **decision
 | CLI | **typer + rich** | Batch verbs with progress output; the host agent is the interactive surface (no TUI) | — |
 | MCP surface | **FastMCP** | stdio + streamable HTTP from one tool set; tools and resources | — |
 | Storage | **SQLite (WAL) + sqlite-vec + FTS5**, files on disk | Zero services; export = zip; exact KNN at 5k–50k chunks/subject | LanceDB/IVF if a corpus ever outgrows brute force |
-| Document extraction | **Docling with bundled RapidOCR**, one warm worker process per `index` run; slide-deck PDFs routed per page, text-layer pages read with **pypdfium2** and chunked without docling's models (decision 49) | Local/offline, zero-key; layout/table/reading order plus OCR for scanned PDFs and raster images; HybridChunker for structure-aware chunks; the worker keeps per-file crash and timeout isolation (decision 48) | none — documents with no readable text fail cleanly |
+| Document extraction | **Docling with bundled RapidOCR**, one warm worker process per `index` run; PDFs and standalone images read page by page and chunked per page, the timeout restarting per 16-page batch, at most `ingestion.max_pages` pages (decision 49) | Local/offline, zero-key; layout/table/reading order plus OCR for scanned PDFs and raster images; HybridChunker for structure-aware chunks; the worker keeps per-file crash and timeout isolation (decision 48) | none — documents with no readable text fail cleanly |
 | Embeddings | **`bge-m3` local**, pinned incl. **hf_revision**; dense + learned sparse from one forward pass; engine per platform (below) | RO/EN cross-lingual; the pin is the interchange compatibility contract | ColBERT vectors rejected (~100× storage) |
 | Rerank | **`bge-reranker-v2-m3`**, default ON | Quality-first; same model family as the embedder | `--no-rerank` for weak hardware |
 | Retrieval | **A plain `VectorRetriever` returning `Hit`** | One arm left, so an orchestration framework wrapped a SQLite row (decision 36) | — |
 | Answer generation | **The host agent** | It is already an LLM; enforced server-side answering was measured and removed (decision 33) | — |
-| HTTP transport | `groundly start` (with the page, at `/mcp`) or `groundly mcp --http`, loopback-only | fastmcp's own Streamable HTTP app | — |
-| Topic-tree page | **Starlette + uvicorn** (`groundly serve`, loopback-only), one inline-CSS/vanilla-JS HTML file | Both were already installed through `fastmcp`, so declaring them directly adds nothing to the install; one self-contained file means no build step, CDN or external font. Not a second tool-surface framework (decision 41) | — |
+| HTTP transport | `groundly mcp --http` (loopback-only) or `groundly start` (`/mcp` stays loopback-only even when opt-in Tailscale SPA pairing is enabled) | fastmcp's own Streamable HTTP app; `_SocketPerimeterMiddleware` returns `404` for `/mcp` on Tailscale sockets (decision 52) | — |
+| Topic-tree page | **FastAPI + uvicorn** (`groundly serve` / `groundly start`, loopback-only by default with opt-in Tailscale `100.64.0.0/10` dual-socket pairing via **`segno`** + `~/.groundly/remote.db`) + **Svelte 5 / TypeScript / Tailwind v4** SPA (`openapi-typescript` + `openapi-fetch`, `@tanstack/svelte-query` v6, `sv-router`, `shadcn-svelte`, `thinking-orbs/engine`, `@paper-design/shaders`) compiled via **Vite+** (`vp`) to committed `groundly/web/static/page.{js,css}` | Strict Pydantic v2 contracts (`docs_url=None`, offline `web/openapi.json` export), typed REST client, reactive query cache invalidated by async pub-sub SSE (`/api/runs/stream`), code-based pure-Svelte routing, fine-grained reactive UI without VDOM overhead, and pure-Python `segno` QR matrix/terminal rendering + socket-scoped per-device `sha256` cookie sessions; Vite+ compiles deterministic single-file static assets (`web/` excluded from wheel, zero Node at install or `pytest` time, zero external fonts). FastMCP stays the sole tool-surface framework (decisions 50, 51, 52) | SvelteKit (`adapter-static` adds hashed multi-file churn + inline bootstrap script clashing with `script-src 'self'` CSP, and server features cannot run without Node) |
 
 ## Engine per platform
 
@@ -33,7 +33,7 @@ The engine is not part of the embedding pin. An engine must stay within the tole
 
 1. **Index, search, verification and import/export need nothing but the local models.**
 2. **No subscription-OAuth piggybacking** — ToS-fragile, and unnecessary: the host already holds the session.
-3. **`config.toml` carries operational settings only** (`[ingestion]`/`[retrieval]`). Files written before decision 37 may still carry `[providers.*]`, `[llm]` and `[graph]` sections; they are ignored, never rejected, and the next `config set` drops them.
+3. **`config.toml` carries operational settings only** (`[ingestion]`, `[retrieval]`, and `[web]`). Files written before decision 37 may still carry `[providers.*]`, `[llm]` and `[graph]` sections; they are ignored, never rejected, and the next `config set` drops them.
 
 ## Version pinning policy
 

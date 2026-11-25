@@ -41,7 +41,9 @@ def test_a_timeout_names_the_limit_and_the_next_file_still_indexes(tmp_path):
     (tmp_path / "hang.pdf").write_text("x")
     (tmp_path / "ok.txt").write_text("x")
     with _ex(timeout=1) as ex:
-        with pytest.raises(ExtractionFailure, match="^extraction timed out after 1s$"):
+        with pytest.raises(
+            ExtractionFailure, match="^extraction timed out — no page finished within 1s$"
+        ):
             ex.extract(tmp_path / "hang.pdf")
         assert ex.extract(tmp_path / "ok.txt").chunks
 
@@ -91,3 +93,35 @@ def test_close_leaves_no_worker_running(tmp_path):
     ex.close()
     ex.close()
     assert proc.poll() is not None
+
+
+def test_pages_that_each_finish_in_time_never_time_out(tmp_path):
+    (tmp_path / "slowpages.pdf").write_text("x")
+    with _ex(timeout=1) as ex:
+        assert ex.extract(tmp_path / "slowpages.pdf").chunks
+
+
+def test_a_stalled_page_names_the_per_page_limit_and_the_next_file_indexes(tmp_path):
+    (tmp_path / "pagehang.pdf").write_text("x")
+    (tmp_path / "ok.txt").write_text("x")
+    with _ex(timeout=1) as ex:
+        with pytest.raises(
+            ExtractionFailure, match="^extraction timed out — no page finished within 1s$"
+        ):
+            ex.extract(tmp_path / "pagehang.pdf")
+        assert ex.extract(tmp_path / "ok.txt").chunks
+
+
+def test_a_worker_that_dies_after_a_page_is_not_resent(tmp_path):
+    (tmp_path / "pagedie.pdf").write_text("x")
+    with _ex() as ex, pytest.raises(ExtractionFailure, match="^parser failed: exit code 9$"):
+        ex.extract(tmp_path / "pagedie.pdf")
+    assert len((tmp_path / "pagedie.pdf.seen").read_text().splitlines()) == 1
+
+
+def test_the_page_ceiling_reaches_the_worker(tmp_path):
+    f = tmp_path / "env.pdf"
+    f.write_bytes(b"%PDF-")
+    extractor = SubprocessExtractor(IngestionSettings(max_pages=7), argv=STUB)
+    with extractor:
+        assert extractor.extract(f).chunks[0].text == "7"

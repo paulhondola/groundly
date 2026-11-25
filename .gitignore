@@ -35,5 +35,6 @@ results-*.json
 logs/
 
 # bench outputs
-bench/results/
-bench/reference/
+/data/
+/bench/results/
+/bench/reference/

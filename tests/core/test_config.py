@@ -10,6 +10,7 @@ from groundly.core.config import (
     render_config_toml,
     set_key,
 )
+from groundly.core.paths import remote_db_path
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +24,7 @@ def test_settings_default_when_no_file():
     s = load_settings()
     assert s.ingestion.timeout_seconds == 300
     assert s.ingestion.max_image_pixels == 100_000_000
+    assert s.ingestion.max_pages == 2000
     assert s.ingestion.max_file_size_mb is None  # unlimited by default
     assert s.retrieval.top_k == 8
     assert s.retrieval.rerank is True
@@ -138,3 +140,19 @@ def test_bad_value_error_is_plain_language(home, key, value, phrase):
         set_key(key, value)
     assert phrase in str(exc.value)
     assert "|" not in str(exc.value) and "<class" not in str(exc.value)
+
+
+def test_web_tailscale_default_and_round_trip(home):
+    assert load_settings().web.tailscale is False
+    assert remote_db_path() == home / "remote.db"
+    set_key("web.tailscale", "true")
+    assert load_settings().web.tailscale is True
+    assert "[web]" in config_path().read_text()
+    set_key("retrieval.top_k", "12")
+    assert load_settings().web.tailscale is True
+
+
+def test_unknown_section_lists_web(home):
+    with pytest.raises(ConfigKeyError) as exc:
+        set_key("nope.field", "x")
+    assert "web" in str(exc.value)

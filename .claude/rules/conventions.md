@@ -6,11 +6,12 @@
 - "Done" for a feature = the acceptance criteria in `docs/use-cases/` pass.
 - Bench code and its page manifest live in `bench/`; results and reference text stay out of git (`bench/results/`, `bench/reference/`, gitignored). Protocols and results of the retired experiments are kept outside the repo; their code is at tag `thesis-experiments-2026-09`.
 
-## Python
+## Python & Web
 
-- Python ≥3.11; typer CLI; Pydantic v2; type hints on public functions.
+- Python ≥3.11; typer CLI; FastAPI + Pydantic v2 for the local page API (`groundly/web/`, runtime `/docs`/`/redoc`/`/openapi.json` disabled, strict validation after `_require_page_json`); type hints on public functions.
+- Frontend (`web/`): Svelte 5 + TypeScript + Tailwind CSS v4 compiled via Vite+ (`vp build`) into committed `groundly/web/static/page.{js,css}` (`web/` excluded from wheel; zero Node at install or `pytest` time). Untrusted Layer-3 strings enter the DOM strictly as text nodes (zero `{@html}` or HTML-inserting sinks).
 - SQLite schema versioned via `PRAGMA user_version` (checked on open; refuse newer-than-known). Integrity rules as constraints where SQLite allows (unique hashes, FKs), not app code.
-- pytest for tests (no service containers — SQLite files + stub embedders); ruff for lint + format; pyrefly (default preset) for types.
+- pytest for tests (no service containers — SQLite files + stub embedders; no Node invoked during `pytest`); ruff for lint + format; pyrefly (default preset) for types; `vp lint` / `vp fmt` / `vp test` / `svelte-check` for `web/`.
 - **Comments and docstrings state intent and invariants.** History belongs in git and in `docs/`: no "used to", no decision narration, no measurement tables in code.
 
 ## Product surfaces

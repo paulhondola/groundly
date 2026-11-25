@@ -3,7 +3,7 @@
 import re
 from typing import Annotated, Any, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from groundly.agents import quiz
 
@@ -17,6 +17,13 @@ def _check_sqlite_id(value: int) -> int:
 
 
 SqliteId = Annotated[int, AfterValidator(_check_sqlite_id)]
+
+
+class ErrorResponse(BaseModel):
+    """Structured JSON error payload returned by Groundly's local web API."""
+
+    error: str
+    detail: str | None = None
 
 
 class SubjectSummary(BaseModel):
@@ -109,6 +116,28 @@ class SubmitAttemptRequest(BaseModel):
         if not _TOKEN.fullmatch(value):
             raise ValueError("token must match [A-Za-z0-9-]{8,64}")
         return value
+
+
+class SubmittedChoiceAnswer(BaseModel):
+    """OpenAPI schema for one submitted single/multiple-choice answer."""
+
+    question_id: SqliteId
+    selected: list[SqliteId]
+
+
+class SubmittedOpenAnswer(BaseModel):
+    """OpenAPI schema for one submitted open-ended text answer."""
+
+    question_id: SqliteId
+    text: str
+
+
+class SubmitAttemptOpenAPIBody(BaseModel):
+    """OpenAPI-only request body schema for POST /api/subjects/{subject}/attempts."""
+
+    token: str
+    topic_id: SqliteId | None = None
+    answers: list[SubmittedChoiceAnswer | SubmittedOpenAnswer]
 
 
 class SubmitAttemptResponse(BaseModel):
@@ -240,3 +269,56 @@ class StopRunResponse(BaseModel):
     """Run state returned by POST /api/runs/stop."""
 
     run: RunSnapshot | None
+
+
+class AuthStatusResponse(BaseModel):
+    """Socket access mode, pairing state, and paired device count returned by GET /api/auth."""
+
+    access: Literal["loopback", "tailscale"]
+    paired: bool
+    tailscale_enabled: bool
+    paired_devices: int
+
+
+class PairDeviceRequest(BaseModel):
+    """Strict request body for POST /api/pair."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    token: str = Field(min_length=16, max_length=128)
+
+
+class PairDeviceResponse(BaseModel):
+    """Confirmation returned by POST /api/pair once the session cookie is set."""
+
+    paired: Literal[True]
+
+
+class PairedDevice(BaseModel):
+    """One active paired Tailscale device session."""
+
+    id: int
+    label: str
+    peer_ip: str
+    last_seen_at: int
+
+
+class RemoteInfoResponse(BaseModel):
+    """Loopback-only Tailscale runtime state, QR matrix, and paired devices."""
+
+    active: bool
+    pairing_url: str | None
+    qr_matrix: list[list[bool]] | None
+    devices: list[PairedDevice]
+
+
+class RevokeDeviceResponse(BaseModel):
+    """Outcome returned by POST /api/remote/devices/{id}/revoke."""
+
+    revoked: bool
+
+
+class RevokeAllResponse(BaseModel):
+    """Revoked device count returned by POST /api/remote/revoke-all."""
+
+    revoked: int

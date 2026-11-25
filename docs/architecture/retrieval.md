@@ -35,10 +35,9 @@ English slides; sparse and BM25 are same-language.
 
 Chunking is Docling's HybridChunker — section-aligned, with the heading path
 ("Lecture 4 › Deadlocks › Prevention") prepended before embedding and stored for
-citation display. In a slide-deck PDF each text-layer page is chunked on its own and
-cites its own page; its heading is the slide-title rule's (an untitled page inherits the
-last title earlier in the file), and mixed or image pages go through docling's layout
-model and OCR one page at a time (decision 49).
+citation display. Every PDF page and standalone image is chunked on its own and cites
+its own page; a page that opens without a heading inherits the last heading earlier in
+the file (decision 49).
 
 ## Citations
 

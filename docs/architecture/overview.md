@@ -11,10 +11,10 @@ groundly/
 ├── cli/         # typer verbs: index, list, title, remove, drop, search, import, export,
 │             #   config, models, skill, mcp (stdio, or --http), serve, start
 ├── mcp/         # FastMCP tool definitions over the core (stdio + streamable HTTP)
-├── web/         # Starlette app + one HTML file: the topic-tree and test page
+├── web/         # FastAPI app, strict Pydantic schemas, live SSE runner + committed Svelte 5 SPA (`page.{js,css}`): the topic-tree and test page
 ├── agents/      # the gates — the topic gate (submit_tree) and the question gate (submit_questions); nothing unchecked enters store.db
 ├── retrieval/   # dense + sparse + BM25, RRF fusion, cross-encoder rerank
-├── ingestion/   # one warm docling worker per run (slide-deck PDFs routed per page) → HybridChunker → embed → stores
+├── ingestion/   # one warm docling worker per run (PDFs and images read page by page) → HybridChunker → embed → stores
 ├── llm/         # local models: bge-m3 embedder + reranker, lazy-loaded (no LLM client);
 │             #   MLX on Apple Silicon, torch elsewhere (decision 48)
 └── core/        # store access (SQLite WAL), manifest, subject registry, settings;
@@ -39,7 +39,7 @@ flowchart LR
     subgraph Groundly[Groundly local process]
         cli[CLI]
         mcp[MCP server\nstdio or loopback HTTP]
-        web[Topic-tree and test page\nloopback]
+        web[Topic-tree and test page\nloopback or paired Tailscale]
         services[Ingestion, retrieval, gates]
         cli --> services
         mcp --> services
@@ -75,9 +75,9 @@ Everything needs only the local models: no path of Groundly's reaches a provider
 | CLI verbs | `groundly index/search/import/export/...` | one-shot, core in-process, exits |
 | MCP stdio | `groundly mcp` | **spawned and killed by the host agent** |
 | Optional HTTP | `groundly mcp --http` | user-run; MCP over Streamable HTTP; binds **127.0.0.1 only**; exists so multiple hosts share one bge-m3 load |
-| Page + HTTP MCP | `groundly start` | user-run; one process, **127.0.0.1 only**, default 8765: the page at `/` and MCP over Streamable HTTP at `/mcp`, reachable as `groundly.localhost`; every host session shares one model load (decision 45) |
-| Topic-tree page | `groundly serve` | user-run; Starlette on uvicorn, **127.0.0.1 only**, all subjects from one process, reads per request; **loads no model and writes no rows to `store.db`**; its one write is a submitted test attempt to `progress.db`, graded in `agents/quiz.py`; it may start one page run (below) |
-| Page run | the student's `claude -p`, spawned by `serve` or `start` | at most one at a time, from a Write questions or Grade now click; ends with its result, **Stop**, a 20-minute timeout or the page process exiting; sees only Groundly's tools, reached at `/mcp` under `start` or through its own `groundly mcp` under `serve` (decision 46) |
+| Page + HTTP MCP | `groundly start` | user-run; one process on port 8765 by default. The page and `/mcp` listen on loopback. When Tailscale is enabled, paired devices can also open the page on its Tailscale IPv4 address. MCP stays on loopback and host sessions share one model load (decisions 45, 52) |
+| Topic-tree page | `groundly serve` | user-run; FastAPI on uvicorn (`docs_url=None`), loopback by default with an optional paired Tailscale listener (decision 52), all subjects from one process, reads per request, serving the committed Svelte 5 SPA (`groundly/web/static/page.{js,css}`); **loads no model and writes no rows to `store.db`**; it saves submitted attempts to `progress.db` through `agents/quiz.py` and manages device sessions in the private, machine-wide `remote.db`; it may start and stream one page run (below) |
+| Page run | the student's `claude -p`, spawned by `serve` or `start` | at most one at a time, from a Write questions or Grade now click; passes `--include-partial-messages` and streams coalesced `phase`/`delta`/`step`/`done` frames over async pub-sub SSE (`GET /api/runs/stream`, triggering mid-run refreshes on non-empty gate writes); ends with its result, **Stop**, a 20-minute timeout or the page process exiting; sees only Groundly's tools, reached at `/mcp` under `start` or through its own `groundly mcp` under `serve` (decisions 46, 50) |
 
 Multiple processes may open the same `store.db` (an `index` run while a host-spawned MCP process answers). Rules: **WAL + busy_timeout** on every connection; **lazy model loading** (never at MCP spawn — hosts expect fast handshakes), one shared embedder and one shared reranker per process, each unloaded after 10 minutes unused (`IDLE_UNLOAD_SECONDS`) so a long-lived `groundly start` or host-spawned server does not keep GBs of weights between sessions.
 

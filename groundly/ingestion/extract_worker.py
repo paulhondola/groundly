@@ -2,9 +2,9 @@
 or `--serve` to extract many files in one process over a line protocol (see `serve`).
 
 Always a child process, so a parser crash on a hostile or broken file kills only this
-process, not the indexing run (UC-01 A2). PDFs go through the page router (`pdf_router`),
-which sends a slide deck's text pages to the text layer and only its image pages to docling;
-other docling formats convert whole. OCR uses docling's bundled RapidOCR. Exits
+process, not the indexing run (UC-01 A2). PDFs and standalone images are read page by page
+(`docling_pages`) and chunked one page at a time (`chunk_pages`), so every chunk cites its own
+page; other docling formats convert whole. OCR uses docling's bundled RapidOCR. Exits
 EXIT_NO_TEXT when nothing is readable even after OCR, and EXIT_MODEL_UNAVAILABLE when a
 model cannot load: an environment failure, retryable, never a bad document.
 
@@ -18,7 +18,7 @@ import re
 import sys
 import tempfile
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, TextIO
 
@@ -42,11 +42,16 @@ EXIT_INPUT_TOO_LARGE = 5
 # ~100 MP (10000×10000), far above any course image: bounds decompression-bomb memory
 # before docling rasterizes an image.
 MAX_IMAGE_PIXELS = 100_000_000
+# the timeout restarts on every page, so only a page ceiling bounds a file's total time
+MAX_PAGES = 2000
 # CPU threads for docling's models — RapidOCR dominates a scanned page. One worker runs at a
 # time, so it may take every performance core; a thread on an efficiency core (Apple Silicon)
 # or a hyper-thread sibling makes the whole pool wait on it, which measured slower than
 # docling's default of 4.
 INFERENCE_THREADS = 8
+# Pages per docling conversion: the worker reports progress (and the parent's timeout
+# restarts) once per batch, so a batch of slow OCR pages must finish within the timeout.
+PAGE_BATCH = 16
 
 
 @functools.cache
@@ -70,9 +75,9 @@ def _model_step(fn):
 
 
 def _first_frame(path: Path) -> Path:
-    """Frame 0 of a standalone image, after the pixel cap. A multi-frame raster would become
-    N docling pages merged into chunks cited to page 1, so only the first frame is indexed;
-    a multi-page scan belongs in a PDF."""
+    """Frame 0 of a standalone image, after the pixel cap. Only the first frame is indexed,
+    so a crafted many-frame image cannot multiply the work; a multi-page scan belongs in a
+    PDF."""
     from PIL import Image, ImageSequence
 
     img = Image.open(path)  # lazy: reads header (size) without decoding pixels
@@ -172,7 +177,8 @@ def chunk_document(doc: "DoclingDocument", page: int | None = None) -> list[dict
     if not chunks:
         # HybridChunker drops a doc whose only content is headings (a title-only slide), though
         # OCR read its text: keep that as one chunk rather than exit with a false "found nothing".
-        salvaged = [t for t in doc.texts if t.text and t.text.strip()]
+        # body text only: a page footer or number is not what the page says
+        salvaged = _body_texts(doc)
         if salvaged:
             text = "\n".join(t.text.strip() for t in salvaged)
             chunk_page = next((t.prov[0].page_no for t in salvaged if t.prov), None)
@@ -191,8 +197,6 @@ def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
     from docling.datamodel.base_models import InputFormat
 
     input_format = InputFormat(DOCLING_FORMATS[path.suffix.lower()])
-    if path.suffix.lower() in IMAGE_SUFFIXES:
-        path = _first_frame(path)
     # docling's layout models load here, before the document is touched — a fetch
     # failure is the environment's fault, never this document's parse failure
     _model_step(lambda: _converter(ocr_lang).initialize_pipeline(input_format))
@@ -200,6 +204,118 @@ def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
     chunks = chunk_document(doc)
     pages = len(doc.pages) if doc.pages else None
     return {"pages": pages, "chunks": chunks}
+
+
+def _page_runs(pages: list[int]) -> list[tuple[int, int]]:
+    """Sorted contiguous runs of `pages`, each at most PAGE_BATCH pages long."""
+    runs: list[tuple[int, int]] = []
+    for n in sorted(set(pages)):
+        if runs and n == runs[-1][1] + 1 and n - runs[-1][0] < PAGE_BATCH:
+            runs[-1] = (runs[-1][0], n)
+        else:
+            runs.append((n, n))
+    return runs
+
+
+def docling_pages(
+    path: Path, pages: list[int] | None, ocr_lang: str | None
+) -> "Iterator[tuple[int, DoclingDocument]]":
+    """The product's page reader: docling + RapidOCR, PAGE_BATCH pages per conversion.
+
+    Yields (page_no, one-page document) for every requested page (every page when `pages`
+    is None) in ascending order, pages with no text included, as each batch finishes. No
+    conversion ever starts past the last page: docling rejects that range. A whole-document
+    read over the page ceiling is refused after its first batch, before any page is yielded."""
+    from docling.datamodel.base_models import InputFormat
+
+    input_format = InputFormat(DOCLING_FORMATS[path.suffix.lower()])
+    converter = _converter(ocr_lang)
+    # models load before the document is touched: a fetch failure is retryable, never this
+    # document's parse failure
+    _model_step(lambda: converter.initialize_pipeline(input_format))
+
+    def split(result, start: int, end: int):
+        doc = result.document
+        for n in range(start, end + 1):
+            if n in doc.pages:
+                yield n, doc.filter(page_nrs={n})
+
+    def convert(start: int, end: int):
+        return converter.convert(path, page_range=(start, end))
+
+    if pages is not None:
+        for start, end in _page_runs(pages):
+            yield from split(convert(start, end), start, end)
+        return
+    first = convert(1, PAGE_BATCH)
+    total = first.input.page_count
+    cap = int(os.environ.get("GROUNDLY_MAX_PAGES") or MAX_PAGES)
+    if total > cap:
+        print(
+            f"too many pages — {total} exceeds the {cap}-page limit "
+            "(raise it with: groundly config set ingestion.max_pages <N>)",
+            file=sys.stderr,
+        )
+        sys.exit(EXIT_INPUT_TOO_LARGE)
+    yield from split(first, 1, PAGE_BATCH)
+    for start in range(PAGE_BATCH + 1, total + 1, PAGE_BATCH):
+        end = min(start + PAGE_BATCH - 1, total)
+        yield from split(convert(start, end), start, end)
+
+
+def _no_progress(n: int) -> None:
+    """The default page callback: nothing listens."""
+
+
+def _body_texts(doc: "DoclingDocument") -> list:
+    """The document's non-empty text items in the body layer (no headers, footers or
+    page numbers)."""
+    from docling_core.types.doc import ContentLayer
+
+    return [t for t in doc.texts if t.content_layer == ContentLayer.BODY and t.text.strip()]
+
+
+def last_heading(doc: "DoclingDocument") -> str | None:
+    """Text of the document's last section header or title, the heading a following
+    untitled page carries."""
+    from docling_core.types.doc import DocItemLabel
+
+    labels = {DocItemLabel.SECTION_HEADER, DocItemLabel.TITLE}
+    return next((t.text for t in reversed(doc.texts) if t.label in labels), None)
+
+
+def _carry_heading(doc: "DoclingDocument", heading: str) -> None:
+    """Puts `heading` first on a page that has body text but does not open with a heading
+    of its own, so the chunker treats it as the page's heading and embeds it. A page with
+    no body text gets nothing: the heading would become a chunk cited to that page alone."""
+    from docling_core.types.doc import DocItemLabel
+
+    if not _body_texts(doc) or not doc.body.children:
+        return
+    first = doc.body.children[0].resolve(doc)
+    if getattr(first, "label", None) in (DocItemLabel.SECTION_HEADER, DocItemLabel.TITLE):
+        return
+    doc.insert_heading(sibling=first, text=heading, level=1, after=False)
+
+
+def chunk_pages(
+    pages: "Iterable[tuple[int, DoclingDocument]]",
+    on_page: Callable[[int], None] = _no_progress,
+) -> dict:
+    """Worker output for a document read page by page: each page chunked on its own, so
+    every chunk cites its page. A page that opens without a heading carries the last one
+    from an earlier page. `on_page` hears every page, blank ones included, in order."""
+    chunks: list[dict] = []
+    carried: str | None = None
+    count = 0
+    for n, doc in pages:
+        if carried:
+            _carry_heading(doc, carried)
+        chunks += chunk_document(doc, page=n)
+        carried = last_heading(doc) or carried
+        count += 1
+        on_page(n)
+    return {"pages": count, "chunks": chunks}
 
 
 def _extract_plain_text(path: Path) -> dict:
@@ -267,11 +383,17 @@ _SERVE_STATUS = {
 }
 
 
-def _handle(in_path: Path, out_path: Path, ocr_lang: str | None) -> None:
-    if in_path.suffix.lower() == ".pdf":
-        from groundly.ingestion import pdf_router
-
-        result = pdf_router.extract(in_path, ocr_lang)
+def _handle(
+    in_path: Path,
+    out_path: Path,
+    ocr_lang: str | None,
+    on_page: Callable[[int], None] = _no_progress,
+) -> None:
+    suffix = in_path.suffix.lower()
+    if suffix == ".pdf" or suffix in IMAGE_SUFFIXES:
+        # the pixel cap and first-frame cut guard every image-suffixed file before a reader sees it
+        path = _first_frame(in_path) if suffix in IMAGE_SUFFIXES else in_path
+        result = chunk_pages(docling_pages(path, None, ocr_lang), on_page)
     elif in_path.suffix.lower() in DOCLING_SUFFIXES:
         result = _extract_docling(in_path, ocr_lang)
     elif in_path.suffix.lower() in NOTEBOOK_SUFFIXES:
@@ -286,20 +408,24 @@ def _handle(in_path: Path, out_path: Path, ocr_lang: str | None) -> None:
     out_path.write_text(json.dumps(result))
 
 
-def serve(
-    stdin: TextIO,
-    stdout: TextIO,
-    handle: Callable[[Path, Path, str | None], None] = _handle,
-) -> None:
-    """One JSON request per line in ({"in", "out", "ocr_lang"}), one reply per line out
-    ({"status": ok|no_text|model_unavailable|input_too_large|error}). The cause goes to
-    stderr before the reply, so the parent can read it once the reply arrives. A failing
-    file never ends the loop."""
+Handler = Callable[[Path, Path, str | None, Callable[[int], None]], None]
+
+
+def serve(stdin: TextIO, stdout: TextIO, handle: Handler = _handle) -> None:
+    """One JSON request per line in ({"in", "out", "ocr_lang"}). Out: one {"page": n} line per
+    page as it finishes, then one status line ({"status": ok|no_text|model_unavailable|
+    input_too_large|error}). The cause goes to stderr before the status, so the parent can
+    read it once the status arrives. A failing file never ends the loop."""
+
+    def on_page(n: int) -> None:
+        stdout.write(json.dumps({"page": n}) + "\n")
+        stdout.flush()
+
     for line in stdin:
         req = json.loads(line)
         status = "ok"
         try:
-            handle(Path(req["in"]), Path(req["out"]), req["ocr_lang"])
+            handle(Path(req["in"]), Path(req["out"]), req["ocr_lang"], on_page)
         except SystemExit as exc:
             if isinstance(exc.code, int):
                 status = _SERVE_STATUS.get(exc.code, "error")
@@ -316,7 +442,7 @@ def serve(
         stdout.flush()
 
 
-def serve_stdio(handle: Callable[[Path, Path, str | None], None] = _handle) -> None:
+def serve_stdio(handle: Handler = _handle) -> None:
     """`serve` on the process's stdin and a private copy of fd 1. fd 1 itself is pointed at
     stderr, so anything a library prints (even from C) can never corrupt the protocol."""
     reply = os.fdopen(os.dup(1), "w")
