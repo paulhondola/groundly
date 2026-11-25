@@ -28,6 +28,12 @@ def test_openapi_schema_contains_only_api_paths_and_typed_errors():
         assert expected_path in paths
     assert all(path.startswith("/api/") for path in paths)
     assert "ErrorResponse" in spec["components"]["schemas"]
+    for path, operations in paths.items():
+        if path.startswith(("/api/subjects", "/api/runs")):
+            for operation in operations.values():
+                for code in ("401", "500", "503"):
+                    schema = operation["responses"][code]["content"]["application/json"]["schema"]
+                    assert schema == {"$ref": "#/components/schemas/ErrorResponse"}
     submit_schema = paths["/api/subjects/{subject}/attempts"]["post"]["requestBody"]["content"][
         "application/json"
     ]["schema"]

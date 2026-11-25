@@ -87,7 +87,7 @@ def _resolve_remote(port: int, tailscale: bool | None) -> "RemoteRuntime | None"
 def _remote_lines(remote: "RemoteRuntime") -> list[str]:
     from groundly.web.remote import render_terminal_qr
 
-    pairing_url = remote.pairing.pairing_url
+    pairing_url = remote.pairing_url
     return [
         f"Tailscale: http://{remote.ts_info.preferred_host}:{remote.port}/",
         f"Pair URL:  {pairing_url}",

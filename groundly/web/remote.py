@@ -15,7 +15,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Generator, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -49,6 +49,18 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at INTEGER NOT NULL
 );
 """
+
+
+def remote_db_error(exc: Exception) -> JSONResponse:
+    if isinstance(exc, sqlite3.OperationalError) and ("locked" in str(exc) or "busy" in str(exc)):
+        return JSONResponse(
+            {"error": "busy", "detail": "remote session store is busy — try again in a moment"},
+            status_code=503,
+        )
+    return JSONResponse(
+        {"error": "store_error", "detail": "could not read or update the remote session store"},
+        status_code=500,
+    )
 
 
 class PairAuthError(Exception):
@@ -253,73 +265,6 @@ class RemoteStore:
             return cursor.rowcount
 
 
-class PairingManager:
-    """Thread-safe single-use `#fragment` pairing token coordinator with per-IP rate limiting."""
-
-    def __init__(
-        self,
-        ts_info: TailscaleInfo,
-        port: int,
-        *,
-        monotonic: Callable[[], float] | None = None,
-    ) -> None:
-        self._ts_info = ts_info
-        self._port = port
-        self._monotonic = monotonic if monotonic is not None else time.monotonic
-        self._lock = threading.Lock()
-        self._active_token = secrets.token_urlsafe(24)
-        self._failures: dict[str, deque[float]] = {}
-
-    def _url_for(self, token: str) -> str:
-        return f"http://{self._ts_info.preferred_host}:{self._port}/pair#{token}"
-
-    @property
-    def pairing_url(self) -> str:
-        with self._lock:
-            return self._url_for(self._active_token)
-
-    def rotate(self) -> str:
-        """Mint and return a fresh pairing URL, invalidating the previous token."""
-        with self._lock:
-            self._active_token = secrets.token_urlsafe(24)
-            return self._url_for(self._active_token)
-
-    def consume_and_rotate(self, candidate: str, peer_ip: str) -> str:
-        """Consume a valid pairing token once and return the next rotated pairing URL."""
-        now = self._monotonic()
-        with self._lock:
-            failures = self._failures.get(peer_ip)
-            if failures is not None:
-                cutoff = now - PAIR_WINDOW_S
-                while failures and failures[0] <= cutoff:
-                    failures.popleft()
-                if not failures:
-                    del self._failures[peer_ip]
-                    failures = None
-
-            if failures is not None and len(failures) >= MAX_PAIR_FAILURES:
-                raise PairAuthError(
-                    429,
-                    "rate_limited",
-                    "too many failed pairing attempts — wait a minute and try again",
-                )
-
-            valid = bool(candidate) and hmac.compare_digest(
-                candidate.encode("utf-8"),
-                self._active_token.encode("utf-8"),
-            )
-            if not valid:
-                self._failures.setdefault(peer_ip, deque()).append(now)
-                raise PairAuthError(
-                    401,
-                    "invalid_pairing_token",
-                    "pairing link is invalid or was already used — scan the current QR code",
-                )
-
-            self._active_token = secrets.token_urlsafe(24)
-            return self._url_for(self._active_token)
-
-
 def qr_matrix(url: str) -> list[list[bool]]:
     """Encode a pairing URL into a boolean QR module matrix."""
     qr = segno.make(url, error="l")
@@ -335,7 +280,7 @@ def render_terminal_qr(url: str) -> str:
 
 
 class RemoteRuntime:
-    """Active Tailscale runtime pairing coordinator and session store bundle."""
+    """Coordinate single-use pairing links, persisted sessions, and active streams."""
 
     def __init__(
         self,
@@ -346,10 +291,77 @@ class RemoteRuntime:
         self.ts_info = ts_info
         self.port = port
         self.store = RemoteStore()
-        self.pairing = PairingManager(ts_info, port)
         self.on_paired = on_paired
+        self._pair_lock = threading.Lock()
+        self._active_token = secrets.token_urlsafe(24)
+        self._failures: dict[str, deque[float]] = {}
         self._stream_lock = threading.Lock()
         self._stream_events: set[tuple[asyncio.AbstractEventLoop, asyncio.Event]] = set()
+
+    def _pairing_url(self) -> str:
+        return f"http://{self.ts_info.preferred_host}:{self.port}/pair#{self._active_token}"
+
+    @property
+    def pairing_url(self) -> str:
+        with self._pair_lock:
+            return self._pairing_url()
+
+    def _check_token(self, candidate: str, peer_ip: str) -> None:
+        now = time.monotonic()
+        failures = self._failures.get(peer_ip)
+        if failures is not None:
+            cutoff = now - PAIR_WINDOW_S
+            while failures and failures[0] <= cutoff:
+                failures.popleft()
+            if not failures:
+                del self._failures[peer_ip]
+                failures = None
+
+        if failures is not None and len(failures) >= MAX_PAIR_FAILURES:
+            raise PairAuthError(
+                429,
+                "rate_limited",
+                "too many failed pairing attempts — wait a minute and try again",
+            )
+
+        valid = bool(candidate) and hmac.compare_digest(
+            candidate.encode("utf-8"),
+            self._active_token.encode("utf-8"),
+        )
+        if not valid:
+            self._failures.setdefault(peer_ip, deque()).append(now)
+            raise PairAuthError(
+                401,
+                "invalid_pairing_token",
+                "pairing link is invalid or was already used — scan the current QR code",
+            )
+
+    def pair_device(
+        self, candidate: str, peer_ip: str, user_agent: str, replace_token: str | None
+    ) -> str:
+        """Publish a replacement QR only after the new session has committed."""
+        with self._pair_lock:
+            self._check_token(candidate, peer_ip)
+            session = secrets.token_urlsafe(32)
+            device = self.store.create_session(
+                session, user_agent, peer_ip, replace_raw_token=replace_token
+            )
+            self._active_token = secrets.token_urlsafe(24)
+            if replace_token:
+                self.notify_revoked()
+            next_url = self._pairing_url()
+        if self.on_paired is not None:
+            # Terminal output is best-effort after the session commits.
+            with suppress(OSError, ValueError):
+                self.on_paired(device["label"], peer_ip, next_url)
+        return session
+
+    def revoke_all(self) -> int:
+        with self._pair_lock:
+            count = self.store.revoke_all()
+            self._active_token = secrets.token_urlsafe(24)
+            self.notify_revoked()
+            return count
 
     def register_stream(self, loop: asyncio.AbstractEventLoop, event: asyncio.Event) -> None:
         """Register an active Tailscale SSE stream to wake immediately on device revocation."""
@@ -456,12 +468,17 @@ class _SocketPerimeterMiddleware:
             await self._app(scope, receive, send)
             return
 
+        shell = method == "GET" and (
+            path in {"/", "/pair"} or _SUBJECT_SHELL_RE.fullmatch(path) is not None
+        )
         session_token = Request(scope).cookies.get(SESSION_COOKIE)
         if session_token:
             try:
                 paired = bool(await run_in_threadpool(remote.store.authenticate, session_token))
-            except (sqlite3.DatabaseError, RuntimeError):
-                paired = False
+            except (sqlite3.DatabaseError, RuntimeError) as exc:
+                response = self._html_shell() if shell else remote_db_error(exc)
+                await response(scope, receive, send)
+                return
         else:
             paired = False
         state["paired"] = paired
@@ -469,13 +486,8 @@ class _SocketPerimeterMiddleware:
         if method == "GET" and path == "/api/auth":
             await self._app(scope, receive, send)
             return
-        if method == "GET" and (
-            path in {"/", "/pair"} or _SUBJECT_SHELL_RE.fullmatch(path) is not None
-        ):
-            if not paired:
-                await self._html_shell()(scope, receive, send)
-                return
-            await self._app(scope, receive, send)
+        if shell and not paired:
+            await self._html_shell()(scope, receive, send)
             return
 
         if not paired:

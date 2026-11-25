@@ -8,6 +8,7 @@
   import Brand from "./lib/components/Brand.svelte";
   import RemoteDialog from "./lib/components/RemoteDialog.svelte";
   import RunStrip from "./lib/components/RunStrip.svelte";
+  import Button from "./lib/components/ui/Button.svelte";
   import Card from "./lib/components/ui/Card.svelte";
   import Select from "./lib/components/ui/Select.svelte";
   import { isActive, parsePositiveInt, route } from "./lib/router";
@@ -48,6 +49,12 @@
     }
   }
 </script>
+
+<svelte:window
+  ononline={() => {
+    if (authStore.canRetry) void authStore.bootstrap();
+  }}
+/>
 
 <QueryClientProvider client={queryClient}>
   <div class="min-h-screen bg-background text-foreground">
@@ -90,7 +97,7 @@
       {#if !authStore.ready}
         <p class="text-sm text-muted-foreground">Connecting…</p>
       {:else if !authStore.paired}
-        {#if authStore.access === "tailscale"}
+        {#if !authStore.canRetry && authStore.access === "tailscale"}
           <PairView />
         {:else}
           <Card
@@ -98,6 +105,9 @@
             role="alert"
           >
             {authStore.error ?? "Could not connect to Groundly."}
+            <Button variant="outline" size="sm" onclick={() => void authStore.bootstrap()}>
+              Retry
+            </Button>
           </Card>
         {/if}
       {:else}

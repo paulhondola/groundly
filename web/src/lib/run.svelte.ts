@@ -275,6 +275,12 @@ export function createRunStore(qc: QueryClient = queryClient) {
     target = info.target;
     const incoming = info.run;
     let invalidatedAllSubjects = false;
+    if (incoming && incoming.id === endedRunId && incoming.started_at !== run?.started_at) {
+      // A restarted page server can reuse the ID of a run this tab already saw finish.
+      message = null;
+      endedRunId = null;
+      dismissed = false;
+    }
     if (incoming && incoming.id === endedRunId) {
       // Already settled locally; keep current view state and let the wake check below refresh subjects.
     } else if (
