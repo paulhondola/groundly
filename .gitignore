@@ -33,3 +33,8 @@ results-*.json
 
 # logs/ dirs graphrag wrote into the CWD in older versions (docs/infrastructure/security.md)
 logs/
+
+# bench outputs
+/data/
+/bench/results/
+/bench/reference/

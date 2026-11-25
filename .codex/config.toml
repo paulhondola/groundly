@@ -1,0 +1,6 @@
+[mcp_servers.dbx]
+command = "/opt/homebrew/Cellar/node/26.8.2/bin/node"
+args = ["/opt/homebrew/lib/node_modules/@dbx-app/mcp-server/bin/dbx-mcp-server.js"]
+
+[mcp_servers.groundly]
+url = "http://127.0.0.1:8765/mcp"
