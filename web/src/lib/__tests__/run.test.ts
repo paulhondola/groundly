@@ -69,10 +69,18 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe("createRunStore", () => {
   const originalFetch = globalThis.fetch;
   let fetchMock: ReturnType<typeof vi.fn>;
+  let createdStores: Array<ReturnType<typeof createRunStore>> = [];
+
+  function makeStore(qc = createAppQueryClient()) {
+    const store = createRunStore(qc);
+    createdStores.push(store);
+    return store;
+  }
 
   beforeEach(() => {
     runStore.destroy();
     authStore.resetForTests();
+    createdStores = [];
     MockEventSource.instances = [];
     fetchMock = vi.fn();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
@@ -80,6 +88,10 @@ describe("createRunStore", () => {
   });
 
   afterEach(() => {
+    for (const store of createdStores) {
+      store.destroy();
+    }
+    createdStores = [];
     authStore.resetForTests();
     setEventStreamFactory(null);
     globalThis.fetch = originalFetch;
@@ -555,5 +567,164 @@ describe("createRunStore", () => {
     expect(fetchMock).toHaveBeenCalledTimes(callsAfterDestroy);
     expect(MockEventSource.instances).toHaveLength(esCountAfterDestroy);
     expect(invalidateSpy).toHaveBeenCalledTimes(invalidatesAfterDestroy);
+  });
+
+  it("reconciles settled watched run on wake-up: calls applySettled, updates message, closes stream, and invalidates subject queries", async () => {
+    const qc = createAppQueryClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const store = makeStore(qc);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 101, subject: "PDSS" }), 202));
+    await store.start("PDSS", { kind: "write", topic_id: 7 });
+
+    const es = MockEventSource.instances[0];
+    expect(es.closed).toBe(false);
+    expect(store.watched).toBe(101);
+
+    const visibilitySpy = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        available: true,
+        reason: null,
+        target: 10,
+        run: makeSnapshot({
+          id: 101,
+          subject: "PDSS",
+          status: "done",
+          phase: null,
+          summary: "Stored 6 questions.",
+        }),
+      }),
+    );
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await vi.waitFor(() => {
+      expect(store.message).toBe("Stored 6 questions.");
+    });
+    expect(es.closed).toBe(true);
+    expect(MockEventSource.instances).toHaveLength(1);
+    expect(store.run?.status).toBe("done");
+    expect(store.watched).toBe(101);
+    expect(store.busy).toBe(false);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject", "PDSS"] });
+
+    visibilitySpy.mockRestore();
+  });
+
+  it("handles server restart on wake-up when watched run disappears: sets restart message, clears watched, and invalidates queries", async () => {
+    const qc = createAppQueryClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const store = makeStore(qc);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 102, subject: "PDSS" }), 202));
+    await store.start("PDSS", { kind: "write", topic_id: 7 });
+
+    const es = MockEventSource.instances[0];
+    expect(store.watched).toBe(102);
+
+    const visibilitySpy = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        available: true,
+        reason: null,
+        target: 10,
+        run: null,
+      }),
+    );
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await vi.waitFor(() => {
+      expect(store.message).toBe("Lost track of the run — the page server restarted.");
+    });
+    expect(es.closed).toBe(true);
+    expect(store.run).toBeNull();
+    expect(store.watched).toBeNull();
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject"] });
+
+    // A fresh attach with watched === null must not show a stale restart banner
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        available: true,
+        reason: null,
+        target: 10,
+        run: null,
+      }),
+    );
+    await store.attach();
+    expect(store.message).toBeNull();
+
+    visibilitySpy.mockRestore();
+  });
+
+  it("preserves or restores Lost error banner when wake-up GET /api/runs probe rejects", async () => {
+    const qc = createAppQueryClient();
+    const store = makeStore(qc);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 103, subject: "PDSS" }), 202));
+    await store.start("PDSS", { kind: "write", topic_id: 7 });
+
+    const runningInfo = () =>
+      jsonResponse({
+        available: true,
+        reason: null,
+        target: 10,
+        run: makeSnapshot({ id: 103, status: "running" }),
+      });
+
+    for (let i = 0; i < 4; i++) {
+      const currentEs = MockEventSource.instances[MockEventSource.instances.length - 1];
+      if (currentEs.closed) {
+        break;
+      }
+      const beforeCalls = fetchMock.mock.calls.length;
+      fetchMock.mockResolvedValueOnce(runningInfo());
+      currentEs.triggerError();
+      await vi.waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledTimes(beforeCalls + 1);
+      });
+      await new Promise((r) => setTimeout(r, 0));
+    }
+
+    expect(store.message).toContain("Lost live stream connection");
+
+    // Wake-up while server is unreachable must NOT clear the "Lost " banner or leave stale running state
+    const visibilitySpy = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const callsBeforeWake = fetchMock.mock.calls.length;
+    fetchMock.mockRejectedValueOnce(new TypeError("NetworkError"));
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(callsBeforeWake + 1);
+    });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(store.message).toContain("Lost ");
+    expect(store.run).toBeNull();
+    expect(store.busy).toBe(false);
+
+    // Also: waking up offline from an active stream with no prior message sets "Lost the page server..."
+    store.destroy();
+    const store2 = makeStore(qc);
+    fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 104, subject: "PDSS" }), 202));
+    await store2.start("PDSS", { kind: "write", topic_id: 7 });
+    const es2 = MockEventSource.instances[MockEventSource.instances.length - 1];
+    expect(store2.message).toBeNull();
+
+    const callsBeforeWake2 = fetchMock.mock.calls.length;
+    fetchMock.mockRejectedValueOnce(new TypeError("NetworkError"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(callsBeforeWake2 + 1);
+    });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(store2.message).toBe("Lost the page server — reload the page when it is back.");
+    expect(store2.run).toBeNull();
+    expect(store2.busy).toBe(false);
+    expect(es2.closed).toBe(true);
+
+    visibilitySpy.mockRestore();
   });
 });

@@ -261,4 +261,136 @@ describe("RemoteDialog", () => {
 
     void unmount(instance);
   });
+
+  it("clears an earlier sibling mutation error when the other revoke action starts", async () => {
+    const qc = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+
+    let devices = [
+      {
+        id: 12,
+        label: "iPhone · Safari",
+        peer_ip: "100.64.0.12",
+        created_at: "2026-11-25T08:00:00+00:00",
+        last_seen_at: 1764057600,
+      },
+      {
+        id: 13,
+        label: "iPad · Safari",
+        peer_ip: "100.64.0.13",
+        created_at: "2026-11-25T08:01:00+00:00",
+        last_seen_at: 1764057660,
+      },
+    ];
+    let failRevokeAll = true;
+    let resolvePendingRevokeAll: ((res: Response) => void) | null = null;
+
+    globalThis.fetch = vi
+      .fn()
+      .mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        const path = requestPathname(input);
+        const method = input instanceof Request ? input.method : (init?.method ?? "GET");
+        if (path === "/api/remote" && method === "GET") {
+          return Promise.resolve(
+            jsonResponse({
+              active: true,
+              host: "macbook.tail1234.ts.net",
+              pairing_url: "macbook.tail1234.ts.net:8765/pair#tok1",
+              qr_matrix: [[true]],
+              devices,
+            }),
+          );
+        }
+        if (path === "/api/remote/devices/12/revoke" && method === "POST") {
+          return Promise.resolve(
+            jsonResponse({ error: "db_error", detail: "Revoke one failed" }, 500),
+          );
+        }
+        if (path === "/api/remote/devices/13/revoke" && method === "POST") {
+          devices = devices.filter((d) => d.id !== 13);
+          return Promise.resolve(jsonResponse({ revoked: true }));
+        }
+        if (path === "/api/remote/revoke-all" && method === "POST") {
+          if (failRevokeAll) {
+            return Promise.resolve(
+              jsonResponse({ error: "db_error", detail: "Revoke all failed" }, 500),
+            );
+          }
+          return new Promise<Response>((resolve) => {
+            resolvePendingRevokeAll = resolve;
+          });
+        }
+        return Promise.resolve(jsonResponse({}));
+      }) as unknown as typeof fetch;
+
+    const instance = mount(QueryHarness, {
+      target: container,
+      props: {
+        client: qc,
+        component: RemoteDialog,
+        props: { pairedCount: 2 },
+      },
+    });
+    flushSync();
+
+    const trigger = Array.from(container.querySelectorAll("button")).find((b) =>
+      b.textContent?.includes("Devices"),
+    );
+    trigger?.click();
+    flushSync();
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain("iPhone · Safari");
+      expect(container.textContent).toContain("iPad · Safari");
+    });
+
+    // 1. Revoke all fails -> clicking per-device Revoke clears the error
+    const revokeAllBtn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Revoke all",
+    );
+    revokeAllBtn?.click();
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain("Revoke all failed");
+    });
+
+    const revokeButtonsAfterAllFail = Array.from(container.querySelectorAll("button")).filter(
+      (b) => b.textContent?.trim() === "Revoke",
+    );
+    revokeButtonsAfterAllFail[1]?.click();
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[role="alert"]')).toBeNull();
+      expect(container.textContent).not.toContain("iPad · Safari");
+    });
+
+    // 2. Per-device Revoke fails -> starting Revoke all immediately clears the error
+    const revokeOneBtn = Array.from(container.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Revoke",
+    );
+    revokeOneBtn?.click();
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain("Revoke one failed");
+    });
+
+    failRevokeAll = false;
+    revokeAllBtn?.click();
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[role="alert"]')).toBeNull();
+      expect(resolvePendingRevokeAll).not.toBeNull();
+    });
+
+    devices = [];
+    resolvePendingRevokeAll!(jsonResponse({ revoked: 1 }));
+    await vi.waitFor(() => {
+      expect(container.textContent).not.toContain("iPhone · Safari");
+    });
+
+    void unmount(instance);
+  });
 });

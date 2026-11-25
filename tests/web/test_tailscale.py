@@ -8,13 +8,18 @@ def _status(
     *,
     state: str = "Running",
     ips: list[str] | None = None,
+    self_ips: list[str] | None = None,
     dns_name: str = "MacBook.Tail1234.ts.net.",
 ):
+    resolved_ips = ["100.101.102.103", "fd7a::1"] if ips is None else ips
     return json.dumps(
         {
             "BackendState": state,
-            "TailscaleIPs": ips if ips is not None else ["100.101.102.103", "fd7a::1"],
-            "Self": {"DNSName": dns_name, "TailscaleIPs": ["100.101.102.103"]},
+            "TailscaleIPs": resolved_ips,
+            "Self": {
+                "DNSName": dns_name,
+                "TailscaleIPs": resolved_ips if self_ips is None else self_ips,
+            },
         }
     )
 
@@ -80,3 +85,53 @@ def test_discover_uses_macos_app_fallback(monkeypatch, tmp_path):
     monkeypatch.setattr(subprocess, "run", fake_run)
     assert discover_tailscale() == TailscaleInfo(ipv4="100.101.102.103", dns_name=None)
     assert seen_cmd == [[str(fake_bin), "status", "--json"]]
+
+
+def test_discover_falls_back_to_self_tailscale_ips(monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/local/bin/tailscale")
+    payloads = [
+        _status(ips=[], self_ips=["fd7a::1", "100.101.102.103"]),
+        _status(ips=["192.168.1.10", "::1"], self_ips=["100.101.102.103"]),
+        json.dumps(
+            {
+                "BackendState": "Running",
+                "Self": {
+                    "DNSName": "MacBook.Tail1234.ts.net.",
+                    "TailscaleIPs": ["100.101.102.103"],
+                },
+            }
+        ),
+    ]
+    for payload in payloads:
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *a, p=payload, **kw: subprocess.CompletedProcess(a[0], 0, stdout=p, stderr=""),
+        )
+        assert discover_tailscale() == TailscaleInfo(
+            ipv4="100.101.102.103", dns_name="macbook.tail1234.ts.net"
+        )
+
+
+def test_discover_returns_none_on_nonzero_exit_invalid_json_or_oserror(monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/local/bin/tailscale")
+
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **kw: subprocess.CompletedProcess(a[0], 1, stdout=_status(), stderr="err"),
+    )
+    assert discover_tailscale() is None
+
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, stdout="{not json", stderr=""),
+    )
+    assert discover_tailscale() is None
+
+    def fail_os(*a, **kw):
+        raise OSError("cannot execute")
+
+    monkeypatch.setattr(subprocess, "run", fail_os)
+    assert discover_tailscale() is None

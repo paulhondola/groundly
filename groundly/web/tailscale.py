@@ -97,10 +97,9 @@ def discover_tailscale() -> TailscaleInfo | None:
 
     self_info = data.get("Self")
     self_dict = self_info if isinstance(self_info, dict) else {}
-    raw_ips = data.get("TailscaleIPs")
-    if raw_ips is None:
-        raw_ips = self_dict.get("TailscaleIPs")
-    ipv4 = _first_cgnat_ipv4(raw_ips)
+    ipv4 = _first_cgnat_ipv4(data.get("TailscaleIPs")) or _first_cgnat_ipv4(
+        self_dict.get("TailscaleIPs")
+    )
     if not ipv4:
         return None
 

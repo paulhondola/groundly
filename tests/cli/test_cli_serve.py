@@ -33,6 +33,14 @@ _ALLOWED_BUNDLE_URLS = (
 )
 
 
+@pytest.fixture(autouse=True)
+def home(monkeypatch, tmp_path):
+    home_dir = tmp_path / "home"
+    home_dir.mkdir()
+    monkeypatch.setenv("GROUNDLY_HOME", str(home_dir))
+    return home_dir
+
+
 def _patch(monkeypatch, probe_free=True):
     import uvicorn
 
@@ -156,14 +164,11 @@ def test_serve_names_the_real_cause_when_the_bind_is_refused(monkeypatch):
 
 
 @pytest.mark.parametrize("verb", ["serve", "start"])
-def test_tailscale_flag_binds_both_sockets_attaches_remote_and_prints_qr(
-    monkeypatch, tmp_path, verb
-):
+def test_tailscale_flag_binds_both_sockets_attaches_remote_and_prints_qr(monkeypatch, verb):
     from groundly.cli.app import console
     from groundly.web.remote import RemoteRuntime, render_terminal_qr
     from groundly.web.tailscale import TailscaleInfo
 
-    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
     runs, opened = _patch(monkeypatch)
     bound: list[tuple[str, int]] = []
     monkeypatch.setattr(socket.socket, "bind", lambda self, address: bound.append(address))
@@ -201,8 +206,7 @@ def test_tailscale_flag_binds_both_sockets_attaches_remote_and_prints_qr(
 
 
 @pytest.mark.parametrize("verb", ["serve", "start"])
-def test_explicit_tailscale_fails_when_unavailable(monkeypatch, tmp_path, verb):
-    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
+def test_explicit_tailscale_fails_when_unavailable(monkeypatch, verb):
     runs, opened = _patch(monkeypatch)
     monkeypatch.setattr("groundly.web.tailscale.discover_tailscale", lambda: None)
 
@@ -212,11 +216,8 @@ def test_explicit_tailscale_fails_when_unavailable(monkeypatch, tmp_path, verb):
     assert runs == [] and opened == []
 
 
-def test_config_tailscale_warns_and_falls_back_to_loopback_when_unavailable(monkeypatch, tmp_path):
-    home = tmp_path / "home"
-    home.mkdir()
+def test_config_tailscale_warns_and_falls_back_to_loopback_when_unavailable(monkeypatch, home):
     (home / "config.toml").write_text("[web]\ntailscale = true\n", encoding="utf-8")
-    monkeypatch.setenv("GROUNDLY_HOME", str(home))
     runs, opened = _patch(monkeypatch)
     bound: list[tuple[str, int]] = []
     monkeypatch.setattr(socket.socket, "bind", lambda self, address: bound.append(address))
@@ -231,11 +232,8 @@ def test_config_tailscale_warns_and_falls_back_to_loopback_when_unavailable(monk
     assert opened == ["http://groundly.localhost:8765/"]
 
 
-def test_no_tailscale_flag_overrides_config_without_discovery(monkeypatch, tmp_path):
-    home = tmp_path / "home"
-    home.mkdir()
+def test_no_tailscale_flag_overrides_config_without_discovery(monkeypatch, home):
     (home / "config.toml").write_text("[web]\ntailscale = true\n", encoding="utf-8")
-    monkeypatch.setenv("GROUNDLY_HOME", str(home))
     runs, opened = _patch(monkeypatch)
     bound: list[tuple[str, int]] = []
     monkeypatch.setattr(socket.socket, "bind", lambda self, address: bound.append(address))
@@ -254,10 +252,30 @@ def test_no_tailscale_flag_overrides_config_without_discovery(monkeypatch, tmp_p
     assert opened == ["http://groundly.localhost:8765/"]
 
 
-def test_second_socket_bind_failure_closes_first_socket_and_exits_cleanly(monkeypatch, tmp_path):
+def test_serve_ignores_user_home_tailscale_config_via_isolated_groundly_home(monkeypatch, tmp_path):
+    user_home = tmp_path / "user_home"
+    (user_home / ".groundly").mkdir(parents=True)
+    (user_home / ".groundly" / "config.toml").write_text(
+        "[web]\ntailscale = true\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("HOME", str(user_home))
+    runs, opened = _patch(monkeypatch)
+
+    def fail_if_called():
+        raise AssertionError("discover_tailscale should not be called")
+
+    monkeypatch.setattr("groundly.web.tailscale.discover_tailscale", fail_if_called)
+
+    result = runner.invoke(app, ["start"])
+    assert result.exit_code == 0, result.output
+    assert [(r["host"], r["port"]) for r in runs] == [("127.0.0.1", 8765)]
+    assert runs[0]["app"].user_middleware[0].kwargs["remote"] is None
+    assert opened == ["http://groundly.localhost:8765/"]
+
+
+def test_second_socket_bind_failure_closes_first_socket_and_exits_cleanly(monkeypatch):
     from groundly.web.tailscale import TailscaleInfo
 
-    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
     runs, opened = _patch(monkeypatch)
     ts_info = TailscaleInfo(ipv4="100.101.102.103")
     monkeypatch.setattr("groundly.web.tailscale.discover_tailscale", lambda: ts_info)

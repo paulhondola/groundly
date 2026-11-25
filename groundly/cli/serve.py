@@ -26,9 +26,7 @@ def _open_browser(url: str) -> None:
     timer.start()
 
 
-_PORT = Annotated[
-    int, typer.Option("--port", min=1, max=65535, help="Port to listen on (127.0.0.1 only).")
-]
+_PORT = Annotated[int, typer.Option("--port", min=1, max=65535, help="Port to listen on.")]
 _TAILSCALE = Annotated[
     bool | None,
     typer.Option(

@@ -242,22 +242,43 @@ export function createRunStore(qc: QueryClient = queryClient) {
     }
   }
 
-  async function attach(): Promise<RunsInfo | null> {
+  async function attach(options?: { fromWake?: boolean }): Promise<RunsInfo | null> {
     const seq = ++stateSeq;
     let info: RunsInfo;
     try {
       info = unwrap(await apiClient.GET("/api/runs"));
     } catch {
+      if (
+        seq === stateSeq &&
+        options?.fromWake &&
+        (run?.status === "running" || (watched !== null && endedRunId !== watched))
+      ) {
+        run = null;
+        closeStream();
+        if (!message) {
+          message = "Lost the page server — reload the page when it is back.";
+        }
+      }
       return null;
     }
     if (seq !== stateSeq) {
       return info;
     }
+    if (options?.fromWake) {
+      streamErrors = 0;
+    }
+    if (message?.startsWith("Lost ")) {
+      message = null;
+    }
     available = info.available;
     reason = info.reason;
     target = info.target;
     const incoming = info.run;
+    let invalidatedAllSubjects = false;
     if (incoming && incoming.id === endedRunId) {
+      if (options?.fromWake) {
+        void qc.invalidateQueries({ queryKey: queryKeys.allSubjects() });
+      }
       return info;
     }
     if (
@@ -268,10 +289,13 @@ export function createRunStore(qc: QueryClient = queryClient) {
       run?.id === incoming.id &&
       run.status === "running"
     ) {
+      if (options?.fromWake) {
+        void qc.invalidateQueries({ queryKey: queryKeys.allSubjects() });
+      }
       return info;
     }
-    run = incoming;
     if (incoming && incoming.status === "running") {
+      run = incoming;
       dismissed = false;
       if (watched !== incoming.id || !source) {
         watched = incoming.id;
@@ -279,6 +303,22 @@ export function createRunStore(qc: QueryClient = queryClient) {
         streamErrors = 0;
         openStream();
       }
+    } else if (watched !== null && endedRunId !== watched) {
+      if (incoming && incoming.id === watched) {
+        applySettled(incoming);
+      } else {
+        run = incoming;
+        closeStream();
+        message = "Lost track of the run — the page server restarted.";
+        notifyEnd(watched);
+        watched = null;
+        invalidatedAllSubjects = true;
+      }
+    } else {
+      run = incoming;
+    }
+    if (options?.fromWake && !invalidatedAllSubjects) {
+      void qc.invalidateQueries({ queryKey: queryKeys.allSubjects() });
     }
     return info;
   }
@@ -351,12 +391,7 @@ export function createRunStore(qc: QueryClient = queryClient) {
     if (!authStore.paired) {
       return;
     }
-    streamErrors = 0;
-    if (message?.startsWith("Lost ")) {
-      message = null;
-    }
-    void attach();
-    void qc.invalidateQueries({ queryKey: queryKeys.allSubjects() });
+    void attach({ fromWake: true });
   }
 
   function onVisibilityChange(): void {

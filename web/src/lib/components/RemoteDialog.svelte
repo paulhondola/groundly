@@ -34,6 +34,9 @@
           body: {},
         }),
       ),
+    onMutate: () => {
+      revokeAllMutation.reset();
+    },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.remote() });
     },
@@ -41,6 +44,9 @@
 
   const revokeAllMutation = createMutation(() => ({
     mutationFn: async () => unwrap(await apiClient.POST("/api/remote/revoke-all", { body: {} })),
+    onMutate: () => {
+      revokeMutation.reset();
+    },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.remote() });
     },
