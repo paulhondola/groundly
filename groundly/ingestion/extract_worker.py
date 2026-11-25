@@ -2,9 +2,9 @@
 or `--serve` to extract many files in one process over a line protocol (see `serve`).
 
 Always a child process, so a parser crash on a hostile or broken file kills only this
-process, not the indexing run (UC-01 A2). PDFs go through the page router (`pdf_router`),
-which sends a slide deck's text pages to the text layer and only its image pages to docling;
-other docling formats convert whole. OCR uses docling's bundled RapidOCR. Exits
+process, not the indexing run (UC-01 A2). PDFs and standalone images are read page by page
+(`docling_pages`) and chunked one page at a time (`chunk_pages`), so every chunk cites its own
+page; other docling formats convert whole. OCR uses docling's bundled RapidOCR. Exits
 EXIT_NO_TEXT when nothing is readable even after OCR, and EXIT_MODEL_UNAVAILABLE when a
 model cannot load: an environment failure, retryable, never a bad document.
 
@@ -194,8 +194,6 @@ def _extract_docling(path: Path, ocr_lang: str | None = None) -> dict:
     from docling.datamodel.base_models import InputFormat
 
     input_format = InputFormat(DOCLING_FORMATS[path.suffix.lower()])
-    if path.suffix.lower() in IMAGE_SUFFIXES:
-        path = _first_frame(path)
     # docling's layout models load here, before the document is touched — a fetch
     # failure is the environment's fault, never this document's parse failure
     _model_step(lambda: _converter(ocr_lang).initialize_pipeline(input_format))
@@ -360,11 +358,17 @@ _SERVE_STATUS = {
 }
 
 
-def _handle(in_path: Path, out_path: Path, ocr_lang: str | None) -> None:
-    if in_path.suffix.lower() == ".pdf":
-        from groundly.ingestion import pdf_router
-
-        result = pdf_router.extract(in_path, ocr_lang)
+def _handle(
+    in_path: Path,
+    out_path: Path,
+    ocr_lang: str | None,
+    on_page: Callable[[int], None] = _no_progress,
+) -> None:
+    suffix = in_path.suffix.lower()
+    if suffix == ".pdf" or suffix in IMAGE_SUFFIXES:
+        # the pixel cap and first-frame cut guard every image before any reader sees it
+        path = _first_frame(in_path) if suffix in IMAGE_SUFFIXES else in_path
+        result = chunk_pages(docling_pages(path, None, ocr_lang), on_page)
     elif in_path.suffix.lower() in DOCLING_SUFFIXES:
         result = _extract_docling(in_path, ocr_lang)
     elif in_path.suffix.lower() in NOTEBOOK_SUFFIXES:

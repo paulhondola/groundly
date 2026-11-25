@@ -85,7 +85,7 @@ def test_no_ocr_lang_keeps_default_langs(monkeypatch):
 
 def test_image_suffixes_route_to_docling(tmp_path):
     """Standalone image extensions land on the docling allowlist and map to the
-    'image' format, so main() routes them to _extract_docling."""
+    'image' format, so `_handle` reads them through the page loop."""
     from groundly.ingestion.formats import DOCLING_FORMATS, DOCLING_SUFFIXES, skip_reason
 
     for suffix in (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"):
@@ -99,7 +99,7 @@ def test_image_suffixes_route_to_docling(tmp_path):
 def test_image_format_overrides_docling_auto_ocr(monkeypatch):
     """The IMAGE registration is load-bearing: docling's *default* IMAGE OCR is the auto
     resolver (`OcrAutoOptions` → ocrmac/rapidocr/easyocr by environment), which would
-    silently diverge from the decision-14 pin. `_extract_docling` must override it with
+    silently diverge from the decision-14 pin. `_converter` must override it with
     the explicit RapidOcrOptions — and deleting the registration drops the IMAGE key,
     failing the second assert."""
     from docling.datamodel.base_models import InputFormat
@@ -151,12 +151,11 @@ def _image_only_pdf(path, lines):
 def test_scanned_pdf_indexes_via_ocr(tmp_path):
     """A scanned (image-only) PDF with no text layer must be readable via docling's
     bundled RapidOCR — chunks non-empty, page attribution intact."""
-    from groundly.ingestion import extract_worker
 
     pdf = tmp_path / "scanned.pdf"
     _image_only_pdf(pdf, ["Deadlock requires mutual exclusion", "and circular wait to occur."])
 
-    result = extract_worker._extract_docling(pdf)
+    result = _via_handle(pdf, tmp_path)
 
     assert result["chunks"], "OCR found no text"
     assert any("mutual exclusion" in c["text"] for c in result["chunks"])
@@ -169,12 +168,11 @@ def test_scanned_pdf_romanian_diacritics_via_ocr_lang(tmp_path):
     Romanian diacritics must survive OCR, not be flattened to ASCII. Note: the
     bundled PP-OCRv6 rec model is multilingual, so the default path reads these
     diacritics too — the plumbing guard is test_ocr_lang_lands_in_rapidocr_options."""
-    from groundly.ingestion import extract_worker
 
     pdf = tmp_path / "scanned_ro.pdf"
     _image_only_pdf(pdf, ["Excludere mutuală și așteptare circulară", "trebuie să aibă loc."])
 
-    result = extract_worker._extract_docling(pdf, ocr_lang="ro")
+    result = _via_handle(pdf, tmp_path, ocr_lang="ro")
 
     assert result["chunks"], "OCR found no text"
     text = " ".join(c["text"] for c in result["chunks"])
@@ -207,11 +205,44 @@ def _slide_bitmap(text):
     return img
 
 
+def _via_handle(path, tmp_path, ocr_lang=None):
+    """Worker output through the product path, `_handle`, as the indexing run gets it."""
+    out = tmp_path / "out.json"
+    extract_worker._handle(path, out, ocr_lang)
+    return json.loads(out.read_text())
+
+
+@pytest.mark.parametrize("name", ["deck.pdf", "slide.png"])
+def test_handle_reads_pdfs_and_images_page_by_page(tmp_path, monkeypatch, name):
+    from PIL import Image
+
+    from tests.ingestion.pdf_fixtures import Page, make_pdf
+    from tests.ingestion.test_pages import _docling_doc, _fake_chunk_document
+
+    src = tmp_path / name
+    if name.endswith(".pdf"):
+        make_pdf(src, [Page(lines=[("Mutual exclusion is required here.", 16)])])
+    else:
+        Image.new("RGB", (64, 64), "white").save(src)
+    recorded = []
+
+    def fake_pages(path, pages, lang):
+        recorded.append((path.name, pages, lang))
+        yield 1, _docling_doc(1)
+
+    monkeypatch.setattr(extract_worker, "docling_pages", fake_pages)
+    monkeypatch.setattr(extract_worker, "chunk_document", _fake_chunk_document)
+    seen = []
+    extract_worker._handle(src, tmp_path / "out.json", "ro", seen.append)
+    assert recorded == [(name, None, "ro")]
+    assert json.loads((tmp_path / "out.json").read_text())["chunks"][0]["page"] == 1
+    assert seen == [1]
+
+
 @pytest.mark.slow
-def test_landscape_deck_routes_pages_and_cites_each(tmp_path):
-    """A slide deck's text and blank pages come from the text layer, its image and mixed
-    pages from docling's OCR, and every chunk cites its own page."""
-    from groundly.ingestion import pdf_router
+def test_deck_pages_each_cite_their_own_page(tmp_path):
+    """Every page of a slide deck, text, image and mixed alike, is read by docling and
+    chunked on its own, so every chunk cites its own page."""
     from tests.ingestion.pdf_fixtures import Page, make_pdf
 
     body = ("Mutual exclusion and hold-and-wait are both required.", 16)
@@ -219,32 +250,19 @@ def test_landscape_deck_routes_pages_and_cites_each(tmp_path):
         tmp_path / "deck.pdf",
         [
             Page(lines=[("Deadlock conditions", 32), body]),
-            Page(lines=[("Scheduling", 32)]),  # one size: body, not a title
+            Page(lines=[("Scheduling", 32)]),
             Page(image=_slide_bitmap("Circular wait occurs"), image_cover=1.0),
             Page(lines=[body], image=_slide_bitmap("Resource graph"), image_cover=0.10),
         ],
     )
 
-    result = pdf_router.extract(pdf, None)
+    result = _via_handle(pdf, tmp_path)
 
     assert result["pages"] == 4
     assert {c["page"] for c in result["chunks"]} == {1, 2, 3, 4}
     assert any("Circular wait" in c["text"] and c["page"] == 3 for c in result["chunks"])
-    assert any(
-        c["text"].startswith("Deadlock conditions") and c["page"] == 1 for c in result["chunks"]
-    )
+    assert any("Deadlock conditions" in c["text"] and c["page"] == 1 for c in result["chunks"])
     assert any("Scheduling" in c["text"] and c["page"] == 2 for c in result["chunks"])
-
-
-def test_blank_landscape_deck_exits_no_text(tmp_path, monkeypatch):
-    """Empty slide pages take the text route and yield nothing: EXIT_NO_TEXT, no model load."""
-    from tests.ingestion.pdf_fixtures import Page, make_pdf
-
-    pdf = make_pdf(tmp_path / "blank.pdf", [Page(), Page()])
-    monkeypatch.setattr("sys.argv", ["extract_worker", str(pdf), str(tmp_path / "out.json")])
-    with pytest.raises(SystemExit) as exc:
-        extract_worker.main()
-    assert exc.value.code == extract_worker.EXIT_NO_TEXT
 
 
 def _image_with_text(path, lines):
@@ -265,7 +283,6 @@ def _image_with_text(path, lines):
 def test_standalone_image_indexes_via_ocr(tmp_path):
     """A standalone PNG of text must be readable via the IMAGE pipeline (pinned
     RapidOCR) — chunks non-empty, single-page attribution."""
-    from groundly.ingestion import extract_worker
 
     png = tmp_path / "slide.png"
     _image_with_text(
@@ -277,7 +294,7 @@ def test_standalone_image_indexes_via_ocr(tmp_path):
         ],
     )
 
-    result = extract_worker._extract_docling(png)
+    result = _via_handle(png, tmp_path)
 
     assert result["chunks"], "OCR found no text"
     assert any("mutual exclusion" in c["text"] for c in result["chunks"])
@@ -289,12 +306,11 @@ def test_title_only_image_salvages_heading_text(tmp_path):
     """A title-only image parses to a heading-only doc that HybridChunker drops. The
     salvage fallback keeps the OCR'd text so it indexes (searchable, page-1) instead of
     failing with a "found nothing" message that OCR would contradict."""
-    from groundly.ingestion import extract_worker
 
     png = tmp_path / "title.png"
     _image_with_text(png, ["Mutual Exclusion Principle"])  # single line → section_header
 
-    result = extract_worker._extract_docling(png)
+    result = _via_handle(png, tmp_path)
 
     assert result["chunks"], "heading-only text should be salvaged, not dropped"
     assert "Mutual Exclusion" in result["chunks"][0]["text"]
@@ -306,7 +322,6 @@ def test_multi_frame_image_indexes_first_frame_only(tmp_path):
     """A multi-frame raster (multi-page TIFF) must index frame 0 only — one page, page-1
     attribution — so no chunk carries later-frame text under a page-1 citation (the
     cross-page HybridChunker merge that would otherwise misattribute the page)."""
-    from groundly.ingestion import extract_worker
 
     tif = tmp_path / "scan.tiff"
     frame0 = _rendered(
@@ -319,7 +334,7 @@ def test_multi_frame_image_indexes_first_frame_only(tmp_path):
     frame1 = _rendered(["Second Frame", "circular wait lives on the second frame here"])
     frame0.save(tif, save_all=True, append_images=[frame1])
 
-    result = extract_worker._extract_docling(tif)
+    result = _via_handle(tif, tmp_path)
 
     assert result["pages"] == 1
     text = " ".join(c["text"] for c in result["chunks"])
