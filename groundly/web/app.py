@@ -13,6 +13,7 @@ addressed by id and its file must resolve inside the subject's materials dir.
 import asyncio
 import atexit
 import json
+import secrets
 import sqlite3
 from collections.abc import Callable
 from contextlib import asynccontextmanager
@@ -26,22 +27,36 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware import Middleware
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.routing import Route
 from starlette.types import ASGIApp
 
 from groundly.agents import quiz
-from groundly.core.paths import discover_subjects
+from groundly.core.paths import discover_subjects, remote_db_path
 from groundly.core.progress import ProgressStore
 from groundly.core.store import SubjectStore
 from groundly.core.subject import Subject
 from groundly.web import runs
+from groundly.web.remote import (
+    SESSION_COOKIE,
+    SESSION_TTL_S,
+    PairAuthError,
+    RemoteRuntime,
+    RemoteStore,
+    _SocketPerimeterMiddleware,
+    qr_matrix,
+)
 from groundly.web.runs import Runner
 from groundly.web.schemas import (
     AttemptResultResponse,
     AttemptSummary,
+    AuthStatusResponse,
     DrawTestResponse,
     ErrorResponse,
+    PairDeviceRequest,
+    PairDeviceResponse,
+    RemoteInfoResponse,
+    RevokeAllResponse,
+    RevokeDeviceResponse,
     RunsInfoResponse,
     RunSnapshot,
     StartRunRequest,
@@ -155,28 +170,34 @@ async def _read_body(request: Request) -> bytes | None:
     return body
 
 
+async def _parse_page_json(request: Request, forbidden: str) -> object:
+    """Enforce Origin -> Content-Type -> 256 KiB cap -> JSON decode for page POSTs."""
+    origin = request.headers.get("origin")
+    expected = f"{request.url.scheme}://{request.headers.get('host', '')}"
+    if origin is None or origin.lower() != expected.lower():
+        raise _PageJsonError("forbidden", forbidden, 403)
+    if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
+        raise _PageJsonError("unsupported", "the body is JSON", 415)
+    raw = await _read_body(request)
+    if raw is None:
+        raise _PageJsonError("too_large", "the body is larger than a test can be", 413)
+    try:
+        return json.loads(raw)
+    except (ValueError, RecursionError) as exc:
+        raise _PageJsonError("invalid_body", "the body is not valid JSON", 400) from exc
+
+
 def _require_page_json(forbidden: str) -> Callable[[Request], Any]:
     """Dependency enforcing Origin -> Content-Type -> 256 KiB cap -> JSON decode."""
 
     async def dependency(request: Request) -> object:
-        origin = request.headers.get("origin")
-        if origin != f"{request.url.scheme}://{request.headers.get('host')}":
-            raise _PageJsonError("forbidden", forbidden, 403)
-        if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
-            raise _PageJsonError("unsupported", "the body is JSON", 415)
-        raw = await _read_body(request)
-        if raw is None:
-            raise _PageJsonError("too_large", "the body is larger than a test can be", 413)
-        try:
-            return json.loads(raw)
-        except (ValueError, RecursionError) as exc:
-            raise _PageJsonError("invalid_body", "the body is not valid JSON", 400) from exc
+        return await _parse_page_json(request, forbidden)
 
     return dependency
 
 
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
-    code: {"model": ErrorResponse} for code in (400, 403, 404, 409, 413, 415, 500, 503)
+    code: {"model": ErrorResponse} for code in (400, 401, 403, 404, 409, 413, 415, 429, 500, 503)
 }
 
 
@@ -227,7 +248,28 @@ class _GroundlyApp(FastAPI):
         return schema
 
 
-def create_app(mcp_app: ASGIApp | None = None, mcp_url: str | None = None) -> FastAPI:
+def _active_remote_store(remote: RemoteRuntime | None) -> RemoteStore | None:
+    """Return the active RemoteStore, or open remote.db only if it already exists."""
+    if remote is not None:
+        return remote.store
+    return RemoteStore() if remote_db_path().exists() else None
+
+
+def _remote_db_error(exc: Exception) -> JSONResponse:
+    if isinstance(exc, sqlite3.OperationalError) and ("locked" in str(exc) or "busy" in str(exc)):
+        return _error(
+            "busy",
+            "remote session store is busy — try again in a moment",
+            503,
+        )
+    return _error("store_error", str(exc), 500)
+
+
+def create_app(
+    mcp_app: ASGIApp | None = None,
+    mcp_url: str | None = None,
+    remote: RemoteRuntime | None = None,
+) -> FastAPI:
     """The page; with `mcp_app` (FastMCP's HTTP app, routed at `/mcp`) mounted after it, and
     `mcp_url` its address, which a page run uses instead of starting its own Groundly."""
     runner = Runner(mcp_url)
@@ -250,7 +292,14 @@ def create_app(mcp_app: ASGIApp | None = None, mcp_url: str | None = None) -> Fa
         redoc_url=None,
         openapi_url=None,
         lifespan=lifespan,
-        middleware=[Middleware(TrustedHostMiddleware, allowed_hosts=HOSTS)],
+        middleware=[
+            Middleware(
+                _SocketPerimeterMiddleware,
+                loopback_hosts=HOSTS,
+                html_shell=_html,
+                remote=remote,
+            )
+        ],
     )
     app.state.runner = runner
 
@@ -266,6 +315,10 @@ def create_app(mcp_app: ASGIApp | None = None, mcp_url: str | None = None) -> Fa
 
     @app.get("/", include_in_schema=False)
     def _root() -> HTMLResponse:
+        return _html()
+
+    @app.get("/pair", include_in_schema=False)
+    def _pair_page() -> HTMLResponse:
         return _html()
 
     app.mount("/static", StaticFiles(directory=_WEB / "static"), name="static")
@@ -453,21 +506,76 @@ def create_app(mcp_app: ASGIApp | None = None, mcp_url: str | None = None) -> Fa
     async def _stream_runs(request: Request) -> StreamingResponse:
         active_runner: Runner = request.app.state.runner
         loop = asyncio.get_running_loop()
+        is_ts_stream = (
+            remote is not None and getattr(request.state, "access", "loopback") == "tailscale"
+        )
+        session_token = request.cookies.get(SESSION_COOKIE) if is_ts_stream else None
+
+        async def _session_revoked() -> bool:
+            if not is_ts_stream or remote is None:
+                return False
+            if not session_token:
+                return True
+            try:
+                return not await run_in_threadpool(remote.store.authenticate, session_token)
+            except (sqlite3.DatabaseError, RuntimeError):
+                return True
 
         async def events():
-            snapshot, queue = active_runner.subscribe(loop)
+            revoke_event = asyncio.Event() if is_ts_stream and remote is not None else None
+            queue = None
             try:
+                if revoke_event is not None and remote is not None:
+                    remote.register_stream(loop, revoke_event)
+                snapshot, queue = active_runner.subscribe(loop)
+                if await _session_revoked():
+                    return
                 yield f"event: snapshot\ndata: {json.dumps(snapshot)}\n\n"
                 if queue is None or snapshot is None or snapshot["status"] != "running":
                     return
                 while True:
-                    try:
-                        item = await asyncio.wait_for(queue.get(), timeout=runs.SSE_KEEPALIVE_S)
-                    except TimeoutError:
-                        if await request.is_disconnected():
-                            break
-                        yield ": keep-alive\n\n"
-                        continue
+                    if revoke_event is None:
+                        try:
+                            item = await asyncio.wait_for(queue.get(), timeout=runs.SSE_KEEPALIVE_S)
+                        except TimeoutError:
+                            if await request.is_disconnected():
+                                break
+                            yield ": keep-alive\n\n"
+                            continue
+                    else:
+                        get_task = asyncio.create_task(queue.get())
+                        revoke_task = asyncio.create_task(revoke_event.wait())
+                        wait_tasks: tuple[asyncio.Task[Any], asyncio.Task[Any]] = (
+                            get_task,
+                            revoke_task,
+                        )
+                        try:
+                            done, pending = await asyncio.wait(
+                                wait_tasks,
+                                timeout=runs.SSE_KEEPALIVE_S,
+                                return_when=asyncio.FIRST_COMPLETED,
+                            )
+                        except BaseException:
+                            for task in wait_tasks:
+                                if not task.done():
+                                    task.cancel()
+                            await asyncio.gather(*wait_tasks, return_exceptions=True)
+                            raise
+                        for task in pending:
+                            task.cancel()
+                        await asyncio.gather(*pending, return_exceptions=True)
+                        if revoke_task in done:
+                            revoke_event.clear()
+                            if await _session_revoked():
+                                break
+                            if get_task not in done:
+                                continue
+                        elif get_task not in done:
+                            if await request.is_disconnected() or await _session_revoked():
+                                break
+                            yield ": keep-alive\n\n"
+                            continue
+                        item = get_task.result()
                     if item is None:
                         break
                     event_name, payload = item
@@ -480,6 +588,8 @@ def create_app(mcp_app: ASGIApp | None = None, mcp_url: str | None = None) -> Fa
             finally:
                 if queue is not None:
                     active_runner.unsubscribe(loop, queue)
+                if revoke_event is not None and remote is not None:
+                    remote.unregister_stream(loop, revoke_event)
 
         return StreamingResponse(
             events(),
@@ -550,6 +660,162 @@ def create_app(mcp_app: ASGIApp | None = None, mcp_url: str | None = None) -> Fa
         # Stopping waits for the process to exit; off the event loop, which may be serving the
         # run's own /mcp calls under `groundly start`.
         return {"run": await run_in_threadpool(request.app.state.runner.stop)}
+
+    @app.get("/api/auth", response_model=AuthStatusResponse, operation_id="getAuthStatus")
+    def _auth_status(request: Request) -> dict[str, Any]:
+        access = getattr(request.state, "access", "loopback")
+        paired = bool(getattr(request.state, "paired", access == "loopback"))
+        paired_devices = 0
+        if access == "loopback":
+            store = _active_remote_store(remote)
+            if store is not None:
+                try:
+                    paired_devices = store.count_devices()
+                except (sqlite3.DatabaseError, RuntimeError):
+                    paired_devices = 0
+        return {
+            "access": access,
+            "paired": paired,
+            "tailscale_enabled": remote is not None,
+            "paired_devices": paired_devices,
+        }
+
+    @app.post(
+        "/api/pair",
+        response_model=PairDeviceResponse,
+        responses=_error_responses(400, 401, 403, 404, 413, 415, 429, 500, 503),
+        openapi_extra=_json_body_schema(PairDeviceRequest),
+        operation_id="pairDevice",
+    )
+    async def _pair_device(request: Request) -> Any:
+        if remote is None or getattr(request.state, "access", "loopback") != "tailscale":
+            return _error("not_available", "pairing is only used on Tailscale", 404)
+        body = await _parse_page_json(request, "pairing is only allowed from this page")
+        try:
+            payload = PairDeviceRequest.model_validate(body)
+        except ValidationError:
+            return _error("invalid_body", "expected {token}")
+        peer_ip = request.client.host if request.client is not None else "unknown"
+        try:
+            next_url = remote.pairing.consume_and_rotate(payload.token, peer_ip)
+        except PairAuthError as e:
+            return _error(e.error, e.detail, e.status_code)
+        raw_session = secrets.token_urlsafe(32)
+        user_agent = request.headers.get("user-agent", "")
+        replace_token = request.cookies.get(SESSION_COOKIE)
+        try:
+            device = await run_in_threadpool(
+                remote.store.create_session,
+                raw_session,
+                user_agent,
+                peer_ip,
+                replace_raw_token=replace_token,
+            )
+        except (sqlite3.DatabaseError, RuntimeError) as exc:
+            return _remote_db_error(exc)
+        if remote.on_paired is not None:
+            remote.on_paired(device["label"], peer_ip, next_url)
+        response = JSONResponse({"paired": True}, status_code=200)
+        response.set_cookie(
+            key=SESSION_COOKIE,
+            value=raw_session,
+            max_age=SESSION_TTL_S,
+            path="/",
+            httponly=True,
+            samesite="strict",
+            secure=False,
+        )
+        return response
+
+    @app.get(
+        "/api/remote",
+        response_model=RemoteInfoResponse,
+        responses=_error_responses(500, 503),
+        operation_id="getRemoteInfo",
+    )
+    def _remote_info() -> Any:
+        store = _active_remote_store(remote)
+        try:
+            devices = store.list_devices() if store is not None else []
+        except (sqlite3.DatabaseError, RuntimeError) as exc:
+            return _remote_db_error(exc)
+        if remote is None:
+            return {
+                "active": False,
+                "pairing_url": None,
+                "qr_matrix": None,
+                "devices": devices,
+            }
+        pairing_url = remote.pairing.pairing_url
+        return {
+            "active": True,
+            "pairing_url": pairing_url,
+            "qr_matrix": qr_matrix(pairing_url),
+            "devices": devices,
+        }
+
+    @app.post(
+        "/api/remote/devices/{id:int}/revoke",
+        response_model=RevokeDeviceResponse,
+        responses=_error_responses(400, 403, 404, 413, 415, 500, 503),
+        openapi_extra=_json_body_schema(StopRunRequest),
+        operation_id="revokeRemoteDevice",
+    )
+    async def _revoke_remote_device(
+        id: int,
+        body: object = Depends(
+            _require_page_json("device revocation is allowed from this page only")
+        ),
+    ) -> Any:
+        try:
+            StopRunRequest.model_validate(body)
+        except ValidationError:
+            return _error("invalid_body", "expected {}")
+        if not quiz.is_id(id):
+            return _error("unknown_device", "no such device", 404)
+
+        def revoke() -> Any:
+            try:
+                store = _active_remote_store(remote)
+                revoked = store.revoke_device(id) if store is not None else False
+            except (sqlite3.DatabaseError, RuntimeError) as exc:
+                return _remote_db_error(exc)
+            if revoked and remote is not None:
+                remote.notify_revoked()
+            return {"revoked": revoked}
+
+        return await run_in_threadpool(revoke)
+
+    @app.post(
+        "/api/remote/revoke-all",
+        response_model=RevokeAllResponse,
+        responses=_error_responses(400, 403, 413, 415, 500, 503),
+        openapi_extra=_json_body_schema(StopRunRequest),
+        operation_id="revokeAllRemoteDevices",
+    )
+    async def _revoke_all_remote_devices(
+        body: object = Depends(
+            _require_page_json("device revocation is allowed from this page only")
+        ),
+    ) -> Any:
+        try:
+            StopRunRequest.model_validate(body)
+        except ValidationError:
+            return _error("invalid_body", "expected {}")
+
+        def revoke_all() -> Any:
+            try:
+                store = _active_remote_store(remote)
+                count = store.revoke_all() if store is not None else 0
+            except (sqlite3.DatabaseError, RuntimeError) as exc:
+                return _remote_db_error(exc)
+            if remote is not None:
+                remote.pairing.rotate()
+                if count > 0:
+                    remote.notify_revoked()
+            return {"revoked": count}
+
+        return await run_in_threadpool(revoke_all)
 
     if mcp_app is not None:
         # A Route, not Mount(""): a catch-all mount would answer wrong-method page requests

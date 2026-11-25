@@ -15,6 +15,7 @@ vi.hoisted(() => {
 import App from "../../../App.svelte";
 import type { AttemptResult, DrawTestResponse, TopicNode, TreeResponse } from "../../api/client";
 import { queryClient, queryKeys } from "../../api/queries";
+import { authStore } from "../../auth.svelte";
 import { navigate, route } from "../../router";
 import { createThemeStore } from "../../theme.svelte";
 import ResultView from "../ResultView.svelte";
@@ -951,6 +952,7 @@ describe("App shell", () => {
   beforeEach(async () => {
     sessionStorage.clear();
     queryClient.clear();
+    authStore.resetForTests();
     vi.spyOn(window, "scrollTo").mockImplementation(() => {});
     await navigate("/");
     container = document.createElement("div");
@@ -960,6 +962,7 @@ describe("App shell", () => {
   afterEach(async () => {
     await navigate("/");
     queryClient.clear();
+    authStore.resetForTests();
     container.remove();
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
@@ -968,6 +971,16 @@ describe("App shell", () => {
   it("renders QueryClientProvider + sv-router views and derives breadcrumb without double-decoding %", async () => {
     globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const pathname = requestPathname(input);
+      if (pathname === "/api/auth") {
+        return Promise.resolve(
+          jsonResponse({
+            access: "loopback",
+            paired: true,
+            tailscale_enabled: false,
+            paired_devices: 0,
+          }),
+        );
+      }
       if (pathname === "/api/runs") {
         return Promise.resolve(
           jsonResponse({ available: false, reason: "no_host", target: 10, run: null }),

@@ -356,6 +356,39 @@
         "title": "AttemptTopicSummary",
         "type": "object"
       },
+      "AuthStatusResponse": {
+        "description": "Socket access mode, pairing state, and paired device count returned by GET /api/auth.",
+        "properties": {
+          "access": {
+            "enum": [
+              "loopback",
+              "tailscale"
+            ],
+            "title": "Access",
+            "type": "string"
+          },
+          "paired": {
+            "title": "Paired",
+            "type": "boolean"
+          },
+          "paired_devices": {
+            "title": "Paired Devices",
+            "type": "integer"
+          },
+          "tailscale_enabled": {
+            "title": "Tailscale Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "access",
+          "paired",
+          "tailscale_enabled",
+          "paired_devices"
+        ],
+        "title": "AuthStatusResponse",
+        "type": "object"
+      },
       "DrawTestResponse": {
         "description": "Drawn test payload returned by GET /api/subjects/{subject}/test.",
         "properties": {
@@ -465,6 +498,50 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "PairDeviceResponse": {
+        "description": "Confirmation returned by POST /api/pair once the session cookie is set.",
+        "properties": {
+          "paired": {
+            "const": true,
+            "title": "Paired",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "paired"
+        ],
+        "title": "PairDeviceResponse",
+        "type": "object"
+      },
+      "PairedDevice": {
+        "description": "One active paired Tailscale device session.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_seen_at": {
+            "title": "Last Seen At",
+            "type": "integer"
+          },
+          "peer_ip": {
+            "title": "Peer Ip",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "peer_ip",
+          "last_seen_at"
+        ],
+        "title": "PairedDevice",
+        "type": "object"
+      },
       "QuestionOption": {
         "description": "One answer option shown in a drawn test (never includes correctness).",
         "properties": {
@@ -482,6 +559,86 @@
           "text"
         ],
         "title": "QuestionOption",
+        "type": "object"
+      },
+      "RemoteInfoResponse": {
+        "description": "Loopback-only Tailscale runtime state, QR matrix, and paired devices.",
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "devices": {
+            "items": {
+              "$ref": "#/components/schemas/PairedDevice"
+            },
+            "title": "Devices",
+            "type": "array"
+          },
+          "pairing_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pairing Url"
+          },
+          "qr_matrix": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "boolean"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qr Matrix"
+          }
+        },
+        "required": [
+          "active",
+          "pairing_url",
+          "qr_matrix",
+          "devices"
+        ],
+        "title": "RemoteInfoResponse",
+        "type": "object"
+      },
+      "RevokeAllResponse": {
+        "description": "Revoked device count returned by POST /api/remote/revoke-all.",
+        "properties": {
+          "revoked": {
+            "title": "Revoked",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revoked"
+        ],
+        "title": "RevokeAllResponse",
+        "type": "object"
+      },
+      "RevokeDeviceResponse": {
+        "description": "Outcome returned by POST /api/remote/devices/{id}/revoke.",
+        "properties": {
+          "revoked": {
+            "title": "Revoked",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "revoked"
+        ],
+        "title": "RevokeDeviceResponse",
         "type": "object"
       },
       "RunErrorDetail": {
@@ -1035,6 +1192,407 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/auth": {
+      "get": {
+        "operationId": "getAuthStatus",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": " Auth Status"
+      }
+    },
+    "/api/pair": {
+      "post": {
+        "operationId": "pairDevice",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "Strict request body for POST /api/pair.",
+                "properties": {
+                  "token": {
+                    "maxLength": 128,
+                    "minLength": 16,
+                    "title": "Token",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "token"
+                ],
+                "title": "PairDeviceRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairDeviceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": " Pair Device"
+      }
+    },
+    "/api/remote": {
+      "get": {
+        "operationId": "getRemoteInfo",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoteInfoResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": " Remote Info"
+      }
+    },
+    "/api/remote/devices/{id}/revoke": {
+      "post": {
+        "operationId": "revokeRemoteDevice",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "Strict request body for POST /api/runs/stop (empty JSON object allowed).",
+                "properties": {},
+                "title": "StopRunRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeDeviceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": " Revoke Remote Device"
+      }
+    },
+    "/api/remote/revoke-all": {
+      "post": {
+        "operationId": "revokeAllRemoteDevices",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "Strict request body for POST /api/runs/stop (empty JSON object allowed).",
+                "properties": {},
+                "title": "StopRunRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeAllResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": " Revoke All Remote Devices"
+      }
+    },
     "/api/runs": {
       "get": {
         "operationId": "getRuns",

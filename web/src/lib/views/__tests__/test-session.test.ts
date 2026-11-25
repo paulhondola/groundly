@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type { DrawnQuestion } from "../../api/client";
 import {
   type StoredTest,
   createTestPersister,
   dropTest,
+  generateAttemptToken,
   isAnswered,
   loadTest,
   saveTest,
@@ -129,5 +130,43 @@ describe("shouldIgnoreShortcut", () => {
     expect(shouldIgnoreShortcut(button)).toBe(false);
     expect(shouldIgnoreShortcut(document.body)).toBe(false);
     expect(shouldIgnoreShortcut(null)).toBe(false);
+  });
+});
+
+describe("generateAttemptToken", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("delegates to crypto.randomUUID() when defined", () => {
+    const uuid = "11111111-2222-4333-8444-555555555555";
+    const randomUUID = vi.fn(() => uuid);
+    vi.stubGlobal("crypto", {
+      randomUUID,
+      getRandomValues: globalThis.crypto.getRandomValues.bind(globalThis.crypto),
+    });
+
+    expect(generateAttemptToken()).toBe(uuid);
+    expect(randomUUID).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to crypto.getRandomValues producing a 32-char lowercase hex string when randomUUID is undefined", () => {
+    const getRandomValues = vi.fn((arr: Uint8Array) => {
+      for (let i = 0; i < arr.length; i++) {
+        arr[i] = i;
+      }
+      return arr;
+    });
+    vi.stubGlobal("crypto", {
+      randomUUID: undefined,
+      getRandomValues,
+    });
+
+    const token = generateAttemptToken();
+    expect(getRandomValues).toHaveBeenCalledTimes(1);
+    expect(token).toBe("000102030405060708090a0b0c0d0e0f");
+    expect(token).toMatch(/^[0-9a-f]{32}$/);
+    expect(token).toMatch(/^[A-Za-z0-9-]{8,64}$/);
   });
 });

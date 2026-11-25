@@ -15,6 +15,7 @@ import {
   type SSEStepEvent,
   createEventStream,
 } from "./api/sse";
+import { authStore } from "./auth.svelte";
 
 export const MAX_STREAM_CHARS = 2000;
 export const MAX_STEPS = 50;
@@ -241,25 +242,43 @@ export function createRunStore(qc: QueryClient = queryClient) {
     }
   }
 
-  async function attach(): Promise<RunsInfo | null> {
+  async function attach(options?: { fromWake?: boolean }): Promise<RunsInfo | null> {
     const seq = ++stateSeq;
     let info: RunsInfo;
     try {
       info = unwrap(await apiClient.GET("/api/runs"));
     } catch {
+      if (
+        seq === stateSeq &&
+        options?.fromWake &&
+        (run?.status === "running" || (watched !== null && endedRunId !== watched))
+      ) {
+        run = null;
+        closeStream();
+        if (!message) {
+          message = "Lost the page server — reload the page when it is back.";
+        }
+      }
       return null;
     }
     if (seq !== stateSeq) {
       return info;
     }
+    if (options?.fromWake) {
+      streamErrors = 0;
+    }
+    if (message?.startsWith("Lost ")) {
+      message = null;
+    }
     available = info.available;
     reason = info.reason;
     target = info.target;
     const incoming = info.run;
+    let invalidatedAllSubjects = false;
     if (incoming && incoming.id === endedRunId) {
-      return info;
-    }
-    if (
+      // Already settled locally; keep current view state and let the wake check below refresh subjects.
+    } else if (
+      !options?.fromWake &&
       incoming &&
       incoming.status === "running" &&
       source !== null &&
@@ -268,16 +287,31 @@ export function createRunStore(qc: QueryClient = queryClient) {
       run.status === "running"
     ) {
       return info;
-    }
-    run = incoming;
-    if (incoming && incoming.status === "running") {
+    } else if (incoming && incoming.status === "running") {
+      run = incoming;
       dismissed = false;
-      if (watched !== incoming.id || !source) {
+      if (watched !== incoming.id || !source || options?.fromWake) {
         watched = incoming.id;
         endedRunId = null;
         streamErrors = 0;
         openStream();
       }
+    } else if (watched !== null && endedRunId !== watched) {
+      if (incoming && incoming.id === watched) {
+        applySettled(incoming);
+      } else {
+        run = incoming;
+        closeStream();
+        message = "Lost track of the run — the page server restarted.";
+        notifyEnd(watched);
+        watched = null;
+        invalidatedAllSubjects = true;
+      }
+    } else {
+      run = incoming;
+    }
+    if (options?.fromWake && !invalidatedAllSubjects) {
+      void qc.invalidateQueries({ queryKey: queryKeys.allSubjects() });
     }
     return info;
   }
@@ -340,8 +374,40 @@ export function createRunStore(qc: QueryClient = queryClient) {
     message = null;
   }
 
+  function disconnect(): void {
+    stateSeq += 1;
+    closeStream();
+  }
+
+  function onWake(): void {
+    // Check authStore lazily to avoid top-level circular ESM access with auth.svelte.ts.
+    if (!authStore.ready || !authStore.paired) {
+      return;
+    }
+    void attach({ fromWake: true });
+  }
+
+  function onVisibilityChange(): void {
+    if (document.visibilityState === "visible") {
+      onWake();
+    }
+  }
+
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", onVisibilityChange);
+  }
+  if (typeof window !== "undefined") {
+    window.addEventListener("online", onWake);
+  }
+
   function destroy(): void {
     closeStream();
+    if (typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    }
+    if (typeof window !== "undefined") {
+      window.removeEventListener("online", onWake);
+    }
   }
 
   return {
@@ -382,6 +448,7 @@ export function createRunStore(qc: QueryClient = queryClient) {
     start,
     stop,
     dismiss,
+    disconnect,
     destroy,
   };
 }

@@ -14,6 +14,16 @@ export function storageKey(subject: string, topicId: number | null): string {
   return "groundly-test:" + subject + ":" + (topicId == null ? "all" : topicId);
 }
 
+/** Generate an attempt idempotency token, falling back off `crypto.randomUUID()` on plain HTTP. */
+export function generateAttemptToken(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 export function shuffled<T>(items: readonly T[]): T[] {
   const out = items.slice();
   for (let i = out.length - 1; i > 0; i--) {

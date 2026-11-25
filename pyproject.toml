@@ -27,6 +27,7 @@ dependencies = [
 	"pypdfium2==5.14.0",            # PDF text layer + page classification (pdf_router.py)
 	"mlx==0.32.4; sys_platform == 'darwin' and platform_machine == 'arm64' and platform_release >= '23'",  # Apple Silicon engine (Metal)
 	"fastapi>=0.165.0",
+	"segno>=1.6",
 ]
 
 [project.optional-dependencies]

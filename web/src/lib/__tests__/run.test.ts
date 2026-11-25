@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import type { RunSnapshot } from "../api/client";
 import { createAppQueryClient } from "../api/queries";
 import { type EventSourceLike, setEventStreamFactory } from "../api/sse";
-import { createRunStore } from "../run.svelte";
+import { authStore } from "../auth.svelte";
+import { createRunStore, runStore } from "../run.svelte";
 
 class MockEventSource implements EventSourceLike {
   static instances: MockEventSource[] = [];
@@ -68,8 +69,18 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe("createRunStore", () => {
   const originalFetch = globalThis.fetch;
   let fetchMock: ReturnType<typeof vi.fn>;
+  let createdStores: Array<ReturnType<typeof createRunStore>> = [];
+
+  function makeStore(qc = createAppQueryClient()) {
+    const store = createRunStore(qc);
+    createdStores.push(store);
+    return store;
+  }
 
   beforeEach(() => {
+    runStore.destroy();
+    authStore.resetForTests();
+    createdStores = [];
     MockEventSource.instances = [];
     fetchMock = vi.fn();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
@@ -77,6 +88,11 @@ describe("createRunStore", () => {
   });
 
   afterEach(() => {
+    for (const store of createdStores) {
+      store.destroy();
+    }
+    createdStores = [];
+    authStore.resetForTests();
     setEventStreamFactory(null);
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
@@ -453,5 +469,329 @@ describe("createRunStore", () => {
     expect(invalidateSpy).toHaveBeenCalledTimes(1);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject", "PDSS"] });
     store.destroy();
+  });
+
+  it("resets retry state and re-attaches SSE on visibilitychange/online wake-up, skips when unpaired, and stops after destroy()", async () => {
+    authStore.resetForTests({ ready: true });
+    const qc = createAppQueryClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const store = createRunStore(qc);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 99 }), 202));
+    await store.start("PDSS", { kind: "write", topic_id: 7 });
+
+    const runningInfo = () =>
+      jsonResponse({
+        available: true,
+        reason: null,
+        target: 10,
+        run: makeSnapshot({ id: 99, status: "running" }),
+      });
+
+    const exhaustRetries = async () => {
+      for (let i = 0; i < 4; i++) {
+        const currentEs = MockEventSource.instances[MockEventSource.instances.length - 1];
+        if (currentEs.closed) {
+          break;
+        }
+        const beforeCalls = fetchMock.mock.calls.length;
+        fetchMock.mockResolvedValueOnce(runningInfo());
+        currentEs.triggerError();
+        await vi.waitFor(() => {
+          expect(fetchMock).toHaveBeenCalledTimes(beforeCalls + 1);
+        });
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    };
+
+    await exhaustRetries();
+    expect(MockEventSource.instances).toHaveLength(3);
+    expect(store.message).toContain("Lost live stream connection");
+
+    // Hidden visibilitychange must not wake up
+    const visibilitySpy = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    const callsBeforeHidden = fetchMock.mock.calls.length;
+    document.dispatchEvent(new Event("visibilitychange"));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fetchMock).toHaveBeenCalledTimes(callsBeforeHidden);
+    expect(MockEventSource.instances).toHaveLength(3);
+
+    // Visible visibilitychange resets retries, clears Lost message, probes GET /api/runs, opens SSE, invalidates queries
+    visibilitySpy.mockReturnValue("visible");
+    fetchMock.mockResolvedValueOnce(runningInfo());
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await vi.waitFor(() => {
+      expect(MockEventSource.instances).toHaveLength(4);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(callsBeforeHidden + 1);
+    const wakeReq1 = fetchMock.mock.calls[callsBeforeHidden][0] as Request;
+    expect(wakeReq1.method).toBe("GET");
+    expect(new URL(wakeReq1.url).pathname).toBe("/api/runs");
+    expect(store.message).toBeNull();
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject"] });
+
+    // Exhaust retries again, then wake via window "online"
+    await exhaustRetries();
+    expect(MockEventSource.instances).toHaveLength(6);
+    expect(store.message).toContain("Lost live stream connection");
+
+    const callsBeforeOnline = fetchMock.mock.calls.length;
+    fetchMock.mockResolvedValueOnce(runningInfo());
+    window.dispatchEvent(new Event("online"));
+
+    await vi.waitFor(() => {
+      expect(MockEventSource.instances).toHaveLength(7);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(callsBeforeOnline + 1);
+    expect(store.message).toBeNull();
+
+    // Unpaired state skips wake-up resync
+    authStore.handleUnpaired();
+    const callsWhileUnpaired = fetchMock.mock.calls.length;
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("online"));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fetchMock).toHaveBeenCalledTimes(callsWhileUnpaired);
+
+    // After destroy(), wake listeners no longer fire even when paired
+    authStore.resetForTests({ ready: true });
+    store.destroy();
+    const callsAfterDestroy = fetchMock.mock.calls.length;
+    const esCountAfterDestroy = MockEventSource.instances.length;
+    const invalidatesAfterDestroy = invalidateSpy.mock.calls.length;
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("online"));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(fetchMock).toHaveBeenCalledTimes(callsAfterDestroy);
+    expect(MockEventSource.instances).toHaveLength(esCountAfterDestroy);
+    expect(invalidateSpy).toHaveBeenCalledTimes(invalidatesAfterDestroy);
+  });
+
+  it("reconciles settled watched run on wake-up: calls applySettled, updates message, closes stream, and invalidates subject queries", async () => {
+    authStore.resetForTests({ ready: true });
+    const qc = createAppQueryClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const store = makeStore(qc);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 101, subject: "PDSS" }), 202));
+    await store.start("PDSS", { kind: "write", topic_id: 7 });
+
+    const es = MockEventSource.instances[0];
+    expect(es.closed).toBe(false);
+    expect(store.watched).toBe(101);
+
+    const visibilitySpy = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        available: true,
+        reason: null,
+        target: 10,
+        run: makeSnapshot({
+          id: 101,
+          subject: "PDSS",
+          status: "done",
+          phase: null,
+          summary: "Stored 6 questions.",
+        }),
+      }),
+    );
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await vi.waitFor(() => {
+      expect(store.message).toBe("Stored 6 questions.");
+    });
+    expect(es.closed).toBe(true);
+    expect(MockEventSource.instances).toHaveLength(1);
+    expect(store.run?.status).toBe("done");
+    expect(store.watched).toBe(101);
+    expect(store.busy).toBe(false);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject", "PDSS"] });
+
+    visibilitySpy.mockRestore();
+  });
+
+  it("handles server restart on wake-up when watched run disappears: sets restart message, clears watched, and invalidates queries", async () => {
+    authStore.resetForTests({ ready: true });
+    const qc = createAppQueryClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const store = makeStore(qc);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 102, subject: "PDSS" }), 202));
+    await store.start("PDSS", { kind: "write", topic_id: 7 });
+
+    const es = MockEventSource.instances[0];
+    expect(store.watched).toBe(102);
+
+    const visibilitySpy = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        available: true,
+        reason: null,
+        target: 10,
+        run: null,
+      }),
+    );
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await vi.waitFor(() => {
+      expect(store.message).toBe("Lost track of the run — the page server restarted.");
+    });
+    expect(es.closed).toBe(true);
+    expect(store.run).toBeNull();
+    expect(store.watched).toBeNull();
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject"] });
+
+    // A fresh attach with watched === null must not show a stale restart banner
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        available: true,
+        reason: null,
+        target: 10,
+        run: null,
+      }),
+    );
+    await store.attach();
+    expect(store.message).toBeNull();
+
+    visibilitySpy.mockRestore();
+  });
+
+  it("preserves or restores Lost error banner when wake-up GET /api/runs probe rejects", async () => {
+    authStore.resetForTests({ ready: true });
+    const qc = createAppQueryClient();
+    const store = makeStore(qc);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 103, subject: "PDSS" }), 202));
+    await store.start("PDSS", { kind: "write", topic_id: 7 });
+
+    const runningInfo = () =>
+      jsonResponse({
+        available: true,
+        reason: null,
+        target: 10,
+        run: makeSnapshot({ id: 103, status: "running" }),
+      });
+
+    for (let i = 0; i < 4; i++) {
+      const currentEs = MockEventSource.instances[MockEventSource.instances.length - 1];
+      if (currentEs.closed) {
+        break;
+      }
+      const beforeCalls = fetchMock.mock.calls.length;
+      fetchMock.mockResolvedValueOnce(runningInfo());
+      currentEs.triggerError();
+      await vi.waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledTimes(beforeCalls + 1);
+      });
+      await new Promise((r) => setTimeout(r, 0));
+    }
+
+    expect(store.message).toContain("Lost live stream connection");
+
+    // Wake-up while server is unreachable must NOT clear the "Lost " banner or leave stale running state
+    const visibilitySpy = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const callsBeforeWake = fetchMock.mock.calls.length;
+    fetchMock.mockRejectedValueOnce(new TypeError("NetworkError"));
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(callsBeforeWake + 1);
+    });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(store.message).toContain("Lost ");
+    expect(store.run).toBeNull();
+    expect(store.busy).toBe(false);
+
+    // Also: waking up offline from an active stream with no prior message sets "Lost the page server..."
+    store.destroy();
+    const store2 = makeStore(qc);
+    fetchMock.mockResolvedValueOnce(jsonResponse(makeSnapshot({ id: 104, subject: "PDSS" }), 202));
+    await store2.start("PDSS", { kind: "write", topic_id: 7 });
+    const es2 = MockEventSource.instances[MockEventSource.instances.length - 1];
+    expect(store2.message).toBeNull();
+
+    const callsBeforeWake2 = fetchMock.mock.calls.length;
+    fetchMock.mockRejectedValueOnce(new TypeError("NetworkError"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(callsBeforeWake2 + 1);
+    });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(store2.message).toBe("Lost the page server — reload the page when it is back.");
+    expect(store2.run).toBeNull();
+    expect(store2.busy).toBe(false);
+    expect(es2.closed).toBe(true);
+
+    visibilitySpy.mockRestore();
+  });
+
+  it("replaces an active SSE stream and applies fresh snapshot steps on visibilitychange wake-up", async () => {
+    authStore.resetForTests({ ready: true });
+    const qc = createAppQueryClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const store = makeStore(qc);
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        makeSnapshot({ id: 105, subject: "PDSS", steps: ["Checking the subject"] }),
+        202,
+      ),
+    );
+    await store.start("PDSS", { kind: "write", topic_id: 7 });
+    expect(MockEventSource.instances).toHaveLength(1);
+    const es1 = MockEventSource.instances[0];
+    expect(es1.closed).toBe(false);
+
+    const visibilitySpy = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        available: true,
+        reason: null,
+        target: 10,
+        run: makeSnapshot({
+          id: 105,
+          subject: "PDSS",
+          status: "running",
+          phase: "reading",
+          active_tool: "Reading the course",
+          steps: ["Checking the subject", "Reading the course"],
+        }),
+      }),
+    );
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await vi.waitFor(() => {
+      expect(MockEventSource.instances).toHaveLength(2);
+    });
+    expect(es1.closed).toBe(true);
+    expect(MockEventSource.instances[1].closed).toBe(false);
+    expect(store.run?.steps).toEqual(["Checking the subject", "Reading the course"]);
+    expect(store.run?.phase).toBe("reading");
+    expect(store.run?.active_tool).toBe("Reading the course");
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["subject"] });
+
+    visibilitySpy.mockRestore();
+  });
+
+  it("skips wake-up probes while authStore.ready is false", async () => {
+    authStore.resetForTests();
+    const qc = createAppQueryClient();
+    makeStore(qc);
+
+    const visibilitySpy = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("online"));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    visibilitySpy.mockRestore();
   });
 });

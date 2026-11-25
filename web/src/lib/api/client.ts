@@ -55,6 +55,27 @@ export const apiClient = createClient<paths>({
   fetch: (request) => globalThis.fetch(request),
 });
 
+let onUnpairedHandler: (() => void) | null = null;
+
+export function setOnUnpaired(handler: (() => void) | null): void {
+  onUnpairedHandler = handler;
+}
+
+apiClient.use({
+  onResponse({ request, response }) {
+    if (response.status === 401 && onUnpairedHandler) {
+      const requestPath =
+        typeof location !== "undefined"
+          ? new URL(request.url, location.origin).pathname
+          : request.url;
+      if (!requestPath.endsWith("/api/pair")) {
+        onUnpairedHandler();
+      }
+    }
+    return undefined;
+  },
+});
+
 export function unwrap<T>(result: { data?: T; error?: unknown; response: Response }): T {
   if (result.error !== undefined || !result.response.ok || result.data === undefined) {
     const errObj =

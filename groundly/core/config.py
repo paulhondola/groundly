@@ -29,9 +29,14 @@ class RetrievalSettings(BaseModel):
     rerank: bool = True
 
 
+class WebSettings(BaseModel):
+    tailscale: bool = False  # bind Tailscale interface and enable remote pairing
+
+
 class Settings(BaseModel):
     ingestion: IngestionSettings = IngestionSettings()
     retrieval: RetrievalSettings = RetrievalSettings()
+    web: WebSettings = WebSettings()
 
 
 class ConfigKeyError(Exception):
@@ -137,6 +142,9 @@ def render_config_toml(settings: Settings) -> str:
         "[retrieval]",
         f"top_k = {_toml_value(settings.retrieval.top_k)}   # chunks returned per search",
         f"rerank = {_toml_value(settings.retrieval.rerank)}   # cross-encoder rerank (off is faster on weak hardware)",
+        "",
+        "[web]",
+        f"tailscale = {_toml_value(settings.web.tailscale)}   # bind Tailscale interface and enable remote pairing",
         "",
     ]
     return "\n".join(lines)

@@ -73,8 +73,11 @@ if (typeof window !== "undefined" && hasMalformedPercentEncoding(window.location
   window.history.replaceState(window.history.state, "", "/not-found");
 }
 
+let redirectHome: (() => Promise<unknown>) | null = null;
+
 const router = createRouter({
   "/": SubjectsView,
+  "/pair": SubjectsView,
   "/s/:subject": SubjectTreeRoute,
   "/s/:subject/test": SubjectTestRoute,
   "/s/:subject/attempts/:id": AttemptResultRoute,
@@ -83,6 +86,9 @@ const router = createRouter({
     beforeLoad(context) {
       if (isMaterialPath(context.pathname)) {
         return false;
+      }
+      if (context.pathname === "/pair" && redirectHome) {
+        throw redirectHome();
       }
     },
     afterLoad(context) {
@@ -95,6 +101,8 @@ const router = createRouter({
     },
   },
 });
+
+redirectHome = () => router.navigate("/", { replace: true });
 
 async function navigateNotFound(rawPathname: string) {
   pendingMalformedPathname = rawPathname;
