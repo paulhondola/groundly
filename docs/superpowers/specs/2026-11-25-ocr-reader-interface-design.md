@@ -78,8 +78,9 @@ The work is two parts on two branches. Part 1 is a product PR off `main`. Part 2
 **The reader.** A reader is a function:
 
 ```python
-def read(path: Path, pages: list[int] | None, ocr_lang: str | None
-         ) -> Iterator[tuple[int, DoclingDocument]]: ...
+def read(
+    path: Path, pages: list[int] | None, ocr_lang: str | None
+) -> Iterator[tuple[int, DoclingDocument]]: ...
 ```
 
 `pages=None` means every page. It yields `(page_no, one-page document)` for each requested page, in

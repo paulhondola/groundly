@@ -146,31 +146,56 @@ document with text, its `heading_path` being the last `SECTION_HEADER` in the do
 ```python
 def test_untitled_page_carries_the_previous_heading():
     pages = [(1, _docling_doc(1, header="Deadlock")), (2, _docling_doc(2))]
-    assert [c["heading_path"] for c in extract_worker.chunk_pages(pages)["chunks"]] == ["Deadlock", "Deadlock"]
+    assert [c["heading_path"] for c in extract_worker.chunk_pages(pages)["chunks"]] == [
+        "Deadlock",
+        "Deadlock",
+    ]
+
 
 def test_first_untitled_page_has_no_heading():
     pages = [(1, _docling_doc(1)), (2, _docling_doc(2, header="Later"))]
-    assert [c["heading_path"] for c in extract_worker.chunk_pages(pages)["chunks"]] == [None, "Later"]
+    assert [c["heading_path"] for c in extract_worker.chunk_pages(pages)["chunks"]] == [
+        None,
+        "Later",
+    ]
+
 
 def test_a_page_with_its_own_heading_keeps_it():
     pages = [(1, _docling_doc(1, header="Deadlock")), (2, _docling_doc(2, header="Scheduling"))]
-    assert [c["heading_path"] for c in extract_worker.chunk_pages(pages)["chunks"]] == ["Deadlock", "Scheduling"]
+    assert [c["heading_path"] for c in extract_worker.chunk_pages(pages)["chunks"]] == [
+        "Deadlock",
+        "Scheduling",
+    ]
+
 
 def test_blank_page_gets_no_chunk_and_the_carry_continues():
-    pages = [(1, _docling_doc(1, header="Deadlock")), (2, _docling_doc(2, text=None)), (3, _docling_doc(3))]
+    pages = [
+        (1, _docling_doc(1, header="Deadlock")),
+        (2, _docling_doc(2, text=None)),
+        (3, _docling_doc(3)),
+    ]
     result = extract_worker.chunk_pages(pages)
     assert result["pages"] == 3
-    assert [(c["page"], c["heading_path"]) for c in result["chunks"]] == [(1, "Deadlock"), (3, "Deadlock")]
+    assert [(c["page"], c["heading_path"]) for c in result["chunks"]] == [
+        (1, "Deadlock"),
+        (3, "Deadlock"),
+    ]
+
 
 def test_on_page_reports_every_page_in_order():
     seen = []
-    extract_worker.chunk_pages([(n, _docling_doc(n, text=None if n == 2 else "x")) for n in (1, 2, 3)], seen.append)
+    extract_worker.chunk_pages(
+        [(n, _docling_doc(n, text=None if n == 2 else "x")) for n in (1, 2, 3)], seen.append
+    )
     assert seen == [1, 2, 3]
 
+
 @pytest.mark.slow
-def test_carried_heading_is_embedded_like_contextualize():   # real chunk_document, no patch
-    pages = [(1, _docling_doc(1, text="Mutual exclusion is required.", header="Deadlock")),
-             (2, _docling_doc(2, text="Circular wait occurs among processes."))]
+def test_carried_heading_is_embedded_like_contextualize():  # real chunk_document, no patch
+    pages = [
+        (1, _docling_doc(1, text="Mutual exclusion is required.", header="Deadlock")),
+        (2, _docling_doc(2, text="Circular wait occurs among processes.")),
+    ]
     page2 = [c for c in extract_worker.chunk_pages(pages)["chunks"] if c["page"] == 2]
     assert page2[0]["heading_path"] == "Deadlock"
     assert page2[0]["text"].startswith("Deadlock\n")
@@ -284,7 +309,11 @@ values only.
 def test_page_lines_precede_the_status_line():
     out = io.StringIO()
     w.serve(io.StringIO(req), out, handle=lambda i, o, lang, on_page: (on_page(1), on_page(2)))
-    assert [json.loads(l) for l in out.getvalue().splitlines()] == [{"page": 1}, {"page": 2}, {"status": "ok"}]
+    assert [json.loads(l) for l in out.getvalue().splitlines()] == [
+        {"page": 1},
+        {"page": 2},
+        {"status": "ok"},
+    ]
 ```
 
 In `test_library_stdout_never_reaches_the_protocol_stream`, the handler also calls `on_page(1)`.
@@ -298,17 +327,23 @@ Assert the stdout lines equal `[{"page": 1}, {"status": "ok"}]`.
 `test_extract_session.py`:
 
 ```python
-def test_pages_that_each_finish_in_time_never_time_out(tmp_path):   # slowpages.pdf, timeout=1
+def test_pages_that_each_finish_in_time_never_time_out(tmp_path):  # slowpages.pdf, timeout=1
     with _ex(timeout=1) as ex:
         assert ex.extract(tmp_path / "slowpages.pdf").chunks
 
-def test_a_stalled_page_names_the_per_page_limit_and_the_next_file_indexes(tmp_path):   # pagehang.pdf, ok.txt
+
+def test_a_stalled_page_names_the_per_page_limit_and_the_next_file_indexes(
+    tmp_path,
+):  # pagehang.pdf, ok.txt
     with _ex(timeout=1) as ex:
-        with pytest.raises(ExtractionFailure, match="^extraction timed out — no page finished within 1s$"):
+        with pytest.raises(
+            ExtractionFailure, match="^extraction timed out — no page finished within 1s$"
+        ):
             ex.extract(tmp_path / "pagehang.pdf")
         assert ex.extract(tmp_path / "ok.txt").chunks
 
-def test_a_worker_that_dies_after_a_page_is_not_resent(tmp_path):   # pagedie.pdf
+
+def test_a_worker_that_dies_after_a_page_is_not_resent(tmp_path):  # pagedie.pdf
     with _ex() as ex, pytest.raises(ExtractionFailure, match="^parser failed: exit code 9$"):
         ex.extract(tmp_path / "pagedie.pdf")
     assert len((tmp_path / "pagedie.pdf.seen").read_text().splitlines()) == 1
@@ -404,7 +439,11 @@ Expected: it merges cleanly or with trivial conflicts. Never merge into `main`.
 
 ```python
 def test_product_arm_runs_the_shipped_worker():
-    assert index_run.worker_argv("product", None)[1:] == ["-m", "groundly.ingestion.extract_worker", "--serve"]
+    assert index_run.worker_argv("product", None)[1:] == [
+        "-m",
+        "groundly.ingestion.extract_worker",
+        "--serve",
+    ]
 ```
 
 - `tests/bench/test_stacks.py`: the handler tests call `handle(src, out, None, seen.append)`. Drop the routed and paged cases.
