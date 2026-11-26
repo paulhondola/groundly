@@ -1,0 +1,4325 @@
+{
+ "version": 2,
+ "created": "2026-11-26T09:11:37.078023+00:00",
+ "short_cells": [],
+ "pages": [
+  {
+   "subject": "romsilva",
+   "sha256": "1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479",
+   "path_hint": "~/.groundly/romsilva/materials/NT5 - Amenajarea padurilor.pdf",
+   "page": 33,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "6b56e75842c2b990fab510eb191af1865de6217c77abb76a4ee62e6e638dc7d8",
+   "path_hint": "~/.groundly/pm/materials/Test_PM_2026 (1).pdf",
+   "page": 35,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "eeb933a2255bc16365c00aff07e7be233844a8ea9e647028107848726ed38f75",
+   "path_hint": "~/.groundly/sma/materials/sma08.pdf",
+   "page": 9,
+   "kind": "image",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "lftc",
+   "sha256": "61df387ce591945cefbfb62850dce7404f229c320fe50467f90085fa7e27991c",
+   "path_hint": "~/.groundly/lftc/materials/LFTC 05-61df387c.pdf",
+   "page": 12,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "8b692198eae4762a798fc000dbe794d34aea28f104920d45c8257423cf5c34ca",
+   "path_hint": "~/.groundly/sma/materials/sma02.pdf",
+   "page": 14,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "053f9690c18cbdb313ed0ce9d8706bf57662e5c49d88cb838b318a9eb3733183",
+   "path_hint": "~/.groundly/sma/materials/sma03.pdf",
+   "page": 10,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "9f2c87ce769cb2ff8405ba81c15561f2e9ae3c7a368521b2e4d01ad55de4b4fe",
+   "path_hint": "~/.groundly/sma/materials/sma05.pdf",
+   "page": 58,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "6b56e75842c2b990fab510eb191af1865de6217c77abb76a4ee62e6e638dc7d8",
+   "path_hint": "~/.groundly/pm/materials/Test_PM_2026 (1).pdf",
+   "page": 23,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "lftc",
+   "sha256": "41f4d1ded4ec9cb0fb15ab6c2ae53040de0392d882ddae3b6d5f9e3166a4feb4",
+   "path_hint": "~/.groundly/lftc/materials/LFTC 09-41f4d1de.pdf",
+   "page": 2,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "lftc",
+   "sha256": "44d6c37534d54e1f522a6edb9745fb17414abc02a6335c2afbf37dd9c6bb9915",
+   "path_hint": "~/.groundly/lftc/materials/LFTC 01-44d6c375.pdf",
+   "page": 7,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "9ab8ff3efa4bc440469001cecfa69922885d9d4eeb0a09e75eb89fe441feba7c",
+   "path_hint": "~/.groundly/pm/materials/1_Unitatea centrala cu procesor 8086.pdf",
+   "page": 9,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "5170a29bad0749ef59d571e5e1b292ce5133f040312ecd623c4f92f00740cd6a",
+   "path_hint": "~/.groundly/sma/materials/sma09.pdf",
+   "page": 63,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "5170a29bad0749ef59d571e5e1b292ce5133f040312ecd623c4f92f00740cd6a",
+   "path_hint": "~/.groundly/sma/materials/sma09.pdf",
+   "page": 97,
+   "kind": "image",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "dc5d9392c56cb4dc0a3c0e4fbb08577e4fd2772673782a7c47cb064ffd541699",
+   "path_hint": "~/.groundly/pm/materials/PM2025.pdf",
+   "page": 15,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "96ca6f68093d0a0f305f27d89be1bad78c407b54b57323bdd95ff22a36eaf264",
+   "path_hint": "~/.groundly/pm/materials/Curs_13.pdf",
+   "page": 28,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "9f2c87ce769cb2ff8405ba81c15561f2e9ae3c7a368521b2e4d01ad55de4b4fe",
+   "path_hint": "~/.groundly/sma/materials/sma05.pdf",
+   "page": 57,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "lftc",
+   "sha256": "fc04ee99f509d8b8803f7b89766840b4f44d6700d45c210c079974853a492337",
+   "path_hint": "~/.groundly/lftc/materials/LFTC 04.pdf",
+   "page": 3,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "35ed755c8967c391b9d7b335a0644b848f791f48a03813306a99fdaa7cc42b75",
+   "path_hint": "~/.groundly/pm/materials/3 Probleme-PMD.pdf",
+   "page": 12,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "75c99dbe4fa02a9c35b41f8cda9080086ea3cf492e451a3f98f16435929f6b34",
+   "path_hint": "~/.groundly/pm/materials/5 probleme.pdf",
+   "page": 21,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "75c99dbe4fa02a9c35b41f8cda9080086ea3cf492e451a3f98f16435929f6b34",
+   "path_hint": "~/.groundly/pm/materials/5 probleme.pdf",
+   "page": 4,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "ed4ba6a76fa5765838c5b93c2309e47978b39a0bafb47f7aec2ae102d1d8309f",
+   "path_hint": "~/.groundly/avmd/materials/04 Distributed File Systems.pdf",
+   "page": 31,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "9c5e152ecddd69cf203dacbab55521b3b4d069392f3846ca5fcbf98c6ceddebb",
+   "path_hint": "~/.groundly/avmd/materials/08 Massive Parallel Processing (MapReduce).pdf",
+   "page": 75,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "243f7af4b7322df33461ce470ea45e48e9f47b719bec44afbfe091b1fa4e066f",
+   "path_hint": "~/.groundly/bia/materials/BIA lab 9.pdf",
+   "page": 101,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "749311f8f708a9918874eb5f0d10e227a88da4ea1c0448cde00bf766a5ee92b1",
+   "path_hint": "~/.groundly/bia/materials/Probleme BIA.pdf",
+   "page": 14,
+   "kind": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "9c5e152ecddd69cf203dacbab55521b3b4d069392f3846ca5fcbf98c6ceddebb",
+   "path_hint": "~/.groundly/avmd/materials/08 Massive Parallel Processing (MapReduce).pdf",
+   "page": 4,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "apd",
+   "sha256": "0beeecd44c0c9ed0abc7e1db2315bc5e49e448176ba95527eb54996806c8f80f",
+   "path_hint": "~/.groundly/apd/materials/Curs 6 - OpenMP.pdf",
+   "page": 15,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pi",
+   "sha256": "749311f8f708a9918874eb5f0d10e227a88da4ea1c0448cde00bf766a5ee92b1",
+   "path_hint": "~/.groundly/pi/materials/Probleme BIA.pdf",
+   "page": 22,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "95212c541ba672f4d4c0209a854aadcbbe4c908b441fd85a646ba34277e8c012",
+   "path_hint": "~/.groundly/avmd/materials/09 Massive Parallel Processing (Spark).pdf",
+   "page": 116,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "9c5e152ecddd69cf203dacbab55521b3b4d069392f3846ca5fcbf98c6ceddebb",
+   "path_hint": "~/.groundly/avmd/materials/08 Massive Parallel Processing (MapReduce).pdf",
+   "page": 67,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "b22d3193113230cc942dc0b719f6ee401c8f7fc1b1ef47626af23fcadfafde10",
+   "path_hint": "~/.groundly/bia/materials/BIA lab 8.pdf",
+   "page": 15,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "b22d3193113230cc942dc0b719f6ee401c8f7fc1b1ef47626af23fcadfafde10",
+   "path_hint": "~/.groundly/bia/materials/BIA lab 8.pdf",
+   "page": 60,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "749311f8f708a9918874eb5f0d10e227a88da4ea1c0448cde00bf766a5ee92b1",
+   "path_hint": "~/.groundly/bia/materials/Probleme BIA.pdf",
+   "page": 12,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "apd",
+   "sha256": "279074aa5e11c9d7c39a82454ae29800f404f7a49eca55991d049eafe1300780",
+   "path_hint": "~/.groundly/apd/materials/Curs 4 - SynchroReview.pdf",
+   "page": 7,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pdss",
+   "sha256": "4a73a15acc69cdcc06f38a2354217e9bb98d9729a93d2f9cb5ded5b906773be9",
+   "path_hint": "~/.groundly/pdss/materials/curs6.pdf",
+   "page": 12,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "passc",
+   "sha256": "f3ffc3c4a33ea36b8ff9f2798b3301efb457cdb60792ea61aa77081c0da271af",
+   "path_hint": "~/.groundly/passc/materials/WhatIsSoftwareArchitecture.pdf",
+   "page": 20,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "c5f4d676711f598534840ee4766ed84593085147dee77122b7b76644bcefa881",
+   "path_hint": "~/.groundly/bia/materials/BIA lab 4.pdf",
+   "page": 54,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "95212c541ba672f4d4c0209a854aadcbbe4c908b441fd85a646ba34277e8c012",
+   "path_hint": "~/.groundly/avmd/materials/09 Massive Parallel Processing (Spark).pdf",
+   "page": 48,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "eb7108e153f81469b096458d91bba63f988b3a4564843b55af1ebb4ccfec7829",
+   "path_hint": "~/.groundly/bia/materials/BIA lab 5.pdf",
+   "page": 14,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "764fd98d95a0d67abf76c5c4b18e191b3de7f0901e56918ca527805794546361",
+   "path_hint": "~/.groundly/avmd/materials/03 Object storage.pdf",
+   "page": 186,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "gac",
+   "sha256": "4658d9c088229f628269eff07bd8d9f07dcad05c1db59f486bb92e1aee070a3c",
+   "path_hint": "~/.groundly/gac/materials/GAC lab 5.pdf",
+   "page": 12,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bgf",
+   "sha256": "eeb719439ae808e6d5a2e2cc5762f47707c1f1fd2357eb1c160adb1dfdf50315",
+   "path_hint": "~/.groundly/bgf/materials/L12.pdf",
+   "page": 1,
+   "kind": "blank",
+   "lang": "?",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "b2b923e79999f66c9c824e60e3411e531dc01f794ab1bf94445fbc7a3b352f6d",
+   "path_hint": "~/.groundly/avmd/materials/02 Lessons learned.pdf",
+   "page": 21,
+   "kind": "blank",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "8be14b93d6d7cf8f4a101acade849d4929692b9874ca2d99acc90687b2c5e28b",
+   "path_hint": "~/.groundly/pm/materials/CPUID_IntelDocumentation.pdf",
+   "page": 50,
+   "kind": "blank",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bgf",
+   "sha256": "1103deb1417c51570fd372badf6392f13456c70fccf0043763f17099210a71c0",
+   "path_hint": "~/.groundly/bgf/materials/The science of complex networks.pdf",
+   "page": 1,
+   "kind": "blank",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "75c99dbe4fa02a9c35b41f8cda9080086ea3cf492e451a3f98f16435929f6b34",
+   "path_hint": "~/.groundly/pm/materials/5 probleme.pdf",
+   "page": 47,
+   "kind": "blank",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "24a8291395567282d0119886c788d80cb3f8cd3da2401baa540d016db81f4c2d",
+   "path_hint": "~/.groundly/sma/materials/sma07.pdf",
+   "page": 60,
+   "kind": "blank",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "cb3c5a38e88d6d02ef26cc9eafb699b653b723bd461844d57c5d0a9080827e0a",
+   "path_hint": "~/.groundly/romsilva/materials/NT4 - Evaluarea volumului de lemn.pdf",
+   "page": 32,
+   "kind": "image",
+   "lang": "?",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "782a1b527ce9ac8a81cb41ed64f0c4e29f6a38820dcc6f8520fe312b6a6c72af",
+   "path_hint": "~/.groundly/bia/materials/BIA_Slide-uri_6.pdf",
+   "page": 45,
+   "kind": "image",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "749311f8f708a9918874eb5f0d10e227a88da4ea1c0448cde00bf766a5ee92b1",
+   "path_hint": "~/.groundly/bia/materials/Probleme BIA.pdf",
+   "page": 11,
+   "kind": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "cd8af767f45e0723b1830c91030ed5988d0bc67c233667f3a736c71e70e33e73",
+   "path_hint": "~/.groundly/bia/materials/BIA lab 6.pdf",
+   "page": 33,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": true,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "6b56e75842c2b990fab510eb191af1865de6217c77abb76a4ee62e6e638dc7d8",
+   "path_hint": "~/.groundly/pm/materials/Test_PM_2026 (1).pdf",
+   "page": 10,
+   "kind": "image",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "5170a29bad0749ef59d571e5e1b292ce5133f040312ecd623c4f92f00740cd6a",
+   "path_hint": "~/.groundly/sma/materials/sma09.pdf",
+   "page": 41,
+   "kind": "image",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "26474235c48eb710e5ba2b6909a0ae9a6a9b0ef91494ef89dbba367216d1586b",
+   "path_hint": "~/.groundly/avmd/materials/05 Syntax.pdf",
+   "page": 15,
+   "kind": "mixed",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "ea0525c9efd1eca377f0de67d524d00f50b03da314f82d1335c5a17a90ce40d3",
+   "path_hint": "~/.groundly/bia/materials/BIA_final.pdf",
+   "page": 12,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "gac",
+   "sha256": "4658d9c088229f628269eff07bd8d9f07dcad05c1db59f486bb92e1aee070a3c",
+   "path_hint": "~/.groundly/gac/materials/GAC lab 5.pdf",
+   "page": 22,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "35ed755c8967c391b9d7b335a0644b848f791f48a03813306a99fdaa7cc42b75",
+   "path_hint": "~/.groundly/pm/materials/3 Probleme-PMD.pdf",
+   "page": 15,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "eeb933a2255bc16365c00aff07e7be233844a8ea9e647028107848726ed38f75",
+   "path_hint": "~/.groundly/sma/materials/sma08.pdf",
+   "page": 166,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "5f030ef05b76f3315a2d144e915154cbfffdbc6c2cd9d0e9cb9fb75ed825d0d7",
+   "path_hint": "~/.groundly/pm/materials/Interfata seriala si paralela.pdf",
+   "page": 1,
+   "kind": "text",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "8be14b93d6d7cf8f4a101acade849d4929692b9874ca2d99acc90687b2c5e28b",
+   "path_hint": "~/.groundly/pm/materials/CPUID_IntelDocumentation.pdf",
+   "page": 31,
+   "kind": "text",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "apd",
+   "sha256": "34a5fdf5b912fa87e325e898648558badda7a9cd0ab36ada8fb2cca7f9746372",
+   "path_hint": "~/.groundly/apd/materials/Curs 11- MPIAlgo.pdf",
+   "page": 4,
+   "kind": "text",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "b285626d3036e339c20718a2e3ef87926d9cee2f6b1b6cbebac9b9af2b8cd886",
+   "path_hint": "~/.groundly/romsilva/materials/NT1 - Compozitii, scheme si tehnologii de regenerare.pdf",
+   "page": 87,
+   "kind": "text",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "9f2c87ce769cb2ff8405ba81c15561f2e9ae3c7a368521b2e4d01ad55de4b4fe",
+   "path_hint": "~/.groundly/sma/materials/sma05.pdf",
+   "page": 10,
+   "kind": "text",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bgf",
+   "sha256": "dc48fde3f20a9aec04ec36b326e126203c4fe32b908ee614a3b14eafb5cd5477",
+   "path_hint": "~/.groundly/bgf/materials/L12-1.pdf",
+   "page": 1,
+   "kind": "blank",
+   "lang": "?",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "26474235c48eb710e5ba2b6909a0ae9a6a9b0ef91494ef89dbba367216d1586b",
+   "path_hint": "~/.groundly/avmd/materials/05 Syntax.pdf",
+   "page": 61,
+   "kind": "blank",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "8be14b93d6d7cf8f4a101acade849d4929692b9874ca2d99acc90687b2c5e28b",
+   "path_hint": "~/.groundly/pm/materials/CPUID_IntelDocumentation.pdf",
+   "page": 10,
+   "kind": "blank",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "gac",
+   "sha256": "c700d414ba1c09995dcc0748049f58be217155c3908084be9ee1d9da55c73aa3",
+   "path_hint": "~/.groundly/gac/materials/GAC lab 2.pdf",
+   "page": 4,
+   "kind": "blank",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "53fb64861b4a255a9ec8a921e0ee2dc86ad45d7d227e3934bc286b1377f2e5ce",
+   "path_hint": "~/.groundly/romsilva/materials/NT7 - Regenerarea padurilor si efectuarea controlului anual al regenerarilor.pdf",
+   "page": 53,
+   "kind": "blank",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "24a8291395567282d0119886c788d80cb3f8cd3da2401baa540d016db81f4c2d",
+   "path_hint": "~/.groundly/sma/materials/sma07.pdf",
+   "page": 78,
+   "kind": "blank",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "242b10540bed3036b080680d9e24be6e1b72c2c8288079be40b5cfb4b3f4a033",
+   "path_hint": "~/.groundly/bia/materials/Exercitii_06_2026.pdf",
+   "page": 4,
+   "kind": "image",
+   "lang": "?",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "1074bcc6ea64c869d4d4d9caf07539793d63784ffca8a48b508fb02f489c8910",
+   "path_hint": "~/.groundly/bia/materials/BIA_Slide-uri_2.pdf",
+   "page": 88,
+   "kind": "image",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "ea0525c9efd1eca377f0de67d524d00f50b03da314f82d1335c5a17a90ce40d3",
+   "path_hint": "~/.groundly/bia/materials/BIA_final.pdf",
+   "page": 7,
+   "kind": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "764fd98d95a0d67abf76c5c4b18e191b3de7f0901e56918ca527805794546361",
+   "path_hint": "~/.groundly/avmd/materials/03 Object storage.pdf",
+   "page": 94,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "6b56e75842c2b990fab510eb191af1865de6217c77abb76a4ee62e6e638dc7d8",
+   "path_hint": "~/.groundly/pm/materials/Test_PM_2026 (1).pdf",
+   "page": 31,
+   "kind": "image",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "eeb933a2255bc16365c00aff07e7be233844a8ea9e647028107848726ed38f75",
+   "path_hint": "~/.groundly/sma/materials/sma08.pdf",
+   "page": 146,
+   "kind": "image",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "793b781edaef27fb01517d2becb24c2895e1723598bb00fe501f483b6ef0888a",
+   "path_hint": "~/.groundly/bia/materials/SEARCHABLE_SUBIECTE TEST1 BIA INTORTOCHEATE.pdf",
+   "page": 14,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pdss",
+   "sha256": "6e151f7494e3db560a6fca0b08462afe4a0c267ddd756ee829b3ce4670f86587",
+   "path_hint": "~/.groundly/pdss/materials/curs5.pdf",
+   "page": 6,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "150c68eac5e54ca9799c4a4d7f9e10c94eded536b31a51945c8edb7c7409a809",
+   "path_hint": "~/.groundly/pm/materials/Problema_curs_07_Aplicatie_02_V3.pdf",
+   "page": 1,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "7786211e016b3e0638ca7b58f48a42cb49936e859b044ff3ee75b5dc0902a82e",
+   "path_hint": "~/.groundly/pm/materials/Curs_9.pdf",
+   "page": 17,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "0a640b849d68d10e3f6632b9b2bb215676c27e1cd5fd739541f61206092bad0f",
+   "path_hint": "~/.groundly/pm/materials/i8086_instruction_set.pdf",
+   "page": 36,
+   "kind": "text",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "apd",
+   "sha256": "3782d820c484a6bdbd0324e27c14f3d51218694c51604b7b6e85e2c4ac75827a",
+   "path_hint": "~/.groundly/apd/materials/JavaThreads.pdf",
+   "page": 47,
+   "kind": "text",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "b285626d3036e339c20718a2e3ef87926d9cee2f6b1b6cbebac9b9af2b8cd886",
+   "path_hint": "~/.groundly/romsilva/materials/NT1 - Compozitii, scheme si tehnologii de regenerare.pdf",
+   "page": 54,
+   "kind": "text",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "9f2c87ce769cb2ff8405ba81c15561f2e9ae3c7a368521b2e4d01ad55de4b4fe",
+   "path_hint": "~/.groundly/sma/materials/sma05.pdf",
+   "page": 43,
+   "kind": "text",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bgf",
+   "sha256": "256035ae078943c7164aa914ea6fe3dd8da1c3abbe7eac89c6c763864aa0bf2e",
+   "path_hint": "~/.groundly/bgf/materials/L12-3.pdf",
+   "page": 2,
+   "kind": "blank",
+   "lang": "?",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "d7735ece79e0d68cfc8b2872a5c7446b782cc677d9774594d1978ff8ed97980b",
+   "path_hint": "~/.groundly/avmd/materials/06 Wide Column Stores.pdf",
+   "page": 33,
+   "kind": "blank",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "gac",
+   "sha256": "e202009e68f51281d7e4f4a1619fd56fba0e7f1011426947dbbcff8faa3f7d52",
+   "path_hint": "~/.groundly/gac/materials/GAC lab 7.pdf",
+   "page": 8,
+   "kind": "blank",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "bc08a933d4c1df8a6dd7995b084e8741798f5b2134e4ad2e1c9c7918d3ecb740",
+   "path_hint": "~/.groundly/pm/materials/Documentatie_finala_PM.pdf",
+   "page": 31,
+   "kind": "blank",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "d579cd98aad0f97793aa14b5f5f46e66d80b765bc0924aba7c5ec0e458e546f4",
+   "path_hint": "~/.groundly/sma/materials/sma04.pdf",
+   "page": 115,
+   "kind": "blank",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "d0c38de4205aaf8d78a14c83e985c80f05ec1a7b567d7340614eb69536583a26",
+   "path_hint": "~/.groundly/pm/materials/Problema_curs_07_Aplicatie_03_V1.pdf",
+   "page": 7,
+   "kind": "image",
+   "lang": "?",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "b2b923e79999f66c9c824e60e3411e531dc01f794ab1bf94445fbc7a3b352f6d",
+   "path_hint": "~/.groundly/avmd/materials/02 Lessons learned.pdf",
+   "page": 66,
+   "kind": "image",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "749311f8f708a9918874eb5f0d10e227a88da4ea1c0448cde00bf766a5ee92b1",
+   "path_hint": "~/.groundly/bia/materials/Probleme BIA.pdf",
+   "page": 15,
+   "kind": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "764fd98d95a0d67abf76c5c4b18e191b3de7f0901e56918ca527805794546361",
+   "path_hint": "~/.groundly/avmd/materials/03 Object storage.pdf",
+   "page": 35,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "52462fc9f7954b5146a99b9d117881e6f62423faca6d5e7c23a2f85199abe1f6",
+   "path_hint": "~/.groundly/pm/materials/PMD_TEST_ADD.pdf",
+   "page": 20,
+   "kind": "image",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "d579cd98aad0f97793aa14b5f5f46e66d80b765bc0924aba7c5ec0e458e546f4",
+   "path_hint": "~/.groundly/sma/materials/sma04.pdf",
+   "page": 23,
+   "kind": "image",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "ea0525c9efd1eca377f0de67d524d00f50b03da314f82d1335c5a17a90ce40d3",
+   "path_hint": "~/.groundly/bia/materials/BIA_final.pdf",
+   "page": 20,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "apd",
+   "sha256": "a29eaaaae3a3ddccc6568ce436bd116ced08cfddbd49204d43d24eaf5fa366e3",
+   "path_hint": "~/.groundly/apd/materials/Curs 5 - PerformanceIssues.pdf",
+   "page": 40,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "1062b7ea8a1ada8706f668773e47e5ff359ef8ab8c284bd6e43ada8eb8423a08",
+   "path_hint": "~/.groundly/pm/materials/Lista PM teorie.pdf",
+   "page": 7,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "lftc",
+   "sha256": "92812b994d8b1ac89ec6f4138e6c58a1fd29ab7a1effff6e71210f99b67cc739",
+   "path_hint": "~/.groundly/lftc/materials/LFTC 05.pdf",
+   "page": 17,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "11c10fdeb94a5fe76ce70cd21c255db96e80fd7879c08692fdca56bd0c977f13",
+   "path_hint": "~/.groundly/bia/materials/Rezolvare_Mosteniri_pdf.pdf",
+   "page": 2,
+   "kind": "text",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "passc",
+   "sha256": "9d65a7d065142798e6c4f735fd7389bdb63c0ecf2f676cf4097893e603fe7bd7",
+   "path_hint": "~/.groundly/passc/materials/Reflection.pdf",
+   "page": 4,
+   "kind": "text",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pdss",
+   "sha256": "a7aa16395e666edd2bea35c3a04ce20340778cfe150df77e15758958d6fd6c12",
+   "path_hint": "~/.groundly/pdss/materials/Subiecte_test_Joi.pdf",
+   "page": 11,
+   "kind": "text",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "167bd3bbd17940bf705180ca2c14ead6d1ed102339904725d96713b1ba100a18",
+   "path_hint": "~/.groundly/pm/materials/Curs_11.pdf",
+   "page": 28,
+   "kind": "text",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "a1d7e839cebc55041bf0f92623d777c03d0f00a10532da1f57c0344be494fc54",
+   "path_hint": "~/.groundly/avmd/materials/07 Data models.pdf",
+   "page": 98,
+   "kind": "blank",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "c5f4d676711f598534840ee4766ed84593085147dee77122b7b76644bcefa881",
+   "path_hint": "~/.groundly/bia/materials/BIA lab 4.pdf",
+   "page": 4,
+   "kind": "blank",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "75c99dbe4fa02a9c35b41f8cda9080086ea3cf492e451a3f98f16435929f6b34",
+   "path_hint": "~/.groundly/pm/materials/5 probleme.pdf",
+   "page": 49,
+   "kind": "blank",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "5170a29bad0749ef59d571e5e1b292ce5133f040312ecd623c4f92f00740cd6a",
+   "path_hint": "~/.groundly/sma/materials/sma09.pdf",
+   "page": 43,
+   "kind": "blank",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pi",
+   "sha256": "cef35b72c78c0a1afb059159ff305f878952678afd2325fa3be44d8ad936e704",
+   "path_hint": "~/.groundly/pi/materials/Exercitii_01_251209_153656.pdf",
+   "page": 14,
+   "kind": "image",
+   "lang": "?",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "0b2265f3a0b6dc888adbc731df918bf55c0cdb73023a6796610576edf175b7a3",
+   "path_hint": "~/.groundly/bia/materials/BIA_Slide-uri_3.pdf",
+   "page": 85,
+   "kind": "image",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "749311f8f708a9918874eb5f0d10e227a88da4ea1c0448cde00bf766a5ee92b1",
+   "path_hint": "~/.groundly/bia/materials/Probleme BIA.pdf",
+   "page": 5,
+   "kind": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "764fd98d95a0d67abf76c5c4b18e191b3de7f0901e56918ca527805794546361",
+   "path_hint": "~/.groundly/avmd/materials/03 Object storage.pdf",
+   "page": 122,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "6b56e75842c2b990fab510eb191af1865de6217c77abb76a4ee62e6e638dc7d8",
+   "path_hint": "~/.groundly/pm/materials/Test_PM_2026 (1).pdf",
+   "page": 8,
+   "kind": "image",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "053f9690c18cbdb313ed0ce9d8706bf57662e5c49d88cb838b318a9eb3733183",
+   "path_hint": "~/.groundly/sma/materials/sma03.pdf",
+   "page": 43,
+   "kind": "image",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "ea0525c9efd1eca377f0de67d524d00f50b03da314f82d1335c5a17a90ce40d3",
+   "path_hint": "~/.groundly/bia/materials/BIA_final.pdf",
+   "page": 1,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "85beeafe56471dc7e8c30effa8ffb80265eb15e0c2c01f4bb860c983a7f09dbe",
+   "path_hint": "~/.groundly/bia/materials/BIA lab 11.pdf",
+   "page": 55,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "c46e3244a94c94e438a35693cd77fe516e80ce7fecd69ac021eeddc0b376ce61",
+   "path_hint": "~/.groundly/sma/materials/Introducere in Android v19 MM.pdf",
+   "page": 49,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "8abfd7b8dbe8134e52d46bfbbf6a8db2ebda192bf76821a1d2ee7ee0343af36d",
+   "path_hint": "~/.groundly/sma/materials/sma10.pdf",
+   "page": 57,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "11c10fdeb94a5fe76ce70cd21c255db96e80fd7879c08692fdca56bd0c977f13",
+   "path_hint": "~/.groundly/bia/materials/Rezolvare_Mosteniri_pdf.pdf",
+   "page": 3,
+   "kind": "text",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bgf",
+   "sha256": "9c72b4373186ab556dae2c68b45b245d9d829e862bcbaab6b97a8ada66eb0cc2",
+   "path_hint": "~/.groundly/bgf/materials/BGF__Lecture_5.pdf",
+   "page": 6,
+   "kind": "text",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "b285626d3036e339c20718a2e3ef87926d9cee2f6b1b6cbebac9b9af2b8cd886",
+   "path_hint": "~/.groundly/romsilva/materials/NT1 - Compozitii, scheme si tehnologii de regenerare.pdf",
+   "page": 136,
+   "kind": "text",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "f574061197f4f8c08b2386cf9bc068afda6ec42260fba72208cbd9c951835a96",
+   "path_hint": "~/.groundly/pm/materials/Curs_3.pdf",
+   "page": 17,
+   "kind": "text",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "d7735ece79e0d68cfc8b2872a5c7446b782cc677d9774594d1978ff8ed97980b",
+   "path_hint": "~/.groundly/avmd/materials/06 Wide Column Stores.pdf",
+   "page": 1,
+   "kind": "blank",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "243f7af4b7322df33461ce470ea45e48e9f47b719bec44afbfe091b1fa4e066f",
+   "path_hint": "~/.groundly/bia/materials/BIA lab 9.pdf",
+   "page": 83,
+   "kind": "blank",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "b285626d3036e339c20718a2e3ef87926d9cee2f6b1b6cbebac9b9af2b8cd886",
+   "path_hint": "~/.groundly/romsilva/materials/NT1 - Compozitii, scheme si tehnologii de regenerare.pdf",
+   "page": 383,
+   "kind": "blank",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "9f2c87ce769cb2ff8405ba81c15561f2e9ae3c7a368521b2e4d01ad55de4b4fe",
+   "path_hint": "~/.groundly/sma/materials/sma05.pdf",
+   "page": 92,
+   "kind": "blank",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "911980b770e35887205a7f753cc4dd966c477b3961cf17d990beffa3a7f57181",
+   "path_hint": "~/.groundly/pm/materials/Problema_curs_07_Aplicatie_02_V2.pdf",
+   "page": 2,
+   "kind": "image",
+   "lang": "?",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pi",
+   "sha256": "cee1a968cdde34761daacfca1ee17266d1f69378ad59537e6bab1c00b2179e0a",
+   "path_hint": "~/.groundly/pi/materials/PI_Slide-uri_8.pdf",
+   "page": 22,
+   "kind": "image",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "749311f8f708a9918874eb5f0d10e227a88da4ea1c0448cde00bf766a5ee92b1",
+   "path_hint": "~/.groundly/bia/materials/Probleme BIA.pdf",
+   "page": 32,
+   "kind": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "9c5e152ecddd69cf203dacbab55521b3b4d069392f3846ca5fcbf98c6ceddebb",
+   "path_hint": "~/.groundly/avmd/materials/08 Massive Parallel Processing (MapReduce).pdf",
+   "page": 2,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "6b56e75842c2b990fab510eb191af1865de6217c77abb76a4ee62e6e638dc7d8",
+   "path_hint": "~/.groundly/pm/materials/Test_PM_2026 (1).pdf",
+   "page": 19,
+   "kind": "image",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "8abfd7b8dbe8134e52d46bfbbf6a8db2ebda192bf76821a1d2ee7ee0343af36d",
+   "path_hint": "~/.groundly/sma/materials/sma10.pdf",
+   "page": 55,
+   "kind": "image",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pi",
+   "sha256": "749311f8f708a9918874eb5f0d10e227a88da4ea1c0448cde00bf766a5ee92b1",
+   "path_hint": "~/.groundly/pi/materials/Probleme BIA.pdf",
+   "page": 28,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pw",
+   "sha256": "bddd85a53340857c05e892b54c4c3da78035e4acdce9547768f55b6f4cf9f575",
+   "path_hint": "~/.groundly/pw/materials/PW - Lecture 5 - ORM.pdf",
+   "page": 14,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479",
+   "path_hint": "~/.groundly/romsilva/materials/NT5 - Amenajarea padurilor.pdf",
+   "page": 31,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "a1ec47567a841d6b21cbb34914c6fb7e5b29de40dfa3699dbd8ee41a975fad95",
+   "path_hint": "~/.groundly/sma/materials/sma11.pdf",
+   "page": 14,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "lftc",
+   "sha256": "88f5a1635f9eb4cdd950c0bb74731ff99d47f29d80477399408aa86ae8d1b5f8",
+   "path_hint": "~/.groundly/lftc/materials/AtomC - reguli sintactice.pdf",
+   "page": 1,
+   "kind": "text",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "passc",
+   "sha256": "b5e3f7d8d9843b54e09ae818a95df67e488e0549d807085789446a1718fd7393",
+   "path_hint": "~/.groundly/passc/materials/JDBC.pdf",
+   "page": 39,
+   "kind": "text",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "bc08a933d4c1df8a6dd7995b084e8741798f5b2134e4ad2e1c9c7918d3ecb740",
+   "path_hint": "~/.groundly/pm/materials/Documentatie_finala_PM.pdf",
+   "page": 15,
+   "kind": "text",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "63a779edc558b2ce99d7a938fc6693732fbb7251fa58ef2626fae7286b88fb28",
+   "path_hint": "~/.groundly/pm/materials/Curs_5.pdf",
+   "page": 10,
+   "kind": "text",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "26474235c48eb710e5ba2b6909a0ae9a6a9b0ef91494ef89dbba367216d1586b",
+   "path_hint": "~/.groundly/avmd/materials/05 Syntax.pdf",
+   "page": 36,
+   "kind": "blank",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "698cdc23938e8f3fb419c907632b59e2a77731e078e370c450e151c868a3de02",
+   "path_hint": "~/.groundly/bia/materials/BIA lab 10.pdf",
+   "page": 60,
+   "kind": "blank",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "53fb64861b4a255a9ec8a921e0ee2dc86ad45d7d227e3934bc286b1377f2e5ce",
+   "path_hint": "~/.groundly/romsilva/materials/NT7 - Regenerarea padurilor si efectuarea controlului anual al regenerarilor.pdf",
+   "page": 55,
+   "kind": "blank",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "165f87e8bffb2af3c648a6c65970f832bc7127ab344598c1674b34a41bdc690d",
+   "path_hint": "~/.groundly/pm/materials/Enunt_Proiect_Proiectarea_cu_Microprocesoare_3.2 C; 1.1 TI; 2.1 TI.pdf",
+   "page": 2,
+   "kind": "blank",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "003e1e3accfc5cd1b6aa4211cc277ecde64b8a32fc5dce2fefdfa1b9ea018a47",
+   "path_hint": "~/.groundly/pm/materials/probleme_DRAGOS_260121_203651.pdf",
+   "page": 10,
+   "kind": "image",
+   "lang": "?",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "9bced592d2abd217e43a55e69eef509e3cb3ede23f19865a1ceb40adc3040be6",
+   "path_hint": "~/.groundly/bia/materials/BIA_Slide-uri_5.pdf",
+   "page": 54,
+   "kind": "image",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bgf",
+   "sha256": "c3e074e695e99ef290c7a941e4148289682013b4e82743c27ad58881f096d262",
+   "path_hint": "~/.groundly/bgf/materials/L11.pdf",
+   "page": 1,
+   "kind": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pdss",
+   "sha256": "6cd8d40a9c26569757b0a1b2d1a682cefa776ee43479056a4e951bb63d2d77aa",
+   "path_hint": "~/.groundly/pdss/materials/S9 - PDSS - Design Patterns (Creational).pdf",
+   "page": 40,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "75c99dbe4fa02a9c35b41f8cda9080086ea3cf492e451a3f98f16435929f6b34",
+   "path_hint": "~/.groundly/pm/materials/5 probleme.pdf",
+   "page": 27,
+   "kind": "image",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "8b692198eae4762a798fc000dbe794d34aea28f104920d45c8257423cf5c34ca",
+   "path_hint": "~/.groundly/sma/materials/sma02.pdf",
+   "page": 15,
+   "kind": "image",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pi",
+   "sha256": "749311f8f708a9918874eb5f0d10e227a88da4ea1c0448cde00bf766a5ee92b1",
+   "path_hint": "~/.groundly/pi/materials/Probleme BIA.pdf",
+   "page": 30,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "b22d3193113230cc942dc0b719f6ee401c8f7fc1b1ef47626af23fcadfafde10",
+   "path_hint": "~/.groundly/bia/materials/BIA lab 8.pdf",
+   "page": 9,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "4c590926819342ad9e8fa6d6ee2dbbfb42833e2d8623ad780c9eded0e4353f6b",
+   "path_hint": "~/.groundly/pm/materials/434161809-TeoriePMD PEA .pdf",
+   "page": 39,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "lftc",
+   "sha256": "51b08f4164c7c4313ca2afe25f196868ef285ec9484b45878f7df123581227d3",
+   "path_hint": "~/.groundly/lftc/materials/LFTC 10-51b08f41.pdf",
+   "page": 15,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "8be14b93d6d7cf8f4a101acade849d4929692b9874ca2d99acc90687b2c5e28b",
+   "path_hint": "~/.groundly/pm/materials/CPUID_IntelDocumentation.pdf",
+   "page": 8,
+   "kind": "text",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pdss",
+   "sha256": "42225317bccd3c2ce0b044110bf57d8eff86f97e3fb6bf4ee1db2006db78a50d",
+   "path_hint": "~/.groundly/pdss/materials/S2 - PDSS - Streams.pdf",
+   "page": 15,
+   "kind": "text",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "b285626d3036e339c20718a2e3ef87926d9cee2f6b1b6cbebac9b9af2b8cd886",
+   "path_hint": "~/.groundly/romsilva/materials/NT1 - Compozitii, scheme si tehnologii de regenerare.pdf",
+   "page": 302,
+   "kind": "text",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "8b692198eae4762a798fc000dbe794d34aea28f104920d45c8257423cf5c34ca",
+   "path_hint": "~/.groundly/sma/materials/sma02.pdf",
+   "page": 51,
+   "kind": "text",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "a1d7e839cebc55041bf0f92623d777c03d0f00a10532da1f57c0344be494fc54",
+   "path_hint": "~/.groundly/avmd/materials/07 Data models.pdf",
+   "page": 1,
+   "kind": "blank",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "85beeafe56471dc7e8c30effa8ffb80265eb15e0c2c01f4bb860c983a7f09dbe",
+   "path_hint": "~/.groundly/bia/materials/BIA lab 11.pdf",
+   "page": 16,
+   "kind": "blank",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "53fb64861b4a255a9ec8a921e0ee2dc86ad45d7d227e3934bc286b1377f2e5ce",
+   "path_hint": "~/.groundly/romsilva/materials/NT7 - Regenerarea padurilor si efectuarea controlului anual al regenerarilor.pdf",
+   "page": 54,
+   "kind": "blank",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "ea6ed1667ae93cee1242f3312d5eb2b3748e04e41065cbc2a0bac97428cac126",
+   "path_hint": "~/.groundly/pm/materials/Enunt_Proiect_Proiectarea_cu_Microprocesoare_2.2 TI; 3.1 TI; 1.2 TI.pdf",
+   "page": 2,
+   "kind": "blank",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "003e1e3accfc5cd1b6aa4211cc277ecde64b8a32fc5dce2fefdfa1b9ea018a47",
+   "path_hint": "~/.groundly/pm/materials/probleme_DRAGOS_260121_203651.pdf",
+   "page": 32,
+   "kind": "image",
+   "lang": "?",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pi",
+   "sha256": "1f3df5e6b202bb777a0d1e2ec886cbf0cb65898ac792b553f586a623b6067246",
+   "path_hint": "~/.groundly/pi/materials/03_07_Deep_Convolutional_neural_networks(AlexNet).pdf",
+   "page": 16,
+   "kind": "image",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pi",
+   "sha256": "749311f8f708a9918874eb5f0d10e227a88da4ea1c0448cde00bf766a5ee92b1",
+   "path_hint": "~/.groundly/pi/materials/Probleme BIA.pdf",
+   "page": 11,
+   "kind": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "764fd98d95a0d67abf76c5c4b18e191b3de7f0901e56918ca527805794546361",
+   "path_hint": "~/.groundly/avmd/materials/03 Object storage.pdf",
+   "page": 177,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "6b56e75842c2b990fab510eb191af1865de6217c77abb76a4ee62e6e638dc7d8",
+   "path_hint": "~/.groundly/pm/materials/Test_PM_2026 (1).pdf",
+   "page": 29,
+   "kind": "image",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "8abfd7b8dbe8134e52d46bfbbf6a8db2ebda192bf76821a1d2ee7ee0343af36d",
+   "path_hint": "~/.groundly/sma/materials/sma10.pdf",
+   "page": 82,
+   "kind": "image",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pi",
+   "sha256": "749311f8f708a9918874eb5f0d10e227a88da4ea1c0448cde00bf766a5ee92b1",
+   "path_hint": "~/.groundly/pi/materials/Probleme BIA.pdf",
+   "page": 19,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bgf",
+   "sha256": "056f4d5002cbe674d4dec5435298cb66b2e9784537c41586d2f3dc6d07247165",
+   "path_hint": "~/.groundly/bgf/materials/BGF__Lecture_1.pdf",
+   "page": 12,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "lftc",
+   "sha256": "29267d849c3eafb35a785bb4df41144e990cd833c014ba5905b02a11010dddc6",
+   "path_hint": "~/.groundly/lftc/materials/Subiecte teorie LFTC.docx.pdf",
+   "page": 4,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "8b692198eae4762a798fc000dbe794d34aea28f104920d45c8257423cf5c34ca",
+   "path_hint": "~/.groundly/sma/materials/sma02.pdf",
+   "page": 28,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pdss",
+   "sha256": "57d602bea0bddd6016cf70a0b31874be4fd292c39dab420625bc0d1d2fd07367",
+   "path_hint": "~/.groundly/pdss/materials/Exercitii Design Patterns.pdf",
+   "page": 5,
+   "kind": "text",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "a1ec47567a841d6b21cbb34914c6fb7e5b29de40dfa3699dbd8ee41a975fad95",
+   "path_hint": "~/.groundly/sma/materials/sma11.pdf",
+   "page": 3,
+   "kind": "text",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "d5e8b4ffb726f5e840a8e599f3a86bf8e0edcdc81685102613f6cc4016d3a92b",
+   "path_hint": "~/.groundly/pm/materials/examen_pmd.pdf",
+   "page": 10,
+   "kind": "text",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "9f2c87ce769cb2ff8405ba81c15561f2e9ae3c7a368521b2e4d01ad55de4b4fe",
+   "path_hint": "~/.groundly/sma/materials/sma05.pdf",
+   "page": 13,
+   "kind": "text",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "26474235c48eb710e5ba2b6909a0ae9a6a9b0ef91494ef89dbba367216d1586b",
+   "path_hint": "~/.groundly/avmd/materials/05 Syntax.pdf",
+   "page": 2,
+   "kind": "blank",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pdss",
+   "sha256": "6cd8d40a9c26569757b0a1b2d1a682cefa776ee43479056a4e951bb63d2d77aa",
+   "path_hint": "~/.groundly/pdss/materials/S9 - PDSS - Design Patterns (Creational).pdf",
+   "page": 1,
+   "kind": "blank",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "c46e3244a94c94e438a35693cd77fe516e80ce7fecd69ac021eeddc0b376ce61",
+   "path_hint": "~/.groundly/sma/materials/Introducere in Android v19 MM.pdf",
+   "page": 4,
+   "kind": "blank",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "eeb933a2255bc16365c00aff07e7be233844a8ea9e647028107848726ed38f75",
+   "path_hint": "~/.groundly/sma/materials/sma08.pdf",
+   "page": 154,
+   "kind": "blank",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pi",
+   "sha256": "61e0e924f5c5de35a678d209cbd74b8be9c182c3a57f5733c06f948aa6c3614e",
+   "path_hint": "~/.groundly/pi/materials/Exercitii_02_251210_150948 (1).pdf",
+   "page": 16,
+   "kind": "image",
+   "lang": "?",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pi",
+   "sha256": "cee1a968cdde34761daacfca1ee17266d1f69378ad59537e6bab1c00b2179e0a",
+   "path_hint": "~/.groundly/pi/materials/PI_Slide-uri_8.pdf",
+   "page": 49,
+   "kind": "image",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bgf",
+   "sha256": "c3e074e695e99ef290c7a941e4148289682013b4e82743c27ad58881f096d262",
+   "path_hint": "~/.groundly/bgf/materials/L11.pdf",
+   "page": 4,
+   "kind": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "ed4ba6a76fa5765838c5b93c2309e47978b39a0bafb47f7aec2ae102d1d8309f",
+   "path_hint": "~/.groundly/avmd/materials/04 Distributed File Systems.pdf",
+   "page": 20,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "6b56e75842c2b990fab510eb191af1865de6217c77abb76a4ee62e6e638dc7d8",
+   "path_hint": "~/.groundly/pm/materials/Test_PM_2026 (1).pdf",
+   "page": 22,
+   "kind": "image",
+   "lang": "ro",
+   "deck": false,
+   "ref": true,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "053f9690c18cbdb313ed0ce9d8706bf57662e5c49d88cb838b318a9eb3733183",
+   "path_hint": "~/.groundly/sma/materials/sma03.pdf",
+   "page": 65,
+   "kind": "image",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "749311f8f708a9918874eb5f0d10e227a88da4ea1c0448cde00bf766a5ee92b1",
+   "path_hint": "~/.groundly/bia/materials/Probleme BIA.pdf",
+   "page": 4,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "gac",
+   "sha256": "4658d9c088229f628269eff07bd8d9f07dcad05c1db59f486bb92e1aee070a3c",
+   "path_hint": "~/.groundly/gac/materials/GAC lab 5.pdf",
+   "page": 26,
+   "kind": "mixed",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "lftc",
+   "sha256": "a3bc941a896fa234f3787d509f3f2583e377e08f7ffc25316f8c76efeb2d0965",
+   "path_hint": "~/.groundly/lftc/materials/Intrebari_Examen_2026.pdf",
+   "page": 22,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "lftc",
+   "sha256": "3e794bdbd37cf7bf9847649a8bba42e1489199d164011eee2ee847ded011ae60",
+   "path_hint": "~/.groundly/lftc/materials/LFTC 08-3e794bdb.pdf",
+   "page": 4,
+   "kind": "mixed",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "8be14b93d6d7cf8f4a101acade849d4929692b9874ca2d99acc90687b2c5e28b",
+   "path_hint": "~/.groundly/pm/materials/CPUID_IntelDocumentation.pdf",
+   "page": 2,
+   "kind": "text",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "apd",
+   "sha256": "16297a043eb25df3ba890df8f8a42abcacb9e1350ceb801da2ba6575677aeb22",
+   "path_hint": "~/.groundly/apd/materials/Curs 1 - IntroParallel.pdf",
+   "page": 9,
+   "kind": "text",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "8cee063fae60a631f546ec716b3f2d2c8adfde7bc5ed0943d0c7f44270e01718",
+   "path_hint": "~/.groundly/romsilva/materials/NT6 - Protectia padurilor.pdf",
+   "page": 148,
+   "kind": "text",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "8b692198eae4762a798fc000dbe794d34aea28f104920d45c8257423cf5c34ca",
+   "path_hint": "~/.groundly/sma/materials/sma02.pdf",
+   "page": 63,
+   "kind": "text",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "avmd",
+   "sha256": "a1d7e839cebc55041bf0f92623d777c03d0f00a10532da1f57c0344be494fc54",
+   "path_hint": "~/.groundly/avmd/materials/07 Data models.pdf",
+   "page": 49,
+   "kind": "blank",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "2143bb587b7197f9722bd9522ef40858c871d7e3cc995a5270a63087e6af6efd",
+   "path_hint": "~/.groundly/bia/materials/BIA lab 1.pdf",
+   "page": 23,
+   "kind": "blank",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "480fae67d9550fd3bea9c5d6cc8d128efc9d9428f41f98b4a56affd13faa0bb6",
+   "path_hint": "~/.groundly/romsilva/materials/NT3 - Alegerea si aplicarea tratamentelor.pdf",
+   "page": 71,
+   "kind": "blank",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "5170a29bad0749ef59d571e5e1b292ce5133f040312ecd623c4f92f00740cd6a",
+   "path_hint": "~/.groundly/sma/materials/sma09.pdf",
+   "page": 42,
+   "kind": "blank",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "pm",
+   "sha256": "e88a766b04a3136f89164de0d7c16b74ecb99785661865f524eea5197eaed8f9",
+   "path_hint": "~/.groundly/pm/materials/Problema_curs_06_Transfer_prin_program_03_Ca_01.pdf",
+   "page": 1,
+   "kind": "image",
+   "lang": "?",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "gac",
+   "sha256": "367fdacf8e71e485ab79893d8bb4ef439c2187868717ead85ba3a093d9e0b1fd",
+   "path_hint": "~/.groundly/gac/materials/GAC_Slide-uri_9.pdf",
+   "page": 34,
+   "kind": "image",
+   "lang": "?",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bia",
+   "sha256": "749311f8f708a9918874eb5f0d10e227a88da4ea1c0448cde00bf766a5ee92b1",
+   "path_hint": "~/.groundly/bia/materials/Probleme BIA.pdf",
+   "page": 29,
+   "kind": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "bgf",
+   "sha256": "1103deb1417c51570fd372badf6392f13456c70fccf0043763f17099210a71c0",
+   "path_hint": "~/.groundly/bgf/materials/The science of complex networks.pdf",
+   "page": 49,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "lftc",
+   "sha256": "a3bc941a896fa234f3787d509f3f2583e377e08f7ffc25316f8c76efeb2d0965",
+   "path_hint": "~/.groundly/lftc/materials/Intrebari_Examen_2026.pdf",
+   "page": 17,
+   "kind": "image",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "source": "pdf"
+  },
+  {
+   "subject": "sma",
+   "sha256": "eeb933a2255bc16365c00aff07e7be233844a8ea9e647028107848726ed38f75",
+   "path_hint": "~/.groundly/sma/materials/sma08.pdf",
+   "page": 95,
+   "kind": "image",
+   "lang": "ro",
+   "deck": true,
+   "source": "pdf",
+   "ref": true
+  },
+  {
+   "subject": "sma",
+   "sha256": "eeb933a2255bc16365c00aff07e7be233844a8ea9e647028107848726ed38f75",
+   "path_hint": "~/.groundly/sma/materials/sma08.pdf",
+   "page": 107,
+   "kind": "image",
+   "lang": "ro",
+   "deck": true,
+   "source": "pdf",
+   "ref": true
+  },
+  {
+   "subject": "sma",
+   "sha256": "eeb933a2255bc16365c00aff07e7be233844a8ea9e647028107848726ed38f75",
+   "path_hint": "~/.groundly/sma/materials/sma08.pdf",
+   "page": 46,
+   "kind": "image",
+   "lang": "ro",
+   "deck": true,
+   "source": "pdf",
+   "ref": true
+  },
+  {
+   "subject": "sma",
+   "sha256": "053f9690c18cbdb313ed0ce9d8706bf57662e5c49d88cb838b318a9eb3733183",
+   "path_hint": "~/.groundly/sma/materials/sma03.pdf",
+   "page": 20,
+   "kind": "image",
+   "lang": "ro",
+   "deck": true,
+   "source": "pdf",
+   "ref": true
+  },
+  {
+   "subject": "pm",
+   "sha256": "75c99dbe4fa02a9c35b41f8cda9080086ea3cf492e451a3f98f16435929f6b34",
+   "path_hint": "~/.groundly/pm/materials/5 probleme.pdf",
+   "page": 31,
+   "kind": "image",
+   "lang": "ro",
+   "deck": false,
+   "source": "pdf",
+   "ref": true
+  },
+  {
+   "subject": "sma",
+   "sha256": "8b692198eae4762a798fc000dbe794d34aea28f104920d45c8257423cf5c34ca",
+   "path_hint": "~/.groundly/sma/materials/sma02.pdf",
+   "page": 123,
+   "kind": "image",
+   "lang": "ro",
+   "deck": true,
+   "source": "pdf",
+   "ref": true
+  },
+  {
+   "subject": "sma",
+   "sha256": "5170a29bad0749ef59d571e5e1b292ce5133f040312ecd623c4f92f00740cd6a",
+   "path_hint": "~/.groundly/sma/materials/sma09.pdf",
+   "page": 36,
+   "kind": "image",
+   "lang": "ro",
+   "deck": true,
+   "source": "pdf",
+   "ref": true
+  },
+  {
+   "subject": "sma",
+   "sha256": "5170a29bad0749ef59d571e5e1b292ce5133f040312ecd623c4f92f00740cd6a",
+   "path_hint": "~/.groundly/sma/materials/sma09.pdf",
+   "page": 61,
+   "kind": "image",
+   "lang": "ro",
+   "deck": true,
+   "source": "pdf",
+   "ref": true
+  },
+  {
+   "subject": "sma",
+   "sha256": "5170a29bad0749ef59d571e5e1b292ce5133f040312ecd623c4f92f00740cd6a",
+   "path_hint": "~/.groundly/sma/materials/sma09.pdf",
+   "page": 47,
+   "kind": "image",
+   "lang": "ro",
+   "deck": true,
+   "source": "pdf",
+   "ref": true
+  },
+  {
+   "subject": "groundly",
+   "sha256": "4658d9c088229f628269eff07bd8d9f07dcad05c1db59f486bb92e1aee070a3c",
+   "path_hint": "~/.groundly/groundly/materials/GAC lab 5.pdf",
+   "page": 7,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "source": "pdf",
+   "ref": true
+  },
+  {
+   "subject": "avmd",
+   "sha256": "9c5e152ecddd69cf203dacbab55521b3b4d069392f3846ca5fcbf98c6ceddebb",
+   "path_hint": "~/.groundly/avmd/materials/08 Massive Parallel Processing (MapReduce).pdf",
+   "page": 130,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "source": "pdf",
+   "ref": true
+  },
+  {
+   "subject": "avmd",
+   "sha256": "9c5e152ecddd69cf203dacbab55521b3b4d069392f3846ca5fcbf98c6ceddebb",
+   "path_hint": "~/.groundly/avmd/materials/08 Massive Parallel Processing (MapReduce).pdf",
+   "page": 95,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "source": "pdf",
+   "ref": true
+  },
+  {
+   "subject": "avmd",
+   "sha256": "ed4ba6a76fa5765838c5b93c2309e47978b39a0bafb47f7aec2ae102d1d8309f",
+   "path_hint": "~/.groundly/avmd/materials/04 Distributed File Systems.pdf",
+   "page": 3,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "source": "pdf",
+   "ref": true
+  },
+  {
+   "subject": "pdss",
+   "sha256": "6cd8d40a9c26569757b0a1b2d1a682cefa776ee43479056a4e951bb63d2d77aa",
+   "path_hint": "~/.groundly/pdss/materials/S9 - PDSS - Design Patterns (Creational).pdf",
+   "page": 22,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "source": "pdf",
+   "ref": true
+  },
+  {
+   "subject": "avmd",
+   "sha256": "ed4ba6a76fa5765838c5b93c2309e47978b39a0bafb47f7aec2ae102d1d8309f",
+   "path_hint": "~/.groundly/avmd/materials/04 Distributed File Systems.pdf",
+   "page": 83,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "source": "pdf",
+   "ref": true
+  },
+  {
+   "subject": "avmd",
+   "sha256": "764fd98d95a0d67abf76c5c4b18e191b3de7f0901e56918ca527805794546361",
+   "path_hint": "~/.groundly/avmd/materials/03 Object storage.pdf",
+   "page": 140,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "source": "pdf",
+   "ref": true
+  },
+  {
+   "subject": "groundly",
+   "sha256": "931a46a003ce573fa339657c8c7fa7b23ff442b64b42c72d948eabbaa4bb7b21",
+   "path_hint": "~/.groundly/groundly/materials/BIA lab 7.pdf",
+   "page": 38,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "source": "pdf",
+   "ref": true
+  },
+  {
+   "subject": "avmd",
+   "sha256": "95212c541ba672f4d4c0209a854aadcbbe4c908b441fd85a646ba34277e8c012",
+   "path_hint": "~/.groundly/avmd/materials/09 Massive Parallel Processing (Spark).pdf",
+   "page": 117,
+   "kind": "image",
+   "lang": "en",
+   "deck": true,
+   "source": "pdf",
+   "ref": true
+  },
+  {
+   "subject": "groundly",
+   "sha256": "d800be9344634f9e8327df8529ebcd3495dad83e325eaf2a539207aa70e37965",
+   "path_hint": "~/.groundly/groundly/materials/1782331389095.png",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "ro",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "groundly",
+   "sha256": "71279ea17c7b551d5d08961d2967522bfa0afc1aff2330380f516889fe70983f",
+   "path_hint": "~/.groundly/groundly/materials/IMG_6070.JPG",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "ro",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "groundly",
+   "sha256": "ee6868ba8566d8794c59cecb1012a88a12a4b55c0c9dfb1c4cbf98f0d4c26804",
+   "path_hint": "~/.groundly/groundly/materials/IMG-20260107-WA0016.jpg",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "ro",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "pm",
+   "sha256": "785e34a83173799f64f59b8ea0c4d4b45e560238123361187f64f60ef1805085",
+   "path_hint": "~/.groundly/pm/materials/IMG-20260107-WA0043.jpg",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "ro",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "pm",
+   "sha256": "1cda8d8454b99e66cef25e31e4c69edeb9a07d6afd717787e946aaaa9f31f958",
+   "path_hint": "~/.groundly/pm/materials/IMG-20260107-WA0048.jpg",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "ro",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "pm",
+   "sha256": "72d6e29fa295ad70c317d2cf36e50ddf34c0d57d9aa46bd6112a6030d86ca559",
+   "path_hint": "~/.groundly/pm/materials/IMG-20260107-WA0046.jpg",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "ro",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "groundly",
+   "sha256": "0ef80d9ebeeb0369e7bffd105b0fbe8c32b28cc1bb232cfdcbda5e3d00532b24",
+   "path_hint": "~/.groundly/groundly/materials/Observer Pattern.drawio.png",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "ro",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "groundly",
+   "sha256": "2cf61e2f9f4c8996c940951c4fd973057116e2453cf8be584ed502c2fe2a37a8",
+   "path_hint": "~/.groundly/groundly/materials/IMG_6058.JPG",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "ro",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "pm",
+   "sha256": "ffea623223449f1420f6e527fa032ac1ac2ed1c2f97cbd947596fef2203ad4d7",
+   "path_hint": "~/.groundly/pm/materials/IMG-20260107-WA0050.jpg",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "ro",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "groundly",
+   "sha256": "7b6fb7159607e46cc81faf404ecc306893ed72803279516641df0262cf8ca1d8",
+   "path_hint": "~/.groundly/groundly/materials/IMG-20260107-WA0040.jpg",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "ro",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "groundly",
+   "sha256": "cdb141c558ffeffb2c137ff761fcbc9900d4e10dacb8f0d39c3056f11a72f731",
+   "path_hint": "~/.groundly/groundly/materials/WhatsApp Image 2025-12-07 at 00.15.31 (2).jpeg",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "bia",
+   "sha256": "d761ea777367f99a48a1b9f70d29959d3ed4b6bd2bfed4172697edbb9cba591a",
+   "path_hint": "~/.groundly/bia/materials/Ex_02-d761ea77.png",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "groundly",
+   "sha256": "85ac682f148452631259a803407298feaf0cd5f28b20e45c3b08ac6afcf236b7",
+   "path_hint": "~/.groundly/groundly/materials/Ex_02.png",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "bia",
+   "sha256": "579d2de7d83f4c0a9187285a6fd7e74eb6928b097c493287c30b8047f580661d",
+   "path_hint": "~/.groundly/bia/materials/Ex_Copie_02_1.png",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "pi",
+   "sha256": "bcb6706d5fdb988d3fa0b624286719163023795b8780d7cbca9c0dd3f082641f",
+   "path_hint": "~/.groundly/pi/materials/PI_Test2_2.png",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "bia",
+   "sha256": "3dbd1106c9b734577dc6b5fd1ae0bcbb4016e47ed8541e9d6ce0b1f4c483e31d",
+   "path_hint": "~/.groundly/bia/materials/Ex_Copie_04_2.png",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "groundly",
+   "sha256": "206ee62e269a59f6815451ffa75955d6b22ce8c22e9bd524269a7be6213980f2",
+   "path_hint": "~/.groundly/groundly/materials/ex2.jpg",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "groundly",
+   "sha256": "054c19d39404cf80345951c20588561ded399b6d5872c933743d2a67fc5614fd",
+   "path_hint": "~/.groundly/groundly/materials/Ex_01-054c19d3.png",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "groundly",
+   "sha256": "adbdffbdb1ac0433b5432c97cd6034fae44706886820565a9c3f8ed83f61e535",
+   "path_hint": "~/.groundly/groundly/materials/Ex_03_02.png",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "bia",
+   "sha256": "5df382bb625aa10955cacbc6fb1f0dc108e71d88d1448b3df25a4f2b4218a6c5",
+   "path_hint": "~/.groundly/bia/materials/4.jpg",
+   "page": 1,
+   "kind": "standalone",
+   "source": "image",
+   "lang": "en",
+   "deck": false,
+   "ref": true
+  },
+  {
+   "subject": "pi",
+   "sha256": "cd7313adae81fd270ef60936c5d4e4ae64449046baa28c212fc6699e0e4fbbb8",
+   "path_hint": "bench/reference/rendered/a970b9b44abeefbfd7a388a812438d99f9114f07368a8eb3708db513cce48baa-12.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "a970b9b44abeefbfd7a388a812438d99f9114f07368a8eb3708db513cce48baa",
+    "path_hint": "~/.groundly/pi/materials/PI_AI_Curs_09.pdf",
+    "page": 12
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "c37ff036f5964233ca7b6de1aa63365ea35d6f730fa05b4f1102cf642cb32dc6",
+   "path_hint": "bench/reference/rendered/0dd25149689ab406903f41f3a8bbea0068d1042fde2789c81cc0d70fe3be1ddb-12.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "0dd25149689ab406903f41f3a8bbea0068d1042fde2789c81cc0d70fe3be1ddb",
+    "path_hint": "~/.groundly/groundly/materials/cap_9a.pdf",
+    "page": 12
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "d3adc66eebe4a505e46a760657953dac25408b597bed70fcb802f9102172f229",
+   "path_hint": "bench/reference/rendered/f3e6e9f3212076804cd1a5fb9bf2e8399934d64e7376d8b68edd7eb37c79282e-1.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "f3e6e9f3212076804cd1a5fb9bf2e8399934d64e7376d8b68edd7eb37c79282e",
+    "path_hint": "~/.groundly/groundly/materials/cap_1.pdf",
+    "page": 1
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "pm",
+   "sha256": "1f6102ba6cc178062cfef8251bc36dc0c85f15f3dc665cbdff0bd56a8ff20a53",
+   "path_hint": "bench/reference/rendered/1062b7ea8a1ada8706f668773e47e5ff359ef8ab8c284bd6e43ada8eb8423a08-15.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "1062b7ea8a1ada8706f668773e47e5ff359ef8ab8c284bd6e43ada8eb8423a08",
+    "path_hint": "~/.groundly/pm/materials/Lista PM teorie.pdf",
+    "page": 15
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "23e5e4f8b72bb382b77daa46a58c26afba6c6adf006fe4432839092e7e3bcf86",
+   "path_hint": "bench/reference/rendered/8cee063fae60a631f546ec716b3f2d2c8adfde7bc5ed0943d0c7f44270e01718-195.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "8cee063fae60a631f546ec716b3f2d2c8adfde7bc5ed0943d0c7f44270e01718",
+    "path_hint": "~/.groundly/romsilva/materials/NT6 - Protectia padurilor.pdf",
+    "page": 195
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "sma",
+   "sha256": "f3f79e53797d3136be0d99a6bec93e4358964c7265f298dbc4c9fe7ea3db7462",
+   "path_hint": "bench/reference/rendered/c46e3244a94c94e438a35693cd77fe516e80ce7fecd69ac021eeddc0b376ce61-78.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "c46e3244a94c94e438a35693cd77fe516e80ce7fecd69ac021eeddc0b376ce61",
+    "path_hint": "~/.groundly/sma/materials/Introducere in Android v19 MM.pdf",
+    "page": 78
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "lftc",
+   "sha256": "c0c180994621da18336f3125151d23b9bf2f2a1fb6e2c5daf4970ddae81d8341",
+   "path_hint": "bench/reference/rendered/f47e3e9f36c2115bee850d5dd530c62b39a796bee154946c0854a4836671a428-8.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "f47e3e9f36c2115bee850d5dd530c62b39a796bee154946c0854a4836671a428",
+    "path_hint": "~/.groundly/lftc/materials/LFTC-CTI - A3 - Analizorul sintactic.pdf",
+    "page": 8
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "c2ef87ab53761ad7f0afda2ed34ecd0281a2792f1bea5c6e9ffe52d303ed004a",
+   "path_hint": "bench/reference/rendered/8cee063fae60a631f546ec716b3f2d2c8adfde7bc5ed0943d0c7f44270e01718-93.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "8cee063fae60a631f546ec716b3f2d2c8adfde7bc5ed0943d0c7f44270e01718",
+    "path_hint": "~/.groundly/romsilva/materials/NT6 - Protectia padurilor.pdf",
+    "page": 93
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "lftc",
+   "sha256": "32c0217228ec17ca4a6d9e8a1c5bf33a298a5ae7042157abb47b5437ac6d32f2",
+   "path_hint": "bench/reference/rendered/a3bc941a896fa234f3787d509f3f2583e377e08f7ffc25316f8c76efeb2d0965-70.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "a3bc941a896fa234f3787d509f3f2583e377e08f7ffc25316f8c76efeb2d0965",
+    "path_hint": "~/.groundly/lftc/materials/Intrebari_Examen_2026.pdf",
+    "page": 70
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "ebd5bd0809aabbbfc344bbf1fe754235fa4dbc54a61c93e34e5897c03abdffe8",
+   "path_hint": "bench/reference/rendered/789eef8401b36a2123648da4ba52e5ae775e756f99573446a7ae9fb1ce70719d-137.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "789eef8401b36a2123648da4ba52e5ae775e756f99573446a7ae9fb1ce70719d",
+    "path_hint": "~/.groundly/groundly/materials/PrezentariCurs.pdf",
+    "page": 137
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "lftc",
+   "sha256": "0cd76ddabb533d30a63e7c18f2c8f2408ee9f4d9be0eef2741d3686f918a2b33",
+   "path_hint": "bench/reference/rendered/9f40def89aa9f00973022592395d851188c80f191ce6ab9632281a4174702aa9-1.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "9f40def89aa9f00973022592395d851188c80f191ce6ab9632281a4174702aa9",
+    "path_hint": "~/.groundly/lftc/materials/LFTC-CTI - A2 - Analizorul lexical.pdf",
+    "page": 1
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "dc900d9a12ff42e38cef6e7bbdded76f1637a1bf580cd6b9216169c505c08338",
+   "path_hint": "bench/reference/rendered/1ec9b87821d62d1b2f66bdd87749ab78e3c313213c3d6e20e180519b0f0fdab6-35.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "1ec9b87821d62d1b2f66bdd87749ab78e3c313213c3d6e20e180519b0f0fdab6",
+    "path_hint": "~/.groundly/groundly/materials/FIC-Tot_Combinat.pdf",
+    "page": 35
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "sma",
+   "sha256": "d392280804d1c6d782624102f29df8d42f92a4186e229aa85521081c62597dd1",
+   "path_hint": "bench/reference/rendered/8b692198eae4762a798fc000dbe794d34aea28f104920d45c8257423cf5c34ca-47.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "8b692198eae4762a798fc000dbe794d34aea28f104920d45c8257423cf5c34ca",
+    "path_hint": "~/.groundly/sma/materials/sma02.pdf",
+    "page": 47
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "97013506f288dc7f33e4f9848ef62a517149ea4ba926362c087d894d316f3f3c",
+   "path_hint": "bench/reference/rendered/1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479-164.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479",
+    "path_hint": "~/.groundly/romsilva/materials/NT5 - Amenajarea padurilor.pdf",
+    "page": 164
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "sma",
+   "sha256": "2be35ae8c0683c9e2351905d3aef7c068ac3ff5d80bf3282811378bd8829cb5a",
+   "path_hint": "bench/reference/rendered/4d1dfddce22760747740f4bd7163e49c43088b9c0476ccbdab9a6cb7a589e3b1-12.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "4d1dfddce22760747740f4bd7163e49c43088b9c0476ccbdab9a6cb7a589e3b1",
+    "path_hint": "~/.groundly/sma/materials/sma01-short.pdf",
+    "page": 12
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "a885b2e3dd458474197f66570c5d5d05138640b25c6981be2c9f225d55b8e2e3",
+   "path_hint": "bench/reference/rendered/53fb64861b4a255a9ec8a921e0ee2dc86ad45d7d227e3934bc286b1377f2e5ce-32.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "53fb64861b4a255a9ec8a921e0ee2dc86ad45d7d227e3934bc286b1377f2e5ce",
+    "path_hint": "~/.groundly/romsilva/materials/NT7 - Regenerarea padurilor si efectuarea controlului anual al regenerarilor.pdf",
+    "page": 32
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "pm",
+   "sha256": "fe941940f4e05e7384f1d4c3b739ce52da040cf8fb5ff98f7298cb39b5395344",
+   "path_hint": "bench/reference/rendered/b61d868d0120fd539439467fc79adfcfe9661e2b378364fa5f0c311860b1cc52-27.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "b61d868d0120fd539439467fc79adfcfe9661e2b378364fa5f0c311860b1cc52",
+    "path_hint": "~/.groundly/pm/materials/Curs_14.pdf",
+    "page": 27
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "6c827cda0bfe4a5cfd2e1f28fe9a4496a87cc9dd3c9f039e2ea83b92ad7846e3",
+   "path_hint": "bench/reference/rendered/1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479-412.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479",
+    "path_hint": "~/.groundly/romsilva/materials/NT5 - Amenajarea padurilor.pdf",
+    "page": 412
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "pm",
+   "sha256": "946517d00082bc2e02e89d36ac77eff350c5fe5b5ba16922f098077bfa0657e6",
+   "path_hint": "bench/reference/rendered/75c99dbe4fa02a9c35b41f8cda9080086ea3cf492e451a3f98f16435929f6b34-26.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "75c99dbe4fa02a9c35b41f8cda9080086ea3cf492e451a3f98f16435929f6b34",
+    "path_hint": "~/.groundly/pm/materials/5 probleme.pdf",
+    "page": 26
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "eebb8d9197c2c27f540ebe411b4531ea0fc5419459e59ab3742ad1283d62c4d2",
+   "path_hint": "bench/reference/rendered/8cee063fae60a631f546ec716b3f2d2c8adfde7bc5ed0943d0c7f44270e01718-87.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "8cee063fae60a631f546ec716b3f2d2c8adfde7bc5ed0943d0c7f44270e01718",
+    "path_hint": "~/.groundly/romsilva/materials/NT6 - Protectia padurilor.pdf",
+    "page": 87
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "fe98888ee9fd381eae2c3e1a0f8258015b321a856ea575c78e476189e6392625",
+   "path_hint": "bench/reference/rendered/8cee063fae60a631f546ec716b3f2d2c8adfde7bc5ed0943d0c7f44270e01718-129.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "8cee063fae60a631f546ec716b3f2d2c8adfde7bc5ed0943d0c7f44270e01718",
+    "path_hint": "~/.groundly/romsilva/materials/NT6 - Protectia padurilor.pdf",
+    "page": 129
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "sma",
+   "sha256": "9c3e37f661157372c5d7d7d6095adac8a67ac5daeb0db7169198f8ce16107635",
+   "path_hint": "bench/reference/rendered/c46e3244a94c94e438a35693cd77fe516e80ce7fecd69ac021eeddc0b376ce61-46.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "c46e3244a94c94e438a35693cd77fe516e80ce7fecd69ac021eeddc0b376ce61",
+    "path_hint": "~/.groundly/sma/materials/Introducere in Android v19 MM.pdf",
+    "page": 46
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "01bd80fdd592ee44b2cfd1056a5272dc7a8a1a704473eb63e1c20d6688aa5ff2",
+   "path_hint": "bench/reference/rendered/1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479-156.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479",
+    "path_hint": "~/.groundly/romsilva/materials/NT5 - Amenajarea padurilor.pdf",
+    "page": 156
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "6484e92dc3231a5429a13bca0c8f2cfa05991b2f3dc0c4589e238cb99b39f176",
+   "path_hint": "bench/reference/rendered/1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479-165.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479",
+    "path_hint": "~/.groundly/romsilva/materials/NT5 - Amenajarea padurilor.pdf",
+    "page": 165
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "lftc",
+   "sha256": "665692e9a72672f54398c99e74471de56dff21ca859bcdce78abd9a049e9a759",
+   "path_hint": "bench/reference/rendered/a3bc941a896fa234f3787d509f3f2583e377e08f7ffc25316f8c76efeb2d0965-64.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "a3bc941a896fa234f3787d509f3f2583e377e08f7ffc25316f8c76efeb2d0965",
+    "path_hint": "~/.groundly/lftc/materials/Intrebari_Examen_2026.pdf",
+    "page": 64
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "pi",
+   "sha256": "a74ad30a70307e51dd3e21a5e55766433e0e75483c4e6250146de646dda11324",
+   "path_hint": "bench/reference/rendered/7cac8b0f9560f999dbe4794d5f5d976960468a239277517acfa9ccbb1f6b1fb6-44.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "7cac8b0f9560f999dbe4794d5f5d976960468a239277517acfa9ccbb1f6b1fb6",
+    "path_hint": "~/.groundly/pi/materials/PI_AI_Curs_07.pdf",
+    "page": 44
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "51a18f7268fae9cf19b95c6ec67b1fd538bd16a1edb80455841d22082d0e246b",
+   "path_hint": "bench/reference/rendered/de8323b21e15a57436abac4d62797d48af08017e31c90f94ccd3d357c15da989-9.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "de8323b21e15a57436abac4d62797d48af08017e31c90f94ccd3d357c15da989",
+    "path_hint": "~/.groundly/groundly/materials/cap_5b-de8323b2.pdf",
+    "page": 9
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "9bcfc55719e783a62e2b92e5c8ffefe2f530eae4709835b2175f062a4d3b93c9",
+   "path_hint": "bench/reference/rendered/799397ee6c8d087bb064bf2f374b5c095162d04348c7ab617c0339cc4ed901cb-17.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "799397ee6c8d087bb064bf2f374b5c095162d04348c7ab617c0339cc4ed901cb",
+    "path_hint": "~/.groundly/groundly/materials/cap_7.pdf",
+    "page": 17
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "3b7506c95f14abb208f29ac5709c9bba30ae9a915e0c0e85cc5f3bdd3bdfc843",
+   "path_hint": "bench/reference/rendered/230c246c48b896649f05037bf609d796eb1e057aaa6e5a876ad96b2dcfd8a8af-1.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "230c246c48b896649f05037bf609d796eb1e057aaa6e5a876ad96b2dcfd8a8af",
+    "path_hint": "~/.groundly/groundly/materials/cap_6.pdf",
+    "page": 1
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "b745992025556ed1a6e445cd99430d5e51f99898dd072f2a0287a1abf3b7b909",
+   "path_hint": "bench/reference/rendered/1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479-337.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479",
+    "path_hint": "~/.groundly/romsilva/materials/NT5 - Amenajarea padurilor.pdf",
+    "page": 337
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "sma",
+   "sha256": "19f6d38e4976ac31c7c3d9f9b171596e1f4f0b969b5f920de5e159f42b253f72",
+   "path_hint": "bench/reference/rendered/24a8291395567282d0119886c788d80cb3f8cd3da2401baa540d016db81f4c2d-70.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "24a8291395567282d0119886c788d80cb3f8cd3da2401baa540d016db81f4c2d",
+    "path_hint": "~/.groundly/sma/materials/sma07.pdf",
+    "page": 70
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "6cd54e8ef42267dd6dc5f3170284e2c40aee392e09d37df167e3654f489cfa40",
+   "path_hint": "bench/reference/rendered/b285626d3036e339c20718a2e3ef87926d9cee2f6b1b6cbebac9b9af2b8cd886-271.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "b285626d3036e339c20718a2e3ef87926d9cee2f6b1b6cbebac9b9af2b8cd886",
+    "path_hint": "~/.groundly/romsilva/materials/NT1 - Compozitii, scheme si tehnologii de regenerare.pdf",
+    "page": 271
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "f8bbae4e6fa6fdd1876c52463a4a9be54631c8ada3bdb67fba63fd900ce314c1",
+   "path_hint": "bench/reference/rendered/b285626d3036e339c20718a2e3ef87926d9cee2f6b1b6cbebac9b9af2b8cd886-269.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "b285626d3036e339c20718a2e3ef87926d9cee2f6b1b6cbebac9b9af2b8cd886",
+    "path_hint": "~/.groundly/romsilva/materials/NT1 - Compozitii, scheme si tehnologii de regenerare.pdf",
+    "page": 269
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "54c0f596bdca1c6e31f51c6ea1d9793cf5e46d27f058e92da79dde98a3210a21",
+   "path_hint": "bench/reference/rendered/1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479-241.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479",
+    "path_hint": "~/.groundly/romsilva/materials/NT5 - Amenajarea padurilor.pdf",
+    "page": 241
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "sma",
+   "sha256": "a2726781f07ba971b286434f72aa5fcdbd511892e531824c0c89b4282f4bd6b6",
+   "path_hint": "bench/reference/rendered/5170a29bad0749ef59d571e5e1b292ce5133f040312ecd623c4f92f00740cd6a-72.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "5170a29bad0749ef59d571e5e1b292ce5133f040312ecd623c4f92f00740cd6a",
+    "path_hint": "~/.groundly/sma/materials/sma09.pdf",
+    "page": 72
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "pi",
+   "sha256": "463fa4476135cf61902a38f2923cfaedc01084939008c355bb151a9f4c073687",
+   "path_hint": "bench/reference/rendered/7cac8b0f9560f999dbe4794d5f5d976960468a239277517acfa9ccbb1f6b1fb6-24.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "7cac8b0f9560f999dbe4794d5f5d976960468a239277517acfa9ccbb1f6b1fb6",
+    "path_hint": "~/.groundly/pi/materials/PI_AI_Curs_07.pdf",
+    "page": 24
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "6e0b39cea9d558803eae01b2ab186b093a4794f29eb0c820f40a2c50685c0f83",
+   "path_hint": "bench/reference/rendered/b285626d3036e339c20718a2e3ef87926d9cee2f6b1b6cbebac9b9af2b8cd886-52.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "b285626d3036e339c20718a2e3ef87926d9cee2f6b1b6cbebac9b9af2b8cd886",
+    "path_hint": "~/.groundly/romsilva/materials/NT1 - Compozitii, scheme si tehnologii de regenerare.pdf",
+    "page": 52
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "sma",
+   "sha256": "64627482b161e7ed325549f89f2facf81d082b05dcef143579d7d3c70df86a65",
+   "path_hint": "bench/reference/rendered/e89a9e52705d516f58876ab8bd0b25f90d6d1c2a3ff20413e5a55ff97f9251cb-27.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "e89a9e52705d516f58876ab8bd0b25f90d6d1c2a3ff20413e5a55ff97f9251cb",
+    "path_hint": "~/.groundly/sma/materials/sma14.pdf",
+    "page": 27
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "pi",
+   "sha256": "ecabb478c2f5beb6e543b0d7b077d89e9007bd913c715cac035c9e5e241b8c05",
+   "path_hint": "bench/reference/rendered/169f33a416477edb65288a0f69d44dba76d674dda5d1c9ed8381a5854c3a0674-53.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "169f33a416477edb65288a0f69d44dba76d674dda5d1c9ed8381a5854c3a0674",
+    "path_hint": "~/.groundly/pi/materials/PI_AI_Curs_03.pdf",
+    "page": 53
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "sma",
+   "sha256": "fca4dc19499c7ee7a8b2d28570c0a0db7008ca227501a1caf1e098fbed8a35ad",
+   "path_hint": "bench/reference/rendered/e89a9e52705d516f58876ab8bd0b25f90d6d1c2a3ff20413e5a55ff97f9251cb-28.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "e89a9e52705d516f58876ab8bd0b25f90d6d1c2a3ff20413e5a55ff97f9251cb",
+    "path_hint": "~/.groundly/sma/materials/sma14.pdf",
+    "page": 28
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "86e0f97e2d182aa82ac50c19259754f30c5d392b670495b5657123309a175444",
+   "path_hint": "bench/reference/rendered/4f6fa840ee5fa8c135254938423fdb0120e45e1cd931caf72074086f661c3a6a-9.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "4f6fa840ee5fa8c135254938423fdb0120e45e1cd931caf72074086f661c3a6a",
+    "path_hint": "~/.groundly/romsilva/materials/NT2 - Ingrijirea si conducerea arboretelor.pdf",
+    "page": 9
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "739095e3ede27cdd7ce8e5c00e6544b07a3b1749f2ce1343ae7e3ccef5dc2f83",
+   "path_hint": "bench/reference/rendered/1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479-243.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479",
+    "path_hint": "~/.groundly/romsilva/materials/NT5 - Amenajarea padurilor.pdf",
+    "page": 243
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "bdd46aa1da9e04e819d164bf41e8b76662f6d075d8e1030ecc0eff611b009197",
+   "path_hint": "bench/reference/rendered/1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479-149.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479",
+    "path_hint": "~/.groundly/romsilva/materials/NT5 - Amenajarea padurilor.pdf",
+    "page": 149
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "pi",
+   "sha256": "290b971b44c64e3eaa03037855db3195cf44c9e8f49458633aea242239de95c3",
+   "path_hint": "bench/reference/rendered/7cac8b0f9560f999dbe4794d5f5d976960468a239277517acfa9ccbb1f6b1fb6-45.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "7cac8b0f9560f999dbe4794d5f5d976960468a239277517acfa9ccbb1f6b1fb6",
+    "path_hint": "~/.groundly/pi/materials/PI_AI_Curs_07.pdf",
+    "page": 45
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "pdss",
+   "sha256": "6abcd9486205e95f0c8eb34ed13d105d8b56bf9199460fe819368287a95f2d00",
+   "path_hint": "bench/reference/rendered/6998260000bd4fdc9c2be49e5eeb80bd2b558a4378f679320d6dc60c82a2b85c-6.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "6998260000bd4fdc9c2be49e5eeb80bd2b558a4378f679320d6dc60c82a2b85c",
+    "path_hint": "~/.groundly/pdss/materials/V0_PDSS.pdf",
+    "page": 6
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "pm",
+   "sha256": "36605d9f886b60792702855697f0233a4ea35c553824581b8bab37731c92d79b",
+   "path_hint": "bench/reference/rendered/ea6ed1667ae93cee1242f3312d5eb2b3748e04e41065cbc2a0bac97428cac126-1.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "ea6ed1667ae93cee1242f3312d5eb2b3748e04e41065cbc2a0bac97428cac126",
+    "path_hint": "~/.groundly/pm/materials/Enunt_Proiect_Proiectarea_cu_Microprocesoare_2.2 TI; 3.1 TI; 1.2 TI.pdf",
+    "page": 1
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "pi",
+   "sha256": "aa5a9daf160ba8502d3d932331e7cda4a2ecb0475430e194032aeaacf092a06e",
+   "path_hint": "bench/reference/rendered/169f33a416477edb65288a0f69d44dba76d674dda5d1c9ed8381a5854c3a0674-60.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "169f33a416477edb65288a0f69d44dba76d674dda5d1c9ed8381a5854c3a0674",
+    "path_hint": "~/.groundly/pi/materials/PI_AI_Curs_03.pdf",
+    "page": 60
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "c07f46abfe8869cc72c96946c6fb7764c072b29adba740515d7d600160ba0163",
+   "path_hint": "bench/reference/rendered/b285626d3036e339c20718a2e3ef87926d9cee2f6b1b6cbebac9b9af2b8cd886-326.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "b285626d3036e339c20718a2e3ef87926d9cee2f6b1b6cbebac9b9af2b8cd886",
+    "path_hint": "~/.groundly/romsilva/materials/NT1 - Compozitii, scheme si tehnologii de regenerare.pdf",
+    "page": 326
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "b348054036a15bbce1ea9c70f348792da57c2cd9a5bfb7d74cef1e82f7b8830d",
+   "path_hint": "bench/reference/rendered/1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479-6.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479",
+    "path_hint": "~/.groundly/romsilva/materials/NT5 - Amenajarea padurilor.pdf",
+    "page": 6
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "romsilva",
+   "sha256": "34b77f329b7c4906bb3df292e14b770c949e164ed41d36ed7488ea409ef6fa72",
+   "path_hint": "bench/reference/rendered/1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479-440.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "ro",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "1dbae560bff117c8c43f7f44497f569faade0e8fa3dce691f397a0cd2bcf1479",
+    "path_hint": "~/.groundly/romsilva/materials/NT5 - Amenajarea padurilor.pdf",
+    "page": 440
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "af62f44ec47fcd6b66aa766f53186227664e302682e711c85bf9ede2887d962d",
+   "path_hint": "bench/reference/rendered/16297a043eb25df3ba890df8f8a42abcacb9e1350ceb801da2ba6575677aeb22-36.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "16297a043eb25df3ba890df8f8a42abcacb9e1350ceb801da2ba6575677aeb22",
+    "path_hint": "~/.groundly/groundly/materials/Curs 1 - IntroParallel.pdf",
+    "page": 36
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "sma",
+   "sha256": "03eb1493cb09f09b165dbad632b75f5b8b88af9f59c9f431bb6709f90a68990f",
+   "path_hint": "bench/reference/rendered/2be7259100f241716a9adb7905c7dc668fee1e0c4994e75e43eacf1f5e4bd2ae-12.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "2be7259100f241716a9adb7905c7dc668fee1e0c4994e75e43eacf1f5e4bd2ae",
+    "path_hint": "~/.groundly/sma/materials/sma06.pdf",
+    "page": 12
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "pw",
+   "sha256": "867ec44fba6cd999b076bec5c111333b4febfe4797ce4c20994ceb8cafac762b",
+   "path_hint": "bench/reference/rendered/831ea3b92cfd772963224ddd8fa92972a4659b15b12a91b37e8fdb9e4f0f006b-9.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "831ea3b92cfd772963224ddd8fa92972a4659b15b12a91b37e8fdb9e4f0f006b",
+    "path_hint": "~/.groundly/pw/materials/PW - Lecture 7 - SessionAttacks.pdf",
+    "page": 9
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "376429557428e7416075f694eccdc0ce57a9dd0b4bd1abb5ce463fee4ae09d23",
+   "path_hint": "bench/reference/rendered/e79c665f6873ee110a1ed2f47dfe59cc007b841ba947bac1e8d6c3db40fb9c12-302.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "e79c665f6873ee110a1ed2f47dfe59cc007b841ba947bac1e8d6c3db40fb9c12",
+    "path_hint": "~/.groundly/groundly/materials/Discovering Knowledge in data An Introduction to Data -- Daniel T_ Larose, Chantel D_ Larose -- Wiley Series on Methods and Applications in Data .pdf",
+    "page": 302
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "fd039c29348041ced66dcc92ed54e855887063f07021e393886eb284b2b2d46f",
+   "path_hint": "bench/reference/rendered/e79c665f6873ee110a1ed2f47dfe59cc007b841ba947bac1e8d6c3db40fb9c12-314.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "e79c665f6873ee110a1ed2f47dfe59cc007b841ba947bac1e8d6c3db40fb9c12",
+    "path_hint": "~/.groundly/groundly/materials/Discovering Knowledge in data An Introduction to Data -- Daniel T_ Larose, Chantel D_ Larose -- Wiley Series on Methods and Applications in Data .pdf",
+    "page": 314
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "c6adcd0b986bd50b0a87a610fa4e1e1ad29a128c99afa52f145b7152003c7c1c",
+   "path_hint": "bench/reference/rendered/dc52e1fe9f8e331566d76ee5ee47df44977223cd0c230a5ab59dd8b6420bc778-134.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "dc52e1fe9f8e331566d76ee5ee47df44977223cd0c230a5ab59dd8b6420bc778",
+    "path_hint": "~/.groundly/groundly/materials/Data.Mining.Techniques.for.Marketing.Sales.and.Customer.Support.(2004),.2Ed.pdf",
+    "page": 134
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "71f82973dbdd5b6c0662ea9d44a74bbdc80da8a8a8ea071d3c8a6b405e8d91d7",
+   "path_hint": "bench/reference/rendered/e79c665f6873ee110a1ed2f47dfe59cc007b841ba947bac1e8d6c3db40fb9c12-329.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "e79c665f6873ee110a1ed2f47dfe59cc007b841ba947bac1e8d6c3db40fb9c12",
+    "path_hint": "~/.groundly/groundly/materials/Discovering Knowledge in data An Introduction to Data -- Daniel T_ Larose, Chantel D_ Larose -- Wiley Series on Methods and Applications in Data .pdf",
+    "page": 329
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "8b4906b64b9933cd9de44d3a18119f35ba0f7fef348ba0988f1c9065f47a4648",
+   "path_hint": "bench/reference/rendered/44ef65bb808a4db375f6aa5df2d4d055382b320dd1b0a2e1676ea40bbf3c6467-3.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "44ef65bb808a4db375f6aa5df2d4d055382b320dd1b0a2e1676ea40bbf3c6467",
+    "path_hint": "~/.groundly/groundly/materials/Overview 4 - RAFT.pdf",
+    "page": 3
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "a05279c5fa1d531477a6e4efef1dd4c1c8f2815c9caf388538d2ee6a9ed3e6c4",
+   "path_hint": "bench/reference/rendered/e79c665f6873ee110a1ed2f47dfe59cc007b841ba947bac1e8d6c3db40fb9c12-42.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "e79c665f6873ee110a1ed2f47dfe59cc007b841ba947bac1e8d6c3db40fb9c12",
+    "path_hint": "~/.groundly/groundly/materials/Discovering Knowledge in data An Introduction to Data -- Daniel T_ Larose, Chantel D_ Larose -- Wiley Series on Methods and Applications in Data .pdf",
+    "page": 42
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "sma",
+   "sha256": "80c025c4abc4d8902e70367918d4e2a88b7dfae53d243aa60fac72acaa6e4df4",
+   "path_hint": "bench/reference/rendered/5170a29bad0749ef59d571e5e1b292ce5133f040312ecd623c4f92f00740cd6a-91.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "5170a29bad0749ef59d571e5e1b292ce5133f040312ecd623c4f92f00740cd6a",
+    "path_hint": "~/.groundly/sma/materials/sma09.pdf",
+    "page": 91
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "sma",
+   "sha256": "6b849b78713259b19a72f6fd53a7119fe70e46b85e77b7de98f2cebdcafad9a0",
+   "path_hint": "bench/reference/rendered/9f2c87ce769cb2ff8405ba81c15561f2e9ae3c7a368521b2e4d01ad55de4b4fe-36.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "9f2c87ce769cb2ff8405ba81c15561f2e9ae3c7a368521b2e4d01ad55de4b4fe",
+    "path_hint": "~/.groundly/sma/materials/sma05.pdf",
+    "page": 36
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "75ae3bd04452e1e76f5ef4d314a6dcef29ae2eadbd965e2675d8cbb6a9b46611",
+   "path_hint": "bench/reference/rendered/dc52e1fe9f8e331566d76ee5ee47df44977223cd0c230a5ab59dd8b6420bc778-543.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "dc52e1fe9f8e331566d76ee5ee47df44977223cd0c230a5ab59dd8b6420bc778",
+    "path_hint": "~/.groundly/groundly/materials/Data.Mining.Techniques.for.Marketing.Sales.and.Customer.Support.(2004),.2Ed.pdf",
+    "page": 543
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "fd455446adf13e399d7fe1bb4f8fb650827bfeed0ca86f8b6e3dae7b5fee1643",
+   "path_hint": "bench/reference/rendered/a29eaaaae3a3ddccc6568ce436bd116ced08cfddbd49204d43d24eaf5fa366e3-10.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "a29eaaaae3a3ddccc6568ce436bd116ced08cfddbd49204d43d24eaf5fa366e3",
+    "path_hint": "~/.groundly/groundly/materials/Curs 5 - PerformanceIssues.pdf",
+    "page": 10
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "pdss",
+   "sha256": "6b0b2fee0e4df8f9ecca7f4537dd2b2b0749006cb1ed488823e0f27e3d70df65",
+   "path_hint": "bench/reference/rendered/6e151f7494e3db560a6fca0b08462afe4a0c267ddd756ee829b3ce4670f86587-11.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "6e151f7494e3db560a6fca0b08462afe4a0c267ddd756ee829b3ce4670f86587",
+    "path_hint": "~/.groundly/pdss/materials/curs5.pdf",
+    "page": 11
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "57a32a9bc48ab85fc92561b5cd52f214301fe87f0adbd9fabe551d769b365509",
+   "path_hint": "bench/reference/rendered/dbde6568cbf7ceb01e66d3678c46643b04f153cc818a9e7aab8b1d62fbba41c2-31.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "dbde6568cbf7ceb01e66d3678c46643b04f153cc818a9e7aab8b1d62fbba41c2",
+    "path_hint": "~/.groundly/groundly/materials/GAC lab 10.pdf",
+    "page": 31
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "pm",
+   "sha256": "3b3864c85bd95989e702ea7e337afd9bdec3eaba47b86949219e519798d40429",
+   "path_hint": "bench/reference/rendered/0a640b849d68d10e3f6632b9b2bb215676c27e1cd5fd739541f61206092bad0f-43.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "0a640b849d68d10e3f6632b9b2bb215676c27e1cd5fd739541f61206092bad0f",
+    "path_hint": "~/.groundly/pm/materials/i8086_instruction_set.pdf",
+    "page": 43
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "avmd",
+   "sha256": "638d21f4d1dfbc4fef7f6d2c8ddf29dbbaeb169b6f0292b0f410ebd7ba77cb73",
+   "path_hint": "bench/reference/rendered/9c5e152ecddd69cf203dacbab55521b3b4d069392f3846ca5fcbf98c6ceddebb-1.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "9c5e152ecddd69cf203dacbab55521b3b4d069392f3846ca5fcbf98c6ceddebb",
+    "path_hint": "~/.groundly/avmd/materials/08 Massive Parallel Processing (MapReduce).pdf",
+    "page": 1
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "passc",
+   "sha256": "120a5b99faf1e9b90f40350d05c3914f556e3aedc7a9147f7b443800becfc7b3",
+   "path_hint": "bench/reference/rendered/7db0bc02b48088edaa68ac5887f2348e64dd59d0b5e4c694de63b5da1ac8592c-10.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "7db0bc02b48088edaa68ac5887f2348e64dd59d0b5e4c694de63b5da1ac8592c",
+    "path_hint": "~/.groundly/passc/materials/FundamentalArchStyles.pdf",
+    "page": 10
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "passc",
+   "sha256": "a78fb58ec82806a74469245b80cb74d16524f8068276754b91010687989858f1",
+   "path_hint": "bench/reference/rendered/c48ca7c5fff20277a5622a1c26d37f66e4f7e1d4dcbdc4da1675184c9b4324ef-15.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "c48ca7c5fff20277a5622a1c26d37f66e4f7e1d4dcbdc4da1675184c9b4324ef",
+    "path_hint": "~/.groundly/passc/materials/RPC.pdf",
+    "page": 15
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "bgf",
+   "sha256": "c6cc4e492c394698b043ab5612d33a15ef3ae7726356ff51cd6c18b5fd068472",
+   "path_hint": "bench/reference/rendered/56ffad46d365b42cfa36f7c3a7fbb37c0250b857d1459887ed750553d253b30c-23.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "56ffad46d365b42cfa36f7c3a7fbb37c0250b857d1459887ed750553d253b30c",
+    "path_hint": "~/.groundly/bgf/materials/BGF__Lecture_2.pdf",
+    "page": 23
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "a1c52e3d9beb1dbfa313866294a48f88588dd0c58211eb2940d518a4af312d6a",
+   "path_hint": "bench/reference/rendered/eb7108e153f81469b096458d91bba63f988b3a4564843b55af1ebb4ccfec7829-36.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "eb7108e153f81469b096458d91bba63f988b3a4564843b55af1ebb4ccfec7829",
+    "path_hint": "~/.groundly/groundly/materials/BIA lab 5.pdf",
+    "page": 36
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "passc",
+   "sha256": "fb585b9b95a5063c7832b20186722010e4b1f715884e63ed550e15fd57fcec30",
+   "path_hint": "bench/reference/rendered/a845db50462a225a1b22e2511071ebc996c3f4271191a43fc1635e8e8bf91df7-5.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "a845db50462a225a1b22e2511071ebc996c3f4271191a43fc1635e8e8bf91df7",
+    "path_hint": "~/.groundly/passc/materials/PublishSubscribe-RabbitMQ.pdf",
+    "page": 5
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "pdss",
+   "sha256": "4e4c60c850ba5564653bfa5d048adfdb0207ef0f244d0a9c11f20f47a34d2020",
+   "path_hint": "bench/reference/rendered/cb01456fbbb09edd3ff081e7b0c3f400726057cd104f7d237bbdb08e3c2c503c-15.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "cb01456fbbb09edd3ff081e7b0c3f400726057cd104f7d237bbdb08e3c2c503c",
+    "path_hint": "~/.groundly/pdss/materials/S5 - PDSS - Code Smells, LoD.pdf",
+    "page": 15
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "ba36ecb73ee95c1eb07cde8d0142bd72285bf0722fa36dd5363d69f1962fa690",
+   "path_hint": "bench/reference/rendered/57f908ddba15e8d0e501030a56fda50af1d4c67f321a31491d54a760d6a41156-1.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "57f908ddba15e8d0e501030a56fda50af1d4c67f321a31491d54a760d6a41156",
+    "path_hint": "~/.groundly/groundly/materials/Predator-Prey Ecosystem Simulation - Complete Walkthrough.pdf",
+    "page": 1
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "sma",
+   "sha256": "3584c6a97452a4e548102fd7a5e989ea8a4f9fbfaea1e737c3495f51d4cc346e",
+   "path_hint": "bench/reference/rendered/8abfd7b8dbe8134e52d46bfbbf6a8db2ebda192bf76821a1d2ee7ee0343af36d-20.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "8abfd7b8dbe8134e52d46bfbbf6a8db2ebda192bf76821a1d2ee7ee0343af36d",
+    "path_hint": "~/.groundly/sma/materials/sma10.pdf",
+    "page": 20
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "ad00c778c0128999b81149e900e03a5e8534b125d4fc569e2fe5cdd6ffad168f",
+   "path_hint": "bench/reference/rendered/6bffdb94e1d72fbbbb3b54e73c1ee6cca9ac6e8c28144aa7e1ee96a08df6fd2b-22.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "6bffdb94e1d72fbbbb3b54e73c1ee6cca9ac6e8c28144aa7e1ee96a08df6fd2b",
+    "path_hint": "~/.groundly/groundly/materials/DataMiningConcepts.pdf",
+    "page": 22
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "a3ca06882472e5a636454390c1e6d671cf9eaf7c457d1ecfa0b38fe88aec328b",
+   "path_hint": "bench/reference/rendered/dc52e1fe9f8e331566d76ee5ee47df44977223cd0c230a5ab59dd8b6420bc778-450.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "dc52e1fe9f8e331566d76ee5ee47df44977223cd0c230a5ab59dd8b6420bc778",
+    "path_hint": "~/.groundly/groundly/materials/Data.Mining.Techniques.for.Marketing.Sales.and.Customer.Support.(2004),.2Ed.pdf",
+    "page": 450
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "fe1624fa488ef110c0336e3388d3921423e6cc8333c19b8f4c49618f825b4a69",
+   "path_hint": "bench/reference/rendered/e79c665f6873ee110a1ed2f47dfe59cc007b841ba947bac1e8d6c3db40fb9c12-265.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "e79c665f6873ee110a1ed2f47dfe59cc007b841ba947bac1e8d6c3db40fb9c12",
+    "path_hint": "~/.groundly/groundly/materials/Discovering Knowledge in data An Introduction to Data -- Daniel T_ Larose, Chantel D_ Larose -- Wiley Series on Methods and Applications in Data .pdf",
+    "page": 265
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "pdss",
+   "sha256": "727371e2989cee77143bfb5ee5f23fd14196d3e0bd3f55ab8bbca6127bfbf270",
+   "path_hint": "bench/reference/rendered/da4a48b60270ddd538d1aa767b667d2709c9d6b94e6e1931454124a8060bbe3c-5.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "da4a48b60270ddd538d1aa767b667d2709c9d6b94e6e1931454124a8060bbe3c",
+    "path_hint": "~/.groundly/pdss/materials/curs0.pdf",
+    "page": 5
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "f7bd8b1b9be5631f14a9b7c56829eb60afb715f6c588a50eeff68aba0825d6d0",
+   "path_hint": "bench/reference/rendered/837280fa9dc059cd656e24c4612628aa8b8bbde2a34f3ab848115042597556c1-4.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "837280fa9dc059cd656e24c4612628aa8b8bbde2a34f3ab848115042597556c1",
+    "path_hint": "~/.groundly/groundly/materials/Curs 7 - DenseMatrix.pdf",
+    "page": 4
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "64c479a9b4e47f66f06744dcc024b9077564f64f8bcd61959c222867966e5675",
+   "path_hint": "bench/reference/rendered/c97b1b053920c9f77b3025bf2f7e6ac0d45dfe980bed882701746ab6f0a644ae-17.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "c97b1b053920c9f77b3025bf2f7e6ac0d45dfe980bed882701746ab6f0a644ae",
+    "path_hint": "~/.groundly/groundly/materials/Introduction To Data Mining Instructors Solution Manual -- Tan, Pang-Ning; Steinbach, Michael; Kumar, Vipin -- 1st ed_, 2005 -- Pearson Addison Wesley .pdf",
+    "page": 17
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "e68b8360fad0d68ca268618de313e50c590c150c105dd05c2c17b7166574bf69",
+   "path_hint": "bench/reference/rendered/dc52e1fe9f8e331566d76ee5ee47df44977223cd0c230a5ab59dd8b6420bc778-65.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "dc52e1fe9f8e331566d76ee5ee47df44977223cd0c230a5ab59dd8b6420bc778",
+    "path_hint": "~/.groundly/groundly/materials/Data.Mining.Techniques.for.Marketing.Sales.and.Customer.Support.(2004),.2Ed.pdf",
+    "page": 65
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "920a6ce8d63ee5f3b5fed8133dc54ba72e54dafe44e7fbab761901b249bed4d1",
+   "path_hint": "bench/reference/rendered/dc52e1fe9f8e331566d76ee5ee47df44977223cd0c230a5ab59dd8b6420bc778-254.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "dc52e1fe9f8e331566d76ee5ee47df44977223cd0c230a5ab59dd8b6420bc778",
+    "path_hint": "~/.groundly/groundly/materials/Data.Mining.Techniques.for.Marketing.Sales.and.Customer.Support.(2004),.2Ed.pdf",
+    "page": 254
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "72abf14be221d31c181a2323c9e5cb12cd9c5a57e12889d72ac748534d9a2862",
+   "path_hint": "bench/reference/rendered/44ef65bb808a4db375f6aa5df2d4d055382b320dd1b0a2e1676ea40bbf3c6467-64.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "44ef65bb808a4db375f6aa5df2d4d055382b320dd1b0a2e1676ea40bbf3c6467",
+    "path_hint": "~/.groundly/groundly/materials/Overview 4 - RAFT.pdf",
+    "page": 64
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "sma",
+   "sha256": "5e461cfeb70269ffc1202da4e4a9947211948b32ec33e75270d9234ca330a8f3",
+   "path_hint": "bench/reference/rendered/a1ec47567a841d6b21cbb34914c6fb7e5b29de40dfa3699dbd8ee41a975fad95-34.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "a1ec47567a841d6b21cbb34914c6fb7e5b29de40dfa3699dbd8ee41a975fad95",
+    "path_hint": "~/.groundly/sma/materials/sma11.pdf",
+    "page": 34
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "c5d1569526c0f45b9878065ce2226f4743a85aa1d2cd0a9ed66a2157667d00f9",
+   "path_hint": "bench/reference/rendered/cd8af767f45e0723b1830c91030ed5988d0bc67c233667f3a736c71e70e33e73-4.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "cd8af767f45e0723b1830c91030ed5988d0bc67c233667f3a736c71e70e33e73",
+    "path_hint": "~/.groundly/groundly/materials/BIA lab 6.pdf",
+    "page": 4
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "b26bd36ef31a7bff072c29f5eb28062e698ee6b0be43c9dbaca43574dbfbdf31",
+   "path_hint": "bench/reference/rendered/e34824c1922dc752c623205bbd257d5a0e38359e80c35b9f14aa96bed42376da-22.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "e34824c1922dc752c623205bbd257d5a0e38359e80c35b9f14aa96bed42376da",
+    "path_hint": "~/.groundly/groundly/materials/Curs 3 - Synchronization.pdf",
+    "page": 22
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "bgf",
+   "sha256": "1ac79aabe0b1939bd1eba3ba45ed0e1d6b9fbea791ceab2cd45f55167472deea",
+   "path_hint": "bench/reference/rendered/e4e3a35e72c04301b2ac984a41b1f78943bb6f525b5ef3caf96bb2f6bd104255-22.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "e4e3a35e72c04301b2ac984a41b1f78943bb6f525b5ef3caf96bb2f6bd104255",
+    "path_hint": "~/.groundly/bgf/materials/BGF__Lecture_4.pdf",
+    "page": 22
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "bgf",
+   "sha256": "3ce81927f896a0d814d2480889360906025298d297931007ee7f3859e81e9ca2",
+   "path_hint": "bench/reference/rendered/03644fc7c4d50fe666f6458080c06fb4a9832ddb6df454da24d8dbe0e4f4633a-10.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "03644fc7c4d50fe666f6458080c06fb4a9832ddb6df454da24d8dbe0e4f4633a",
+    "path_hint": "~/.groundly/bgf/materials/Bioinformatics-apps.pdf",
+    "page": 10
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "89e42c11893c0ca79b7e457a5052ac39c1d47e508f9ec89e601a8de54e4e4c59",
+   "path_hint": "bench/reference/rendered/e34824c1922dc752c623205bbd257d5a0e38359e80c35b9f14aa96bed42376da-15.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "e34824c1922dc752c623205bbd257d5a0e38359e80c35b9f14aa96bed42376da",
+    "path_hint": "~/.groundly/groundly/materials/Curs 3 - Synchronization.pdf",
+    "page": 15
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "273f9167e12bc85f3f8662f0233b7b658b09b2199e13149ac42cb245d20c8276",
+   "path_hint": "bench/reference/rendered/11c10fdeb94a5fe76ce70cd21c255db96e80fd7879c08692fdca56bd0c977f13-20.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "11c10fdeb94a5fe76ce70cd21c255db96e80fd7879c08692fdca56bd0c977f13",
+    "path_hint": "~/.groundly/groundly/materials/Rezolvare_Mosteniri_pdf.pdf",
+    "page": 20
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "b9ff3c295483980e1724926654ec9f41713a18eb47753fa0e577d1af2352eac6",
+   "path_hint": "bench/reference/rendered/16297a043eb25df3ba890df8f8a42abcacb9e1350ceb801da2ba6575677aeb22-22.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "16297a043eb25df3ba890df8f8a42abcacb9e1350ceb801da2ba6575677aeb22",
+    "path_hint": "~/.groundly/groundly/materials/Curs 1 - IntroParallel.pdf",
+    "page": 22
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "34b31bb0ef67217a15c32334cc9c302f10a4d9519e4bfbe30107cfe287ae7aad",
+   "path_hint": "bench/reference/rendered/dc52e1fe9f8e331566d76ee5ee47df44977223cd0c230a5ab59dd8b6420bc778-114.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "dc52e1fe9f8e331566d76ee5ee47df44977223cd0c230a5ab59dd8b6420bc778",
+    "path_hint": "~/.groundly/groundly/materials/Data.Mining.Techniques.for.Marketing.Sales.and.Customer.Support.(2004),.2Ed.pdf",
+    "page": 114
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "bgf",
+   "sha256": "24ce583cb3acc5684363c36eb73a3b785e8b0deb217c457b38edf8e62ab00b4a",
+   "path_hint": "bench/reference/rendered/edd5e516c5888e6c58dd07b2d127b6b41dd801fad72e9bf5a510815f4c36778e-21.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "edd5e516c5888e6c58dd07b2d127b6b41dd801fad72e9bf5a510815f4c36778e",
+    "path_hint": "~/.groundly/bgf/materials/giad011.pdf",
+    "page": 21
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "passc",
+   "sha256": "5613c0608d31a0f0c21810c7fa38b7acdeabbc59851410c5d8ca757120175663",
+   "path_hint": "bench/reference/rendered/cdd6d2a7328931be2dd9653d7f974e53facacc01baeadc3bbca449fd3a753533-20.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "cdd6d2a7328931be2dd9653d7f974e53facacc01baeadc3bbca449fd3a753533",
+    "path_hint": "~/.groundly/passc/materials/DAO.pdf",
+    "page": 20
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "ce1717c56d98ec6f9f2a900f4f759df1c88ba0352583c018e51368dbb1de584d",
+   "path_hint": "bench/reference/rendered/837280fa9dc059cd656e24c4612628aa8b8bbde2a34f3ab848115042597556c1-28.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "837280fa9dc059cd656e24c4612628aa8b8bbde2a34f3ab848115042597556c1",
+    "path_hint": "~/.groundly/groundly/materials/Curs 7 - DenseMatrix.pdf",
+    "page": 28
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "49277de7a1d09a270e27c1f60a2c47663f2aa70b3caf818a55d9c27984016b76",
+   "path_hint": "bench/reference/rendered/34a5fdf5b912fa87e325e898648558badda7a9cd0ab36ada8fb2cca7f9746372-8.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "34a5fdf5b912fa87e325e898648558badda7a9cd0ab36ada8fb2cca7f9746372",
+    "path_hint": "~/.groundly/groundly/materials/Curs 11- MPIAlgo.pdf",
+    "page": 8
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "sma",
+   "sha256": "410d8ecdae1015e6c6be7fd4d124fc5ace648500af637f2a03bcceaa80cc0c2e",
+   "path_hint": "bench/reference/rendered/a1ec47567a841d6b21cbb34914c6fb7e5b29de40dfa3699dbd8ee41a975fad95-46.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "a1ec47567a841d6b21cbb34914c6fb7e5b29de40dfa3699dbd8ee41a975fad95",
+    "path_hint": "~/.groundly/sma/materials/sma11.pdf",
+    "page": 46
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "passc",
+   "sha256": "411cefc1b11101a164c8c8e662e22d5be1e87a1ef1041bac48989a7b8a96795f",
+   "path_hint": "bench/reference/rendered/0b1be834b2296722ff2b6316f0213b6965bec90d44b92eb9f030d038adc6fa86-4.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": true,
+   "ref": false,
+   "render_of": {
+    "sha256": "0b1be834b2296722ff2b6316f0213b6965bec90d44b92eb9f030d038adc6fa86",
+    "path_hint": "~/.groundly/passc/materials/RPCtechnologies.pdf",
+    "page": 4
+   },
+   "render_scale": 2
+  },
+  {
+   "subject": "groundly",
+   "sha256": "a105d475fef2c31ea9d4050c89e1761c2ccca8d5701c9505d6c8f8e61a417960",
+   "path_hint": "bench/reference/rendered/c97b1b053920c9f77b3025bf2f7e6ac0d45dfe980bed882701746ab6f0a644ae-52.png",
+   "page": 1,
+   "kind": "rendered",
+   "source": "rendered",
+   "lang": "en",
+   "deck": false,
+   "ref": false,
+   "render_of": {
+    "sha256": "c97b1b053920c9f77b3025bf2f7e6ac0d45dfe980bed882701746ab6f0a644ae",
+    "path_hint": "~/.groundly/groundly/materials/Introduction To Data Mining Instructors Solution Manual -- Tan, Pang-Ning; Steinbach, Michael; Kumar, Vipin -- 1st ed_, 2005 -- Pearson Addison Wesley .pdf",
+    "page": 52
+   },
+   "render_scale": 2
+  }
+ ]
+}

@@ -93,6 +93,20 @@ def _copy_to_materials(src: Path, sha256: str, materials_dir: Path) -> str:
     return dest.name
 
 
+def _sibling_result(path: Path, primary: FileResult) -> FileResult:
+    """Result for a duplicate-content file deferred behind its first occurrence in a run."""
+    if primary.status in (Status.INDEXED, Status.SKIPPED_DUPLICATE):
+        return FileResult(path, Status.SKIPPED_DUPLICATE, "already indexed")
+    if primary.status == Status.EXTRACTION_FAILED:
+        error = primary.detail or "unknown error"
+        return FileResult(
+            path,
+            Status.SKIPPED_FAILED,
+            f"failed previously: {error} — re-run with --retry-failed",
+        )
+    return FileResult(path, primary.status, primary.detail)
+
+
 class IngestionPipeline:
     """Orchestrates indexing of documents: extraction, embedding, and storage."""
 
@@ -127,61 +141,71 @@ class IngestionPipeline:
                 self.extractor.close()
 
     def _run(self, paths: list[Path], ocr_lang: str | None, retry_failed: bool) -> list[FileResult]:
-        results: list[FileResult] = []
         known = self.store.hash_status()
-        retried: set[str] = set()  # retry each content once; a same-content sibling skips
         files = _iter_files(paths)
-        self.on_discovered(len(files))
-        for path in files:
-            self.on_event(path, "queued")
+        results: dict[int, FileResult] = {}
+        work: list[tuple[int, Path, str]] = []
+        siblings: dict[str, list[tuple[int, Path]]] = {}
+        planned: set[str] = set()
+
+        # Pre-classify before reporting discovery so the progress total and terminal events
+        # count only remaining work; keep existing DB rows untouched until actually retried.
+        for idx, path in enumerate(files):
             if path.is_symlink():  # a hostile symlink would index (and later export)
-                results.append(
-                    FileResult(path, Status.SKIPPED_UNSUPPORTED, "symlink — not followed")
+                results[idx] = FileResult(
+                    path, Status.SKIPPED_UNSUPPORTED, "symlink — not followed"
                 )
-                self.on_event(path, Status.SKIPPED_UNSUPPORTED)
                 continue
             if not path.exists():
-                results.append(FileResult(path, Status.ERROR, "file not found"))
-                self.on_event(path, Status.ERROR)
+                results[idx] = FileResult(path, Status.ERROR, "file not found")
                 continue
             if reason := skip_reason(path):
-                results.append(FileResult(path, Status.SKIPPED_UNSUPPORTED, reason))
-                self.on_event(path, Status.SKIPPED_UNSUPPORTED)
+                results[idx] = FileResult(path, Status.SKIPPED_UNSUPPORTED, reason)
                 continue
 
             sha = _sha256(path)
             if known.get(sha) == Status.INDEXED:
-                results.append(FileResult(path, Status.SKIPPED_DUPLICATE, "already indexed"))
-                self.on_event(path, Status.SKIPPED_DUPLICATE)
+                results[idx] = FileResult(path, Status.SKIPPED_DUPLICATE, "already indexed")
                 continue
-            if known.get(sha) == Status.EXTRACTION_FAILED:
+            if known.get(sha) == Status.EXTRACTION_FAILED and not retry_failed:
                 # terminal per UC-01 (a slow OCR timeout must not repeat every run) unless
-                # the student asks; the old row goes first because sha256 is UNIQUE
+                # the student asks
                 materials = self.store.find_materials(sha)
-                if retry_failed and sha not in retried:
-                    retried.add(sha)
-                    for row in materials:
-                        self.store.remove_material(row["id"])
-                    del known[sha]
-                else:
-                    error = materials[0]["error"] if materials else "unknown error"
-                    results.append(
-                        FileResult(
-                            path,
-                            Status.SKIPPED_FAILED,
-                            f"failed previously: {error} — re-run with --retry-failed",
-                        )
-                    )
-                    self.on_event(path, Status.SKIPPED_FAILED)
-                    continue
+                error = materials[0]["error"] if materials else "unknown error"
+                results[idx] = FileResult(
+                    path,
+                    Status.SKIPPED_FAILED,
+                    f"failed previously: {error} — re-run with --retry-failed",
+                )
+                continue
+            if (
+                sha in planned
+            ):  # extract each content once; same-content siblings follow its outcome
+                siblings.setdefault(sha, []).append((idx, path))
+                continue
+            planned.add(sha)
+            work.append((idx, path, sha))
+
+        self.on_discovered(len(work))
+        for idx, path, sha in work:
+            self.on_event(path, "queued")
+            if known.get(sha) == Status.EXTRACTION_FAILED:
+                # the old row goes first because sha256 is UNIQUE; delete only right before retry
+                # so an interrupted run preserves untouched failure rows
+                for row in self.store.find_materials(sha):
+                    self.store.remove_material(row["id"])
+                del known[sha]
 
             result = self._index_one(path, sha, ocr_lang)
-            results.append(result)
+            results[idx] = result
             if result.status in (Status.INDEXED, Status.EXTRACTION_FAILED):
-                known[sha] = result.status  # a same-content sibling this run is a skip
+                known[sha] = result.status
+            for sib_idx, sib_path in siblings.get(sha, ()):
+                results[sib_idx] = _sibling_result(sib_path, result)
             with closing(self.store.connect()) as conn:
                 sync_counts(conn, self.subject.manifest_path)
-        return results
+
+        return [results[i] for i in range(len(files))]
 
     def _index_one(self, path: Path, sha: str, ocr_lang: str | None) -> FileResult:
         self.on_event(path, "extracting")

@@ -1,0 +1,152 @@
+[
+ {
+  "query": "Ce eroare detectează circuitul serial dacă microprocesorul nu preia caracterul din registrul RA înainte să fie asamblat un caracter nou în RB",
+  "file": "434161809-TeoriePMD PEA .pdf",
+  "page": 20
+ },
+ {
+  "query": "Cum permite coada de prefetch a unității BIU suprapunerea accesului la memorie cu execuția instrucțiunilor la 8086",
+  "file": "Intrebari PM.pdf",
+  "page": 4
+ },
+ {
+  "query": "Ce niveluri de tensiune folosește interfața RS232 și de ce are o bună imunitate la zgomot",
+  "file": "Intrebari PM.pdf",
+  "page": 13
+ },
+ {
+  "query": "Ce este gâtul de sticlă Von Neumann și cum îl evită structura Harvard",
+  "file": "Intrebari PM.pdf",
+  "page": 22
+ },
+ {
+  "query": "Cum se sincronizează cererile procesoarelor cu un tact extern de mare frecvență înainte de a intra în arbitru",
+  "file": "Teorie PMD IMPROVED.pdf",
+  "page": 12
+ },
+ {
+  "query": "Diferența dintre multithreading fine-grained și coarse-grained la deținerea resurselor de către un thread",
+  "file": "Teorie PMD IMPROVED.pdf",
+  "page": 38
+ },
+ {
+  "query": "Cum se șterge memoria EPROM 27C512 folosită în proiect și ce timp de acces are",
+  "file": "Documentatie_finala_PM.pdf",
+  "page": 7
+ },
+ {
+  "query": "Ce cuvânt de mod și ce cuvânt de comandă se trimit la inițializarea circuitului 8251 în proiect",
+  "file": "Documentatie_finala_PM.pdf",
+  "page": 20
+ },
+ {
+  "query": "Formula pentru adresa portului unui rang al afișajului cu segmente: baza plus rangul minus unu înmulțit cu 4",
+  "file": "Documentatie_finala_PM.pdf",
+  "page": 33
+ },
+ {
+  "query": "Cum se elimină zgomotul la apăsarea unei taste din tastatură cu o întârziere de debounce",
+  "file": "Documentatie_finala_PM.pdf",
+  "page": 28
+ },
+ {
+  "query": "Care este scheletul unui program nou în asamblare x86 cu .model small, .data și .code",
+  "file": "PM_Lucrarea1.pdf",
+  "page": 4
+ },
+ {
+  "query": "Ce flag testează instrucțiunile de salt condiționat JS, JNS și JZ",
+  "file": "PM_Lucrarea2.pdf",
+  "page": 5
+ },
+ {
+  "query": "Cum transformi o literă mare în literă mică în asamblare folosind diferența de 32 din codul ASCII",
+  "file": "PM_Lucrarea3.pdf",
+  "page": 2
+ },
+ {
+  "query": "Cum parcurgi caracterele unui șir folosind registrul SI ca index",
+  "file": "PM_Lucrarea3.pdf",
+  "page": 3
+ },
+ {
+  "query": "Ce subservicii ale întreruperii INT 21h se folosesc pentru deschiderea, crearea, citirea și scrierea fișierelor text",
+  "file": "PM_Lucrarea4.pdf",
+  "page": 1
+ },
+ {
+  "query": "Cum scrii valoarea unei variabile C++ într-un registru folosind directiva __asm",
+  "file": "PM_Lucrarea5.pdf",
+  "page": 3
+ },
+ {
+  "query": "Ce semnalizează pinii DSR, RTS și CTS ai interfeței seriale la placa Modulo Z3",
+  "file": "PM_Lucrarea6.pdf",
+  "page": 2
+ },
+ {
+  "query": "Ce valori de BaudRate acceptă circuitul 8250 în exercițiile laboratorului de transmisie serială",
+  "file": "PM_Lucrarea6.pdf",
+  "page": 8
+ },
+ {
+  "query": "Care sunt cele trei spații de adrese ale microprocesorului în modul protejat",
+  "file": "Curs_3.pdf",
+  "page": 12
+ },
+ {
+  "query": "Prin ce diferă modul block transfer de modul demand transfer la controlerul DMA",
+  "file": "Curs_9.pdf",
+  "page": 15
+ },
+ {
+  "query": "Ce spune legea lui Minsky despre accelerarea programelor cu puncte de ramificare pe o structură SIMD",
+  "file": "Curs_13.pdf",
+  "page": 10
+ },
+ {
+  "query": "Cum a evoluat arhitectura microprocesoarelor de la primul microprocesor pe 4 biți din 1971",
+  "file": "Lista PM teorie.pdf",
+  "page": 23
+ },
+ {
+  "query": "Câte niveluri de întreruperi mascabile prin INTR există și de la ce intrare încep",
+  "file": "Lista PM teorie.pdf",
+  "page": 19
+ },
+ {
+  "query": "Care sunt avantajele modului protejat de gestionare a memoriei la microprocesorul 80386",
+  "file": "PM 2026 eu.pdf",
+  "page": 4
+ },
+ {
+  "query": "Ce se întâmplă în etapele MEM și Write Back ale benzii de asamblare",
+  "file": "PM2025.pdf",
+  "page": 2
+ },
+ {
+  "query": "Ce circuit tampon tristat se folosește pentru liniile unidirecționale de adresă și control",
+  "file": "PM2025.pdf",
+  "page": 9
+ },
+ {
+  "query": "Definiți microsistemul digital și cele două tipuri de echipamente care sunt microsisteme digitale",
+  "file": "examen_pmd.pdf",
+  "page": 1
+ },
+ {
+  "query": "Avantajele și dezavantajele demultiplexării centrale față de demultiplexarea locală a liniilor multiplexate",
+  "file": "Subiecte-PMD-1.pdf",
+  "page": 9
+ },
+ {
+  "query": "Ce îmbunătățiri interne are microprocesorul i9, de exemplu suportul pentru AVX-512",
+  "file": "Subiecte-PMD-1.pdf",
+  "page": 48
+ },
+ {
+  "query": "Ce face instrucțiunea CWD și cum extinde semnul lui AX în DX",
+  "file": "SetInstructiuni.pdf",
+  "page": 2
+ }
+]

@@ -38,10 +38,16 @@ dev = [
     "memray>=1.14",
     "import-linter>=2.15",
     "pyrefly==1.4.0",
+    "psutil>=7.2",
 ]
 
 [project.scripts]
 groundly = "groundly.cli:app"
+
+[dependency-groups]
+# Benchmark-only (`uv sync --extra dev --group bench`): a group is never published, so a plain
+# install cannot pull MinerU. MinerU2.5 drafts and scores reference pages.
+bench = ["mineru-vl-utils[mlx]==2.0.9"]
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
@@ -91,3 +97,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = ["slow: needs model downloads / real documents; excluded by default, run with -m slow"]
 addopts = "-m 'not slow'"
+
+[tool.uv]
+# opencv-python would overwrite the cv2 that RapidOCR (opencv-python-headless) uses.
+override-dependencies = ["opencv-python ; sys_platform == 'never'"]

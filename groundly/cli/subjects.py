@@ -113,7 +113,11 @@ def index(
         def on_discovered(total: int) -> None:
             nonlocal discovered
             discovered = total
-            progress.update(task, description="indexing…", total=total)
+            progress.update(
+                task,
+                description="nothing to index" if total == 0 else "indexing…",
+                total=total,
+            )
             activity.record("index", "index_start", subject=subject, detail={"files": total})
 
         def on_event(path: Path, stage: str) -> None:
