@@ -17,6 +17,9 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
 
 SLOTS = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948")
+# for arms outside ENTITIES, so they never take a known arm's colour
+SPARE = ("#8a6a4a", "#3f8f9c", "#9a9a94", "#b0418f")
+STYLES = ("-", "--", ":", "-.")  # one per subject when lines split by subject
 ENTITIES = ("docling", "product", "mineru", "granite", "docling_mineru", "docling_granite",
             "mlx", "torch")  # fmt: skip
 SURFACE, INK, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e4e3df"
@@ -33,8 +36,8 @@ def color(entity: str, seen: dict[str, str] = {}) -> str:  # noqa: B006 - one ma
     """An entity's slot: known arms fixed, others the next free slot by first appearance."""
     if entity not in seen:
         known = ENTITIES.index(entity) if entity in ENTITIES else None
-        free = [s for s in SLOTS[len(ENTITIES) :]] or SLOTS
-        seen[entity] = SLOTS[known] if known is not None else free[len(seen) % len(free)]
+        spare = sum(e not in ENTITIES for e in seen)
+        seen[entity] = SLOTS[known] if known is not None else SPARE[spare % len(SPARE)]
     return seen[entity]
 
 
@@ -84,7 +87,8 @@ def bars(ax, rows, x, y, series=None, lo=None, hi=None):
             hs.append(h)
             err[0].append(h - low)
             err[1].append(high - h)
-        ax.bar(xs, hs, width * 0.92, color=color(str(g)) if own else SLOTS[g_i], label=str(g), yerr=err,
+        fill = color(str(g)) if own or series == "arm" else SLOTS[g_i]  # arms keep their colour
+        ax.bar(xs, hs, width * 0.92, color=fill, label=str(g), yerr=err,
                error_kw={"ecolor": MUTED, "elinewidth": 1, "capsize": 2})  # fmt: skip
     ax.set_xticks(range(len(cats)), [str(c) for c in cats], rotation=20, ha="right")
     ax.set_ylabel(y)
@@ -136,10 +140,15 @@ def cdf(ax, rows, y, group):
     _legend(ax)
 
 
-def lines(ax, rows, x, y, group):
-    for g in dict.fromkeys(r[group] for r in rows):
-        pts = [(r[x], r[y]) for r in rows if r[group] == g and r[y] is not None]
-        ax.plot([p[0] for p in pts], [p[1] for p in pts], color=color(str(g)), label=str(g))
+def lines(ax, rows, x, y, group, split=None):
+    """One line per `group` value (its colour), and per `split` value (its line style)."""
+    splits = list(dict.fromkeys(r.get(split) for r in rows)) if split else [None]
+    for g, sp in dict.fromkeys((r[group], r.get(split) if split else None) for r in rows):
+        pts = [(r[x], r[y]) for r in rows
+               if r[group] == g and (not split or r.get(split) == sp) and r[y] is not None]  # fmt: skip
+        label = str(g) if sp is None else f"{g} · {sp}"
+        ax.plot([p[0] for p in pts], [p[1] for p in pts], color=color(str(g)), label=label,
+                linestyle=STYLES[splits.index(sp) % len(STYLES)])  # fmt: skip
     ax.set(xlabel=x, ylabel=y)
     _legend(ax)
 
@@ -167,7 +176,7 @@ PANELS = {
                                 ("energy", scatter, {"x": "j_per_page_run", "y": "f1", "group": "arm"}, None)]),
     "R4": ("Per-page latency", [("", cdf, {"y": "ms", "group": "arm"}, None)]),
     "R5": ("Memory over time (physical footprint, run 1)",
-           [(b, lines, {"x": "t_s", "y": "footprint_mb", "group": "arm"},
+           [(b, lines, {"x": "t_s", "y": "footprint_mb", "group": "arm", "split": "subject"},
              lambda rs, b=b: [r for r in _first_run(rs) if r["bench"] == b]) for b in ("extract", "index")]),
     "R6": ("Energy and CPU per item", [("energy", bars, {"x": "arm", "y": "j_per_item", "series": "bench"}, None),
                                        ("CPU", bars, {"x": "arm", "y": "cpu_pct", "series": "bench"}, None)]),
@@ -176,10 +185,11 @@ PANELS = {
     "R8": ("Index time", [("wall", bars, {"x": "arm", "y": "wall_s", "series": "subject"}, None),
                           ("stage split", stacked, {"x": "arm", "ys": ["extract_s", "embed_s", "other_s"]}, None)]),
     "R9": ("Retrieval hit@8 (within one page)", [("", bars, {"x": "arm", "y": "hit_within1_at8", "series": "subject"}, None)]),
-    "R10": ("Embedding and rerank throughput", [(y, bars, {"x": "arm", "y": y}, None)
+    "R10": ("Embedding and rerank throughput", [(y, bars, {"x": "arm", "y": y, "series": "subject"}, None)
                                                 for y in ("chunks_per_s", "pairs_per_s", "load_s")]),
-    "R11": ("search latency", [(y, bars, {"x": "arm", "y": y}, None) for y in ("p50_ms", "p95_ms")]),
-    "R12": ("Embed resources", [(y, bars, {"x": "arm", "y": y}, None)
+    "R11": ("search latency", [(y, bars, {"x": "arm", "y": y, "series": "subject"}, None)
+                               for y in ("p50_ms", "p95_ms")]),
+    "R12": ("Embed resources", [(y, bars, {"x": "arm", "y": y, "series": "subject"}, None)
                                 for y in ("j_per_1000_chunks_run", "peak_footprint_mb", "cpu_pct", "gpu_active")]),
     "R13": ("MLX vs torch agreement", [(y, box, {"y": y}, None)
                                        for y in ("dense_cos", "sparse_top10_overlap", "rerank_top5_overlap", "max_score_diff")]),

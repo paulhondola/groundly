@@ -1,7 +1,5 @@
 import pytest
 
-pytest.importorskip("duckdb")  # bench group only; CI installs `--extra dev`
-
 from bench.common.compare import table
 
 
@@ -55,6 +53,11 @@ def test_mixed_machines_or_manifests_refuse():
     rows = rows_for("main", [240]) + rows_for("router", [200], manifest_version="2")
     with pytest.raises(ValueError, match="manifest_version"):
         table(rows, "main", "wall_s", None)
+
+
+def test_a_missing_metric_is_a_message_not_a_keyerror():
+    with pytest.raises(ValueError, match="without 'extract_s'"):
+        table(rows_for("main", [240]), "main", "extract_s", None)
 
 
 def test_compare_reads_the_store_and_skips_memray(tmp_path):

@@ -72,7 +72,7 @@ def main() -> None:
     ap.add_argument("--session", help="one session for every bench (default: each bench's latest)")
     ap.add_argument("--out", type=Path, default=EXPORT_DIR)
     args = ap.parse_args()
-    con = store.connect(read_only=True)
+    con = store.connect_waiting(read_only=True)
     try:
         files = export(con, args.out, args.session)
     finally:

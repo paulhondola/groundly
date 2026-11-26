@@ -9,8 +9,6 @@ import argparse
 import statistics
 import sys
 
-from bench.common import store
-
 
 def table(rows: list[dict], baseline: str, metric: str, gate: float | None) -> str:
     sessions = {r["session"] for r in rows if r["arm"] == baseline}
@@ -25,6 +23,10 @@ def table(rows: list[dict], baseline: str, metric: str, gate: float | None) -> s
     values: dict[str, list[float]] = {}
     for r in rows:
         if r["returncode"] == 0:
+            if metric not in r["metrics"]:
+                raise ValueError(
+                    f"{r['arm']} has a run without {metric!r} in session {max(sessions)}"
+                )
             values.setdefault(r["arm"], []).append(r["metrics"][metric])
     if baseline not in values:
         raise ValueError(f"every run of baseline arm {baseline!r} failed")
@@ -51,6 +53,8 @@ _PER_RUN = {
     "peak_rss_mb": "select run, max(rss_mb) from sample_proc group by run",
     "hit_within1@8": "select run, avg(hit_within1_at8::int) from query group by run",
     "ms_p50": "select run, median(ms) from page where error is null group by run",
+    "extract_s": "select run, sum(extract_s) from file group by run",
+    "embed_s": "select run, sum(embed_s) from file group by run",
 }
 
 
@@ -88,7 +92,9 @@ def main() -> None:
     ap.add_argument("--session")
     ap.add_argument("--gate", type=float)
     a = ap.parse_args()
-    con = store.connect(read_only=True)
+    from bench.common import store
+
+    con = store.connect_waiting(read_only=True)
     try:
         rows = rows_from_store(con, a.bench)
     finally:

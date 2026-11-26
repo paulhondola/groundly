@@ -120,6 +120,7 @@ def test_power_session_restarts_powermetrics_when_it_dies(tmp_path, monkeypatch)
         system, _ = power.slice(0, time.time() + 60, set())
     assert len(system) > 2  # more than the one launch's two samples
     assert "powermetrics restarted" in (power.note or "")
+    assert "restarted" not in (power.run_note(power.restarts) or "")  # none since "now"
 
 
 # sudo_ok's one-sample probe returns at once; anything but powermetrics (e.g. `sudo -n kill`) fails

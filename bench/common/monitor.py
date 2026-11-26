@@ -62,6 +62,7 @@ def run(
     power: PowerSession | None = None,
 ) -> Measurement:
     cmd = _command(cmd, memray_out, memray_python)
+    restarts_before = power.restarts if power is not None else 0
     started_at, t_start = datetime.now(UTC), time.time()
     start = time.perf_counter()
     proc = subprocess.Popen(cmd, env=env, cwd=cwd)
@@ -79,7 +80,7 @@ def run(
         if not power.alive():
             notes.append("powermetrics not running")
         power_rows, task_rows = power.slice(t_start, t_end, sampler.pids | {proc.pid})
-        notes.append(power.note)
+        notes.append(power.run_note(restarts_before))
     return Measurement(
         wall_s=wall,
         peak_rss_mb=max((r["rss_mb"] for r in proc_rows), default=0.0),

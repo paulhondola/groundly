@@ -36,7 +36,7 @@ Every run is written to the DuckDB store `bench/results/bench.duckdb` (gitignore
 
 | Table | One row per |
 |---|---|
-| `run` | measured run: bench, arm, subject, run number, start/end, return code, `wall_s`, `load_s`, `items`, `memray`, `idle_combined_mw`, `power_sampler`, `sampler_note` |
+| `run` | measured run: bench, arm, subject, run number, start/end, return code, `wall_s`, `load_s`, `items`, `memray`, `idle_combined_mw`, `power_sampler`, `sampler_note`, and its own `git_sha` and `packages` (JSON), which a reused session's row may not match |
 | `page`, `page_text` | extracted page: time, cap, error, scores with `scorer_version` / its text (course text: never exported) |
 | `file` | file of an index run: `extract_s`, `embed_s`, status, error |
 | `query`, `query_hit` | labelled query: latency, hit within one page in the top 8 / each ranked hit |
@@ -46,7 +46,7 @@ Every run is written to the DuckDB store `bench/results/bench.duckdb` (gitignore
 
 Every bench takes `--runs` (index 5, extract and retrieval 1) and `--no-power`. Without it, one `sudo -n powermetrics` runs for the whole invocation, after a 10 s idle baseline; if sudo would prompt, the bench stops with `powermetrics needs sudo — run "sudo -v" first, or pass --no-power`. Per-process GPU time is NULL on macOS versions whose powermetrics does not report it.
 
-`compare` reads the store and only compares runs from **one session on one machine**, never memray runs. Runs with a nonzero return code are dropped and counted. `python -m bench.extract.score rescore [--all]` recomputes stored page scores after a scorer change (or, with `--all`, a corrected reference).
+`compare` reads the store and only compares runs from **one session on one machine**, never memray runs. Runs with a nonzero return code are dropped and counted. Its metrics are the run's `wall_s`, `load_s` and `items`, plus `peak_rss_mb`, `ms_p50`, `word_f1/<kind>/<lang>`, `hit_within1@8`, and an index run's `extract_s` / `embed_s` summed over its files; a run without the metric is refused with a message. `python -m bench.extract.score rescore [--all]` recomputes stored page scores after a scorer change (or, with `--all`, a corrected reference).
 
 ### index: end-to-end speed and memory
 
@@ -58,11 +58,11 @@ uv run python -m bench.common.compare index --baseline docling --gate 0.85
 
 The stacks run interleaved. Each run is a fresh child process with its own scratch `GROUNDLY_HOME`; `models/` is symlinked to `~/.groundly/models`.
 
-Each run is a `run` row (`items` = chunks in `store.db`) with one `file` row per file: `extract_s` and `embed_s` from the pipeline's stage events (a failed file's time counts as extract), and failed files with their message (a timeout's says so).
+Each run is a `run` row (`items` = chunks in `store.db`) with one `file` row per file: `extract_s` and `embed_s` from the pipeline's stage events (a failed file's time counts as extract), and each file's status from the pipeline's own outcome: `ok`, `failed` (extraction failed, with its message; a timeout's says so), `error` (an embedding or extractor error, which leaves no `materials` row) or `skipped_duplicate`.
 
 **Gate:** a stack passes when its median ≤ gate × the baseline's median, both from the same session. A ratio is used because absolute seconds drift with machine load.
 
-**memray caveat:** `--memray` traces both processes, the run's parent under `memray run --follow-fork` and the worker under its own `memray run`, which slows them down. Each capture and its flamegraph is an `artifact` row with its peak heap, in `bench/results/memray/`. Those runs are flagged `memray` and never used for timing. Psutil RSS counts shared copy-on-write pages once per process, and it can miss spikes shorter than one sampling interval.
+**memray caveat:** `--memray` traces both processes, the run's parent under `memray run --follow-fork` and the worker under its own `memray run`, which slows them down. Each capture and its flamegraph is an `artifact` row with its peak heap, in `bench/results/memray/`; a capture memray cannot read keeps its row with a NULL peak, and the run is still saved. A worker restarted after a crash or timeout overwrites the worker capture, so it holds the last worker. Those runs are flagged `memray` and never used for timing. Psutil RSS counts shared copy-on-write pages once per process, and it can miss spikes shorter than one sampling interval.
 
 ### extract: per-page accuracy
 
@@ -91,7 +91,7 @@ The manifest is a frozen sample, pinned by sha256; loading it refuses a missing 
 
 The per-cell means above are printed after each run and computed by `compare` from `page` rows. Per run: `load_s` (the untimed warm-up page: model load plus one page), each page's `ms` and `capped` (VLM output stopped at the token cap). The printed summary also gives `model_disk_mb`, the arm's model weights on disk.
 
-To compare stacks, pass the session id the first run prints to the next run's `--session`.
+To compare stacks, pass the session id the first run prints to the next run's `--session`. A run with `--ocr-lang L` is stored as arm `<stack>:L`, its own configuration, never pooled with the default.
 
 ### retrieval: does it still find the right page
 
@@ -109,7 +109,7 @@ The bench runs labelled queries against an indexed home, such as one left behind
 uv run python -m bench.report.run [--session S]
 ```
 
-Writes `bench/results/export/R<n>.parquet`, a `.csv` twin and a `.png` figure for each result, from the latest session of each bench, arm, subject and memray flag (or one `--session`), so stacks and subjects run one per invocation all appear. The report opens the store read-only; a bench that finds the store busy retries for 30 s before saying so. The queries are named blocks in `bench/report/queries.sql`; R1's 95% CIs are a percentile bootstrap of the page mean. Energy is the trapezoid integral of combined power over the run window [0, wall_s] (first and last samples held to the edges) minus its idle baseline × wall time; it is NULL when samples cover under 90% of the window (`coverage`, exported in R6 and R12). It is whole-run energy, load included (`j_per_page_run`, `j_per_1000_chunks_run`). CPU % is Δcpu_s / Δt_s. Accuracy results (R1–R3) use each arm's first run, since extraction is deterministic. memray runs feed only R15. No export reads `page_text`.
+Writes `bench/results/export/R<n>.parquet`, a `.csv` twin and a `.png` figure for each result, from the latest session of each bench, arm, subject and memray flag (or one `--session`), so stacks and subjects run one per invocation all appear. The report opens the store read-only; the report and a bench that find the store busy each retry for 30 s before saying so. Results over benches that take a subject keep `subject` in their rows, so one arm run on two subjects never pools. The queries are named blocks in `bench/report/queries.sql`; R1's 95% CIs are a percentile bootstrap of the page mean. Energy is the trapezoid integral of combined power over the run window [0, wall_s] (first and last samples held to the edges) minus its idle baseline × wall time; it is NULL when samples cover under 90% of the window (`coverage`, exported in R6 and R12). It is whole-run energy, load included (`j_per_page_run`, `j_per_1000_chunks_run`). CPU % is Δcpu_s / Δt_s. Accuracy results (R1–R3) use each arm's first run, since extraction is deterministic. memray runs feed only R15. No export reads `page_text`.
 
 | Result | What |
 |---|---|

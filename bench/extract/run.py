@@ -12,7 +12,7 @@ from pathlib import Path
 
 from huggingface_hub.constants import HF_HUB_CACHE
 
-from bench.common import monitor, results, store
+from bench.common import monitor, results
 from bench.common.corpus import load_manifest
 from bench.common.sampler import power_session
 from bench.extract.score import SCORER_VERSION, page_scores, score
@@ -111,8 +111,11 @@ def main() -> None:
     )
     ap.add_argument("--no-power", action="store_true")
     args = ap.parse_args()
+    from bench.common import store
 
     manifest = load_manifest(args.manifest)
+    # an OCR language is its own configuration: stored as arm `<stack>:<lang>`, never pooled
+    arm = f"{args.stack}:{args.ocr_lang}" if args.ocr_lang else args.stack
     if args.only_ref:
         manifest["pages"] = [p for p in manifest["pages"] if p["ref"]]
     session = args.session or results.new_session()
@@ -131,14 +134,14 @@ def main() -> None:
                 outputs, meta = collect(manifest, out)
             pages, texts = page_rows(manifest, outputs, args.reference_dir)
             run = {
-                "session": session, "bench": "extract", "arm": args.stack, "run_no": run_no,
+                "session": session, "bench": "extract", "arm": arm, "run_no": run_no,
                 "load_s": meta.get("load_s"), "manifest_version": manifest["version"],
                 "items": len(outputs), **monitor.run_columns(m, idle, power),
             }  # fmt: skip
             store.save(info, run, {"page": pages, "page_text": texts, **m.samples})
             summary = score(manifest, outputs, args.reference_dir)
             summary |= {"wall_s": m.wall_s, "model_disk_mb": model_disk_mb(args.stack)}
-            print(f"{args.stack} run {run_no}: rc={m.returncode}")
+            print(f"{arm} run {run_no}: rc={m.returncode}")
             print(json.dumps(summary, indent=1))
     print(f"session: {session}")
 

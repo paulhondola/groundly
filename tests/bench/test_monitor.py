@@ -76,6 +76,10 @@ def test_instant_child_writes_no_samples_and_does_not_crash():
 
 class DeadPower:
     note = None
+    restarts = 0
+
+    def run_note(self, restarts_before):
+        return None
 
     def alive(self):
         return False

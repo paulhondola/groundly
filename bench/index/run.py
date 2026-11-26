@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from bench.common import monitor, results, store
+from bench.common import monitor, results
 from bench.common.sampler import power_session
 
 if TYPE_CHECKING:
@@ -46,7 +46,9 @@ def worker_argv(stack: str, memray_out: Path | None) -> list[str]:
     serve = ["-m", module, "--serve"]
     if memray_out is None:
         return [sys.executable, *serve]
-    return [sys.executable, "-m", "memray", "run", "-q", "-o", str(memray_out), *serve]
+    # ponytail: -f, so the fresh worker after a crash or timeout can start; its capture replaces
+    # the dead worker's (one capture per run). A capture per spawn needs a per-spawn argv.
+    return [sys.executable, "-m", "memray", "run", "-q", "-f", "-o", str(memray_out), *serve]
 
 
 def store_stats(home: Path, subject: str) -> dict:
@@ -89,22 +91,30 @@ def stage_seconds(marks: dict) -> tuple[float, float]:
 
 
 def memray_artifacts(captures: dict[str, Path]) -> list[dict]:
-    """`artifact` rows per existing capture: its peak heap, and a flamegraph HTML beside it."""
+    """`artifact` rows per existing capture: its peak heap, and a flamegraph HTML beside it.
+
+    A capture memray cannot read (cut short by a crash or timeout) keeps its row with a NULL
+    peak and no flamegraph, and says why on stderr: the measured run is still saved."""
     rows = []
     for process, capture in captures.items():
         if not capture.is_file():
             continue
         stats, html = capture.with_suffix(".json"), capture.with_suffix(".html")
         memray = [sys.executable, "-m", "memray"]
-        subprocess.run([*memray, "stats", "--json", "-f", "-o", str(stats), str(capture)],
-                       check=True, capture_output=True)  # fmt: skip
-        subprocess.run([*memray, "flamegraph", "-f", "-o", str(html), str(capture)],
-                       check=True, capture_output=True)  # fmt: skip
-        peak = json.loads(stats.read_text())["metadata"]["peak_memory"] / (1 << 20)
-        rows += [
-            {"kind": "memray", "path": str(capture), "process": process, "peak_heap_mb": peak},
-            {"kind": "memray_html", "path": str(html), "process": process},
-        ]
+        peak = None
+        try:
+            subprocess.run([*memray, "stats", "--json", "-f", "-o", str(stats), str(capture)],
+                           check=True, capture_output=True)  # fmt: skip
+            peak = json.loads(stats.read_text())["metadata"]["peak_memory"] / (1 << 20)
+            subprocess.run([*memray, "flamegraph", "-f", "-o", str(html), str(capture)],
+                           check=True, capture_output=True)  # fmt: skip
+        except (subprocess.CalledProcessError, OSError, ValueError, KeyError) as e:
+            print(f"memray {process} capture {capture.name} unreadable: {e}", file=sys.stderr)
+        rows.append(
+            {"kind": "memray", "path": str(capture), "process": process, "peak_heap_mb": peak}
+        )
+        if html.is_file():
+            rows.append({"kind": "memray_html", "path": str(html), "process": process})
     return rows
 
 
@@ -141,17 +151,25 @@ def _one(
     t0 = time.perf_counter()
     settings = ingestion_settings(timeout)
     with SubprocessExtractor(settings, argv=worker_argv(stack, memray_out)) as ex:
-        IngestionPipeline(subj, extractor=ex, on_event=on_event).run([input_path])
+        done = IngestionPipeline(subj, extractor=ex, on_event=on_event).run([input_path])
     pipeline_s = time.perf_counter() - t0
 
     extract_s, embed_s = stage_seconds(marks)
+    # each file's own outcome: an embedding error or a duplicate leaves no `materials` row
+    outcome = {r.path.name: (str(r.status), r.detail) for r in done}
+    per_file = [
+        {**f, "status": outcome[f["file"]][0], "error": outcome[f["file"]][1]}
+        if f["file"] in outcome
+        else f
+        for f in file_seconds(marks)
+    ]
     out = json.dumps(
         {
             "pipeline_s": pipeline_s,
             "extract_s": extract_s,
             "embed_s": embed_s,
             "files": len(marks),
-            "per_file": file_seconds(marks),
+            "per_file": per_file,
         }
     )
     print(out)
@@ -196,6 +214,8 @@ def main() -> None:
 
 
 def _run(args, stack, run_no, session, info, timeout_s, memray_dir, power, idle) -> None:
+    from bench.common import store
+
     home = scratch_home()
     base = ["-m", "bench.index.run", "--one", "--stack", stack]
     base += ["--subject", args.subject, "--input", str(args.input)]

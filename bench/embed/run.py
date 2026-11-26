@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from bench.common import monitor, results, store
+from bench.common import monitor, results
 from bench.common.sampler import power_session
 from bench.retrieval.run import query_rows
 
@@ -37,7 +37,7 @@ def _top(scores: dict[int, float], n: int = 5) -> set[int]:
 
 def agreement_rows(a: Path, b: Path) -> list[dict]:
     """Item-by-item agreement of two runs' outputs (no run ids; the caller adds them)."""
-    x, y = np.load(a), np.load(b)
+    x, y = dict(np.load(a)), dict(np.load(b))  # an NpzFile re-reads its member on every []
     where = {int(c): j for j, c in enumerate(y["chunk_ids"])}
     rows: list[dict] = []
     for i, cid in enumerate(x["chunk_ids"].tolist()):
@@ -71,6 +71,7 @@ def main() -> None:
     ap.add_argument("--runs", type=int, default=5)
     ap.add_argument("--no-power", action="store_true")
     args = ap.parse_args()
+    from bench.common import store
 
     labelled = json.loads(args.queries.read_text())
     session = results.new_session()

@@ -150,6 +150,27 @@ def test_whole_run_energy_columns_say_so(con, tmp_path):
     assert "coverage" in cols["R12"]
 
 
+def test_one_arm_on_two_subjects_never_pools(con, tmp_path):
+    base = {"session": "S", "returncode": 0, "wall_s": 10.0, "run_no": 1, "bench": "index",
+            "arm": "docling", "subject": "os"}  # fmt: skip
+    store.write_run(con, base, {"file": [{"filename": "b.pdf", "status": "failed",
+                                          "error": "extraction timed out"}]})  # fmt: skip
+    report.export(con, tmp_path)
+    rows = duckdb.sql(
+        f"select subject, failed_items, timed_out from '{tmp_path / 'R7.parquet'}' "
+        "where bench = 'index' order by subject"
+    ).fetchall()
+    assert rows == [("apd", 0, 0), ("os", 1, 1)]
+
+
+def test_an_unknown_arm_never_takes_a_known_arms_colour():
+    pytest.importorskip("matplotlib")
+    from bench.report.figures import ENTITIES, color
+
+    known = {color(e) for e in ENTITIES}
+    assert color("docling:ro") not in known and color("another") not in known
+
+
 def test_the_report_reads_the_store_read_only(tmp_path):
     p = tmp_path / "b.duckdb"
     store.connect(p).close()

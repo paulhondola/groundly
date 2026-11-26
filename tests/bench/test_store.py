@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 
@@ -131,6 +132,46 @@ def test_import_maps_rows_to_runs_and_files(tmp_path):
     assert con.execute("select distinct sampler_note from run").fetchall() == [("imported",)]
 
 
+def test_a_failed_import_leaves_no_half_imported_session(tmp_path):
+    manifest = _legacy(tmp_path)
+    broken = {"session": "20261126T094955Z", "bench": "index", "arm": "x",
+              "per_file": [{"file": "a.pdf"}]}  # fmt: skip
+    with (tmp_path / "index.jsonl").open("a") as f:
+        f.write(json.dumps(broken) + "\n")
+    con = store.connect(tmp_path / "b.duckdb")
+    with pytest.raises(KeyError):
+        store.import_jsonl(con, tmp_path, manifest)
+    assert con.execute("select count(*) from session").fetchone() == (0,)
+    assert con.execute("select count(*) from run").fetchone() == (0,)
+
+
+def test_imported_ocr_lang_is_part_of_the_arm(tmp_path):
+    manifest = _legacy(tmp_path)
+    rows = [json.loads(line) for line in (tmp_path / "extract.jsonl").read_text().splitlines()]
+    rows[0]["ocr_lang"] = "ro"
+    (tmp_path / "extract.jsonl").write_text(json.dumps(rows[0]) + "\n")
+    con = store.connect(tmp_path / "b.duckdb")
+    store.import_jsonl(con, tmp_path, manifest)
+    assert con.execute("select arm from run where bench = 'extract'").fetchone() == ("granite:ro",)
+
+
+def test_file_rows_use_the_pipeline_outcome():
+    per_file = [
+        {"file": "ok.pdf", "extract_s": 1.0, "embed_s": 1.0, "status": "indexed", "error": None},
+        {"file": "oom.pdf", "extract_s": 1.0, "embed_s": 9.0, "status": "error",
+         "error": "embedding failed: out of memory"},
+        {"file": "bad.pdf", "extract_s": 2.0, "embed_s": 0.0, "status": "extraction_failed",
+         "error": "parser failed: boom"},
+    ]  # fmt: skip
+    failed = [{"filename": "bad.pdf", "error": "parser failed: boom"}]
+    got = {r["filename"]: (r["status"], r["error"]) for r in store.file_rows(per_file, failed)}
+    assert got == {
+        "ok.pdf": ("ok", None),
+        "oom.pdf": ("error", "embedding failed: out of memory"),
+        "bad.pdf": ("failed", "parser failed: boom"),
+    }
+
+
 def test_import_twice_adds_nothing(tmp_path):
     manifest = _legacy(tmp_path)
     con = store.connect(tmp_path / "b.duckdb")
@@ -156,6 +197,45 @@ def _hold(p, seconds):
     holder = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
     assert holder.stdout.readline().strip() == "held"
     return holder
+
+
+def test_each_run_records_its_own_sha_and_packages(tmp_path):
+    p = tmp_path / "b.duckdb"
+    store.save({**SESSION, "id": "S"}, _RUN, {}, path=p)
+    store.save({**SESSION, "id": "S", "git_sha": "def5678", "packages": {"mlx": "0.33"}}, _RUN, {},
+               path=p)  # fmt: skip
+    con = store.connect(p)
+    assert con.execute("select git_sha, packages from run order by id").fetchall() == [
+        ("abc1234", json.dumps(SESSION["packages"])),
+        ("def5678", '{"mlx": "0.33"}'),
+    ]
+    assert con.execute("select git_sha from session").fetchall() == [("abc1234",)]
+
+
+def test_an_older_store_gains_the_run_provenance_columns(tmp_path):
+    p = tmp_path / "b.duckdb"
+    con = store.connect(p)
+    con.execute("alter table run drop column git_sha")
+    con.close()
+    con = store.connect(p)
+    assert "git_sha" in [c[0] for c in con.execute("describe run").fetchall()]
+
+
+def test_read_only_refuses_a_missing_store(tmp_path):
+    with pytest.raises(SystemExit, match="does not exist yet"):
+        store.connect(tmp_path / "none.duckdb", read_only=True)
+    assert not (tmp_path / "none.duckdb").exists()
+
+
+def test_a_read_only_reader_waits_for_a_writer(tmp_path):
+    p = tmp_path / "b.duckdb"
+    store.connect(p).close()
+    holder = _hold(p, 1.5)
+    try:
+        store.connect_waiting(p, wait_s=15, read_only=True).close()
+    finally:
+        holder.kill()
+        holder.wait()
 
 
 def test_save_waits_for_a_busy_store(tmp_path):

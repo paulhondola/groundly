@@ -1,5 +1,7 @@
 -- One named block per result; `setup` runs first over the runs in `sel_ids`.
 -- Every result reads `sel` (the selected sessions' runs) and drops memray runs except R15.
+-- A result over benches that take a subject (index, retrieval, embed) keeps `subject` in its
+-- rows and groups, so one arm run on two subjects never pools.
 -- page_text is never read here: no export carries course text.
 
 -- name: setup
@@ -69,9 +71,11 @@ select s.arm, s.run_no, p.ms, s.load_s from page p join sel s on s.id = p.run
 where s.bench = 'extract' and not s.memray and p.error is null order by all;
 
 -- name: R5
-select r.bench, r.arm, r.run_no, x.t_s, x.rss_mb, x.footprint_mb, x.gpu_mem_mb_system
+select r.bench, r.arm, r.subject, r.run_no, x.t_s, x.rss_mb, x.footprint_mb,
+       x.gpu_mem_mb_system
 from sample_proc x join run_res r on r.run = x.run
-where r.bench in ('extract', 'index') and not r.memray order by r.bench, r.arm, r.run_no, x.t_s;
+where r.bench in ('extract', 'index') and not r.memray
+order by r.bench, r.arm, r.subject, r.run_no, x.t_s;
 
 -- name: R6
 select bench, arm, subject, run_no, items, wall_s, cpu_pct, gpu_active, cpu_mw, gpu_mw, ane_mw,
@@ -79,15 +83,15 @@ select bench, arm, subject, run_no, items, wall_s, cpu_pct, gpu_active, cpu_mw, 
 from run_res where bench in ('extract', 'index') and not memray order by all;
 
 -- name: R7
-select s.bench, s.arm, s.run_no, s.returncode,
+select s.bench, s.arm, s.subject, s.run_no, s.returncode,
        count(*) filter (where p.capped) as capped_pages,
        count(*) filter (where p.error is not null) as failed_items,
        0 as timed_out
 from sel s left join page p on p.run = s.id
 where s.bench = 'extract' and not s.memray group by all
 union all
-select s.bench, s.arm, s.run_no, s.returncode, 0,
-       count(*) filter (where f.status <> 'ok'),
+select s.bench, s.arm, s.subject, s.run_no, s.returncode, 0,
+       count(*) filter (where f.status <> 'ok' and f.status not like 'skipped%'),
        count(*) filter (where f.error ilike '%timed out%')
 from sel s left join file f on f.run = s.id
 where s.bench = 'index' and not s.memray group by all
@@ -108,24 +112,27 @@ from query q join sel s on s.id = q.run
 where s.bench = 'retrieval' and not s.memray group by all order by all;
 
 -- name: R10
-select arm, device, run_no, load_s, items as chunks, embed_s, items / embed_s as chunks_per_s,
+select arm, subject, device, run_no, load_s, items as chunks, embed_s,
+       items / embed_s as chunks_per_s,
        pairs, rerank_s, pairs / rerank_s as pairs_per_s
 from run_res where bench = 'embed' and not memray order by all;
 
 -- name: R11
-select s.arm, quantile_cont(q.latency_ms, 0.5) as p50_ms, quantile_cont(q.latency_ms, 0.95) as p95_ms,
+select s.arm, s.subject, quantile_cont(q.latency_ms, 0.5) as p50_ms,
+       quantile_cont(q.latency_ms, 0.95) as p95_ms,
        count(*) as queries
 from query q join sel s on s.id = q.run
 where s.bench = 'embed' and not s.memray group by all order by all;
 
 -- name: R12
 -- Energy is the whole child run (load, embed, rerank, searches), hence the `_run` names.
-select arm, run_no, peak_rss_mb, peak_footprint_mb, peak_gpu_mem_mb_system, cpu_pct, gpu_active,
+select arm, subject, run_no, peak_rss_mb, peak_footprint_mb, peak_gpu_mem_mb_system, cpu_pct,
+       gpu_active,
        coverage, energy_j, energy_j * 1000 / nullif(items, 0) as j_per_1000_chunks_run
 from run_res where bench = 'embed' and not memray order by all;
 
 -- name: R13
-select ra.run_no, a.item_kind, a.item_id, a.dense_cos, a.sparse_top10_overlap,
+select ra.subject, ra.run_no, a.item_kind, a.item_id, a.dense_cos, a.sparse_top10_overlap,
        a.rerank_top5_overlap, a.max_score_diff
 from agreement a join sel ra on ra.id = a.run_a order by all;
 

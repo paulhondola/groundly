@@ -12,8 +12,9 @@ would itself load the CPU being measured.
 per sample, system CPU/GPU/ANE power, GPU active ratio and frequency, and per-process CPU time
 and energy impact; each run takes the samples inside its own time window. It reads
 powermetrics from a pipe, so closing the pipe ends it: the harness never needs a second sudo
-command (a sudoers rule limited to powermetrics is enough). Per-process GPU time is NULL where
-this macOS's powermetrics does not report it.
+command (a sudoers rule limited to powermetrics is enough; only a powermetrics that outlives
+its closed pipe gets a `sudo -n kill`, and a refused kill is reported). Per-process GPU time is
+NULL where this macOS's powermetrics does not report it.
 
 A value that cannot be read is None, never 0, and `note` says why.
 """
@@ -114,19 +115,25 @@ class ProcSampler:
             return None
         rss = cpu = 0.0
         footprint: float | None = 0.0
+        read = 0
         for p in procs:
             try:
-                rss += p.memory_info().rss
-                times = p.cpu_times()
-                cpu += times.user + times.system
+                mem, times = p.memory_info().rss, p.cpu_times()
             except psutil.Error:
                 continue
-            self.pids.add(p.pid)
             fp = footprint_bytes(p.pid)
+            if fp is None and _libproc is not None and not p.is_running():
+                continue  # exited between the two reads: skipped whole, like a psutil.Error
+            read += 1
+            rss += mem
+            cpu += times.user + times.system
+            self.pids.add(p.pid)
             if fp is None:
                 footprint = None
             elif footprint is not None:
                 footprint += fp
+        if not read:  # nothing readable (a zombie root): no row rather than zeros
+            return None
         if footprint is None and self.note is None:
             self.note = "footprint unavailable (libproc)"
         gpu = gpu_mem_system_bytes() if tick % _IOREG_EVERY == 0 else None
@@ -246,10 +253,20 @@ class PowerSession:
         self._idle: float | None = None
 
     @property
+    def restarts(self) -> int:
+        return self._restarts
+
+    @property
     def note(self) -> str | None:
-        """Why rows are missing or incomplete, for the run's `sampler_note`."""
-        restarted = f"powermetrics restarted {self._restarts}x after exiting mid-run (gaps ~1.5 s)"
-        return "; ".join(n for n in (self._note, self._restarts and restarted) if n) or None
+        """Why rows are missing or incomplete, over the whole session."""
+        return self.run_note(0)
+
+    def run_note(self, restarts_before: int) -> str | None:
+        """A run's `sampler_note`: session-wide conditions plus only the restarts since
+        `restarts_before` (`restarts` read when the run started)."""
+        n = self._restarts - restarts_before
+        restarted = f"powermetrics restarted {n}x after exiting mid-run (gaps ~1.5 s)"
+        return "; ".join(x for x in (self._note, n and restarted) if x) or None
 
     def __enter__(self) -> Self:
         if not sudo_ok():
@@ -337,8 +354,6 @@ class PowerSession:
             (t, s) for t, s in list(self._samples)
             if t_start <= t - s["elapsed_ns"] / 2e9 <= t_end
         ]  # fmt: skip
-        if not self.alive() and self._note is None:
-            self._note = f"powermetrics exited (rc {self._proc.returncode})"
         return power_rows([s for _, s in picked], t_start, pids, [t for t, _ in picked])
 
     def __exit__(self, *exc) -> None:
@@ -348,5 +363,9 @@ class PowerSession:
             self._proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             # SIGPIPE did not end it (root process: this user cannot signal it directly)
-            subprocess.run(["sudo", "-n", "kill", str(self._proc.pid)], check=False)
+            kill = ["sudo", "-n", "kill", str(self._proc.pid)]
+            r = subprocess.run(kill, check=False, capture_output=True)
+            if r.returncode:  # a sudoers rule for powermetrics alone does not allow `kill`
+                print(f"powermetrics (sudo pid {self._proc.pid}) did not exit and sudo would "
+                      "not kill it: end it by hand", file=sys.stderr)  # fmt: skip
         self._err.close()

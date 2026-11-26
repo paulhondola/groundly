@@ -5,8 +5,6 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("duckdb")  # bench group only; CI installs `--extra dev`
-
 from bench.common import monitor
 from bench.extract import run
 from bench.extract.run import collect, model_disk_mb

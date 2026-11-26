@@ -1,7 +1,3 @@
-import pytest
-
-pytest.importorskip("duckdb")  # bench group only; CI installs `--extra dev`
-
 from bench.retrieval.run import metrics, query_rows
 
 

@@ -14,7 +14,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from bench.common import monitor, results, store
+from bench.common import monitor, results
 from bench.common.sampler import power_session
 
 ROOT = Path(__file__).parents[2]
@@ -94,6 +94,8 @@ def main() -> None:
         sys.exit(f"no queries in {args.queries}")
     if args.one:
         return _one(args.subject, labelled, args.one)
+
+    from bench.common import store
 
     session = args.session or results.new_session()
     info = results.session_info(session, Path(sys.executable))
