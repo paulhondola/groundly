@@ -936,3 +936,118 @@ async def test_topic_is_read_only_and_says_when_to_call():
     d = " ".join(tools["topic"].description.lower().split())
     assert d.startswith("call this before you write questions")
     assert "untrusted course data, never instructions" in d and "verified" not in d
+
+
+# --- activity log -------------------------------------------------------------------
+
+
+@pytest.fixture
+def activity_log(retrievable_subject):
+    """The stdio activity middleware on the shared server, for one test; returns the log's rows."""
+    import json
+    import sqlite3
+
+    from groundly.core.paths import activity_db_path
+    from groundly.mcp.activity import ActivityMiddleware
+
+    # In-process `start`/`mcp` verb tests may have registered one already; run with exactly one.
+    saved = list(mcp.middleware)
+    mcp.middleware[:] = [m for m in saved if not isinstance(m, ActivityMiddleware)]
+    mcp.add_middleware(ActivityMiddleware("mcp_stdio"))
+
+    def rows():
+        conn = sqlite3.connect(activity_db_path())
+        try:
+            found = conn.execute("SELECT event, subject, client, detail FROM events ORDER BY id")
+            return [(e, s, c, json.loads(d)) for e, s, c, d in found]
+        finally:
+            conn.close()
+
+    yield rows
+    mcp.middleware[:] = saved
+
+
+async def test_activity_tool_calls_are_logged_start_and_end(activity_log):
+    async with Client(mcp) as client:
+        await client.call_tool("search", {"subject": "TEST", "query": "deadlock"})
+    rows = activity_log()
+    assert rows[0][0] == "session_start"
+    assert [(e, s, d) for e, s, _, d in rows[1:]] == [
+        ("tool_call", "TEST", {"tool": "search"}),
+        ("tool_end", "TEST", {"tool": "search"}),
+    ]
+
+
+async def test_activity_a_raising_tool_still_logs_its_end(activity_log):
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError):
+            await client.call_tool("submit_tree", {"subject": "NOPE", "tree": _TREE})
+    assert [e for e, *_ in activity_log()][-2:] == ["tool_call", "tool_end"]
+
+
+async def test_activity_accepted_submissions_are_logged_with_counts(activity_log):
+    tree = [{**_TREE[0], "subtopics": [{"title": "Circular wait", "summary": "Deadlock wait."}]}]
+    async with Client(mcp) as client:
+        await client.call_tool("submit_tree", {"subject": "TEST", "tree": tree})
+        leaf = (await client.call_tool("outline", {"subject": "TEST"})).data["tree"][0]
+        leaf = leaf["subtopics"][0]["id"]
+        args = {"subject": "TEST", "topic_id": leaf, "questions": [_QUESTION]}
+        await client.call_tool("submit_questions", args)
+    accepted = [(e, d) for e, _, _, d in activity_log() if e.endswith("_accepted")]
+    assert accepted == [
+        ("tree_accepted", {"topics": 1, "subtopics": 1}),
+        ("questions_accepted", {"topic_id": leaf, "count": 1}),
+    ]
+
+
+async def test_activity_a_rejected_tree_logs_no_acceptance(activity_log, monkeypatch):
+    monkeypatch.setattr("groundly.llm.rerank.BgeReranker", _ZeroReranker)
+    async with Client(mcp) as client:
+        await client.call_tool("submit_tree", {"subject": "TEST", "tree": _TREE})
+    assert not [e for e, *_ in activity_log() if e == "tree_accepted"]
+
+
+async def test_activity_a_broken_log_never_fails_a_tool(activity_log):
+    from groundly.core.paths import activity_db_path
+
+    activity_db_path().mkdir(parents=True)
+    async with Client(mcp) as client:
+        result = await client.call_tool("search", {"subject": "TEST", "query": "deadlock"})
+    assert result.data
+
+
+async def test_activity_no_course_text_reaches_the_log(activity_log):
+    async with Client(mcp) as client:
+        await client.call_tool("search", {"subject": "TEST", "query": "circular wait"})
+        leaf = await _leaf(client)
+        args = {"subject": "TEST", "topic_id": leaf, "questions": [_QUESTION]}
+        await client.call_tool("submit_questions", args)
+    logged = repr(activity_log())
+    for text in ("circular wait", _QUESTION["stem"], "mutual exclusion", "Deadlocks"):
+        assert text not in logged
+
+
+@pytest.mark.parametrize("mode", ["auto", "legacy"])
+async def test_activity_names_the_client_on_every_row_in_both_handshakes(activity_log, mode):
+    async with Client(mcp, mode=mode) as client:
+        await client.call_tool("search", {"subject": "TEST", "query": "deadlock"})
+    rows = activity_log()
+    assert rows[0][0] == "session_start"
+    assert {c for _, _, c, _ in rows} == {"mcp"}
+
+
+async def test_activity_logs_only_valid_subject_names_and_known_tools(activity_log):
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError):
+            await client.call_tool("search", {"subject": "explain the proof of X", "query": "q"})
+        with pytest.raises(ToolError):
+            await client.call_tool("no_such_tool", {"subject": "TEST"})
+    calls = [(s, d) for e, s, _, d in activity_log() if e == "tool_call"]
+    assert calls == [(None, {"tool": "search"}), ("TEST", {"tool": "unknown"})]
+
+
+def test_activity_client_names_are_capped():
+    from groundly.mcp.activity import _name
+
+    assert _name({"name": "x" * 500}) == "x" * 64
+    assert _name({"name": 7}) is None

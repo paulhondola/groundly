@@ -79,13 +79,15 @@ Everything needs only the local models: no path of Groundly's reaches a provider
 | Topic-tree page | `groundly serve` | user-run; FastAPI on uvicorn (`docs_url=None`), loopback by default with an optional paired Tailscale listener (decision 52), all subjects from one process, reads per request, serving the committed Svelte 5 SPA (`groundly/web/static/page.{js,css}`); **loads no model and writes no rows to `store.db`**; it saves submitted attempts to `progress.db` through `agents/quiz.py` and manages device sessions in the private, machine-wide `remote.db`; it may start and stream one page run (below) |
 | Page run | the student's `claude -p`, spawned by `serve` or `start` | at most one at a time, from a Write questions or Grade now click; passes `--include-partial-messages` and streams coalesced `phase`/`delta`/`step`/`done` frames over async pub-sub SSE (`GET /api/runs/stream`, triggering mid-run refreshes on non-empty gate writes); ends with its result, **Stop**, a 20-minute timeout or the page process exiting; sees only Groundly's tools, reached at `/mcp` under `start` or through its own `groundly mcp` under `serve` (decisions 46, 50) |
 
+MCP processes (stdio and `/mcp`) and `groundly index` append what they are doing to the machine-wide `activity.db`, best-effort; the page reads it through `GET /api/activity` for the host card, the orb and indexing progress (decision 53). It is private local state, never exported.
+
 Multiple processes may open the same `store.db` (an `index` run while a host-spawned MCP process answers). Rules: **WAL + busy_timeout** on every connection; **lazy model loading** (never at MCP spawn — hosts expect fast handshakes), one shared embedder and one shared reranker per process, each unloaded after 10 minutes unused (`IDLE_UNLOAD_SECONDS`) so a long-lived `groundly start` or host-spawned server does not keep GBs of weights between sessions.
 
 ## Cross-cutting rules
 
 - **Citations are structural**: retrieval returns chunk ids; the core resolves them to document/page (+ heading path). 
 - **Subject scoping is filesystem layout** — a query physically cannot cross subjects.
-- **The privacy boundary is a file**: `store.db` exports; `progress.db` never does.
+- **The privacy boundary is a file**: `store.db` exports; `progress.db`, `remote.db` and `activity.db` never do.
 - **A gate checks every write of host-generated content**: the topic gate for the tree, the question gate for questions, whoever generated it.
 - **The page shows; it never decides.** Grading and mastery are `agents/quiz.py`'s, never the browser's, and a drawn test carries no key. Titles, summaries, questions and chunk text are layer 3 and are inserted as text only.
 - **The host composes answers.** Groundly returns cited chunks and verifies what comes back; it runs no answer-generation loop of its own (decision 33).

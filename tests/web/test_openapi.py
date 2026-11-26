@@ -17,19 +17,21 @@ def test_committed_openapi_json_matches_fastapi_schema():
 def test_openapi_schema_contains_only_api_paths_and_typed_errors():
     spec = export_openapi()
     paths = spec["paths"]
-    assert len(paths) == 14
+    assert len(paths) == 18
     for expected_path in (
         "/api/auth",
         "/api/pair",
         "/api/remote",
         "/api/remote/devices/{id}/revoke",
         "/api/remote/revoke-all",
+        "/api/subjects/{subject}/questions/{id}/check",
+        "/api/activity",
     ):
         assert expected_path in paths
     assert all(path.startswith("/api/") for path in paths)
     assert "ErrorResponse" in spec["components"]["schemas"]
     for path, operations in paths.items():
-        if path.startswith(("/api/subjects", "/api/runs")):
+        if path.startswith(("/api/subjects", "/api/runs", "/api/activity")):
             for operation in operations.values():
                 for code in ("401", "500", "503"):
                     schema = operation["responses"][code]["content"]["application/json"]["schema"]

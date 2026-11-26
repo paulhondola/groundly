@@ -564,3 +564,73 @@ def test_answers_awaiting_review_come_in_batches_oldest_first(bank, monkeypatch)
     pending = quiz.pending_reviews(bank.store, bank.progress)
     assert [p["question_id"] for p in pending["awaiting"]] == [first]
     assert pending["remaining"] == 1
+
+
+# --- check one answer --------------------------------------------------------------------
+
+
+def test_check_answer_agrees_with_submit_and_reveals_key_and_sources(bank):
+    qid = bank.ids[bank.leaf()][0]
+    right = quiz.check_answer(bank.store, qid, bank.key(qid))
+    assert right["correct"] is True and right["key"] == bank.key(qid)
+    assert right["sources"][0]["chunk_id"] == 1 and right["sources"][0]["text"]
+    assert quiz.check_answer(bank.store, qid, bank.wrong(qid))["correct"] is False
+    multiple = _multiple(bank)
+    assert quiz.check_answer(bank.store, multiple, bank.key(multiple))["correct"] is True
+    assert quiz.check_answer(bank.store, multiple, bank.key(multiple)[:1])["correct"] is False
+
+
+def test_check_answer_writes_nothing_to_progress(bank):
+    qid = bank.ids[bank.leaf()][0]
+    quiz.check_answer(bank.store, qid, bank.key(qid))
+    assert bank.progress.answers() == [] and bank.progress.attempts() == []
+
+
+def test_check_answer_refuses_open_foreign_options_and_unknown_ids(bank):
+    single, *_, open_q = bank.ids[bank.leaf()]
+    other = bank.ids[bank.leaf()][1]
+    every = [o["id"] for o in bank.questions[single]["options"]]
+    for qid, selected, reason in (
+        (open_q, [], "invalid_text"),
+        (single, bank.key(other), "invalid_text"),
+        (single, every[:2], "invalid_text"),
+        (999_999, [], "unknown_question"),
+    ):
+        with pytest.raises(QuizError) as err:
+            quiz.check_answer(bank.store, qid, selected)
+        assert err.value.reason == reason
+
+
+# --- subject card ------------------------------------------------------------------------
+
+
+def test_subject_card_counts_leaves_mastery_and_last_test(bank):
+    qid = bank.ids[bank.leaf()][0]
+    for _ in range(quiz.MASTERY_WINDOW):
+        bank.record([(qid, True)])
+    card = quiz.subject_card(bank.store, bank.progress)
+    assert card == {
+        "topics": 1,
+        "leaves": 2,
+        "leaves_mastered": 1,
+        "last_test_at": bank.progress.attempts()[0]["submitted_at"],
+    }
+
+
+def test_subject_card_without_tests_or_readable_progress(bank):
+    assert quiz.subject_card(bank.store, bank.progress) == {
+        "topics": 1,
+        "leaves": 2,
+        "leaves_mastered": 0,
+    }
+    bank.record([(bank.ids[bank.leaf()][0], True)])
+    assert quiz.subject_card(bank.store, None) == {"topics": 1, "leaves": 2, "leaves_mastered": 0}
+
+
+def test_subject_card_of_an_unmapped_subject_is_empty(bank):
+    from groundly.core.subject import Subject
+
+    Subject("BARE").initialize()
+    root = subject_dir("BARE")
+    card = quiz.subject_card(SubjectStore(root / "store.db"), ProgressStore(root / "progress.db"))
+    assert card == {}

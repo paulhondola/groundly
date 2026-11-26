@@ -127,7 +127,14 @@ def test_api_lists_subjects_with_has_tree(client, seeded):
     Subject("EMPTY").initialize()
     assert client.get("/api/subjects").json() == [
         {"subject": "EMPTY", "title": "", "has_tree": False},
-        {"subject": "PDSS", "title": "", "has_tree": True},
+        {
+            "subject": "PDSS",
+            "title": "",
+            "has_tree": True,
+            "topics": 1,
+            "leaves": 1,
+            "leaves_mastered": 0,
+        },
     ]
 
 
@@ -148,7 +155,14 @@ def test_api_reports_the_title_in_the_list_and_the_tree(client, seeded):
 def test_corrupt_manifest_loses_the_title_not_the_listing(client, seeded):
     Subject("PDSS").manifest_path.write_text("{not json")
     (entry,) = client.get("/api/subjects").json()
-    assert entry == {"subject": "PDSS", "title": "", "has_tree": True}
+    assert entry == {
+        "subject": "PDSS",
+        "title": "",
+        "has_tree": True,
+        "topics": 1,
+        "leaves": 1,
+        "leaves_mastered": 0,
+    }
     assert client.get("/api/subjects/PDSS/tree").json()["title"] == ""
 
 
@@ -1020,3 +1034,184 @@ def test_chunked_and_malformed_content_length_oversized_bodies_return_413(
         )
         assert (r.status_code, r.json()["error"]) == (413, "too_large")
     assert fake_claude.calls() == []
+
+
+# --- check one answer ----------------------------------------------------------------------
+
+
+def _check(client, qid, body, headers=ORIGIN, subject="PDSS"):
+    return client.post(f"/api/subjects/{subject}/questions/{qid}/check", json=body, headers=headers)
+
+
+def test_check_returns_key_and_pdf_flagged_sources_and_writes_nothing(client, seeded):
+    _, (q, *_) = _bank(seeded)
+    r = _check(client, q["id"], {"selected": _key(q)})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["correct"] is True and body["key"] == _key(q)
+    (src,) = body["sources"]
+    assert src["filename"] == "extra.pdf" and src["pdf"] is False and src["text"]
+    assert "verified" not in r.text
+    wrong = [o["id"] for o in q["options"] if not o["correct"]]
+    assert _check(client, q["id"], {"selected": wrong}).json()["correct"] is False
+    assert client.get("/api/subjects/PDSS/attempts").json() == []
+
+
+def test_check_errors_name_their_cause(client, seeded):
+    _, (q, _, open_q) = _bank(seeded)
+    r = _check(client, open_q["id"], {"selected": []})
+    assert (r.status_code, r.json()["error"]) == (400, "invalid_text")
+    r = _check(client, 999_999, {"selected": []})
+    assert (r.status_code, r.json()["error"]) == (404, "unknown_question")
+    r = _check(client, q["id"], {"selected": []}, subject="NOPE")
+    assert (r.status_code, r.json()["error"]) == (404, "unknown_subject")
+    r = _check(client, q["id"], {"selected": "x"})
+    assert (r.status_code, r.json()["error"]) == (400, "invalid_body")
+
+
+@pytest.mark.parametrize("headers", [{}, {"Origin": "http://evil.example"}])
+def test_a_check_from_elsewhere_is_refused(client, seeded, headers):
+    _, (q, *_) = _bank(seeded)
+    assert _check(client, q["id"], {"selected": _key(q)}, headers=headers).status_code == 403
+
+
+def test_a_check_on_a_question_removed_with_its_chunk_is_404(client, seeded):
+    _, (q, *_) = _bank(seeded)
+    s = SubjectStore(subject_dir("PDSS") / "store.db")
+    conn = s.connect()
+    try:
+        (extra,) = conn.execute("SELECT id FROM materials WHERE filename = 'extra.pdf'").fetchone()
+    finally:
+        conn.close()
+    s.remove_material(extra)
+    r = _check(client, q["id"], {"selected": _key(q)})
+    assert (r.status_code, r.json()["error"]) == (404, "unknown_question")
+
+
+# --- subject cards -------------------------------------------------------------------------
+
+
+def test_subjects_carry_card_fields_once_mapped_and_tested(client, seeded):
+    leaf, (q, *_) = _bank(seeded)
+    assert _post(client, _attempt(q, _key(q), topic_id=leaf)).status_code == 201
+    (entry,) = client.get("/api/subjects").json()
+    assert (entry["topics"], entry["leaves"], entry["leaves_mastered"]) == (1, 1, 0)
+    (attempt,) = client.get("/api/subjects/PDSS/attempts").json()
+    assert entry["last_test_at"] == attempt["submitted_at"]
+
+
+def test_subjects_omit_card_fields_without_a_map(client, home):
+    Subject("BARE").initialize()
+    (entry,) = client.get("/api/subjects").json()
+    assert set(entry) == {"subject", "title", "has_tree"}
+
+
+def test_an_unreadable_progress_db_costs_only_the_progress_fields(client, seeded):
+    leaf, (q, *_) = _bank(seeded)
+    _post(client, _attempt(q, _key(q), topic_id=leaf))
+    progress_db = subject_dir("PDSS") / "progress.db"
+    for suffix in ("", "-wal", "-shm"):
+        progress_db.with_name(progress_db.name + suffix).unlink(missing_ok=True)
+    r = client.get("/api/subjects")
+    assert r.status_code == 200
+    (entry,) = r.json()
+    assert entry["leaves_mastered"] == 0 and "last_test_at" not in entry
+    assert not progress_db.exists()
+
+
+# --- export --------------------------------------------------------------------------------
+
+
+def test_export_info_reports_on_disk_sizes(client, seeded):
+    info = client.get("/api/subjects/PDSS/export/info").json()
+    assert info["filename"] == "PDSS.groundly"
+    assert info["store_bytes"] == (subject_dir("PDSS") / "store.db").stat().st_size
+    assert info["materials_bytes"] == len(PDF_BYTES) + len("<script>alert(1)</script>")
+
+
+@pytest.mark.parametrize(("materials", "with_pdf"), [("true", True), ("false", False)])
+def test_export_downloads_a_bundle_without_private_files(client, seeded, materials, with_pdf):
+    import io
+    import zipfile
+
+    r = client.get(f"/api/subjects/PDSS/export?materials={materials}")
+    assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
+    assert 'filename="PDSS.groundly"' in r.headers["content-disposition"]
+    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    assert "store.db" in names and "manifest.json" in names
+    assert not any(word in n for n in names for word in ("progress", "activity", "remote"))
+    assert ("materials/lec.pdf" in names) is with_pdf
+
+
+def test_export_leaves_no_temp_file(client, seeded, tmp_path, monkeypatch):
+    import tempfile
+
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+    assert client.get("/api/subjects/PDSS/export").status_code == 200
+    assert list(scratch.iterdir()) == []
+
+
+def test_export_of_a_corrupt_manifest_is_409_and_leaves_nothing(
+    client, seeded, tmp_path, monkeypatch
+):
+    import tempfile
+
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+    Subject("PDSS").manifest_path.write_text("{not json")
+    r = client.get("/api/subjects/PDSS/export")
+    assert (r.status_code, r.json()["error"]) == (409, "manifest_invalid")
+    assert list(scratch.iterdir()) == []
+
+
+def test_export_of_a_damaged_store_names_the_cause_and_leaves_nothing(
+    client, seeded, tmp_path, monkeypatch
+):
+    import sqlite3
+    import tempfile
+
+    from groundly.core import bundle
+
+    def broken(*_a, **_kw):
+        raise sqlite3.DatabaseError("database disk image is malformed")
+
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+    monkeypatch.setattr(bundle, "export_subject", broken)
+    r = client.get("/api/subjects/PDSS/export")
+    assert (r.status_code, r.json()["error"]) == (500, "store_error")
+    assert "malformed" in r.json()["detail"]
+    assert list(scratch.iterdir()) == []
+
+
+def test_export_of_an_unknown_subject_is_404(client, seeded):
+    assert client.get("/api/subjects/NOPE/export").status_code == 404
+    assert client.get("/api/subjects/NOPE/export/info").status_code == 404
+
+
+# --- activity ------------------------------------------------------------------------
+
+
+def test_activity_route_reads_the_log(client, seeded):
+    from groundly.core import activity
+
+    leaf = SubjectStore(subject_dir("PDSS") / "store.db").tree(with_sources=False)[0]["id"]
+    activity.record("mcp_stdio", "session_start", client="claude-code")
+    activity.record("mcp_stdio", "questions_accepted", subject="PDSS",
+                    detail={"topic_id": leaf, "count": 4})  # fmt: skip
+    activity.record("mcp_stdio", "questions_accepted", subject="PDSS",
+                    detail={"topic_id": leaf + 99, "count": 1})  # fmt: skip
+    body = client.get("/api/activity").json()
+    (host,) = body["hosts"]
+    assert host["client"] == "claude-code" and host["orb"] == "listening"
+    assert host["transport"] == "stdio" and host["last_done_at"]
+    assert [r["text"] for r in body["recent"]] == ["Wrote 1 question", "Wrote 4 questions · Locks"]
+
+
+def test_activity_route_without_a_log_is_empty_and_creates_none(client, home):
+    assert client.get("/api/activity").json() == {"hosts": [], "indexing": [], "recent": []}
+    assert not (home / "activity.db").exists()

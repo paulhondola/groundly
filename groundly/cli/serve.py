@@ -174,10 +174,12 @@ def serve(port: _PORT = 8765, tailscale: _TAILSCALE = None) -> None:
 @app.command()
 def start(port: _PORT = 8765, tailscale: _TAILSCALE = None) -> None:
     """Serve the page and the MCP tools (at /mcp) from one process, for every host session."""
+    from groundly.mcp.activity import ActivityMiddleware
     from groundly.mcp.server import mcp
     from groundly.web.app import HOSTS, create_app
 
     remote = _resolve_remote(port, tailscale)
+    mcp.add_middleware(ActivityMiddleware("mcp_http"))
     # host_origin_protection stays on: FastMCP's own DNS-rebinding guard, scoped to HOSTS.
     mcp_app = mcp.http_app(path="/mcp", host_origin_protection="auto", allowed_hosts=HOSTS)
     # The IP, not groundly.localhost: an MCP client resolves through the OS, which on some

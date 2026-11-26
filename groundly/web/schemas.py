@@ -33,6 +33,10 @@ class SubjectSummary(BaseModel):
     title: str
     has_tree: bool
     error: str | None = None
+    topics: int | None = None
+    leaves: int | None = None
+    leaves_mastered: int | None = None
+    last_test_at: str | None = None
 
 
 class SourceItem(BaseModel):
@@ -99,6 +103,71 @@ class DrawTestResponse(BaseModel):
     """Drawn test payload returned by GET /api/subjects/{subject}/test."""
 
     questions: list[DrawnQuestion]
+
+
+class CheckAnswerRequest(BaseModel):
+    """Strict request body for POST /api/subjects/{subject}/questions/{id}/check."""
+
+    model_config = ConfigDict(strict=True)
+
+    selected: list[SqliteId]
+
+
+class CheckAnswerResponse(BaseModel):
+    """One choice answer graded before submit: whether it is right, the key, and the
+    question's cited sources. Nothing is recorded."""
+
+    correct: bool
+    key: list[int]
+    sources: list[SourceItem]
+
+
+class ExportInfoResponse(BaseModel):
+    """What a subject's bundle would hold: its file name and the on-disk bytes of store.db
+    and of the materials it ships (the zip itself is compressed, so smaller)."""
+
+    filename: str
+    store_bytes: int
+    materials_bytes: int
+
+
+class ActivityHost(BaseModel):
+    """One live MCP host: who it is, how it connects, and what the orb shows for it. `done` is
+    not a state: the page shows it briefly when `last_done_at` moves on."""
+
+    client: str | None
+    transport: Literal["stdio", "http"]
+    started_at: str
+    last_call_at: str | None
+    subject: str | None
+    orb: Literal["listening", "reading", "mapping", "writing"]
+    last_done_at: str | None
+
+
+class ActivityIndexing(BaseModel):
+    """One `groundly index` run still going."""
+
+    subject: str
+    done: int
+    total: int
+    current_file: str | None
+    started_at: str
+
+
+class ActivityRecent(BaseModel):
+    """One recent result: a map built, questions written, answers graded or files indexed."""
+
+    at: str
+    subject: str | None
+    text: str
+
+
+class ActivityResponse(BaseModel):
+    """What Groundly's processes are doing, read from activity.db by GET /api/activity."""
+
+    hosts: list[ActivityHost]
+    indexing: list[ActivityIndexing]
+    recent: list[ActivityRecent]
 
 
 class SubmitAttemptRequest(BaseModel):

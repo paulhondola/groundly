@@ -3,6 +3,7 @@
 that connect by URL. A lazy-import wrapper: the server module loads only when the verb
 runs."""
 
+import atexit
 import sys
 from typing import Annotated
 
@@ -33,7 +34,9 @@ def mcp(
     ] = False,
 ) -> None:
     """Serve the groundly MCP tools over stdio, or Streamable HTTP on 127.0.0.1 with --http."""
+    from groundly.core import activity
     from groundly.core.logs import setup_logging
+    from groundly.mcp.activity import ActivityMiddleware
     from groundly.mcp.server import mcp as mcp_server
 
     if port is not None and not http:
@@ -43,7 +46,9 @@ def mcp(
     except ValueError as exc:
         _stderr_fail(str(exc))
 
+    mcp_server.add_middleware(ActivityMiddleware("mcp_http" if http else "mcp_stdio"))
     if not http:
+        atexit.register(activity.record, "mcp_stdio", "session_end")
         mcp_server.run()
         return
     # ponytail: loopback only, no --host flag — the security.md non-loopback
