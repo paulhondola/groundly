@@ -3,7 +3,15 @@ from collections import Counter
 import pytest
 
 from bench.common.corpus import census
-from bench.extract.score import diacritic_recall, score, word_f1, words
+from bench.extract.score import (
+    diacritic_recall,
+    reference_text,
+    score,
+    word_f1,
+    word_precision,
+    word_recall,
+    words,
+)
 from tests.bench.test_corpus import make_pdf
 
 
@@ -86,3 +94,39 @@ def test_errored_page_on_blank_reference_scores_zero(tmp_path):
     out = score({"pages": [p0]}, [_out(p0, "", error="boom")], tmp_path)
     assert out[f"word_f1/{p0['kind']}/{p0['lang']}"] == 0.0
     assert score({"pages": [p0]}, [], tmp_path)[f"word_f1/{p0['kind']}/{p0['lang']}"] == 0.0
+
+
+def test_word_precision_and_recall():
+    assert word_precision("alpha beta gamma", "alpha beta delta epsilon") == 0.5
+    assert word_recall("alpha beta gamma", "alpha beta delta epsilon") == pytest.approx(2 / 3)
+
+
+def test_a_rendered_page_scores_against_its_source_text_layer(tmp_path):
+    pdf = make_pdf(tmp_path / "src.pdf", "alpha beta gamma delta")
+    row = {
+        "sha256": "r",
+        "page": 1,
+        "path_hint": str(tmp_path / "missing.png"),
+        "source": "rendered",
+        "kind": "rendered",
+        "ref": False,
+        "render_of": {"sha256": "s", "path_hint": str(pdf), "page": 1},
+    }
+    assert words(reference_text(row, tmp_path)) == words("alpha beta gamma delta")
+
+
+def _image_row(kind, ref):
+    return {"sha256": "i", "page": 1, "path_hint": "x.png", "kind": kind, "lang": "en", "ref": ref}
+
+
+def test_a_non_reference_image_page_is_skipped(tmp_path):
+    row = _image_row("image", False)
+    out = score({"pages": [row]}, [_out(row, "anything")], tmp_path)
+    assert out["skipped_pages"] == 1 and "word_f1/image/en" not in out
+
+
+def test_a_standalone_image_scores_only_against_its_reference_file(tmp_path):
+    row = _image_row("standalone", True)
+    assert score({"pages": [row]}, [_out(row, "alpha")], tmp_path)["skipped_pages"] == 1
+    (tmp_path / "i-1.txt").write_text("alpha", encoding="utf-8")
+    assert score({"pages": [row]}, [_out(row, "alpha")], tmp_path)["word_f1/standalone/en"] == 1.0

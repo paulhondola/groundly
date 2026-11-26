@@ -1,6 +1,7 @@
 import json
 
-from bench.extract.run import collect
+from bench.extract import run
+from bench.extract.run import collect, model_disk_mb
 
 
 def page(sha, n):
@@ -22,3 +23,14 @@ def test_collect_splits_the_meta_row(tmp_path):
     out = tmp_path / "o.jsonl"
     out.write_text(json.dumps(r) + "\n" + json.dumps({"meta": {"load_s": 1.5}}) + "\n")
     assert collect(manifest, out) == ([r], {"load_s": 1.5})
+
+
+def test_model_disk_mb_sums_the_arm_repos(tmp_path, monkeypatch):
+    for repo, mb in (("models--a--x", 1), ("models--b--y", 2)):
+        snap = tmp_path / repo / "snapshots" / "rev"
+        snap.mkdir(parents=True)
+        (snap / "w.bin").write_bytes(b"0" * (mb << 20))
+    monkeypatch.setattr(run, "MODEL_REPOS", {"arm": ("a/x", "b/y"), "gone": ("c/z",)})
+    assert model_disk_mb("arm", cache=tmp_path) == 3.0
+    assert model_disk_mb("gone", cache=tmp_path) is None
+    assert model_disk_mb("unknown", cache=tmp_path) is None

@@ -10,11 +10,45 @@ import sys
 import tempfile
 from pathlib import Path
 
+from huggingface_hub.constants import HF_HUB_CACHE
+
 from bench.common import monitor, results
 from bench.common.corpus import load_manifest
 from bench.extract.score import score
 
 ROOT = Path(__file__).parents[2]
+_DOCLING = ("docling-project/docling-layout-heron", "docling-project/docling-models")
+_MINERU = "opendatalab/MinerU2.5-Pro-2605-1.2B"
+_GRANITE = "ibm-granite/granite-docling-258M-mlx"
+# HF repos each arm reads; an arm that runs docling also reads RapidOCR's bundled models.
+MODEL_REPOS: dict[str, tuple[str, ...]] = {
+    "docling": _DOCLING,
+    "product": _DOCLING,
+    "mineru": (_MINERU,),
+    "granite": (_GRANITE,),
+    "docling_mineru": (*_DOCLING, _MINERU),
+    "docling_granite": (*_DOCLING, _GRANITE),
+}
+
+
+def _tree_bytes(root: Path) -> int:
+    # snapshot files are links into a shared blob store: size the targets, each once
+    blobs = {f.resolve() for f in root.rglob("*") if f.is_file()}
+    return sum(b.stat().st_size for b in blobs)
+
+
+def model_disk_mb(arm: str, cache: Path = Path(HF_HUB_CACHE)) -> float | None:
+    """On-disk size of the models an arm reads; None when the arm or a repo is unknown here."""
+    repos = MODEL_REPOS.get(arm)
+    dirs = [cache / f"models--{r.replace('/', '--')}" / "snapshots" for r in repos or ()]
+    if not repos or not all(d.is_dir() for d in dirs):
+        return None
+    total = sum(_tree_bytes(d) for d in dirs)
+    if _DOCLING[0] in repos:
+        import rapidocr
+
+        total += _tree_bytes(Path(rapidocr.__file__).parent / "models")
+    return total / (1 << 20)
 
 
 def collect(manifest: dict, out_path: Path) -> tuple[list[dict], dict]:
@@ -77,6 +111,7 @@ def main() -> None:
         "ms_p50": statistics.median(timed) if timed else None,
         "load_s": meta.get("load_s"),
         "capped_pages": sum(1 for o in outputs if o.get("capped")),
+        "model_disk_mb": model_disk_mb(args.stack),
     }
     session = args.session or results.new_session()
     sha = results._sh("git", "-C", str(ROOT), "rev-parse", "--short", "HEAD")

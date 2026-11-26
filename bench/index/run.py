@@ -60,6 +60,10 @@ def store_stats(home: Path, subject: str) -> dict:
         con.close()
 
 
+def timed_out(failed: list[dict]) -> int:
+    return sum("timed out" in (f["error"] or "") for f in failed)
+
+
 def stage_seconds(marks: dict) -> tuple[float, float]:
     """Sum per-file extract and embed time from stage timestamps ("extracting", "embedding",
     "end"). A file that fails extraction never reaches "embedding"; its extract time runs to
@@ -173,6 +177,7 @@ def main() -> None:
                     "chunks": stats["chunks"],
                     "materials": stats["materials"],
                     "failed_count": len(stats["failed"]),
+                    "timed_out": timed_out(stats["failed"]),
                 }
             results.append(
                 "index",

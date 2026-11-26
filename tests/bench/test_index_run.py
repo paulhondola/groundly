@@ -7,6 +7,7 @@ from bench.index.run import (
     scratch_home,
     stage_seconds,
     store_stats,
+    timed_out,
     worker_argv,
 )
 from groundly.core.store import create_store
@@ -76,3 +77,11 @@ def test_timeout_overrides_only_the_timeout(monkeypatch, tmp_path):
     assert s.timeout_seconds == 3600
     assert s.max_pages == ingestion_settings(None).max_pages
     assert ingestion_settings(None).timeout_seconds == 300
+
+
+def test_index_row_counts_timed_out_files():
+    failed = [
+        {"filename": "a.pdf", "error": "extraction timed out — no page finished within 300s"},
+        {"filename": "b.pdf", "error": "parser failed: boom"},
+    ]
+    assert timed_out(failed) == 1
