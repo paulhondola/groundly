@@ -1,15 +1,13 @@
-"""Same-session comparison of arms against a baseline arm.
+"""Same-session comparison of arms against a baseline arm, read from the store.
 
 Only rows from one session on one machine and manifest are comparable, so the
-table refuses anything else rather than averaging across them.
+table refuses anything else rather than averaging across them. memray runs are
+never compared: tracing distorts time.
 """
 
 import argparse
-import json
 import statistics
 import sys
-
-from bench.common.results import RESULTS_DIR
 
 
 def table(rows: list[dict], baseline: str, metric: str, gate: float | None) -> str:
@@ -25,6 +23,10 @@ def table(rows: list[dict], baseline: str, metric: str, gate: float | None) -> s
     values: dict[str, list[float]] = {}
     for r in rows:
         if r["returncode"] == 0:
+            if metric not in r["metrics"]:
+                raise ValueError(
+                    f"{r['arm']} has a run without {metric!r} in session {max(sessions)}"
+                )
             values.setdefault(r["arm"], []).append(r["metrics"][metric])
     if baseline not in values:
         raise ValueError(f"every run of baseline arm {baseline!r} failed")
@@ -46,6 +48,42 @@ def table(rows: list[dict], baseline: str, metric: str, gate: float | None) -> s
     return "\n".join(lines)
 
 
+_RUN_METRICS = ("wall_s", "load_s", "items")
+_PER_RUN = {
+    "peak_rss_mb": "select run, max(rss_mb) from sample_proc group by run",
+    "hit_within1@8": "select run, avg(hit_within1_at8::int) from query group by run",
+    "ms_p50": "select run, median(ms) from page where error is null group by run",
+    "extract_s": "select run, sum(extract_s) from file group by run",
+    "embed_s": "select run, sum(embed_s) from file group by run",
+}
+
+
+def rows_from_store(con, bench: str) -> list[dict]:
+    """The bench's non-memray runs as `table` rows; per-run metrics are aggregated here."""
+    runs = con.execute(
+        f"select r.id, r.session, r.arm, s.machine, r.manifest_version, r.returncode, "
+        f"{', '.join('r.' + c for c in _RUN_METRICS)} from run r "
+        "left join session s on s.id = r.session where r.bench = ? and not r.memray order by r.id",
+        [bench],
+    ).fetchall()
+    extra: dict[int, dict] = {}
+    for name, sql in _PER_RUN.items():
+        for rid, v in con.execute(sql).fetchall():
+            extra.setdefault(rid, {})[name] = v
+    for rid, kind, lang, f1 in con.execute(
+        "select run, kind, lang, avg(f1) from page where f1 is not null group by all"
+    ).fetchall():
+        extra.setdefault(rid, {})[f"word_f1/{kind}/{lang}"] = f1
+    rows = []
+    for rid, session, arm, machine, manifest_version, rc, *vals in runs:
+        m = {k: v for k, v in zip(_RUN_METRICS, vals, strict=True) if v is not None}
+        rows.append(
+            {"session": session, "arm": arm, "machine": machine, "returncode": rc,
+             "manifest_version": manifest_version, "metrics": m | extra.get(rid, {})}
+        )  # fmt: skip
+    return rows
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="python -m bench.common.compare")
     ap.add_argument("bench")
@@ -54,8 +92,13 @@ def main() -> None:
     ap.add_argument("--session")
     ap.add_argument("--gate", type=float)
     a = ap.parse_args()
-    path = RESULTS_DIR / f"{a.bench}.jsonl"
-    rows = [json.loads(line) for line in path.read_text().splitlines() if line]
+    from bench.common import store
+
+    con = store.connect_waiting(read_only=True)
+    try:
+        rows = rows_from_store(con, a.bench)
+    finally:
+        con.close()
     if a.session:
         rows = [r for r in rows if r["session"] == a.session]
     try:

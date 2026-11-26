@@ -30,7 +30,7 @@ def test_scratch_home_holds_only_the_models_link(tmp_path):
 def test_worker_argv_plain_and_memray(tmp_path):
     assert worker_argv("x", None) == [sys.executable, "-m", "bench.stacks.x", "--serve"]
     assert worker_argv("x", tmp_path / "w.bin") == [
-        sys.executable, "-m", "memray", "run", "-q", "-o", str(tmp_path / "w.bin"),
+        sys.executable, "-m", "memray", "run", "-q", "-f", "-o", str(tmp_path / "w.bin"),
         "-m", "bench.stacks.x", "--serve",
     ]  # fmt: skip
 
@@ -99,3 +99,30 @@ def test_index_row_counts_timed_out_files():
         {"filename": "b.pdf", "error": "parser failed: boom"},
     ]
     assert timed_out(failed) == 1
+
+
+def test_memray_artifacts_record_peak_heap_and_flamegraph(tmp_path):
+    import subprocess
+
+    from bench.index.run import memray_artifacts
+
+    script = tmp_path / "m.py"
+    script.write_text("b = bytearray(30 << 20)\n")
+    capture = tmp_path / "w.bin"
+    subprocess.run(
+        [sys.executable, "-m", "memray", "run", "-q", "-o", str(capture), str(script)], check=True
+    )
+    rows = memray_artifacts({"worker": capture, "parent": tmp_path / "missing.bin"})
+    heap, html = rows
+    assert heap["kind"] == "memray" and heap["process"] == "worker" and heap["peak_heap_mb"] >= 30
+    assert html["kind"] == "memray_html" and Path(html["path"]).is_file()
+
+
+def test_an_unreadable_memray_capture_keeps_the_run(tmp_path):
+    from bench.index.run import memray_artifacts
+
+    cut = tmp_path / "cut.bin"
+    cut.write_bytes(b"not a memray capture")
+    assert memray_artifacts({"worker": cut}) == [
+        {"kind": "memray", "path": str(cut), "process": "worker", "peak_heap_mb": None}
+    ]

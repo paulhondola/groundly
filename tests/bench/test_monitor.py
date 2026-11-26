@@ -58,3 +58,40 @@ def test_memray_python_defaults_to_the_current_interpreter(tmp_path):
     out = tmp_path / "x.bin"
     assert _command(["s.py"], out, None)[0] == sys.executable
     assert _command(["s.py"], None, None) == ["s.py"]
+
+
+def test_measurement_carries_proc_samples():
+    m = run([sys.executable, "-c", "import time; time.sleep(1)"])
+    assert len(m.samples["sample_proc"]) >= 5
+    assert m.started_at < m.ended_at
+    assert m.samples["sample_power"] == [] and m.samples["sample_task"] == []
+
+
+def test_instant_child_writes_no_samples_and_does_not_crash():
+    m = run([sys.executable, "-c", "pass"])
+    assert m.returncode == 0
+    assert len(m.samples["sample_proc"]) <= 2  # one at start, a second if startup is slow
+    assert m.peak_rss_mb >= 0
+
+
+class DeadPower:
+    note = None
+    restarts = 0
+
+    def run_note(self, restarts_before):
+        return None
+
+    def alive(self):
+        return False
+
+    def wait_past(self, t, timeout=2.0):
+        return False
+
+    def slice(self, t_start, t_end, pids):
+        return [], []
+
+
+def test_dead_power_session_leaves_a_note():
+    m = run([sys.executable, "-c", "pass"], power=DeadPower())
+    assert m.samples["sample_power"] == []
+    assert "powermetrics" in (m.sampler_note or "")

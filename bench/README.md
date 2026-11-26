@@ -26,41 +26,50 @@ Each module ends with `_worker.main(stack)`, which builds two modes from `read`:
 | `text_layer` | not a reader: pypdfium2 text-layer reading and page classification for the corpus census and `by_kind` |
 | `product` (index arm only) | the shipped worker (`groundly.ingestion.extract_worker`) |
 
-Set the bench up with `uv sync --extra dev --group bench` (the VLM stacks need the group). `docling_standard`, `docling_routed` and `docling_paged` were retired; their rows stay in `index.jsonl`.
+Set the bench up with `uv sync --extra dev --group bench` (the VLM stacks need the group). `docling_standard`, `docling_routed` and `docling_paged` were retired; their rows stay in the pre-store `index.jsonl` archive (`python -m bench.common.store import-jsonl` loads it once).
 
 To add a stack, write one module with `SUFFIXES`, `read` and the `_worker.main` footer. Nothing in `groundly/` changes, and `groundly/` never imports `bench`.
 
 ## Benches
 
-Every run appends one row per arm and run to `bench/results/<bench>.jsonl`. Each row records the session, arm, git sha, machine, versions, OCR language, manifest version, return code and metrics. `compare` only compares rows from **one session on one machine**. Runs with a nonzero return code are dropped and counted.
+Every run is written to the DuckDB store `bench/results/bench.duckdb` (gitignored) in one transaction: a `run` row, its child rows, and its samplers' time series. Rows are raw facts; scores per cell, energy and CPU % are queries. A `session` row records the machine, OS, git sha and package versions.
+
+| Table | One row per |
+|---|---|
+| `run` | measured run: bench, arm, subject, run number, start/end, return code, `wall_s`, `load_s`, `items`, `memray`, `idle_combined_mw`, `power_sampler`, `sampler_note`, and its own `git_sha` and `packages` (JSON), which a reused session's row may not match |
+| `page`, `page_text` | extracted page: time, cap, error, scores with `scorer_version` / its text (course text: never exported) |
+| `file` | file of an index run: `extract_s`, `embed_s`, status, error |
+| `query`, `query_hit` | labelled query: latency, hit within one page in the top 8 / each ranked hit |
+| `sample_proc` | 0.1 s tick: tree RSS, physical footprint, CPU seconds, system GPU memory (once a second) |
+| `sample_power`, `sample_task` | powermetrics 0.5 s sample: CPU/GPU/ANE/combined mW, GPU active and MHz / per process of the run's tree: CPU ms/s, energy impact |
+| `artifact` | memray capture or flamegraph, with its peak heap |
+
+Every bench takes `--runs` (index 5, extract and retrieval 1) and `--no-power`. Without it, one `sudo -n powermetrics` runs for the whole invocation, after a 10 s idle baseline; if sudo would prompt, the bench stops with `powermetrics needs sudo — run "sudo -v" first, or pass --no-power`. Per-process GPU time is NULL on macOS versions whose powermetrics does not report it.
+
+`compare` reads the store and only compares runs from **one session on one machine**, never memray runs. Runs with a nonzero return code are dropped and counted. Its metrics are the run's `wall_s`, `load_s` and `items`, plus `peak_rss_mb`, `ms_p50`, `word_f1/<kind>/<lang>`, `hit_within1@8`, and an index run's `extract_s` / `embed_s` summed over its files; a run without the metric is refused with a message. `python -m bench.extract.score rescore [--all]` recomputes stored page scores after a scorer change (or, with `--all`, a corrected reference).
 
 ### index: end-to-end speed and memory
 
 ```bash
 uv run python -m bench.index.run --stacks docling product --runs 5 [--timeout 3600] \
-    --subject apd --input ~/.groundly/apd/materials [--keep-homes] [--memray]
+    --subject apd --input ~/.groundly/apd/materials [--keep-homes] [--memray] [--no-power]
 uv run python -m bench.common.compare index --baseline docling --gate 0.85
 ```
 
 The stacks run interleaved. Each run is a fresh child process with its own scratch `GROUNDLY_HOME`; `models/` is symlinked to `~/.groundly/models`.
 
-| Metric | Meaning |
-|---|---|
-| `wall_s` | whole run, model load included |
-| `pipeline_s` / `extract_s` / `embed_s` | pipeline time and its split; failed files count toward `extract_s` |
-| `peak_rss_mb` | peak RSS summed over the process tree, sampled every 0.1 s (psutil) |
-| `chunks`, `materials`, `failed_count`, `timed_out` | what landed in `store.db`; files that failed, and of those the ones that timed out |
+Each run is a `run` row (`items` = chunks in `store.db`) with one `file` row per file: `extract_s` and `embed_s` from the pipeline's stage events (a failed file's time counts as extract), and each file's status from the pipeline's own outcome: `ok`, `failed` (extraction failed, with its message; a timeout's says so), `error` (an embedding or extractor error, which leaves no `materials` row) or `skipped_duplicate`.
 
 **Gate:** a stack passes when its median ≤ gate × the baseline's median, both from the same session. A ratio is used because absolute seconds drift with machine load.
 
-**memray caveat:** `--memray` wraps the worker in `memray run`, which slows it down. Its rows are flagged `memray: true`. Read them for the allocation profiles in `bench/results/memray/` and never for timing. Psutil RSS counts shared copy-on-write pages once per process, and it can miss spikes shorter than one sampling interval.
+**memray caveat:** `--memray` traces both processes, the run's parent under `memray run --follow-fork` and the worker under its own `memray run`, which slows them down. Each capture and its flamegraph is an `artifact` row with its peak heap, in `bench/results/memray/`; a capture memray cannot read keeps its row with a NULL peak, and the run is still saved. A worker restarted after a crash or timeout overwrites the worker capture, so it holds the last worker. Those runs are flagged `memray` and never used for timing. Psutil RSS counts shared copy-on-write pages once per process, and it can miss spikes shorter than one sampling interval.
 
 ### extract: per-page accuracy
 
 ```bash
 uv run python -m bench.extract.sample --version 2          # v1 manifest -> v2, renders pages
 uv run python -m bench.extract.drafts                      # both engines' drafts + page images for the refs
-uv run python -m bench.extract.run --stack docling [--only-ref] [--session S]
+uv run python -m bench.extract.run --stack docling [--only-ref] [--session S] [--runs N] [--no-power]
 ```
 
 The manifest is a frozen sample, pinned by sha256; loading it refuses a missing or changed file. Version 2 keeps version 1's PDF pages and adds two sources. Every row names its `source`:
@@ -80,27 +89,35 @@ The manifest is a frozen sample, pinned by sha256; loading it refuses a missing 
 | `pages/…`, `diacritic_pages/…` | the n behind each average |
 | `failed_pages`, `scored_pages`, `skipped_pages` | coverage; a failed page scores 0 |
 
-| Metric (per run) | Meaning |
-|---|---|
-| `load_s` | the untimed warm-up page: model load plus one page |
-| `ms_p50` | median per-page time |
-| `peak_rss_mb` | peak RSS of the process tree |
-| `model_disk_mb` | the arm's model weights on disk (HF cache; RapidOCR's for docling arms) |
-| `capped_pages` | pages whose VLM output stopped at the token cap |
+The per-cell means above are printed after each run and computed by `compare` from `page` rows. Per run: `load_s` (the untimed warm-up page: model load plus one page), each page's `ms` and `capped` (VLM output stopped at the token cap). The printed summary also gives `model_disk_mb`, the arm's model weights on disk.
 
-The index bench adds `timed_out`: failed files whose message says the extraction timed out.
-
-To compare stacks, pass the session id the first run prints to the next run's `--session`.
+To compare stacks, pass the session id the first run prints to the next run's `--session`. A run with `--ocr-lang L` is stored as arm `<stack>:L`, its own configuration, never pooled with the default.
 
 ### retrieval: does it still find the right page
 
 ```bash
 uv run python -m bench.retrieval.run --home <home> --subject apd \
-    --queries bench/retrieval/queries/apd.json --arm product [--session S]
+    --queries bench/retrieval/queries/apd.json --arm product [--session S] [--runs N] [--no-power]
 uv run python -m bench.common.compare retrieval --baseline docling --metric hit_within1@8
 ```
 
-The bench runs labelled queries against an indexed home, such as one left behind by `index --keep-homes`. It reports `hit_exact@8`, `hit_within1@8` and `mrr_within1@8`.
+The bench runs labelled queries against an indexed home, such as one left behind by `index --keep-homes`, in a measured child: one warm-up search (`load_s`) loads the models, then each query is timed. It prints `hit_exact@8`, `hit_within1@8` and `mrr_within1@8`, and stores `query` and `query_hit` rows.
+
+## Report: thesis results R1–R15
+
+```bash
+uv run python -m bench.report.run [--session S]
+```
+
+Writes `bench/results/export/R<n>.parquet`, a `.csv` twin and a `.png` figure for each result, from the latest session of each bench, arm, subject and memray flag (or one `--session`), so stacks and subjects run one per invocation all appear. The report opens the store read-only; the report and a bench that find the store busy each retry for 30 s before saying so. Results over benches that take a subject keep `subject` in their rows, so one arm run on two subjects never pools. The queries are named blocks in `bench/report/queries.sql`; R1's 95% CIs are a percentile bootstrap of the page mean. Energy is the trapezoid integral of combined power over the run window [0, wall_s] (first and last samples held to the edges) minus its idle baseline × wall time; it is NULL when samples cover under 90% of the window (`coverage`, exported in R6 and R12). It is whole-run energy, load included (`j_per_page_run`, `j_per_1000_chunks_run`). CPU % is Δcpu_s / Δt_s. Accuracy results (R1–R3) use each arm's first run, since extraction is deterministic. memray runs feed only R15. No export reads `page_text`.
+
+| Result | What |
+|---|---|
+| R1–R3 | word F1 / precision / recall per engine × cell with CIs; per-page F1 spread; cost (s/page, J/page) vs F1 |
+| R4–R7 | per-page latency and model load; memory over time and peaks; CPU, GPU, power and energy per item; capped pages, failed items, timeouts |
+| R8–R9 | index time per subject and arm with its extract / embed / other split; retrieval hit@8 |
+| R10–R14 | torch vs MLX: throughput and load, `search` p50/p95, resources and J per 1,000 chunks, agreement, hit@8 |
+| R15 | memray peak heap per process (flamegraphs beside the captures) |
 
 ## Ship rule
 

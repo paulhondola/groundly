@@ -1,9 +1,10 @@
-"""Append-only benchmark result rows (one JSON object per line, per bench).
+"""Session provenance for the store: the machine, package versions and git sha behind a run.
 
-Rows carry numbers and provenance only, never page text.
+`RESULTS_DIR` (gitignored) holds the store and memray captures.
 """
 
 import json
+import platform
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -42,7 +43,15 @@ def versions(python: Path) -> dict[str, str]:
     return json.loads(out)
 
 
-def append(bench: str, row: dict, results_dir: Path = RESULTS_DIR) -> None:
-    results_dir.mkdir(parents=True, exist_ok=True)
-    with (results_dir / f"{bench}.jsonl").open("a") as f:
-        f.write(json.dumps(row) + "\n")
+def session_info(session: str, python: Path, note: str | None = None) -> dict:
+    """The `session` row (and its package versions) for `store.save`."""
+    root = Path(__file__).parents[2]
+    return {
+        "id": session,
+        "started_at": datetime.strptime(session, "%Y%m%dT%H%M%SZ"),
+        "machine": machine(),
+        "os": platform.platform(),
+        "git_sha": _sh("git", "-C", str(root), "rev-parse", "--short", "HEAD"),
+        "note": note,
+        "packages": versions(python),
+    }
