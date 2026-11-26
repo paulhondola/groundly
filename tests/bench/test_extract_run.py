@@ -1,7 +1,7 @@
 import json
 
 from bench.extract import run
-from bench.extract.run import collect, model_disk_mb
+from bench.extract.run import collect, model_disk_mb, pages_path
 
 
 def page(sha, n):
@@ -34,3 +34,7 @@ def test_model_disk_mb_sums_the_arm_repos(tmp_path, monkeypatch):
     assert model_disk_mb("arm", cache=tmp_path) == 3.0
     assert model_disk_mb("gone", cache=tmp_path) is None
     assert model_disk_mb("unknown", cache=tmp_path) is None
+
+
+def test_page_rows_are_kept_per_session_and_arm(tmp_path):
+    assert pages_path("S1", "granite", tmp_path) == tmp_path / "pages" / "S1-granite.jsonl"

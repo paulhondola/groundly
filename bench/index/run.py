@@ -64,18 +64,24 @@ def timed_out(failed: list[dict]) -> int:
     return sum("timed out" in (f["error"] or "") for f in failed)
 
 
-def stage_seconds(marks: dict) -> tuple[float, float]:
-    """Sum per-file extract and embed time from stage timestamps ("extracting", "embedding",
-    "end"). A file that fails extraction never reaches "embedding"; its extract time runs to
-    its terminal event, so a timeout still counts."""
-    extract_s = embed_s = 0.0
-    for m in marks.values():
+def file_seconds(marks: dict) -> list[dict]:
+    """Each extracted file's extract and embed time from its stage timestamps ("extracting",
+    "embedding", "end"). A file that fails extraction never reaches "embedding"; its extract
+    time runs to its terminal event, so a timeout still counts. Unextracted files are left out."""
+    out = []
+    for path, m in marks.items():
         if "extracting" not in m:
             continue
-        extract_s += m.get("embedding", m.get("end", m["extracting"])) - m["extracting"]
-        if "embedding" in m and "end" in m:
-            embed_s += m["end"] - m["embedding"]
-    return extract_s, embed_s
+        extract_s = m.get("embedding", m.get("end", m["extracting"])) - m["extracting"]
+        embed_s = m["end"] - m["embedding"] if "embedding" in m and "end" in m else 0.0
+        out.append({"file": Path(path).name, "extract_s": extract_s, "embed_s": embed_s})
+    return out
+
+
+def stage_seconds(marks: dict) -> tuple[float, float]:
+    """Total extract and embed time over all files (see file_seconds)."""
+    per = file_seconds(marks)
+    return sum(f["extract_s"] for f in per), sum(f["embed_s"] for f in per)
 
 
 def ingestion_settings(timeout: float | None) -> "IngestionSettings":
@@ -116,7 +122,13 @@ def _one(
 
     extract_s, embed_s = stage_seconds(marks)
     out = json.dumps(
-        {"pipeline_s": pipeline_s, "extract_s": extract_s, "embed_s": embed_s, "files": len(marks)}
+        {
+            "pipeline_s": pipeline_s,
+            "extract_s": extract_s,
+            "embed_s": embed_s,
+            "files": len(marks),
+            "per_file": file_seconds(marks),
+        }
     )
     print(out)
     if timing_out:  # the monitor does not capture stdout, so the parent reads the timings here
@@ -170,8 +182,11 @@ def main() -> None:
                 else None
             )
             metrics = {"wall_s": m.wall_s, "peak_rss_mb": m.peak_rss_mb}
+            per_file = []
             if timing.exists():
-                metrics |= {k: v for k, v in json.loads(timing.read_text()).items() if k != "files"}
+                t = json.loads(timing.read_text())
+                per_file = t.pop("per_file", [])
+                metrics |= {k: v for k, v in t.items() if k != "files"}
             if stats:
                 metrics |= {
                     "chunks": stats["chunks"],
@@ -196,6 +211,7 @@ def main() -> None:
                     "returncode": m.returncode,
                     "metrics": metrics,
                     "failed": stats["failed"] if stats else [],
+                    "per_file": per_file,
                 },
             )
             print(f"{stack} run {run}: rc={m.returncode} {metrics}")

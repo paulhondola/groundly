@@ -1,13 +1,13 @@
 """CLI: run one stack's page mode over the manifest, score it, append an `extract` row.
 
-Page text lives only in a temp file that is deleted afterwards."""
+Page rows (text, ms, capped, error) stay in bench/results/pages/<session>-<arm>.jsonl,
+gitignored like every result, so per-page figures can be drawn later."""
 
 import argparse
 import json
 import os
 import statistics
 import sys
-import tempfile
 from pathlib import Path
 
 from huggingface_hub.constants import HF_HUB_CACHE
@@ -51,6 +51,11 @@ def model_disk_mb(arm: str, cache: Path = Path(HF_HUB_CACHE)) -> float | None:
     return total / (1 << 20)
 
 
+def pages_path(session: str, arm: str, results_dir: Path = results.RESULTS_DIR) -> Path:
+    """Where one arm's page rows from one session are kept."""
+    return results_dir / "pages" / f"{session}-{arm}.jsonl"
+
+
 def collect(manifest: dict, out_path: Path) -> tuple[list[dict], dict]:
     """The stack's page rows in manifest order, and its closing meta row."""
     seen, meta = {}, {}
@@ -91,17 +96,14 @@ def main() -> None:
     manifest = load_manifest(args.manifest)
     if args.only_ref:
         manifest["pages"] = [p for p in manifest["pages"] if p["ref"]]
-    fd, tmp = tempfile.mkstemp(suffix=".jsonl")
-    os.close(fd)
-    out = Path(tmp)
-    try:
-        cmd = [sys.executable, "-m", f"bench.stacks.{args.stack}", "--pages", str(args.manifest)]
-        cmd += ["--out", tmp] + (["--only-ref"] if args.only_ref else [])
-        cmd += ["--ocr-lang", args.ocr_lang] if args.ocr_lang else []
-        m = monitor.run(cmd, env={**os.environ, "PYTHONPATH": str(ROOT)}, cwd=ROOT)
-        outputs, meta = collect(manifest, out)
-    finally:
-        out.unlink(missing_ok=True)
+    session = args.session or results.new_session()
+    out = pages_path(session, args.stack)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [sys.executable, "-m", f"bench.stacks.{args.stack}", "--pages", str(args.manifest)]
+    cmd += ["--out", str(out)] + (["--only-ref"] if args.only_ref else [])
+    cmd += ["--ocr-lang", args.ocr_lang] if args.ocr_lang else []
+    m = monitor.run(cmd, env={**os.environ, "PYTHONPATH": str(ROOT)}, cwd=ROOT)
+    outputs, meta = collect(manifest, out)
 
     metrics = score(manifest, outputs, args.reference_dir)
     timed = [o["ms"] for o in outputs if not o["error"]]
@@ -113,7 +115,6 @@ def main() -> None:
         "capped_pages": sum(1 for o in outputs if o.get("capped")),
         "model_disk_mb": model_disk_mb(args.stack),
     }
-    session = args.session or results.new_session()
     sha = results._sh("git", "-C", str(ROOT), "rev-parse", "--short", "HEAD")
     results.append(
         "extract",

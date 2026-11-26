@@ -1,7 +1,9 @@
 import sqlite3
 import sys
+from pathlib import Path
 
 from bench.index.run import (
+    file_seconds,
     ingestion_settings,
     schedule,
     scratch_home,
@@ -61,6 +63,18 @@ def test_stage_seconds_counts_a_failed_extraction_as_extract_time():
         "big.pdf": {"extracting": 15.5, "end": 315.5},
     }
     assert stage_seconds(marks) == (304.0, 1.5)
+
+
+def test_file_seconds_keeps_each_file_for_graphs():
+    marks = {
+        Path("m/ok.pdf"): {"extracting": 10.0, "embedding": 14.0, "end": 15.5},
+        Path("m/big.pdf"): {"extracting": 15.5, "end": 315.5},
+        Path("m/skipped.pdf"): {"end": 316.0},
+    }
+    assert file_seconds(marks) == [
+        {"file": "ok.pdf", "extract_s": 4.0, "embed_s": 1.5},
+        {"file": "big.pdf", "extract_s": 300.0, "embed_s": 0.0},
+    ]
 
 
 def test_product_arm_runs_the_shipped_worker():
