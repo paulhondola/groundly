@@ -309,10 +309,12 @@ def chunk_pages(
     carried: str | None = None
     count = 0
     for n, doc in pages:
+        # read before the carry: an inserted heading lands last in doc.texts
+        own = last_heading(doc)
         if carried:
             _carry_heading(doc, carried)
         chunks += chunk_document(doc, page=n)
-        carried = last_heading(doc) or carried
+        carried = own or carried
         count += 1
         on_page(n)
     return {"pages": count, "chunks": chunks}
