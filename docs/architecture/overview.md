@@ -14,7 +14,7 @@ groundly/
 ├── web/         # FastAPI app, strict Pydantic schemas, live SSE runner + committed Svelte 5 SPA (`page.{js,css}`): the topic-tree and test page
 ├── agents/      # the gates — the topic gate (submit_tree) and the question gate (submit_questions); nothing unchecked enters store.db
 ├── retrieval/   # dense + sparse + BM25, RRF fusion, cross-encoder rerank
-├── ingestion/   # one warm docling worker per run (slide-deck PDFs routed per page) → HybridChunker → embed → stores
+├── ingestion/   # one warm docling worker per run (PDFs and images read page by page) → HybridChunker → embed → stores
 ├── llm/         # local models: bge-m3 embedder + reranker, lazy-loaded (no LLM client);
 │             #   MLX on Apple Silicon, torch elsewhere (decision 48)
 └── core/        # store access (SQLite WAL), manifest, subject registry, settings;

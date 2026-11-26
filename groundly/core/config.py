@@ -19,8 +19,11 @@ logger = logging.getLogger(__name__)
 
 
 class IngestionSettings(BaseModel):
-    timeout_seconds: float = 300  # per-file extraction wall-clock
+    timeout_seconds: float = (
+        300  # seconds without a finished page (the whole file if read in one piece)
+    )
     max_image_pixels: int = 100_000_000  # MAX_IMAGE_PIXELS — ingestion/extract_worker.py
+    max_pages: int = 2000  # MAX_PAGES — ingestion/extract_worker.py
     max_file_size_mb: float | None = None  # None/0 = no limit (unchanged default behavior)
 
 
@@ -126,8 +129,9 @@ def render_config_toml(settings: Settings) -> str:
         "# Set values with e.g.:  groundly config set retrieval.top_k 12",
         "",
         "[ingestion]",
-        f"timeout_seconds = {_toml_value(ing.timeout_seconds)}   # per-file extraction wall-clock; raise for large PDFs / heavy OCR",
+        f"timeout_seconds = {_toml_value(ing.timeout_seconds)}   # seconds without a finished page (whole file if read in one piece); raise for slow OCR",
         f"max_image_pixels = {_toml_value(ing.max_image_pixels)}   # decompression-bomb cap before an image is rasterized",
+        f"max_pages = {_toml_value(ing.max_pages)}   # refuse a PDF with more pages; bounds a file's total time",
     ]
     if ing.max_file_size_mb:
         lines.append(
