@@ -26,7 +26,7 @@ Each module ends with `_worker.main(stack)`, which builds two modes from `read`:
 | `text_layer` | not a reader: pypdfium2 text-layer reading and page classification for the corpus census and `by_kind` |
 | `product` (index arm only) | the shipped worker (`groundly.ingestion.extract_worker`) |
 
-The VLM stacks need the optional extra: `uv sync --extra bench`. `docling_standard`, `docling_routed` and `docling_paged` were retired; their rows stay in `index.jsonl`.
+Set the bench up with `uv sync --extra dev --group bench` (the VLM stacks need the group). `docling_standard`, `docling_routed` and `docling_paged` were retired; their rows stay in `index.jsonl`.
 
 To add a stack, write one module with `SUFFIXES`, `read` and the `_worker.main` footer. Nothing in `groundly/` changes, and `groundly/` never imports `bench`.
 

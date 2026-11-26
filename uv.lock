@@ -1437,9 +1437,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-bench = [
-    { name = "mineru-vl-utils", extra = ["mlx"] },
-]
 dev = [
     { name = "import-linter" },
     { name = "memray" },
@@ -1450,6 +1447,11 @@ dev = [
     { name = "ruff" },
 ]
 
+[package.dev-dependencies]
+bench = [
+    { name = "mineru-vl-utils", extra = ["mlx"] },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "docling", specifier = "==2.115.0" },
@@ -1458,7 +1460,6 @@ requires-dist = [
     { name = "flagembedding", specifier = "==1.4.2" },
     { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2.15" },
     { name = "memray", marker = "extra == 'dev'", specifier = ">=1.14" },
-    { name = "mineru-vl-utils", extras = ["mlx"], marker = "extra == 'bench'", specifier = "==2.0.9" },
     { name = "mlx", marker = "platform_machine == 'arm64' and platform_release >= '23' and sys_platform == 'darwin'", specifier = "==0.32.4" },
     { name = "onnxruntime", specifier = ">=1.31" },
     { name = "psutil", marker = "extra == 'dev'", specifier = ">=7.2" },
@@ -1478,7 +1479,10 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
-provides-extras = ["bench", "dev"]
+provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+bench = [{ name = "mineru-vl-utils", extras = ["mlx"], specifier = "==2.0.9" }]
 
 [[package]]
 name = "h11"
