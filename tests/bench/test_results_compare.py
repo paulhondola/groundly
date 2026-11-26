@@ -1,7 +1,6 @@
 import pytest
 
 from bench.common.compare import table
-from bench.common.results import append
 
 
 def row(arm, wall, returncode=0, session="S2", machine="M", manifest_version=None):
@@ -22,15 +21,6 @@ def row(arm, wall, returncode=0, session="S2", machine="M", manifest_version=Non
 
 def rows_for(arm, walls, **kw):
     return [row(arm, w, **kw) for w in walls]
-
-
-ROW = row("main", 240)
-
-
-def test_append_writes_one_line_per_row(tmp_path):
-    append("index", ROW, results_dir=tmp_path)
-    append("index", ROW, results_dir=tmp_path)
-    assert len((tmp_path / "index.jsonl").read_text().splitlines()) == 2
 
 
 def test_table_reports_median_spread_and_ratio():
@@ -63,3 +53,25 @@ def test_mixed_machines_or_manifests_refuse():
     rows = rows_for("main", [240]) + rows_for("router", [200], manifest_version="2")
     with pytest.raises(ValueError, match="manifest_version"):
         table(rows, "main", "wall_s", None)
+
+
+def test_compare_reads_the_store_and_skips_memray(tmp_path):
+    pytest.importorskip("duckdb")
+    from bench.common import store
+    from bench.common.compare import rows_from_store
+
+    con = store.connect(tmp_path / "b.duckdb")
+    store.ensure_session(
+        con,
+        {"id": "S", "started_at": None, "machine": "M", "os": None, "git_sha": None, "note": None},
+    )
+    for arm, wall, memray in (("main", 240, False), ("main", 999, True), ("router", 200, False)):
+        run = {"session": "S", "bench": "index", "arm": arm, "wall_s": wall, "returncode": 0}
+        store.write_run(con, {**run, "memray": memray}, {})
+    hits = [{"query_id": "0", "hit_within1_at8": True}, {"query_id": "1", "hit_within1_at8": False}]
+    store.write_run(
+        con, {"session": "S", "bench": "retrieval", "arm": "main", "returncode": 0}, {"query": hits}
+    )
+    out = table(rows_from_store(con, "index"), "main", "wall_s", 0.85)
+    assert "999" not in out and "PASS" in out
+    assert rows_from_store(con, "retrieval")[0]["metrics"]["hit_within1@8"] == 0.5

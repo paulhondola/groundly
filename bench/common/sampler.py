@@ -29,6 +29,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Iterator
 from datetime import UTC
 from typing import Self
 from xml.parsers.expat import ExpatError
@@ -216,6 +217,16 @@ def _compact(s: dict) -> dict:
         "gpu": {k: g[k] for k in ("freq_hz", "idle_ratio") if k in g},
         "tasks": [{k: t[k] for k in _TASK_KEYS if k in t} for t in s.get("tasks", [])],
     }
+
+
+@contextlib.contextmanager
+def power_session(no_power: bool) -> Iterator["PowerSession | None"]:
+    """A `PowerSession` for one bench invocation, or None with `--no-power`."""
+    if no_power:
+        yield None
+        return
+    with PowerSession() as power:
+        yield power
 
 
 class PowerSession:

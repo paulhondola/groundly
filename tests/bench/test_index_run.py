@@ -99,3 +99,20 @@ def test_index_row_counts_timed_out_files():
         {"filename": "b.pdf", "error": "parser failed: boom"},
     ]
     assert timed_out(failed) == 1
+
+
+def test_memray_artifacts_record_peak_heap_and_flamegraph(tmp_path):
+    import subprocess
+
+    from bench.index.run import memray_artifacts
+
+    script = tmp_path / "m.py"
+    script.write_text("b = bytearray(30 << 20)\n")
+    capture = tmp_path / "w.bin"
+    subprocess.run(
+        [sys.executable, "-m", "memray", "run", "-q", "-o", str(capture), str(script)], check=True
+    )
+    rows = memray_artifacts({"worker": capture, "parent": tmp_path / "missing.bin"})
+    heap, html = rows
+    assert heap["kind"] == "memray" and heap["process"] == "worker" and heap["peak_heap_mb"] >= 30
+    assert html["kind"] == "memray_html" and Path(html["path"]).is_file()

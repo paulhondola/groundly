@@ -1,7 +1,11 @@
 """Accuracy of extracted page text against a reference, as multiset word and
-bigram F1, word precision and recall, plus Romanian-diacritic recall. Scores are aggregates; page text is
-never written anywhere."""
+bigram F1, word precision and recall, plus Romanian-diacritic recall: per page
+(`page_scores`, the store's `page` rows) and as per-cell means (`score`).
 
+`rescore` recomputes stored page scores from `page_text` when the scorer changes
+(`SCORER_VERSION`) or a reference is corrected (`--all`)."""
+
+import argparse
 import itertools
 import re
 import unicodedata
@@ -10,6 +14,7 @@ from pathlib import Path
 
 import pypdfium2 as pdfium
 
+SCORER_VERSION = 1
 _DIACRITICS = set("ăâîșțşţ")
 _FOLD = str.maketrans("şţ", "șț")
 _IMAGE = re.compile(r"<!--\s*image\s*-->")
@@ -110,30 +115,51 @@ def reference_text(page: dict, reference_dir: Path) -> str | None:
     return _text_layer(page["path_hint"], page["page"])
 
 
-def score(manifest: dict, outputs: list[dict], reference_dir: Path) -> dict[str, float]:
+def _broken(out: dict | None) -> bool:
+    return out is None or bool(out.get("error"))
+
+
+def page_scores(manifest: dict, outputs: list[dict], reference_dir: Path) -> list[dict]:
+    """One row per page that has a reference; a broken page scores 0 even on a blank one."""
     by_page = {(o["sha256"], o["page"]): o for o in outputs}
-    acc: dict[str, list[float]] = defaultdict(list)
-    failed = scored = skipped = 0
+    rows = []
     for page in manifest["pages"]:
         out = by_page.get((page["sha256"], page["page"]))
-        broken = out is None or bool(out.get("error"))
-        failed += broken
         ref = reference_text(page, reference_dir)
         if ref is None:  # reference not checked yet: not scorable
-            skipped += 1
             continue
-        scored += 1
-        hyp = "" if broken else out["text"]
-        suffix = f"{page['kind']}/{page['lang']}"
-        # a broken page scores 0 even against a blank reference
-        acc[f"word_f1/{suffix}"].append(0.0 if broken else word_f1(ref, hyp))
-        acc[f"bigram_f1/{suffix}"].append(0.0 if broken else bigram_f1(ref, hyp))
-        acc[f"word_precision/{suffix}"].append(0.0 if broken else word_precision(ref, hyp))
-        acc[f"word_recall/{suffix}"].append(0.0 if broken else word_recall(ref, hyp))
-        for name, fold in (("diacritic_recall", False), ("diacritic_recall_folded", True)):
-            d = diacritic_recall(ref, hyp, fold=fold)
-            if d is not None:
-                acc[f"{name}/{suffix}"].append(d)
+        broken = _broken(out)
+        hyp = "" if broken or out is None else out["text"]
+        rows.append(
+            {"sha256": page["sha256"], "page": page["page"], "kind": page.get("kind"),
+             "lang": page.get("lang"), "broken": broken,
+             "f1": 0.0 if broken else word_f1(ref, hyp),
+             "precision": 0.0 if broken else word_precision(ref, hyp),
+             "recall": 0.0 if broken else word_recall(ref, hyp),
+             "bigram_f1": 0.0 if broken else bigram_f1(ref, hyp),
+             "diacritic_recall": diacritic_recall(ref, hyp, fold=False),
+             "diacritic_recall_folded": diacritic_recall(ref, hyp, fold=True)}
+        )  # fmt: skip
+    return rows
+
+
+_CELL_METRICS = (
+    ("word_f1", "f1"), ("bigram_f1", "bigram_f1"), ("word_precision", "precision"),
+    ("word_recall", "recall"), ("diacritic_recall", "diacritic_recall"),
+    ("diacritic_recall_folded", "diacritic_recall_folded"),
+)  # fmt: skip
+
+
+def score(manifest: dict, outputs: list[dict], reference_dir: Path) -> dict[str, float]:
+    by_page = {(o["sha256"], o["page"]): o for o in outputs}
+    failed = sum(_broken(by_page.get((p["sha256"], p["page"]))) for p in manifest["pages"])
+    rows = page_scores(manifest, outputs, reference_dir)
+    acc: dict[str, list[float]] = defaultdict(list)
+    for r in rows:
+        suffix = f"{r['kind']}/{r['lang']}"
+        for metric, key in _CELL_METRICS:
+            if r[key] is not None:  # diacritic recall only where the reference has diacritics
+                acc[f"{metric}/{suffix}"].append(r[key])
     result = {k: sum(v) / len(v) for k, v in acc.items()}
     # n behind the averages: differs per metric (diacritic pages only)
     for k, v in acc.items():
@@ -142,4 +168,58 @@ def score(manifest: dict, outputs: list[dict], reference_dir: Path) -> dict[str,
             result[f"pages/{suffix}"] = len(v)
         elif metric == "diacritic_recall":
             result[f"diacritic_pages/{suffix}"] = len(v)
-    return {**result, "failed_pages": failed, "scored_pages": scored, "skipped_pages": skipped}
+    skipped = len(manifest["pages"]) - len(rows)
+    return {**result, "failed_pages": failed, "scored_pages": len(rows), "skipped_pages": skipped}
+
+
+_SCORE_COLUMNS = ("f1", "precision", "recall", "bigram_f1", "diacritic_recall")
+
+
+def rescore(con, reference_dir: Path, manifest: dict, *, every: bool = False) -> int:
+    """Recompute stored page scores from `page_text`; stale rows only unless `every`.
+
+    A page the manifest no longer has, or with no reference, gets NULL scores."""
+    info = {(p["sha256"], p["page"]): p for p in manifest["pages"]}
+    stale = "" if every else "where p.scorer_version is distinct from ?"
+    rows = con.execute(
+        "select p.run, p.sha256, p.page, t.text, p.error from page p "
+        f"join page_text t using (run, sha256, page) {stale}",
+        [] if every else [SCORER_VERSION],
+    ).fetchall()
+    for run, sha, page, text, error in rows:
+        mp = info.get((sha, page))
+        got = page_scores({"pages": [mp]}, [{"sha256": sha, "page": page, "text": text or "", "error": error}],
+                          reference_dir) if mp else []  # fmt: skip
+        values = [got[0][c] for c in _SCORE_COLUMNS] if got else [None] * len(_SCORE_COLUMNS)
+        con.execute(
+            f"update page set {', '.join(f'{c} = ?' for c in _SCORE_COLUMNS)}, scorer_version = ? "
+            "where run = ? and sha256 = ? and page = ?",
+            [*values, SCORER_VERSION, run, sha, page],
+        )
+    return len(rows)
+
+
+def main() -> None:
+    from bench.common import store
+    from bench.common.corpus import load_manifest
+
+    root = Path(__file__).parents[2]
+    ap = argparse.ArgumentParser(prog="python -m bench.extract.score")
+    ap.add_argument("command", choices=["rescore"])
+    ap.add_argument("--manifest", type=Path, default=root / "bench/corpus/manifest.json")
+    ap.add_argument("--reference-dir", type=Path, default=root / "bench/reference")
+    ap.add_argument(
+        "--all", action="store_true", help="every page row, e.g. after correcting references"
+    )
+    args = ap.parse_args()
+    con = store.connect()
+    try:
+        print(
+            f"rescored {rescore(con, args.reference_dir, load_manifest(args.manifest), every=args.all)} page rows"
+        )
+    finally:
+        con.close()
+
+
+if __name__ == "__main__":
+    main()

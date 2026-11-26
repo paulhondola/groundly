@@ -172,6 +172,16 @@ def write_run(con: duckdb.DuckDBPyConnection, run: dict, children: dict[str, lis
     return rid
 
 
+def save(session: dict, run: dict, children: dict[str, list[dict]]) -> int:
+    """Open the store, record the session once, write one run with its rows, close."""
+    con = connect()
+    try:
+        ensure_session(con, session)
+        return write_run(con, run, children)
+    finally:
+        con.close()
+
+
 def _legacy_run(r: dict) -> dict:
     m = r.get("metrics", {})
     return {
@@ -190,17 +200,18 @@ def _legacy_run(r: dict) -> dict:
     }
 
 
-def _legacy_files(r: dict) -> list[dict]:
-    failed = {f["filename"]: f["error"] for f in r.get("failed", [])}
+def file_rows(per_file: list[dict], failed: list[dict]) -> list[dict]:
+    """`file` rows of an index run: timed files, plus failed files that never got timed."""
+    failed_by = {f["filename"]: f["error"] for f in failed}
     rows = [
         {"filename": f["file"], "extract_s": f["extract_s"], "embed_s": f["embed_s"],
-         "status": "failed" if f["file"] in failed else "ok", "error": failed.get(f["file"])}
-        for f in r.get("per_file", [])
+         "status": "failed" if f["file"] in failed_by else "ok", "error": failed_by.get(f["file"])}
+        for f in per_file
     ]  # fmt: skip
     seen = {f["filename"] for f in rows}
     rows += [
         {"filename": name, "status": "failed", "error": err}
-        for name, err in failed.items()
+        for name, err in failed_by.items()
         if name not in seen
     ]
     return rows
@@ -260,7 +271,9 @@ def import_jsonl(
                  "packages": r.get("versions", {})},
             )  # fmt: skip
         children: dict[str, list[dict]] = (
-            {"file": _legacy_files(r)} if r["bench"] == "index" else {}
+            {"file": file_rows(r.get("per_file", []), r.get("failed", []))}
+            if r["bench"] == "index"
+            else {}
         )
         pages_file = results_dir / "pages" / f"{sid}-{r['arm']}.jsonl"
         if r["bench"] == "extract" and pages_file.is_file():

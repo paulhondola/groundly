@@ -2,20 +2,24 @@
 IngestionPipeline in a scratch GROUNDLY_HOME, with a stack module as the extraction worker.
 
 The parent stays light (no Groundly models, no torch/mlx); every Groundly import lives in
-`_one`, a child whose process tree the monitor measures with its worker."""
+`_one`, a child whose process tree the monitor measures with its worker. Each run is written
+to the store with its per-file rows; `--memray` traces both processes (the `_one` parent and
+the extraction worker) and records each capture's peak heap and flamegraph."""
 
 import argparse
 import json
 import os
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from bench.common import monitor, results
+from bench.common import monitor, results, store
+from bench.common.sampler import power_session
 
 if TYPE_CHECKING:
     from groundly.core.config import IngestionSettings
@@ -84,6 +88,26 @@ def stage_seconds(marks: dict) -> tuple[float, float]:
     return sum(f["extract_s"] for f in per), sum(f["embed_s"] for f in per)
 
 
+def memray_artifacts(captures: dict[str, Path]) -> list[dict]:
+    """`artifact` rows per existing capture: its peak heap, and a flamegraph HTML beside it."""
+    rows = []
+    for process, capture in captures.items():
+        if not capture.is_file():
+            continue
+        stats, html = capture.with_suffix(".json"), capture.with_suffix(".html")
+        memray = [sys.executable, "-m", "memray"]
+        subprocess.run([*memray, "stats", "--json", "-f", "-o", str(stats), str(capture)],
+                       check=True, capture_output=True)  # fmt: skip
+        subprocess.run([*memray, "flamegraph", "-f", "-o", str(html), str(capture)],
+                       check=True, capture_output=True)  # fmt: skip
+        peak = json.loads(stats.read_text())["metadata"]["peak_memory"] / (1 << 20)
+        rows += [
+            {"kind": "memray", "path": str(capture), "process": process, "peak_heap_mb": peak},
+            {"kind": "memray_html", "path": str(html), "process": process},
+        ]
+    return rows
+
+
 def ingestion_settings(timeout: float | None) -> "IngestionSettings":
     """This machine's ingestion settings, the timeout overridden when given."""
     from groundly.core.config import load_settings
@@ -140,7 +164,8 @@ def main() -> None:
     ap.add_argument("--one", action="store_true")
     ap.add_argument("--stack")
     ap.add_argument("--stacks", nargs="+")
-    ap.add_argument("--runs", type=int, default=1)
+    ap.add_argument("--runs", type=int, default=5)
+    ap.add_argument("--no-power", action="store_true")
     ap.add_argument("--subject", required=True)
     ap.add_argument("--input", type=Path, required=True)
     ap.add_argument("--memray-out", type=Path)
@@ -158,68 +183,60 @@ def main() -> None:
         )
 
     session = results.new_session()
-    sha = results._sh("git", "-C", str(ROOT), "rev-parse", "--short", "HEAD")
+    info = results.session_info(session, Path(sys.executable))
+    timeout_s = ingestion_settings(args.timeout).timeout_seconds
     memray_dir = results.RESULTS_DIR / "memray"
     if args.memray:
         memray_dir.mkdir(parents=True, exist_ok=True)
-    for stack, i in schedule(args.stacks, args.runs):
-        run = i + 1
-        home = scratch_home()
-        cmd = [sys.executable, "-m", "bench.index.run", "--one", "--stack", stack]
-        cmd += ["--subject", args.subject, "--input", str(args.input)]
-        if args.timeout is not None:
-            cmd += ["--timeout", str(args.timeout)]
-        if args.memray:
-            cmd += ["--memray-out", str(memray_dir / f"{session}-{stack}-{run}.bin")]
-        timing = home / "timing.json"  # outside the subject dir, so it never reaches store stats
-        cmd += ["--timing-out", str(timing)]
-        try:
-            env = {**os.environ, "GROUNDLY_HOME": str(home), "PYTHONPATH": str(ROOT)}
-            m = monitor.run(cmd, env=env, cwd=ROOT)
-            stats = (
-                store_stats(home, args.subject)
-                if (home / args.subject / "store.db").exists()
-                else None
-            )
-            metrics = {"wall_s": m.wall_s, "peak_rss_mb": m.peak_rss_mb}
-            per_file = []
-            if timing.exists():
-                t = json.loads(timing.read_text())
-                per_file = t.pop("per_file", [])
-                metrics |= {k: v for k, v in t.items() if k != "files"}
-            if stats:
-                metrics |= {
-                    "chunks": stats["chunks"],
-                    "materials": stats["materials"],
-                    "failed_count": len(stats["failed"]),
-                    "timed_out": timed_out(stats["failed"]),
-                }
-            results.append(
-                "index",
-                {
-                    "bench": "index",
-                    "session": session,
-                    "arm": stack,
-                    "sha": sha,
-                    "machine": results.machine(),
-                    "versions": results.versions(Path(sys.executable)),
-                    "ocr_lang": None,
-                    "timeout_s": ingestion_settings(args.timeout).timeout_seconds,
-                    "manifest_version": None,
-                    "run": run,
-                    "memray": args.memray,
-                    "returncode": m.returncode,
-                    "metrics": metrics,
-                    "failed": stats["failed"] if stats else [],
-                    "per_file": per_file,
-                },
-            )
-            print(f"{stack} run {run}: rc={m.returncode} {metrics}")
-        finally:
-            if args.keep_homes:
-                print(f"kept home: {home}")
-            else:
-                shutil.rmtree(home, ignore_errors=True)
+    with power_session(args.no_power) as power:
+        idle = power.idle_mw() if power else None
+        for stack, i in schedule(args.stacks, args.runs):
+            _run(args, stack, i + 1, session, info, timeout_s, memray_dir, power, idle)
+    print(f"session: {session}")
+
+
+def _run(args, stack, run_no, session, info, timeout_s, memray_dir, power, idle) -> None:
+    home = scratch_home()
+    base = ["-m", "bench.index.run", "--one", "--stack", stack]
+    base += ["--subject", args.subject, "--input", str(args.input)]
+    if args.timeout is not None:
+        base += ["--timeout", str(args.timeout)]
+    captures = {}
+    if args.memray:
+        stem = memray_dir / f"{session}-{stack}-{run_no}"
+        captures = {"parent": Path(f"{stem}-parent.bin"), "worker": Path(f"{stem}-worker.bin")}
+        base += ["--memray-out", str(captures["worker"])]
+    timing = home / "timing.json"  # outside the subject dir, so it never reaches store stats
+    base += ["--timing-out", str(timing)]
+    try:
+        env = {**os.environ, "GROUNDLY_HOME": str(home), "PYTHONPATH": str(ROOT)}
+        # under memray, monitor prepends `python -m memray run --follow-fork -o …`
+        cmd = base if args.memray else [sys.executable, *base]
+        m = monitor.run(cmd, env=env, cwd=ROOT, memray_out=captures.get("parent"), power=power)
+        db = home / args.subject / "store.db"
+        stats = store_stats(home, args.subject) if db.exists() else None
+        per_file = json.loads(timing.read_text()).get("per_file", []) if timing.exists() else []
+        failed = stats["failed"] if stats else []
+        run = {
+            "session": session, "bench": "index", "arm": stack, "subject": args.subject,
+            "run_no": run_no, "memray": args.memray, "timeout_s": timeout_s,
+            "items": stats["chunks"] if stats else None, **monitor.run_columns(m, idle, power),
+        }  # fmt: skip
+        children = {
+            "file": store.file_rows(per_file, failed),
+            "artifact": memray_artifacts(captures),
+            **m.samples,
+        }
+        store.save(info, run, children)
+        print(
+            f"{stack} run {run_no}: rc={m.returncode} wall {m.wall_s:.1f}s "
+            f"chunks {run['items']} failed {len(failed)} timed out {timed_out(failed)}"
+        )
+    finally:
+        if args.keep_homes:
+            print(f"kept home: {home}")
+        else:
+            shutil.rmtree(home, ignore_errors=True)
 
 
 if __name__ == "__main__":

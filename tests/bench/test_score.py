@@ -1,11 +1,15 @@
+import statistics
 from collections import Counter
 
 import pytest
 
 from bench.common.corpus import census
 from bench.extract.score import (
+    SCORER_VERSION,
     diacritic_recall,
+    page_scores,
     reference_text,
+    rescore,
     score,
     word_f1,
     word_precision,
@@ -130,3 +134,35 @@ def test_a_standalone_image_scores_only_against_its_reference_file(tmp_path):
     assert score({"pages": [row]}, [_out(row, "alpha")], tmp_path)["skipped_pages"] == 1
     (tmp_path / "i-1.txt").write_text("alpha", encoding="utf-8")
     assert score({"pages": [row]}, [_out(row, "alpha")], tmp_path)["word_f1/standalone/en"] == 1.0
+
+
+def test_page_scores_match_the_aggregate(tmp_path):
+    m = _manifest(tmp_path)
+    p0, p1 = m["pages"]
+    outs = [_out(p0, "alpha beta gamma delta 0"), _out(p1, "alpha beta")]
+    rows = page_scores(m, outs, tmp_path)
+    key = f"word_f1/{p0['kind']}/{p0['lang']}"
+    assert len(rows) == 2
+    assert statistics.fmean(r["f1"] for r in rows) == pytest.approx(score(m, outs, tmp_path)[key])
+
+
+def test_rescore_updates_only_stale_rows(tmp_path):
+    pytest.importorskip("duckdb")
+    from bench.common import store
+
+    m = _ref_manifest(tmp_path)
+    p0, p1 = m["pages"]
+    for p in (p0, p1):
+        (tmp_path / f"{p['sha256']}-{p['page']}.txt").write_text("alpha beta", encoding="utf-8")
+    con = store.connect(tmp_path / "b.duckdb")
+    pages = [
+        {"sha256": p0["sha256"], "page": p0["page"], "f1": 0.5, "scorer_version": SCORER_VERSION},
+        {"sha256": p1["sha256"], "page": p1["page"]},
+    ]
+    texts = [{"sha256": p["sha256"], "page": p["page"], "text": "alpha beta"} for p in (p0, p1)]
+    store.write_run(
+        con, {"session": "S", "bench": "extract", "arm": "a"}, {"page": pages, "page_text": texts}
+    )
+    assert rescore(con, tmp_path, m) == 1
+    got = con.execute("select f1, scorer_version from page order by f1").fetchall()
+    assert got == [(0.5, SCORER_VERSION), (1.0, SCORER_VERSION)]

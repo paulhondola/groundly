@@ -26,41 +26,50 @@ Each module ends with `_worker.main(stack)`, which builds two modes from `read`:
 | `text_layer` | not a reader: pypdfium2 text-layer reading and page classification for the corpus census and `by_kind` |
 | `product` (index arm only) | the shipped worker (`groundly.ingestion.extract_worker`) |
 
-Set the bench up with `uv sync --extra dev --group bench` (the VLM stacks need the group). `docling_standard`, `docling_routed` and `docling_paged` were retired; their rows stay in `index.jsonl`.
+Set the bench up with `uv sync --extra dev --group bench` (the VLM stacks need the group). `docling_standard`, `docling_routed` and `docling_paged` were retired; their rows stay in the pre-store `index.jsonl` archive (`python -m bench.common.store import-jsonl` loads it once).
 
 To add a stack, write one module with `SUFFIXES`, `read` and the `_worker.main` footer. Nothing in `groundly/` changes, and `groundly/` never imports `bench`.
 
 ## Benches
 
-Every run appends one row per arm and run to `bench/results/<bench>.jsonl`. Each row records the session, arm, git sha, machine, versions, OCR language, manifest version, return code and metrics. `compare` only compares rows from **one session on one machine**. Runs with a nonzero return code are dropped and counted.
+Every run is written to the DuckDB store `bench/results/bench.duckdb` (gitignored) in one transaction: a `run` row, its child rows, and its samplers' time series. Rows are raw facts; scores per cell, energy and CPU % are queries. A `session` row records the machine, OS, git sha and package versions.
+
+| Table | One row per |
+|---|---|
+| `run` | measured run: bench, arm, subject, run number, start/end, return code, `wall_s`, `load_s`, `items`, `memray`, `idle_combined_mw`, `power_sampler`, `sampler_note` |
+| `page`, `page_text` | extracted page: time, cap, error, scores with `scorer_version` / its text (course text: never exported) |
+| `file` | file of an index run: `extract_s`, `embed_s`, status, error |
+| `query`, `query_hit` | labelled query: latency, hit within one page in the top 8 / each ranked hit |
+| `sample_proc` | 0.1 s tick: tree RSS, physical footprint, CPU seconds, system GPU memory (once a second) |
+| `sample_power`, `sample_task` | powermetrics 0.5 s sample: CPU/GPU/ANE/combined mW, GPU active and MHz / per process of the run's tree: CPU ms/s, energy impact |
+| `artifact` | memray capture or flamegraph, with its peak heap |
+
+Every bench takes `--runs` (index 5, extract and retrieval 1) and `--no-power`. Without it, one `sudo -n powermetrics` runs for the whole invocation, after a 10 s idle baseline; if sudo would prompt, the bench stops with `powermetrics needs sudo — run "sudo -v" first, or pass --no-power`. Per-process GPU time is NULL on macOS versions whose powermetrics does not report it.
+
+`compare` reads the store and only compares runs from **one session on one machine**, never memray runs. Runs with a nonzero return code are dropped and counted. `python -m bench.extract.score rescore [--all]` recomputes stored page scores after a scorer change (or, with `--all`, a corrected reference).
 
 ### index: end-to-end speed and memory
 
 ```bash
 uv run python -m bench.index.run --stacks docling product --runs 5 [--timeout 3600] \
-    --subject apd --input ~/.groundly/apd/materials [--keep-homes] [--memray]
+    --subject apd --input ~/.groundly/apd/materials [--keep-homes] [--memray] [--no-power]
 uv run python -m bench.common.compare index --baseline docling --gate 0.85
 ```
 
 The stacks run interleaved. Each run is a fresh child process with its own scratch `GROUNDLY_HOME`; `models/` is symlinked to `~/.groundly/models`.
 
-| Metric | Meaning |
-|---|---|
-| `wall_s` | whole run, model load included |
-| `pipeline_s` / `extract_s` / `embed_s` | pipeline time and its split; failed files count toward `extract_s` |
-| `peak_rss_mb` | peak RSS summed over the process tree, sampled every 0.1 s (psutil) |
-| `chunks`, `materials`, `failed_count`, `timed_out` | what landed in `store.db`; files that failed, and of those the ones that timed out |
+Each run is a `run` row (`items` = chunks in `store.db`) with one `file` row per file: `extract_s` and `embed_s` from the pipeline's stage events (a failed file's time counts as extract), and failed files with their message (a timeout's says so).
 
 **Gate:** a stack passes when its median ≤ gate × the baseline's median, both from the same session. A ratio is used because absolute seconds drift with machine load.
 
-**memray caveat:** `--memray` wraps the worker in `memray run`, which slows it down. Its rows are flagged `memray: true`. Read them for the allocation profiles in `bench/results/memray/` and never for timing. Psutil RSS counts shared copy-on-write pages once per process, and it can miss spikes shorter than one sampling interval.
+**memray caveat:** `--memray` traces both processes, the run's parent under `memray run --follow-fork` and the worker under its own `memray run`, which slows them down. Each capture and its flamegraph is an `artifact` row with its peak heap, in `bench/results/memray/`. Those runs are flagged `memray` and never used for timing. Psutil RSS counts shared copy-on-write pages once per process, and it can miss spikes shorter than one sampling interval.
 
 ### extract: per-page accuracy
 
 ```bash
 uv run python -m bench.extract.sample --version 2          # v1 manifest -> v2, renders pages
 uv run python -m bench.extract.drafts                      # both engines' drafts + page images for the refs
-uv run python -m bench.extract.run --stack docling [--only-ref] [--session S]
+uv run python -m bench.extract.run --stack docling [--only-ref] [--session S] [--runs N] [--no-power]
 ```
 
 The manifest is a frozen sample, pinned by sha256; loading it refuses a missing or changed file. Version 2 keeps version 1's PDF pages and adds two sources. Every row names its `source`:
@@ -80,15 +89,7 @@ The manifest is a frozen sample, pinned by sha256; loading it refuses a missing 
 | `pages/…`, `diacritic_pages/…` | the n behind each average |
 | `failed_pages`, `scored_pages`, `skipped_pages` | coverage; a failed page scores 0 |
 
-| Metric (per run) | Meaning |
-|---|---|
-| `load_s` | the untimed warm-up page: model load plus one page |
-| `ms_p50` | median per-page time |
-| `peak_rss_mb` | peak RSS of the process tree |
-| `model_disk_mb` | the arm's model weights on disk (HF cache; RapidOCR's for docling arms) |
-| `capped_pages` | pages whose VLM output stopped at the token cap |
-
-The index bench adds `timed_out`: failed files whose message says the extraction timed out.
+The per-cell means above are printed after each run and computed by `compare` from `page` rows. Per run: `load_s` (the untimed warm-up page: model load plus one page), each page's `ms` and `capped` (VLM output stopped at the token cap). The printed summary also gives `model_disk_mb`, the arm's model weights on disk.
 
 To compare stacks, pass the session id the first run prints to the next run's `--session`.
 
@@ -96,11 +97,11 @@ To compare stacks, pass the session id the first run prints to the next run's `-
 
 ```bash
 uv run python -m bench.retrieval.run --home <home> --subject apd \
-    --queries bench/retrieval/queries/apd.json --arm product [--session S]
+    --queries bench/retrieval/queries/apd.json --arm product [--session S] [--runs N] [--no-power]
 uv run python -m bench.common.compare retrieval --baseline docling --metric hit_within1@8
 ```
 
-The bench runs labelled queries against an indexed home, such as one left behind by `index --keep-homes`. It reports `hit_exact@8`, `hit_within1@8` and `mrr_within1@8`.
+The bench runs labelled queries against an indexed home, such as one left behind by `index --keep-homes`, in a measured child: one warm-up search (`load_s`) loads the models, then each query is timed. It prints `hit_exact@8`, `hit_within1@8` and `mrr_within1@8`, and stores `query` and `query_hit` rows.
 
 ## Ship rule
 

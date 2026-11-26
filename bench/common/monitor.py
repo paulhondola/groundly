@@ -7,7 +7,7 @@ A sampler that could not read leaves its rows empty and says why in `sampler_not
 
 With `memray_out`, the command runs under `memray run --follow-fork`: forked
 children are traced, an `exec`'d process (the extraction worker) is not.
-`cmd[0]` must then be a Python script path.
+`cmd` must then start with a Python script path or `-m module`.
 """
 
 import subprocess
@@ -29,6 +29,19 @@ class Measurement:
     ended_at: datetime
     samples: dict[str, list[dict]]  # sample_proc, sample_power, sample_task
     sampler_note: str | None
+
+
+def run_columns(m: Measurement, idle_mw: float | None, power: PowerSession | None) -> dict:
+    """The `run` columns every bench fills the same way from one measurement."""
+    return {
+        "started_at": m.started_at.replace(tzinfo=None),  # stored as naive UTC
+        "ended_at": m.ended_at.replace(tzinfo=None),
+        "returncode": m.returncode,
+        "wall_s": m.wall_s,
+        "idle_combined_mw": idle_mw,
+        "power_sampler": "powermetrics" if power is not None else "none",
+        "sampler_note": m.sampler_note,
+    }
 
 
 def _command(cmd: list[str], memray_out: Path | None, memray_python: Path | None) -> list[str]:
