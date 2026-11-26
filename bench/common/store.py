@@ -33,7 +33,7 @@ create table if not exists run (
     started_at timestamp, ended_at timestamp, returncode integer, wall_s double,
     load_s double, memray boolean default false, timeout_s double, manifest_version integer,
     device varchar, items integer, idle_combined_mw double, power_sampler varchar,
-    sampler_note varchar);
+    sampler_note varchar, embed_s double, rerank_s double, pairs integer);
 create table if not exists page (
     run bigint, sha256 varchar, page integer, kind varchar, lang varchar, ref boolean,
     ms double, capped boolean, error varchar, f1 double, precision double, recall double,
@@ -65,7 +65,7 @@ create table if not exists artifact (
 _RUN_COLUMNS = (
     "session", "bench", "arm", "subject", "run_no", "started_at", "ended_at", "returncode",
     "wall_s", "load_s", "memray", "timeout_s", "manifest_version", "device", "items",
-    "idle_combined_mw", "power_sampler", "sampler_note",
+    "idle_combined_mw", "power_sampler", "sampler_note", "embed_s", "rerank_s", "pairs",
 )  # fmt: skip
 
 TABLES: dict[str, tuple[str, ...]] = {
