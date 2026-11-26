@@ -1069,6 +1069,12 @@ def test_check_errors_name_their_cause(client, seeded):
     assert (r.status_code, r.json()["error"]) == (400, "invalid_body")
 
 
+@pytest.mark.parametrize("qid", [2**63, -(2**63) - 1])
+def test_a_check_on_an_id_beyond_64_bits_is_404(client, seeded, qid):
+    r = _check(client, qid, {"selected": []})
+    assert (r.status_code, r.json()["error"]) == (404, "unknown_question")
+
+
 @pytest.mark.parametrize("headers", [{}, {"Origin": "http://evil.example"}])
 def test_a_check_from_elsewhere_is_refused(client, seeded, headers):
     _, (q, *_) = _bank(seeded)
@@ -1186,6 +1192,56 @@ def test_export_of_a_damaged_store_names_the_cause_and_leaves_nothing(
     assert (r.status_code, r.json()["error"]) == (500, "store_error")
     assert "malformed" in r.json()["detail"]
     assert list(scratch.iterdir()) == []
+
+
+def test_export_sweeps_bundles_a_stopped_server_left_behind(client, seeded, tmp_path, monkeypatch):
+    import os
+    import tempfile
+    import time
+
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+    stale, fresh, other = (
+        scratch / "groundly-export-old.groundly",
+        scratch / "groundly-export-new.groundly",
+        scratch / "someone-else.groundly",
+    )
+    for f in (stale, fresh, other):
+        f.write_bytes(b"zip")
+    hour_ago = time.time() - 2 * 3600
+    for f in (stale, other):
+        os.utime(f, (hour_ago, hour_ago))
+    assert client.get("/api/subjects/PDSS/export").status_code == 200
+    assert sorted(scratch.iterdir()) == sorted([fresh, other])
+
+
+def test_export_info_of_a_corrupt_manifest_is_409_like_the_download(client, seeded):
+    Subject("PDSS").manifest_path.write_text("{not json")
+    for path in ("/api/subjects/PDSS/export/info", "/api/subjects/PDSS/export"):
+        r = client.get(path)
+        assert (r.status_code, r.json()["error"]) == (409, "manifest_invalid")
+
+
+@pytest.mark.parametrize("site", ["cross-site", "same-site"])
+def test_export_from_another_site_is_refused_before_building(
+    client, seeded, tmp_path, monkeypatch, site
+):
+    import tempfile
+
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+    r = client.get("/api/subjects/PDSS/export", headers={"Sec-Fetch-Site": site})
+    assert (r.status_code, r.json()["error"]) == (403, "forbidden")
+    assert list(scratch.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "headers", [{"Sec-Fetch-Site": "same-origin"}, {"Sec-Fetch-Site": "none"}, {}]
+)
+def test_export_from_the_page_a_typed_url_or_curl_is_allowed(client, seeded, headers):
+    assert client.get("/api/subjects/PDSS/export", headers=headers).status_code == 200
 
 
 def test_export_of_an_unknown_subject_is_404(client, seeded):

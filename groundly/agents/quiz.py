@@ -216,7 +216,7 @@ def check_answer(store: SubjectStore, question_id: int, selected: list[int]) -> 
     """One choice answer graded before its test is submitted: whether it is right, the key,
     and the question's cited sources. Grades through `_grade`, so a check and a submit of
     the same choice agree; writes nothing, so the answer counts only once submitted."""
-    found = store.questions(ids=[question_id])
+    found = store.questions(ids=[question_id]) if is_id(question_id) else []
     if not found:
         raise QuizError("unknown_question", _REMOVED)
     (q,) = found

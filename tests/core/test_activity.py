@@ -220,3 +220,31 @@ def test_an_index_run_that_indexed_nothing_is_not_recent(db):
     rec(db, "index", "index_done", T0, subject="apd", detail={"indexed": 0, "failed": 0})
     rec(db, "index", "index_done", T0 + 1, subject="apd", detail={"indexed": 0, "failed": 2})
     assert snap(db, T0 + 2)["recent"] == []
+
+
+def test_record_tightens_an_existing_file_to_owner_only(db):
+    rec(db, "mcp_stdio", "session_start", T0)
+    db.chmod(0o644)
+    rec(db, "mcp_stdio", "tool_call", T0 + 1, detail={"tool": "search"})
+    assert stat.S_IMODE(db.stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize(
+    ("at", "detail"), [(T0, "not json"), (T0, "[1]"), (T0, "null"), ("soon", "{}")]
+)
+def test_a_malformed_row_is_skipped_not_fatal(db, at, detail):
+    rec(db, "mcp_stdio", "session_start", T0, client="claude-code")
+    conn = sqlite3.connect(db)
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO events (at, pid, source, event, detail)"
+                " VALUES (?, 111, 'mcp_stdio', 'tool_call', ?)",
+                (at, detail),
+            )
+    finally:
+        conn.close()
+    rec(db, "index", "index_done", T0 + 2, subject="apd", detail={"indexed": 1})
+    out = snap(db, T0 + 3)
+    assert [h["orb"] for h in out["hosts"]] == ["listening"]
+    assert [r["text"] for r in out["recent"]] == ["Indexed 1 file"]

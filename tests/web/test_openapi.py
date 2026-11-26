@@ -36,6 +36,9 @@ def test_openapi_schema_contains_only_api_paths_and_typed_errors():
                 for code in ("401", "500", "503"):
                     schema = operation["responses"][code]["content"]["application/json"]["schema"]
                     assert schema == {"$ref": "#/components/schemas/ErrorResponse"}
+    export = "/api/subjects/{subject}/export"
+    assert {"404", "409"} <= set(paths[f"{export}/info"]["get"]["responses"])
+    assert {"403", "404", "409"} <= set(paths[export]["get"]["responses"])
     submit_schema = paths["/api/subjects/{subject}/attempts"]["post"]["requestBody"]["content"][
         "application/json"
     ]["schema"]

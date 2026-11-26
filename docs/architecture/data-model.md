@@ -43,7 +43,7 @@ Two tables at `PRAGMA user_version = 2` (decision 44): `attempts` (one per submi
 
 ## activity.db (never exported)
 
-One machine-wide table, `events` (`at`, `pid`, `source` in `mcp_stdio`/`mcp_http`/`index`, `session`, `client`, `subject`, `event`, a small JSON `detail`), at `PRAGMA user_version = 1`, mode `0600`, created on first write (decision 53). The MCP middleware and `groundly index` append to it, best-effort; the page reads it for the host card, the orb, indexing progress and recent results. It holds no course text: valid subject names, Groundly's own tool names, counts, file names, an index run's failure message and the host's self-reported name (capped). Rows older than 7 days are pruned when a session or index run starts. Export and import never read it.
+One machine-wide table, `events` (`at`, `pid`, `source` in `mcp_stdio`/`mcp_http`/`index`, `session`, `client`, `subject`, `event`, a small JSON `detail`), at `PRAGMA user_version = 1`, mode `0600` (tightened back on write if loosened), created on first write (decision 53). The MCP middleware and `groundly index` append to it, best-effort; the page reads it for the host card, the orb, indexing progress and recent results. It holds no course text: valid subject names, Groundly's own tool names, counts, file names, an index run's failure message and the host's self-reported name (capped). Rows older than 7 days are pruned when a session or index run starts. Export and import never read it.
 
 ## manifest.json — the interchange contract
 
