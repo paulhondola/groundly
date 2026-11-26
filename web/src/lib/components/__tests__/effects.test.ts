@@ -4,9 +4,9 @@ import { createRunStore } from "../../run.svelte";
 import type { RunSnapshot } from "../../api/client";
 import RunStrip from "../RunStrip.svelte";
 import SourceItem from "../SourceItem.svelte";
-import LiquidMetalButton from "../effects/LiquidMetalButton.svelte";
-import ThinkingOrb from "../effects/ThinkingOrb.svelte";
-import { orbStateFor, phaseLabelFor } from "../effects/orb-state";
+import Orb from "../orb/Orb.svelte";
+import { frame, geometry, orbModeForHosts } from "../orb/orb";
+import { orbModeForRun, phaseLabelFor } from "../orb/orb-state";
 
 class MockEventSource {
   static instances: MockEventSource[] = [];
@@ -65,14 +65,13 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-describe("orbStateFor and phaseLabelFor", () => {
-  it("maps run phases and kinds to expected orb states and labels", () => {
-    expect(orbStateFor("starting", "write")).toBe("connecting");
-    expect(orbStateFor("reading", "write")).toBe("searching");
-    expect(orbStateFor("writing", "write")).toBe("composing");
-    expect(orbStateFor("writing", "grade")).toBe("solving");
-    expect(orbStateFor("thinking", "write")).toBe("working");
-    expect(orbStateFor(null, "write")).toBe("working");
+describe("orbModeForRun and phaseLabelFor", () => {
+  it("maps run phases to orb modes and labels", () => {
+    expect(orbModeForRun("starting")).toBe("listening");
+    expect(orbModeForRun("reading")).toBe("reading");
+    expect(orbModeForRun("writing")).toBe("writing");
+    expect(orbModeForRun("thinking")).toBe("writing");
+    expect(orbModeForRun(null)).toBe("writing");
 
     expect(phaseLabelFor("writing", "write", "Drafting questions")).toBe("Drafting questions");
     expect(phaseLabelFor("writing", "grade", null)).toBe("Recording verdicts");
@@ -80,72 +79,31 @@ describe("orbStateFor and phaseLabelFor", () => {
   });
 });
 
-describe("LiquidMetalButton fallback", () => {
-  let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
+describe("orb geometry", () => {
+  it("drops the dot count below 28 px and keeps every dot inside the square", () => {
+    expect(geometry("listening", 16).pts.length).toBeLessThan(geometry("listening", 64).pts.length);
+    expect(geometry("mapping", 64).edges.length).toBeGreaterThan(0);
+    for (const mode of ["idle", "listening", "reading", "mapping", "writing", "done"] as const) {
+      const { dots } = frame(geometry(mode, 48), mode, 48, 3.7);
+      expect(dots.length).toBeGreaterThan(0);
+      for (const d of dots) {
+        expect(d.x).toBeGreaterThanOrEqual(0);
+        expect(d.x).toBeLessThanOrEqual(48);
+        expect(d.alpha).toBeGreaterThanOrEqual(0);
+        expect(d.alpha).toBeLessThanOrEqual(1);
+      }
+    }
   });
 
-  afterEach(() => {
-    container.remove();
-    vi.restoreAllMocks();
-  });
-
-  it("renders accessible fallback button when WebGL context is unavailable", () => {
-    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
-    const onClick = vi.fn();
-    const instance = mount(LiquidMetalButton, {
-      target: container,
-      props: {
-        label: "Write questions",
-        onclick: onClick,
-      },
-    });
-    flushSync();
-
-    const btn = container.querySelector("button");
-    expect(btn).not.toBeNull();
-    expect(btn?.getAttribute("type")).toBe("button");
-    expect(btn?.textContent?.trim()).toBe("Write questions");
-    expect(container.querySelectorAll("canvas")).toHaveLength(0);
-    btn?.click();
-    expect(onClick).toHaveBeenCalledTimes(1);
-
-    void unmount(instance);
-  });
-
-  it("skips WebGL shader mount when prefers-reduced-motion matches", () => {
-    const getContextSpy = vi.spyOn(HTMLCanvasElement.prototype, "getContext");
-    vi.stubGlobal(
-      "matchMedia",
-      vi.fn().mockImplementation((query: string) => ({
-        matches: query.includes("prefers-reduced-motion"),
-        media: query,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      })),
-    );
-    const onClick = vi.fn();
-    const instance = mount(LiquidMetalButton, {
-      target: container,
-      props: {
-        label: "Grade now",
-        onclick: onClick,
-      },
-    });
-    flushSync();
-
-    expect(getContextSpy).not.toHaveBeenCalled();
-    expect(container.querySelector("button")?.textContent?.trim()).toBe("Grade now");
-
-    void unmount(instance);
-    vi.unstubAllGlobals();
+  it("shows idle with no host, a working host over listening ones", () => {
+    expect(orbModeForHosts([])).toBe("idle");
+    expect(orbModeForHosts([{ orb: "listening" }])).toBe("listening");
+    expect(orbModeForHosts([{ orb: "listening" }, { orb: "reading" }])).toBe("reading");
+    expect(orbModeForHosts([{ orb: "reading" }, { orb: "writing" }])).toBe("writing");
   });
 });
 
-describe("ThinkingOrb", () => {
+describe("Orb", () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
@@ -160,11 +118,12 @@ describe("ThinkingOrb", () => {
   });
 
   it("renders a static frame with role=img under prefers-reduced-motion without rAF loop", () => {
+    const arc = vi.fn();
     const ctxStub = {
       clearRect: vi.fn(),
       setTransform: vi.fn(),
       beginPath: vi.fn(),
-      arc: vi.fn(),
+      arc,
       fill: vi.fn(),
       moveTo: vi.fn(),
       lineTo: vi.fn(),
@@ -186,22 +145,29 @@ describe("ThinkingOrb", () => {
       })),
     );
 
-    const instance = mount(ThinkingOrb, {
+    const instance = mount(Orb, {
       target: container,
-      props: {
-        phase: "thinking",
-        kind: "write",
-        size: 32,
-      },
+      props: { mode: "writing", size: 32, label: "Writing" },
     });
     flushSync();
 
     const canvas = container.querySelector("canvas");
     expect(canvas).not.toBeNull();
     expect(canvas?.getAttribute("role")).toBe("img");
-    expect(canvas?.getAttribute("aria-label")).toBeTruthy();
+    expect(canvas?.getAttribute("aria-label")).toBe("Writing");
     expect(rafSpy).not.toHaveBeenCalled();
+    expect(arc).toHaveBeenCalled();
 
+    void unmount(instance);
+  });
+
+  it("is hidden from assistive tech when it carries no label", () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const instance = mount(Orb, { target: container, props: { mode: "idle" } });
+    flushSync();
+    const canvas = container.querySelector("canvas");
+    expect(canvas?.getAttribute("aria-hidden")).toBe("true");
+    expect(canvas?.hasAttribute("role")).toBe(false);
     void unmount(instance);
   });
 });

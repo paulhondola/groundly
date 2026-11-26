@@ -367,6 +367,10 @@ def create_app(
     def _pair_page() -> HTMLResponse:
         return _html()
 
+    @app.get("/connections", include_in_schema=False)
+    def _connections_page() -> HTMLResponse:
+        return _html()
+
     app.mount("/static", StaticFiles(directory=_WEB / "static"), name="static")
 
     @app.get("/s/{subject}", include_in_schema=False)

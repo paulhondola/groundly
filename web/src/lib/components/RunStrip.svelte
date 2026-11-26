@@ -1,9 +1,8 @@
 <script lang="ts">
   import { createRunStore, runStore } from "../run.svelte";
-  import BorderBeam from "./effects/BorderBeam.svelte";
-  import ThinkingOrb from "./effects/ThinkingOrb.svelte";
-  import { phaseLabelFor } from "./effects/orb-state";
-  import Badge from "./ui/Badge.svelte";
+  import Check from "@lucide/svelte/icons/check";
+  import Orb from "./orb/Orb.svelte";
+  import { orbModeForRun, phaseLabelFor } from "./orb/orb-state";
   import Button from "./ui/Button.svelte";
   import { cn } from "./ui/utils";
 
@@ -53,27 +52,21 @@
 {#if visible}
   <section
     aria-label="Agent run"
-    class={cn(
-      "run relative overflow-hidden rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm",
-      className,
-    )}
+    class={cn("run rounded-[14px] border border-border bg-card p-4 text-card-foreground", className)}
   >
-    <BorderBeam active={working} />
-
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="flex min-w-0 items-center gap-3">
         {#if working}
-          <ThinkingOrb
-            phase={activeRun?.phase ?? "starting"}
-            kind={activeRun?.kind ?? "write"}
+          <Orb
+            mode={orbModeForRun(activeRun?.phase ?? "starting")}
             size={32}
             label={phaseLabel}
           />
         {/if}
-        <div class="flex min-w-0 flex-wrap items-center gap-2">
-          <h2 class="truncate text-sm font-semibold text-foreground">{heading}</h2>
+        <div class="flex min-w-0 flex-col gap-0.5">
+          <h2 class="truncate text-sm font-medium text-foreground">{heading}</h2>
           {#if working}
-            <Badge variant="progress">{phaseLabel}</Badge>
+            <span class="shimmer truncate text-xs">{phaseLabel}</span>
           {/if}
         </div>
       </div>
@@ -97,30 +90,29 @@
     </div>
 
     {#if activeRun && activeRun.thought}
-      <div class="mt-3 rounded-lg border border-border/70 bg-muted/40 p-3">
-        <div class="mb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+      <div class="mt-3 rounded-xl border border-border bg-well p-3">
+        <div class="mb-1 text-[11px] font-medium tracking-[0.08em] text-subtle-foreground uppercase">
           {channelLabel}
         </div>
         <pre
           bind:this={thoughtBox}
-          class="max-h-36 overflow-y-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground"
+          class="max-h-36 overflow-y-auto font-mono text-xs leading-relaxed break-words whitespace-pre-wrap text-foreground/85"
         >{activeRun.thought}</pre>
       </div>
     {/if}
 
     {#if recentSteps.length > 0}
-      <ol class="steps mt-3 list-decimal space-y-1 pl-5 text-xs text-muted-foreground">
+      <ol class="steps mt-3 space-y-2 text-[13px] text-muted-foreground">
         {#each recentSteps as step, idx (`${idx}-${step}`)}
-          <li>{step}</li>
+          <li class="flex items-center gap-2.5">
+            <Check size={16} class="shrink-0 text-mastered" aria-hidden="true" />{step}
+          </li>
         {/each}
       </ol>
     {/if}
 
     <p
-      class={cn(
-        "outcome text-sm",
-        store.message ? "mt-3 font-medium text-foreground" : "sr-only",
-      )}
+      class={cn("outcome text-sm", store.message ? "mt-3 font-medium text-foreground" : "sr-only")}
       role="status"
     >
       {store.message ?? ""}

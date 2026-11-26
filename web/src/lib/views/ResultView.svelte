@@ -4,8 +4,8 @@
   import { queryKeys, treeQueryOptions } from "../api/queries";
   import MasteryBadge from "../components/MasteryBadge.svelte";
   import SourceItem from "../components/SourceItem.svelte";
-  import LiquidMetalButton from "../components/effects/LiquidMetalButton.svelte";
   import Badge, { type BadgeVariant } from "../components/ui/Badge.svelte";
+  import Button from "../components/ui/Button.svelte";
   import Card from "../components/ui/Card.svelte";
   import { cn } from "../components/ui/utils";
   import { runStore } from "../run.svelte";
@@ -98,12 +98,12 @@
   <div class="space-y-1">
     <a
       href={pageURL(subject)}
-      class="back inline-flex items-center text-xs font-medium text-muted-foreground hover:text-foreground"
+      class="back inline-flex items-center text-[13px] text-muted-foreground hover:text-foreground"
     >
       ← Back to the map
     </a>
     {#if !loading && !error && result}
-      <h1 class="text-2xl font-semibold tracking-tight text-foreground">{courseTitle}</h1>
+      <h1 class="text-[32px] leading-tight font-semibold tracking-[-0.02em] text-foreground">{courseTitle}</h1>
       <p class="text-sm text-muted-foreground">{scopeTitle} · {result.submitted_at}</p>
     {/if}
   </div>
@@ -111,12 +111,12 @@
   {#if loading}
     <p class="text-sm text-muted-foreground">Loading results…</p>
   {:else if error}
-    <Card class="border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
+    <Card class="border-destructive/40 p-4 text-sm text-destructive" role="alert">
       {error}
     </Card>
   {:else if result}
     <Card class="space-y-3 p-6">
-      <p class="score text-3xl font-semibold tracking-tight text-foreground">
+      <p class="score text-[32px] font-semibold tracking-[-0.02em] text-foreground">
         {result.score.correct} / {result.score.graded} correct
       </p>
       {#if result.provisional}
@@ -125,11 +125,12 @@
             provisional, {result.score.awaiting} awaiting review
           </p>
           {#if canGrade}
-            <LiquidMetalButton
-              label="Grade now"
+            <Button
               disabled={runStore.busy}
               onclick={() => void runStore.start(subject, { kind: "grade" })}
-            />
+            >
+              Grade now
+            </Button>
           {/if}
         </div>
       {/if}
@@ -139,7 +140,7 @@
       {#each result.answers as a, i (a.answer_id)}
         <article
           class={cn(
-            "answer rounded-xl border border-border bg-card p-5 shadow-xs",
+            "answer rounded-[14px] border border-border bg-card p-5",
             "state-" + a.state,
           )}
         >
@@ -227,7 +228,7 @@
                 <summary class="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
                   Sources ({a.sources.length})
                 </summary>
-                <ul class="sources mt-2 space-y-2" role="list">
+                <ul class="sources mt-2 divide-y divide-border overflow-hidden rounded-[10px] border border-border" role="list">
                   {#each a.sources as src (src.chunk_id)}
                     <SourceItem {subject} {src} />
                   {/each}

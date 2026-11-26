@@ -476,7 +476,7 @@ def test_an_attempt_of_an_unknown_subject_is_404(client, seeded):
 
 
 def test_test_and_result_pages_serve_the_shell_under_the_csp(client, seeded):
-    for path in ("/s/PDSS/test", "/s/PDSS/attempts/1"):
+    for path in ("/s/PDSS/test", "/s/PDSS/attempts/1", "/connections"):
         r = client.get(path)
         assert r.status_code == 200, path
         assert "default-src 'none'" in r.headers["content-security-policy"]

@@ -466,7 +466,7 @@ class _SocketPerimeterMiddleware:
             return
 
         shell = method == "GET" and (
-            path in {"/", "/pair"} or _SUBJECT_SHELL_RE.fullmatch(path) is not None
+            path in {"/", "/pair", "/connections"} or _SUBJECT_SHELL_RE.fullmatch(path) is not None
         )
         session_token = Request(scope).cookies.get(SESSION_COOKIE)
         if session_token:

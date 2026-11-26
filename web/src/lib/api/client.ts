@@ -7,6 +7,7 @@ export type TopicNode = components["schemas"]["TopicNode"];
 export type TreeResponse = components["schemas"]["TreeResponse"];
 export type DrawnQuestion = components["schemas"]["DrawnQuestion"];
 export type DrawTestResponse = components["schemas"]["DrawTestResponse"];
+export type CheckResult = components["schemas"]["CheckAnswerResponse"];
 export type SubmittedAnswer =
   | components["schemas"]["SubmittedChoiceAnswer"]
   | components["schemas"]["SubmittedOpenAnswer"];

@@ -16,6 +16,23 @@
     }
     return p.answered + " answered";
   }
+
+  /** 0..100: how far a topic is towards mastered. */
+  export function progressRatio(p: TopicProgress | null): number {
+    if (!p || p.state === "not_started") {
+      return 0;
+    }
+    if (p.state === "mastered") {
+      return 100;
+    }
+    if (p.subtopics != null && p.subtopics > 0) {
+      return Math.round(((p.subtopics_mastered ?? 0) / p.subtopics) * 100);
+    }
+    if (p.recent > 0) {
+      return Math.round((p.recent_correct / Math.max(p.recent, 10)) * 100);
+    }
+    return 10;
+  }
 </script>
 
 <script lang="ts">
@@ -39,21 +56,7 @@
         : "secondary",
   );
 
-  const ratio = $derived.by(() => {
-    if (!progress || progress.state === "not_started") {
-      return 0;
-    }
-    if (progress.state === "mastered") {
-      return 100;
-    }
-    if (progress.subtopics != null && progress.subtopics > 0) {
-      return Math.round(((progress.subtopics_mastered ?? 0) / progress.subtopics) * 100);
-    }
-    if (progress.recent > 0) {
-      return Math.round((progress.recent_correct / Math.max(progress.recent, 10)) * 100);
-    }
-    return 10;
-  });
+  const ratio = $derived(progressRatio(progress));
 </script>
 
 <div class={cn("inline-flex items-center gap-2", className)}>
