@@ -905,6 +905,15 @@ def test_perimeter_restricts_head_to_static_only(monkeypatch, tmp_path):
         base_url="http://macbook.tail1234.ts.net:8765",
     ) as phone:
         assert phone.head("/static/page.css").status_code == 200
+        for name in (
+            "manifest.webmanifest",
+            "icon-192.png",
+            "icon-512.png",
+            "apple-touch-icon.png",
+            "favicon.ico",
+            "favicon.svg",
+        ):
+            assert phone.get(f"/static/{name}").status_code == 200
         for path in ("/", "/pair", "/s/PDSS", "/api/auth"):
             assert phone.head(path).status_code == 401
 
