@@ -219,3 +219,39 @@ def test_a_page_with_only_a_picture_and_a_footer_gets_no_chunk():
         (2, page2),
     ]
     assert [c["page"] for c in extract_worker.chunk_pages(pages)["chunks"]] == [1]
+
+
+def _page(n, *items):
+    """A one-page document holding `items` in order: ("h", text) a level-1 heading,
+    ("t", text) body text, ("header", text) a running page header (furniture)."""
+    doc = DoclingDocument(name="stub")
+    doc.add_page(page_no=n, size=Size(width=960, height=540))
+    prov = ProvenanceItem(page_no=n, bbox=BoundingBox(l=0, t=540, r=960, b=0), charspan=(0, 0))
+    for kind, text in items:
+        if kind == "h":
+            doc.add_heading(text, level=1, prov=prov)
+        elif kind == "header":
+            doc.add_text(
+                DocItemLabel.PAGE_HEADER, text, prov=prov, content_layer=ContentLayer.FURNITURE
+            )
+        else:
+            doc.add_text(DocItemLabel.TEXT, text, prov=prov)
+    return doc
+
+
+def test_a_heading_met_mid_page_is_the_one_carried_on(fake_chunker):
+    pages = [
+        (1, _page(1, ("h", "2.1 Processes"), ("t", "a"))),
+        (2, _page(2, ("t", "b"), ("h", "2.2 Threads"), ("t", "c"))),
+        (3, _page(3, ("t", "d"))),
+    ]
+    assert _headings(pages)[2] == "2.2 Threads"
+
+
+def test_a_running_header_does_not_freeze_the_carry(fake_chunker):
+    pages = [
+        (1, _page(1, ("header", "OS"), ("h", "Deadlock"), ("t", "a"))),
+        (2, _page(2, ("header", "OS"), ("h", "Scheduling"), ("t", "b"))),
+        (3, _page(3, ("header", "OS"), ("t", "c"))),
+    ]
+    assert _headings(pages)[2] == "Scheduling"
