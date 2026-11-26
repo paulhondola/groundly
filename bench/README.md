@@ -19,7 +19,7 @@ Each module ends with `_worker.main(stack)`, which gives it two modes:
 
 | Stack | What it is |
 |---|---|
-| `docling_standard` | docling + RapidOCR on every page |
+| `docling` | docling + RapidOCR page by page, as the product reads |
 | `product` | the shipped worker (`groundly.ingestion.extract_worker`): every PDF and image read and chunked page by page (decision 49) |
 | `mineru` | MinerU2.5 on MLX. Needs the optional extra: `uv sync --extra bench` |
 
@@ -34,9 +34,9 @@ Every run appends one row per arm and run to `bench/results/<bench>.jsonl`. Each
 ### index: end-to-end speed and memory
 
 ```bash
-uv run python -m bench.index.run --stacks docling_standard product --runs 5 [--timeout 3600] \
+uv run python -m bench.index.run --stacks docling product --runs 5 [--timeout 3600] \
     --subject apd --input ~/.groundly/apd/materials [--keep-homes] [--memray]
-uv run python -m bench.common.compare index --baseline docling_standard --gate 0.85
+uv run python -m bench.common.compare index --baseline docling --gate 0.85
 ```
 
 The stacks run interleaved. Each run is a fresh child process with its own scratch `GROUNDLY_HOME`; `models/` is symlinked to `~/.groundly/models`.
@@ -56,7 +56,7 @@ The stacks run interleaved. Each run is a fresh child process with its own scrat
 
 ```bash
 uv run python -m bench.extract.sample --version 1          # build bench/corpus/manifest.json
-uv run python -m bench.extract.run --stack docling_standard --only-ref [--session S]
+uv run python -m bench.extract.run --stack docling --only-ref [--session S]
 ```
 
 The manifest is a frozen, stratified sample of pages: kind (text, image, mixed) × language (ro, en). Files are pinned by sha256, and loading the manifest refuses a missing or changed file. About 40 pages are reference pages. Their hand-checked text lives in `bench/reference/<sha256>-<page>.txt`, and pages with no checked text are skipped.
@@ -76,7 +76,7 @@ To compare stacks, pass the session id the first run prints to the next run's `-
 ```bash
 uv run python -m bench.retrieval.run --home <home> --subject apd \
     --queries bench/retrieval/queries/apd.json --arm product [--session S]
-uv run python -m bench.common.compare retrieval --baseline docling_standard --metric hit_within1@8
+uv run python -m bench.common.compare retrieval --baseline docling --metric hit_within1@8
 ```
 
 The bench runs labelled queries against an indexed home, such as one left behind by `index --keep-homes`. It reports `hit_exact@8`, `hit_within1@8` and `mrr_within1@8`.

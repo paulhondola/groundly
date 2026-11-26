@@ -17,13 +17,17 @@ from bench.extract.score import score
 ROOT = Path(__file__).parents[2]
 
 
-def collect(manifest: dict, out_path: Path) -> list[dict]:
-    seen = {}
+def collect(manifest: dict, out_path: Path) -> tuple[list[dict], dict]:
+    """The stack's page rows in manifest order, and its closing meta row."""
+    seen, meta = {}, {}
     if out_path.is_file():
         for line in out_path.read_text().splitlines():
             row = json.loads(line)
-            seen[(row["sha256"], row["page"])] = row
-    return [
+            if "meta" in row:
+                meta = row["meta"]
+            else:
+                seen[(row["sha256"], row["page"])] = row
+    rows = [
         seen.get(
             (p["sha256"], p["page"]),
             {
@@ -32,10 +36,12 @@ def collect(manifest: dict, out_path: Path) -> list[dict]:
                 "text": "",
                 "ms": 0.0,
                 "error": "missing from stack output",
+                "capped": False,
             },
         )
         for p in manifest["pages"]
     ]
+    return rows, meta
 
 
 def main() -> None:
@@ -59,7 +65,7 @@ def main() -> None:
         cmd += ["--out", tmp] + (["--only-ref"] if args.only_ref else [])
         cmd += ["--ocr-lang", args.ocr_lang] if args.ocr_lang else []
         m = monitor.run(cmd, env={**os.environ, "PYTHONPATH": str(ROOT)}, cwd=ROOT)
-        outputs = collect(manifest, out)
+        outputs, meta = collect(manifest, out)
     finally:
         out.unlink(missing_ok=True)
 
@@ -69,6 +75,8 @@ def main() -> None:
         "wall_s": m.wall_s,
         "peak_rss_mb": m.peak_rss_mb,
         "ms_p50": statistics.median(timed) if timed else None,
+        "load_s": meta.get("load_s"),
+        "capped_pages": sum(1 for o in outputs if o.get("capped")),
     }
     session = args.session or results.new_session()
     sha = results._sh("git", "-C", str(ROOT), "rev-parse", "--short", "HEAD")
