@@ -19,7 +19,7 @@ Each module ends with `_worker.main(stack)`, which builds two modes from `read`:
 | Stack | What it is |
 |---|---|
 | `docling` | docling + RapidOCR page by page, as the product reads (`extract_worker.docling_pages`) |
-| `mineru` | MinerU2.5 two-step on MLX, each page rendered at scale 2, its blocks joined as Markdown and turned into a one-page document (`markdown_page`). Token cap 8192 |
+| `mineru` | MinerU2.5 two-step on MLX, each page rendered at scale 2, its blocks joined as Markdown and turned into a one-page document (`markdown_page`); table HTML becomes a pipe table. Image and chart blocks give no text (MinerU's image analysis is off: a generated description is not text on the page). Token cap 8192 |
 | `granite` | granite-docling 258M on MLX through docling's `VlmPipeline`, in the product's 16-page batches. Token cap 8192 |
 | `docling_mineru` | `by_kind`: pages that classify `image` go to `mineru`, every other page to `docling` |
 | `docling_granite` | the same with `granite` |
