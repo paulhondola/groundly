@@ -29,6 +29,8 @@
 - A VLM that loops until its token cap must still yield the page and be counted as capped, not hang or fail the file: pinned in Tasks 2 and 3.
 - A rendered page must score against its source PDF page's text layer, never the PNG's (empty) one: pinned in Task 5.
 - A non-reference `image` page (no text layer) must be skipped, not scored 0 against an empty reference: pinned in Task 5.
+- A CI checkout synced with `--extra dev` only (no bench group) must still collect and pass `tests/bench`: pinned in Task 9.
+- A plain `pip install groundly` must not offer or pull MinerU: the built wheel has no `bench/` and no `bench` extra, pinned in Task 9.
 
 ---
 
@@ -363,6 +365,69 @@ Expected: rows with `failed_count`, `timed_out` and wall time per arm.
 - [ ] **Step 3: Retrieval** on apd and pm from the kept homes, one session per subject, all three arms (`--session` passed as its own argument).
 
 - [ ] **Step 4: Verdict.** Report every metric the ship rule names, per arm, from one session each, and state for each VLM stack which of (a)–(d) hold. Do not propose a product change: passing the rule only opens a `/decision` for Paul.
+
+### Task 9: Run the bench from `main`
+
+Spec: `docs/superpowers/specs/2026-11-26-in-repo-bench-design.md` (approved by Paul 2026-11-26). Runs after Task 8 Step 4 and before the final review, so the review package's range is cut from `main`'s tip.
+
+**Files:**
+- Modify: `pyproject.toml` (move `bench` from `[project.optional-dependencies]` to `[dependency-groups]`), `uv.lock`
+- Modify: `bench/README.md:29` (setup line)
+- Test: `tests/bench/test_packaging.py`
+
+**Interfaces:**
+- Consumes: nothing new.
+- Produces: `uv sync --extra dev --group bench` as the one bench setup command.
+
+- [ ] **Step 1: Write the failing test** in `tests/bench/test_packaging.py`
+
+```python
+def test_bench_dependencies_are_a_group_not_a_published_extra():
+    p = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    assert "bench" not in p["project"]["optional-dependencies"]
+    assert p["dependency-groups"]["bench"] == ["mineru-vl-utils[mlx]==2.0.9"]
+    assert p["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == ["groundly"]
+```
+
+- [ ] **Step 2: Run it**
+
+Run: `uv run pytest tests/bench/test_packaging.py -q`
+Expected: FAIL (`bench` is still an extra; `dependency-groups` missing).
+
+- [ ] **Step 3: Move the group, relock, fix the README line**
+
+`bench = [...]` moves under a new `[dependency-groups]` table with its comment; `uv lock`; README says `uv sync --extra dev --group bench`. The `[tool.uv]` opencv override stays where it is.
+
+- [ ] **Step 4: Run it**
+
+Run: `uv run pytest tests/bench/test_packaging.py -q`
+Expected: PASS.
+
+- [ ] **Step 5: The CI environment**
+
+Run, from a scratch dir: `UV_PROJECT_ENVIRONMENT=<scratch>/venv uv sync --frozen --extra dev`, then `UV_PROJECT_ENVIRONMENT=<scratch>/venv uv run --no-sync pytest tests/bench -q`.
+Expected: all pass or skip. A test that errors on a missing bench-group module gets `pytest.importorskip("<module>")` at its top, then rerun until green.
+
+- [ ] **Step 6: The wheel**
+
+Run: `uv build --wheel -o <scratch>/dist`, then list it with `unzip -l` and read `*.dist-info/METADATA`.
+Expected: no path under `bench/`; no `Provides-Extra: bench`.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add pyproject.toml uv.lock bench/README.md tests/bench/test_packaging.py
+git commit -m "build(bench): bench dependencies are a dependency group, never a published extra"
+```
+
+- [ ] **Step 8: Merge `main` into `bench-suite`**
+
+Run: `git merge main`, resolve conflicts in favour of `main` for product files and of `bench-suite` for `bench/` and the measurement lines in CLAUDE.md and `.claude/rules/conventions.md`; then `uv run pytest -q`, `uv run lint-imports`, `uv run ruff check .`.
+Expected: green suite, contract kept, no lint findings.
+
+- [ ] **Step 9: After Paul merges the PR** (finishing-a-development-branch opens it, with Paul's OK to push)
+
+Move `bench/results/` and `bench/reference/` from `../groundly-bench` into the main checkout's `bench/` (same gitignored paths); confirm both checkouts' file counts match; ask Paul before removing the `../groundly-bench` worktree.
 
 ## What the plan leaves to the builder
 
