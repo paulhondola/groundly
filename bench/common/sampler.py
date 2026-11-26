@@ -8,16 +8,30 @@ come and go under-reports CPU. System-wide GPU memory in use is read from `ioreg
 on every tenth row; the other rows leave it NULL by design, since spawning `ioreg` at 10 Hz
 would itself load the CPU being measured.
 
+`PowerSession` runs one `sudo -n powermetrics` for a whole bench invocation (2 Hz) and keeps,
+per sample, system CPU/GPU/ANE power, GPU active ratio and frequency, and per-process CPU time
+and energy impact; each run takes the samples inside its own time window. It reads
+powermetrics from a pipe, so closing the pipe ends it: the harness never needs a second sudo
+command (a sudoers rule limited to powermetrics is enough). Per-process GPU time is NULL where
+this macOS's powermetrics does not report it.
+
 A value that cannot be read is None, never 0, and `note` says why.
 """
 
+import contextlib
 import ctypes
 import ctypes.util
+import os
+import plistlib
 import re
+import statistics
 import subprocess
 import sys
 import threading
 import time
+from datetime import UTC
+from typing import Self
+from xml.parsers.expat import ExpatError
 
 import psutil
 
@@ -131,3 +145,154 @@ class ProcSampler:
                 self._rows.append(row)
             tick += 1
             self._stop.wait(self.interval)
+
+
+NO_SUDO = 'powermetrics needs sudo — run "sudo -v" first, or pass --no-power'
+POWERMETRICS = [
+    "sudo", "-n", "/usr/bin/powermetrics",
+    "--samplers", "cpu_power,gpu_power,ane_power,tasks",
+    "--show-process-gpu", "--show-process-energy", "-i", "500", "-f", "plist",
+]  # fmt: skip
+_POWER_KEYS = ("cpu_power", "gpu_power", "ane_power", "combined_power")
+_TASK_KEYS = ("pid", "name", "cputime_ms_per_s", "gputime_ms_per_s", "energy_impact_per_s")
+
+
+def sudo_ok() -> bool:
+    """True when sudo runs without a prompt in this shell (a cached `sudo -v` or a sudoers rule)."""
+    try:
+        return (
+            subprocess.run(["sudo", "-n", "true"], capture_output=True, check=False).returncode == 0
+        )
+    except OSError:
+        return False
+
+
+def parse_plists(data: bytes) -> list[dict]:
+    """powermetrics' `-f plist` stream: NUL-separated plist documents; a partial one is dropped."""
+    out = []
+    for doc in data.split(b"\0"):
+        if doc.strip():
+            with contextlib.suppress(ExpatError, plistlib.InvalidFileException, ValueError):
+                out.append(plistlib.loads(doc.strip()))  # a partial document fails to parse
+    return out
+
+
+def power_rows(
+    samples: list[dict], t0: float, pids: set[int], times: list[float] | None = None
+) -> tuple[list[dict], list[dict]]:
+    """`sample_power` rows, and `sample_task` rows for `pids` only; `t_s` is relative to `t0`.
+
+    `times` are the samples' end times (epoch seconds); without them, each sample's own
+    `timestamp` is used, which powermetrics writes to the whole second only.
+    """
+    if times is None:
+        times = [s["timestamp"].replace(tzinfo=UTC).timestamp() for s in samples]
+    system, tasks = [], []
+    for s, t in zip(samples, times, strict=True):
+        p, g = s.get("processor", {}), s.get("gpu", {})
+        idle = g.get("idle_ratio")
+        system.append(
+            {"t_s": t - t0, "cpu_mw": p.get("cpu_power"), "gpu_mw": p.get("gpu_power"),
+             "ane_mw": p.get("ane_power"), "combined_mw": p.get("combined_power"),
+             "gpu_active": None if idle is None else 1 - idle,
+             # named freq_hz by powermetrics, but the value is in MHz
+             "gpu_freq_mhz": g.get("freq_hz")}
+        )  # fmt: skip
+        tasks += [
+            {"t_s": t - t0, "pid": k["pid"], "name": k.get("name"),
+             "cpu_ms_per_s": k.get("cputime_ms_per_s"), "gpu_ms_per_s": k.get("gputime_ms_per_s"),
+             "energy_impact": k.get("energy_impact_per_s")}
+            for k in s.get("tasks", []) if k.get("pid") in pids
+        ]  # fmt: skip
+    return system, tasks
+
+
+def _compact(s: dict) -> dict:
+    """Only the fields `power_rows` reads: a full sample is ~150 KB, this is ~10 KB."""
+    p, g = s.get("processor", {}), s.get("gpu", {})
+    return {
+        "elapsed_ns": s.get("elapsed_ns", 0),
+        "processor": {k: p[k] for k in _POWER_KEYS if k in p},
+        "gpu": {k: g[k] for k in ("freq_hz", "idle_ratio") if k in g},
+        "tasks": [{k: t[k] for k in _TASK_KEYS if k in t} for t in s.get("tasks", [])],
+    }
+
+
+class PowerSession:
+    """One powermetrics process for a bench invocation; refuses to start without sudo.
+
+    Samples are timed from launch plus the summed `elapsed_ns` of the samples before them.
+    ponytail: every sample stays in memory (~20 KB/s); spill to disk if a session runs for hours.
+    """
+
+    def __init__(self) -> None:
+        self.note: str | None = None
+        self._samples: list[tuple[float, dict]] = []  # (end time, compact sample)
+        self._stop = threading.Event()
+        self._idle: float | None = None
+
+    def __enter__(self) -> Self:
+        if not sudo_ok():
+            raise SystemExit(NO_SUDO)
+        import tempfile
+
+        self._err = tempfile.TemporaryFile()
+        self._launch = time.time()
+        self._proc = subprocess.Popen(
+            POWERMETRICS, stdout=subprocess.PIPE, stderr=self._err, start_new_session=True
+        )
+        self._reader = threading.Thread(target=self._read, daemon=True)
+        self._reader.start()
+        return self
+
+    def _read(self) -> None:
+        assert self._proc.stdout is not None
+        fd, buf, clock = self._proc.stdout.fileno(), b"", self._launch
+        gpu_seen = False
+        while not self._stop.is_set():
+            chunk = os.read(fd, 1 << 16)
+            if not chunk:
+                break
+            *docs, buf = (buf + chunk).split(b"\0")
+            for s in parse_plists(b"\0".join(docs)):
+                clock += s.get("elapsed_ns", 0) / 1e9
+                c = _compact(s)
+                gpu_seen = gpu_seen or any("gputime_ms_per_s" in t for t in c["tasks"])
+                self._samples.append((clock, c))
+                if not gpu_seen and self.note is None:
+                    self.note = "per-process GPU time not reported by powermetrics on this macOS"
+        self._proc.stdout.close()  # powermetrics gets SIGPIPE on its next write and exits
+
+    def alive(self) -> bool:
+        return self._proc.poll() is None
+
+    def idle_mw(self, seconds: float = 10) -> float | None:
+        """Mean combined power over the next `seconds` with nothing measured; call right after entry."""
+        t = time.time()
+        time.sleep(seconds)
+        system, _ = self.slice(t, time.time(), set())
+        vals = [r["combined_mw"] for r in system if r["combined_mw"] is not None]
+        self._idle = statistics.fmean(vals) if vals else None
+        if self._idle is None:
+            self.note = "no powermetrics samples during the idle baseline"
+        return self._idle
+
+    def slice(self, t_start: float, t_end: float, pids: set[int]) -> tuple[list[dict], list[dict]]:
+        """Rows for samples whose interval midpoint lies in [t_start, t_end]."""
+        picked = [
+            (t, s) for t, s in list(self._samples)
+            if t_start <= t - s["elapsed_ns"] / 2e9 <= t_end
+        ]  # fmt: skip
+        if not self.alive() and self.note is None:
+            self.note = f"powermetrics exited (rc {self._proc.returncode})"
+        return power_rows([s for _, s in picked], t_start, pids, [t for t, _ in picked])
+
+    def __exit__(self, *exc) -> None:
+        self._stop.set()
+        self._reader.join(timeout=5)
+        try:
+            self._proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            # SIGPIPE did not end it (root process: this user cannot signal it directly)
+            subprocess.run(["sudo", "-n", "kill", str(self._proc.pid)], check=False)
+        self._err.close()

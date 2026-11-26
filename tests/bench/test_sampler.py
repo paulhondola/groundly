@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -41,3 +42,44 @@ def test_sampler_sees_a_child_allocate_and_burn_cpu():
     assert rows[-1]["cpu_s"] >= rows[0]["cpu_s"]
     assert all(rows[i]["t_s"] < rows[i + 1]["t_s"] for i in range(len(rows) - 1))
     assert child.pid in s.pids
+
+
+POWER_SAMPLE = (Path(__file__).parent / "powermetrics.plist").read_bytes()
+
+
+def test_parse_plists_reads_both_samples():
+    assert len(sampler.parse_plists(POWER_SAMPLE)) == 2
+    cut = POWER_SAMPLE[: POWER_SAMPLE.index(b"\0") + 200]
+    assert len(sampler.parse_plists(cut)) == 1
+
+
+def test_power_rows_keeps_only_the_tree():
+    samples = sampler.parse_plists(POWER_SAMPLE)
+    system, tasks = sampler.power_rows(samples, 0, {415})
+    assert len(system) == 2 and all(r["combined_mw"] > 0 for r in system)
+    assert system[1]["t_s"] - system[0]["t_s"] == pytest.approx(1)  # timestamps are whole seconds
+    assert system[0]["gpu_active"] == pytest.approx(1 - 0.626961)
+    assert system[0]["gpu_freq_mhz"] == pytest.approx(422.392)
+    assert {r["pid"] for r in tasks} == {415} and len(tasks) == 2
+    assert all(r["gpu_ms_per_s"] is None for r in tasks)  # this macOS writes no per-task GPU
+    assert tasks[0]["cpu_ms_per_s"] >= 0 and tasks[0]["energy_impact"] is not None
+
+
+def test_power_session_refuses_without_sudo(monkeypatch):
+    monkeypatch.setattr(sampler, "sudo_ok", lambda: False)
+    message = r'powermetrics needs sudo — run "sudo -v" first, or pass --no-power'
+    with pytest.raises(SystemExit, match=message), sampler.PowerSession():
+        pass
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not sampler.sudo_ok(), reason="needs sudo -n")
+def test_power_session_records_while_alive():
+    import time
+
+    with sampler.PowerSession() as power:
+        t = time.time()
+        time.sleep(3)
+        assert power.alive()
+        system, _ = power.slice(t - 1, time.time() + 1, set())
+    assert len(system) >= 4
