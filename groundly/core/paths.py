@@ -23,6 +23,12 @@ def activity_db_path() -> Path:
     return groundly_home() / "activity.db"
 
 
+def owner_only(path: Path) -> None:
+    """Tighten a private state file to 0600 when group or others can reach it."""
+    if os.stat(path).st_mode & 0o077:
+        os.chmod(path, 0o600)
+
+
 def validate_subject_name(name: str) -> None:
     """Subject names become path components and MCP identifiers."""
     if not _SUBJECT_RE.fullmatch(name):  # fullmatch: `$` alone accepts a trailing newline

@@ -16,8 +16,9 @@ import json
 import os
 import sqlite3
 import tempfile
+import time
 from collections.abc import Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -149,6 +150,32 @@ def _stored_pdf(subject: Subject, filename: object) -> Path | None:
 
 def _error(error: str, detail: str, status_code: int = 400) -> JSONResponse:
     return JSONResponse({"error": error, "detail": detail}, status_code=status_code)
+
+
+def _exportable(name: str) -> Subject | JSONResponse:
+    """The subject when its bundle can be built: export info and the download agree."""
+    opened = _open_subject(name)
+    if opened is None:
+        return _error("unknown_subject", f"unknown subject {name!r}", 404)
+    try:
+        opened.load_manifest()
+    except (OSError, ValueError) as e:  # pydantic's ValidationError is a ValueError
+        return _error("manifest_invalid", f"manifest.json is corrupt or unreadable: {e}", 409)
+    return opened
+
+
+_EXPORT_PREFIX = "groundly-export-"
+_STALE_EXPORT_SECONDS = 3600
+
+
+def _sweep_stale_exports() -> None:
+    """Delete bundles a stopped server never got to delete. A download in flight holds its file
+    open, and an hour is longer than building one takes."""
+    cutoff = time.time() - _STALE_EXPORT_SECONDS
+    for f in Path(tempfile.gettempdir()).glob(f"{_EXPORT_PREFIX}*.groundly"):
+        with suppress(OSError):  # another user's file in a shared /tmp, or already gone
+            if f.lstat().st_mtime < cutoff:
+                f.unlink()
 
 
 def _quiz(
@@ -540,13 +567,13 @@ def create_app(
     @app.get(
         "/api/subjects/{subject}/export/info",
         response_model=ExportInfoResponse,
-        responses=_protected_responses(404),
+        responses=_protected_responses(404, 409),
         operation_id="exportInfo",
     )
     def _export_info(subject: str) -> Any:
-        opened = _open_subject(subject)
-        if opened is None:
-            return _error("unknown_subject", f"unknown subject {subject!r}", 404)
+        opened = _exportable(subject)
+        if isinstance(opened, JSONResponse):
+            return opened
         try:
             materials = bundle.material_files(opened)
         except (sqlite3.DatabaseError, RuntimeError) as e:
@@ -562,21 +589,23 @@ def create_app(
         response_class=FileResponse,
         responses={
             200: {"content": {"application/zip": {}}, "description": "The subject's bundle."},
-            **_protected_responses(404, 409),
+            **_protected_responses(403, 404, 409),
         },
         operation_id="exportSubject",
     )
-    def _export(subject: str, materials: bool = True) -> Any:
-        opened = _open_subject(subject)
-        if opened is None:
-            return _error("unknown_subject", f"unknown subject {subject!r}", 404)
-        try:
-            opened.load_manifest()
-        except (OSError, ValueError) as e:  # pydantic's ValidationError is a ValueError
-            return _error("manifest_invalid", f"manifest.json is corrupt or unreadable: {e}", 409)
+    def _export(request: Request, subject: str, materials: bool = True) -> Any:
+        # A GET any site can trigger: refuse other sites' requests before building anything.
+        # Browsers send Sec-Fetch-Site to loopback. Without it (curl, or the plain-HTTP Tailscale
+        # socket, where the SameSite=Strict session cookie keeps other sites out) it is allowed.
+        if request.headers.get("sec-fetch-site", "none") not in ("same-origin", "none"):
+            return _error("forbidden", "a bundle is downloaded from this page only", 403)
+        opened = _exportable(subject)
+        if isinstance(opened, JSONResponse):
+            return opened
+        _sweep_stale_exports()
         # ponytail: the whole bundle is built before the first byte is sent; stream the zip as
         # it is written if a large materials folder makes the wait hurt.
-        fd, name = tempfile.mkstemp(suffix=".groundly")
+        fd, name = tempfile.mkstemp(prefix=_EXPORT_PREFIX, suffix=".groundly")
         os.close(fd)
         path = Path(name)
         try:

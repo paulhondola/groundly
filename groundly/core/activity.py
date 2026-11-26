@@ -93,8 +93,11 @@ def _create(path: Path) -> None:
 
 def _connect(path: Path, *, create: bool) -> sqlite3.Connection | None:
     """Open the log, or None when it holds no schema."""
-    if create and not path.exists():
-        _create(path)
+    if create:
+        if path.exists():
+            paths.owner_only(path)
+        else:
+            _create(path)
     conn = sqlite3.connect(path, timeout=5)
     try:
         conn.execute("PRAGMA busy_timeout = 5000")
@@ -202,8 +205,9 @@ def snapshot(
         if conn is None:
             return {k: [] for k in _EMPTY}
         try:
-            # ponytail: reads the week's rows on every poll; add a per-host summary table if
-            # this shows up in a profile.
+            # ponytail: reads the week's rows on every poll (two per tool call). A bounded read
+            # must still find a long-lived host's first row and open tools; add a per-host
+            # summary table if polls show up in a profile.
             rows = conn.execute(
                 "SELECT at, pid, source, session, client, subject, event, detail"
                 " FROM events ORDER BY id"
@@ -226,8 +230,15 @@ def snapshot(
     hosts: dict[tuple, dict] = {}
     runs: dict[int, dict] = {}
     recent: list[tuple[float, str, str | None, dict]] = []
+    skipped = 0
     for at, pid, source, session, client, subject, event, raw in rows:
-        detail = json.loads(raw)
+        try:
+            detail = json.loads(raw)
+        except (TypeError, ValueError):
+            detail = None
+        if not isinstance(detail, dict) or not isinstance(at, float) or not isinstance(pid, int):
+            skipped += 1
+            continue
         if event in _ACCEPTED or (event == "index_done" and detail.get("indexed")):
             recent.append((at, event, subject, detail))
         if source == "index":
@@ -259,7 +270,7 @@ def snapshot(
         # Any event opens a host, so one whose session_start was pruned stays visible.
         h = hosts.setdefault(
             key,
-            {"source": source, "pid": pid, "started_at": iso(at), "open": [], "end": None,
+            {"source": source, "pid": pid, "started_at": at, "open": [], "end": None,
              "client": None, "subject": None, "last": at, "last_call": None, "done": None},
         )  # fmt: skip
         h["last"] = at
@@ -276,6 +287,8 @@ def snapshot(
         elif event in _ACCEPTED:
             h["done"] = at
 
+    if skipped:
+        _log.warning("activity log: skipped %d malformed row(s)", skipped)
     out_hosts = []
     for h in hosts.values():
         if not live(h["source"], h["pid"], h["last"]):
@@ -290,7 +303,7 @@ def snapshot(
             {
                 "client": h["client"],
                 "transport": "stdio" if h["source"] == "mcp_stdio" else "http",
-                "started_at": h["started_at"],
+                "started_at": iso(h["started_at"]),
                 "last_call_at": iso(h["last_call"]) if h["last_call"] else None,
                 "subject": h["subject"],
                 "orb": orb,

@@ -928,6 +928,7 @@ def test_a_paired_phone_may_export_and_an_unpaired_one_may_not(monkeypatch, tmp_
         token = runtime.pairing_url.split("#", 1)[1]
         assert phone.post("/api/pair", json={"token": token}, headers=ts_origin).status_code == 200
         assert phone.get("/api/subjects/PDSS/export/info").status_code == 200
+        # Plain-HTTP Tailscale gets no Sec-Fetch-Site from the phone's browser.
         r = phone.get("/api/subjects/PDSS/export?materials=false")
         assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
 

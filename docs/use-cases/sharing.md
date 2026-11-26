@@ -9,7 +9,7 @@ Detail for [`groundly-spec.md`](../groundly-spec.md) §3. The professor's "basis
 1. `groundly export <SUBJECT>` → zips the subject dir **minus `progress.db`** → `SUBJECT.groundly`.
 2. Bundle contains: manifest (pins), materials (original files — the importer's citations must open the right page; `--no-materials` to shrink), `store.db` (chunks, vectors, sparse, FTS, the topic tree). Bundles from before decision 37 also carry `graph/`; import ignores it.
 3. Output states plainly: *"this bundle contains everything indexed in this subject, including its topic map."* (No source filtering — decided; personal state is protected by the file split, not a flag.)
-4. The page exports too (decision 53): `GET /api/subjects/{subject}/export/info` gives the file name and sizes, and `GET /api/subjects/{subject}/export?materials=` downloads the same bundle, built by the same code. A paired Tailscale device may export with its session. The page's export screen states the same sentence before the download (it ships with the page design's UI).
+4. The page exports too (decision 53): `GET /api/subjects/{subject}/export/info` gives the file name and sizes, and `GET /api/subjects/{subject}/export?materials=` downloads the same bundle, built by the same code; both refuse a corrupt manifest with `409`, and the download refuses another site's request with `403`. A paired Tailscale device may export with its session. The page's export screen states the same sentence before the download (it ships with the page design's UI).
 
 **Import**
 
