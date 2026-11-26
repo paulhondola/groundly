@@ -233,7 +233,8 @@ def power_session(no_power: bool) -> Iterator["PowerSession | None"]:
 class PowerSession:
     """One powermetrics process for a bench invocation; refuses to start without sudo.
 
-    Samples are timed from launch plus the summed `elapsed_ns` of the samples before them.
+    A powermetrics process's first sample is stamped on arrival, later ones by adding their
+    `elapsed_ns`.
     ponytail: every sample stays in memory (~20 KB/s); spill to disk if a session runs for hours.
     """
 
@@ -262,7 +263,6 @@ class PowerSession:
         return self
 
     def _spawn(self) -> None:
-        self._launch = time.time()
         self._proc = subprocess.Popen(
             POWERMETRICS, stdout=subprocess.PIPE, stderr=self._err, start_new_session=True
         )
@@ -278,21 +278,23 @@ class PowerSession:
     def _drain(self) -> bool:
         """Samples from the current powermetrics until EOF or stop; True when the session must end."""
         assert self._proc.stdout is not None
-        fd, buf, clock, got = self._proc.stdout.fileno(), b"", self._launch, 0
+        # The first sample is stamped when it arrives: its start-up is not in elapsed_ns.
+        fd, buf, clock, got = self._proc.stdout.fileno(), b"", None, 0
         while not self._stop.is_set():
             chunk = os.read(fd, 1 << 16)
             if not chunk:
                 break
             *docs, buf = (buf + chunk).split(b"\0")
             for s in parse_plists(b"\0".join(docs)):
-                clock += s.get("elapsed_ns", 0) / 1e9
+                clock = time.time() if clock is None else clock + s.get("elapsed_ns", 0) / 1e9
                 self._keep(clock, s)
                 got += 1
         else:
             self._proc.stdout.close()  # powermetrics gets SIGPIPE on its next write and exits
             return True
         for s in parse_plists(buf):  # a last whole document at EOF; a partial one is dropped
-            self._keep(clock + s.get("elapsed_ns", 0) / 1e9, s)
+            clock = time.time() if clock is None else clock + s.get("elapsed_ns", 0) / 1e9
+            self._keep(clock, s)
             got += 1
         self._proc.stdout.close()
         if not got:
@@ -304,6 +306,16 @@ class PowerSession:
         self._samples.append((clock, c))
         if self._note is None and not any("gputime_ms_per_s" in t for t in c["tasks"]):
             self._note = "per-process GPU time not reported by powermetrics on this macOS"
+
+    def wait_past(self, t: float, timeout: float = 2.0) -> bool:
+        """Wait until a sample ending after `t` has arrived, so a run's last interval is kept
+        (powermetrics writes a sample only as the next one starts)."""
+        deadline = time.time() + timeout
+        while time.time() < deadline and self.alive():
+            if self._samples and self._samples[-1][0] >= t:
+                return True
+            time.sleep(0.05)
+        return bool(self._samples) and self._samples[-1][0] >= t
 
     def alive(self) -> bool:
         return self._proc.poll() is None

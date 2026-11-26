@@ -35,7 +35,8 @@ def _select(con, session: str | None) -> None:
     con.execute(
         "create or replace temp table sel_ids as select id from run r "
         "where session = coalesce(cast(? as varchar), "
-        "(select max(session) from run r2 where r2.bench = r.bench and r2.memray = r.memray))",
+        "(select max(session) from run r2 where r2.bench = r.bench and r2.memray = r.memray "
+        "and r2.arm = r.arm and r2.subject is not distinct from r.subject))",
         [session],
     )
     con.execute(SQL["setup"])
@@ -47,8 +48,8 @@ def _select(con, session: str | None) -> None:
 
 
 def export(con, out_dir: Path, session: str | None = None) -> list[Path]:
-    """Write every result as `<R>.parquet` and `<R>.csv`; by default the latest session per bench,
-    with and without memray (a `--memray` session never hides the plain runs)."""
+    """Write every result as `<R>.parquet` and `<R>.csv`; by default the latest session for each
+    bench, arm, subject and memray flag, so one stack or subject per invocation all shows up."""
     out_dir.mkdir(parents=True, exist_ok=True)
     _select(con, session)
     written = []
@@ -71,7 +72,7 @@ def main() -> None:
     ap.add_argument("--session", help="one session for every bench (default: each bench's latest)")
     ap.add_argument("--out", type=Path, default=EXPORT_DIR)
     args = ap.parse_args()
-    con = store.connect()
+    con = store.connect(read_only=True)
     try:
         files = export(con, args.out, args.session)
     finally:

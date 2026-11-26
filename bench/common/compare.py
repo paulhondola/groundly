@@ -88,7 +88,7 @@ def main() -> None:
     ap.add_argument("--session")
     ap.add_argument("--gate", type=float)
     a = ap.parse_args()
-    con = store.connect()
+    con = store.connect(read_only=True)
     try:
         rows = rows_from_store(con, a.bench)
     finally:

@@ -113,3 +113,45 @@ def test_a_later_memray_session_keeps_the_plain_index_run(con, tmp_path):
     r15 = duckdb.sql(f"select count(*) from '{tmp_path / 'export' / 'R15.parquet'}'").fetchall()
     assert r8 == [(10.0,)]  # the plain run from session S
     assert r15 == [(0,)]  # session T's memray run has no artifacts; S's memray run is superseded
+
+
+def test_the_default_selection_keeps_every_arm_and_subject(con, tmp_path):
+    store.ensure_session(con, {**SESSION, "id": "T"})
+    base = {"session": "T", "returncode": 0, "wall_s": 10.0, "run_no": 1}
+    store.write_run(con, {**base, "bench": "extract", "arm": "mineru", "items": 1}, {})
+    store.write_run(con, {**base, "bench": "index", "arm": "docling", "subject": "pm"}, {})
+    report.export(con, tmp_path / "export")
+    r6 = duckdb.sql(
+        f"select bench, arm, subject from '{tmp_path / 'export' / 'R6.parquet'}' order by all"
+    )
+    assert r6.fetchall() == [("extract", "docling", None), ("extract", "mineru", None),
+                             ("index", "docling", "apd"), ("index", "docling", "pm")]  # fmt: skip
+
+
+def test_energy_spans_the_whole_run_and_needs_coverage(con, tmp_path):
+    store.ensure_session(con, {**SESSION, "id": "T"})
+    base = {"session": "T", "bench": "extract", "returncode": 0, "wall_s": 10.0, "run_no": 1,
+            "idle_combined_mw": 400.0, "items": 1}  # fmt: skip
+    inner = [r for r in _power(1000, 10) if 1.0 <= r["t_s"] <= 9.0]  # edges unsampled, < 2 s each
+    store.write_run(con, {**base, "arm": "edges"}, {"sample_power": inner})
+    head = [r for r in _power(1000, 10) if r["t_s"] <= 4.0]  # sampler died after 4 s
+    store.write_run(con, {**base, "arm": "died"}, {"sample_power": head})
+    report.export(con, tmp_path / "export")
+    rows = dict(duckdb.sql(f"select arm, energy_j from '{tmp_path / 'export' / 'R6.parquet'}' "
+                           "where arm in ('edges', 'died')").fetchall())  # fmt: skip
+    assert rows == {"edges": pytest.approx(6.0), "died": None}
+
+
+def test_whole_run_energy_columns_say_so(con, tmp_path):
+    report.export(con, tmp_path / "export")
+    cols = {n: [r[0] for r in duckdb.sql(f"describe select * from '{tmp_path / 'export' / f'{n}.parquet'}'").fetchall()]
+            for n in ("R3", "R12")}  # fmt: skip
+    assert "j_per_page_run" in cols["R3"] and "j_per_1000_chunks_run" in cols["R12"]
+    assert "coverage" in cols["R12"]
+
+
+def test_the_report_reads_the_store_read_only(tmp_path):
+    p = tmp_path / "b.duckdb"
+    store.connect(p).close()
+    con = store.connect(p, read_only=True)
+    assert len(report.export(con, tmp_path / "export")) == 30

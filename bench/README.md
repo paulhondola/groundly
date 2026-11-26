@@ -109,7 +109,7 @@ The bench runs labelled queries against an indexed home, such as one left behind
 uv run python -m bench.report.run [--session S]
 ```
 
-Writes `bench/results/export/R<n>.parquet`, a `.csv` twin and a `.png` figure for each result, from each bench's latest session (or one `--session`). The queries are named blocks in `bench/report/queries.sql`; R1's 95% CIs are a percentile bootstrap of the page mean. Energy is the trapezoid integral of combined power over the run's samples minus its idle baseline × wall time; CPU % is Δcpu_s / Δt_s. Accuracy results (R1–R3) use each arm's first run, since extraction is deterministic. memray runs feed only R15. No export reads `page_text`.
+Writes `bench/results/export/R<n>.parquet`, a `.csv` twin and a `.png` figure for each result, from the latest session of each bench, arm, subject and memray flag (or one `--session`), so stacks and subjects run one per invocation all appear. The report opens the store read-only; a bench that finds the store busy retries for 30 s before saying so. The queries are named blocks in `bench/report/queries.sql`; R1's 95% CIs are a percentile bootstrap of the page mean. Energy is the trapezoid integral of combined power over the run window [0, wall_s] (first and last samples held to the edges) minus its idle baseline × wall time; it is NULL when samples cover under 90% of the window (`coverage`, exported in R6 and R12). It is whole-run energy, load included (`j_per_page_run`, `j_per_1000_chunks_run`). CPU % is Δcpu_s / Δt_s. Accuracy results (R1–R3) use each arm's first run, since extraction is deterministic. memray runs feed only R15. No export reads `page_text`.
 
 | Result | What |
 |---|---|

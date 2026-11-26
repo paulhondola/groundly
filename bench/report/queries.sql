@@ -4,12 +4,25 @@
 
 -- name: setup
 create or replace temp view sel as select r.* from run r join sel_ids using (id);
+-- Energy spans the run window [0, wall_s]: trapezoids between samples, the first and last values
+-- held to the window edges. `coverage` is the share of the window within 2 s of a sample; an
+-- energy below 0.9 coverage (powermetrics died, a run too short for 2 Hz) is NULL, not a guess.
 create or replace temp view power_x as
-select run, sum((t_s - prev_t) * (combined_mw + prev_mw) / 2) / 1000 as energy_raw_j,
+select run,
+       (coalesce(sum((t_s - prev_t) * (combined_mw + prev_mw) / 2), 0)
+        + arg_min(combined_mw, t_s) * greatest(min(t_s), 0)
+        + arg_max(combined_mw, t_s) * greatest(any_value(wall_s) - max(t_s), 0)) / 1000
+         as energy_raw_j,
+       least((coalesce(sum(t_s - prev_t) filter (where t_s - prev_t <= 2), 0)
+              + case when min(t_s) <= 2 then greatest(min(t_s), 0) else 0 end
+              + case when any_value(wall_s) - max(t_s) <= 2
+                     then greatest(any_value(wall_s) - max(t_s), 0) else 0 end)
+             / nullif(any_value(wall_s), 0), 1) as coverage,
        avg(cpu_mw) as cpu_mw, avg(gpu_mw) as gpu_mw, avg(ane_mw) as ane_mw,
        avg(gpu_active) as gpu_active
-from (select *, lag(t_s) over w as prev_t, lag(combined_mw) over w as prev_mw
-      from sample_power window w as (partition by run order by t_s))
+from (select p.*, r.wall_s, lag(p.t_s) over w as prev_t, lag(p.combined_mw) over w as prev_mw
+      from sample_power p join run r on r.id = p.run where p.combined_mw is not null
+      window w as (partition by p.run order by p.t_s))
 group by run;
 create or replace temp view proc_x as
 select run, max(rss_mb) as peak_rss_mb, max(footprint_mb) as peak_footprint_mb,
@@ -20,7 +33,9 @@ create or replace temp view run_res as
 select s.id as run, s.bench, s.arm, s.subject, s.run_no, s.memray, s.returncode, s.wall_s,
        s.load_s, s.items, s.device, s.embed_s, s.rerank_s, s.pairs, p.peak_rss_mb,
        p.peak_footprint_mb, p.peak_gpu_mem_mb_system, p.cpu_pct, e.cpu_mw, e.gpu_mw, e.ane_mw,
-       e.gpu_active, e.energy_raw_j - s.idle_combined_mw * s.wall_s / 1000 as energy_j
+       e.gpu_active, e.coverage,
+       case when e.coverage >= 0.9 then e.energy_raw_j - s.idle_combined_mw * s.wall_s / 1000 end
+         as energy_j
 from sel s left join proc_x p on p.run = s.id left join power_x e on e.run = s.id;
 create or replace temp view acc_pages as
 select s.arm, p.* exclude (run) from page p join sel s on s.id = p.run
@@ -45,7 +60,7 @@ with acc as (select arm, avg(f1) as f1 from acc_pages group by arm),
 cost as (select s.arm, sum(p.ms) / 1000 / count(*) as s_per_page
          from page p join sel s on s.id = p.run
          where s.bench = 'extract' and not s.memray and p.error is null group by s.arm),
-energy as (select arm, median(energy_j / nullif(items, 0)) as j_per_page from run_res
+energy as (select arm, median(energy_j / nullif(items, 0)) as j_per_page_run from run_res
            where bench = 'extract' and not memray group by arm)
 select * from acc full join cost using (arm) full join energy using (arm) order by arm;
 
@@ -60,7 +75,7 @@ where r.bench in ('extract', 'index') and not r.memray order by r.bench, r.arm, 
 
 -- name: R6
 select bench, arm, subject, run_no, items, wall_s, cpu_pct, gpu_active, cpu_mw, gpu_mw, ane_mw,
-       energy_j, energy_j / nullif(items, 0) as j_per_item
+       coverage, energy_j, energy_j / nullif(items, 0) as j_per_item
 from run_res where bench in ('extract', 'index') and not memray order by all;
 
 -- name: R7
@@ -104,8 +119,9 @@ from query q join sel s on s.id = q.run
 where s.bench = 'embed' and not s.memray group by all order by all;
 
 -- name: R12
+-- Energy is the whole child run (load, embed, rerank, searches), hence the `_run` names.
 select arm, run_no, peak_rss_mb, peak_footprint_mb, peak_gpu_mem_mb_system, cpu_pct, gpu_active,
-       energy_j, energy_j * 1000 / nullif(items, 0) as j_per_1000_chunks
+       coverage, energy_j, energy_j * 1000 / nullif(items, 0) as j_per_1000_chunks_run
 from run_res where bench = 'embed' and not memray order by all;
 
 -- name: R13

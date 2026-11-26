@@ -138,3 +138,44 @@ def test_import_twice_adds_nothing(tmp_path):
     again = store.import_jsonl(con, tmp_path, manifest)
     assert again == {"run": 0, "file": 0, "page": 0, "page_text": 0}
     assert con.execute("select count(*) from run").fetchone() == (3,)
+
+
+_SESSION = {
+    "id": "S",
+    "started_at": None,
+    "machine": "M",
+    "os": None,
+    "git_sha": None,
+    "note": None,
+}
+_RUN = {"session": "S", "bench": "extract", "arm": "a", "returncode": 0, "wall_s": 1.0}
+
+
+def _hold(p, seconds):
+    code = HOLD.format(p=p).replace("time.sleep(30)", f"time.sleep({seconds})")
+    holder = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
+    assert holder.stdout.readline().strip() == "held"
+    return holder
+
+
+def test_save_waits_for_a_busy_store(tmp_path):
+    p = tmp_path / "b.duckdb"
+    store.connect(p).close()
+    holder = _hold(p, 1.5)
+    try:
+        assert store.save(_SESSION, _RUN, {}, path=p, wait_s=15) > 0
+    finally:
+        holder.kill()
+        holder.wait()
+
+
+def test_save_gives_up_with_a_one_line_error(tmp_path):
+    p = tmp_path / "b.duckdb"
+    store.connect(p).close()
+    holder = _hold(p, 30)
+    try:
+        with pytest.raises(SystemExit, match="in use by another bench run"):
+            store.save(_SESSION, _RUN, {}, path=p, wait_s=1)
+    finally:
+        holder.kill()
+        holder.wait()

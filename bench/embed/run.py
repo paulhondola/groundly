@@ -112,7 +112,7 @@ def main() -> None:
             if len(done) == len(ARMS):
                 (ra, pa), (rb, pb) = done["mlx"], done["torch"]
                 rows = [{**r, "run_a": ra, "run_b": rb} for r in agreement_rows(pa, pb)]
-                con = store.connect()
+                con = store.connect_waiting()
                 try:
                     store.insert(con, "agreement", rows)
                 finally:

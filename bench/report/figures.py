@@ -164,7 +164,7 @@ PANELS = {
            [("", bars, {"x": "cell", "y": "f1", "series": "arm", "lo": "f1_lo", "hi": "f1_hi"}, None)]),
     "R2": ("Per-page word F1", [("", box, {"x": "arm", "y": "f1"}, None)]),
     "R3": ("Cost vs accuracy", [("time", scatter, {"x": "s_per_page", "y": "f1", "group": "arm"}, None),
-                                ("energy", scatter, {"x": "j_per_page", "y": "f1", "group": "arm"}, None)]),
+                                ("energy", scatter, {"x": "j_per_page_run", "y": "f1", "group": "arm"}, None)]),
     "R4": ("Per-page latency", [("", cdf, {"y": "ms", "group": "arm"}, None)]),
     "R5": ("Memory over time (physical footprint, run 1)",
            [(b, lines, {"x": "t_s", "y": "footprint_mb", "group": "arm"},
@@ -180,7 +180,7 @@ PANELS = {
                                                 for y in ("chunks_per_s", "pairs_per_s", "load_s")]),
     "R11": ("search latency", [(y, bars, {"x": "arm", "y": y}, None) for y in ("p50_ms", "p95_ms")]),
     "R12": ("Embed resources", [(y, bars, {"x": "arm", "y": y}, None)
-                                for y in ("j_per_1000_chunks", "peak_footprint_mb", "cpu_pct", "gpu_active")]),
+                                for y in ("j_per_1000_chunks_run", "peak_footprint_mb", "cpu_pct", "gpu_active")]),
     "R13": ("MLX vs torch agreement", [(y, box, {"y": y}, None)
                                        for y in ("dense_cos", "sparse_top10_overlap", "rerank_top5_overlap", "max_score_diff")]),
     "R14": ("hit@8 per engine", [("", bars, {"x": "arm", "y": "hit_within1_at8", "series": "subject"}, None)]),

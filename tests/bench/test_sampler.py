@@ -120,3 +120,38 @@ def test_power_session_restarts_powermetrics_when_it_dies(tmp_path, monkeypatch)
         system, _ = power.slice(0, time.time() + 60, set())
     assert len(system) > 2  # more than the one launch's two samples
     assert "powermetrics restarted" in (power.note or "")
+
+
+# sudo_ok's one-sample probe returns at once; anything but powermetrics (e.g. `sudo -n kill`) fails
+PROBE_OK = '[ "$2" = /usr/bin/powermetrics ] || exit 1\n[ "$4" = cpu_power ] && exit 0\n'
+
+
+def _fixture_cmd():
+    return f'cat "{Path(__file__).parent / "powermetrics.plist"}"'
+
+
+def test_the_first_sample_is_stamped_when_it_arrives(tmp_path, monkeypatch):
+    # powermetrics' start-up is not in elapsed_ns: launch + elapsed_ns would stamp it early.
+    _fake_sudo(tmp_path, monkeypatch, f"{PROBE_OK}sleep 1\n{_fixture_cmd()}\nsleep 5\n")
+    import time
+
+    with sampler.PowerSession() as power:
+        launch = time.time()
+        assert power.wait_past(launch + 0.5, timeout=5)
+        first = power._samples[0][0]
+    assert first >= launch + 0.9
+
+
+def test_wait_past_waits_for_a_sample_beyond_the_run(tmp_path, monkeypatch):
+    # One NUL between documents, as powermetrics writes; ends on SIGPIPE, like powermetrics.
+    loop = f"while {_fixture_cmd()} && printf '\\0'; do sleep 0.3; done\n"
+    _fake_sudo(tmp_path, monkeypatch, PROBE_OK + loop)
+    import time
+
+    with sampler.PowerSession() as power:
+        t = time.time() + 0.5
+        assert power.wait_past(t, timeout=5)
+        assert power._samples[-1][0] >= t
+        start = time.time()
+        assert not power.wait_past(time.time() + 1000, timeout=0.5)
+        assert time.time() - start < 2

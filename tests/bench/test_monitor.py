@@ -80,6 +80,9 @@ class DeadPower:
     def alive(self):
         return False
 
+    def wait_past(self, t, timeout=2.0):
+        return False
+
     def slice(self, t_start, t_end, pids):
         return [], []
 

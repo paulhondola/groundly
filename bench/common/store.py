@@ -5,6 +5,7 @@ import duckdb. Rows are raw facts: aggregates (per-cell scores, energy, CPU %) a
 `page_text` is the one table holding course text and is never exported.
 """
 
+import time
 from pathlib import Path
 
 import duckdb
@@ -86,20 +87,23 @@ TABLES: dict[str, tuple[str, ...]] = {
 }  # fmt: skip
 
 
-def connect(path: Path | None = None) -> duckdb.DuckDBPyConnection:
-    """Open (creating if needed) the store; refuse a schema newer than this bench knows."""
+def connect(path: Path | None = None, *, read_only: bool = False) -> duckdb.DuckDBPyConnection:
+    """Open (creating if needed) the store; refuse a schema newer than this bench knows.
+    `read_only` (report, compare) takes no write lock and changes nothing."""
     path = path or STORE
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        con = duckdb.connect(str(path))
+        con = duckdb.connect(str(path), read_only=read_only)
     except duckdb.IOException as e:
         if "lock" in str(e).lower():
             raise StoreBusy(f"{path.name} is in use by another bench run") from e
         raise
-    con.execute(_SCHEMA)
+    if not read_only:
+        con.execute(_SCHEMA)
     row = con.execute("select schema_version from meta").fetchone()
     if row is None:
-        con.execute("insert into meta values (?)", [SCHEMA_VERSION])
+        if not read_only:
+            con.execute("insert into meta values (?)", [SCHEMA_VERSION])
     elif row[0] > SCHEMA_VERSION:
         con.close()
         raise SystemExit(f"{path.name} is schema v{row[0]}, this bench knows v{SCHEMA_VERSION}")
@@ -172,9 +176,25 @@ def write_run(con: duckdb.DuckDBPyConnection, run: dict, children: dict[str, lis
     return rid
 
 
-def save(session: dict, run: dict, children: dict[str, list[dict]]) -> int:
+def connect_waiting(path: Path | None = None, wait_s: float = 30.0) -> duckdb.DuckDBPyConnection:
+    """`connect`, retrying while another process holds the store (a report export, a run
+    finishing), so a measured run is not thrown away; then one line, no traceback."""
+    deadline = time.monotonic() + wait_s
+    while True:
+        try:
+            return connect(path)
+        except StoreBusy as e:
+            if time.monotonic() >= deadline:
+                raise SystemExit(f"{e}; this run was not saved") from None
+            time.sleep(0.5)
+
+
+def save(
+    session: dict, run: dict, children: dict[str, list[dict]], *,
+    path: Path | None = None, wait_s: float = 30.0,
+) -> int:  # fmt: skip
     """Open the store, record the session once, write one run with its rows, close."""
-    con = connect()
+    con = connect_waiting(path, wait_s)
     try:
         ensure_session(con, session)
         return write_run(con, run, children)

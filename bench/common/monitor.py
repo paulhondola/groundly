@@ -75,6 +75,7 @@ def run(
     power_rows: list[dict] = []
     task_rows: list[dict] = []
     if power is not None:
+        power.wait_past(t_end)  # the sample covering the run's last moments arrives a beat later
         if not power.alive():
             notes.append("powermetrics not running")
         power_rows, task_rows = power.slice(t_start, t_end, sampler.pids | {proc.pid})
