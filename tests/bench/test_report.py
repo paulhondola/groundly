@@ -102,3 +102,14 @@ def test_figures_draw_one_png_per_result(con, tmp_path):
     report.export(con, tmp_path / "export")
     pngs = report.figures(tmp_path / "export")
     assert sorted(p.name for p in pngs) == sorted(f"R{i}.png" for i in range(1, 16))
+
+
+def test_a_later_memray_session_keeps_the_plain_index_run(con, tmp_path):
+    store.ensure_session(con, {**SESSION, "id": "T"})  # sorts after "S", like a later --memray run
+    store.write_run(con, {"session": "T", "bench": "index", "arm": "docling", "subject": "apd",
+                          "run_no": 1, "returncode": 0, "wall_s": 12.0, "memray": True}, {})  # fmt: skip
+    report.export(con, tmp_path / "export")
+    r8 = duckdb.sql(f"select wall_s from '{tmp_path / 'export' / 'R8.parquet'}'").fetchall()
+    r15 = duckdb.sql(f"select count(*) from '{tmp_path / 'export' / 'R15.parquet'}'").fetchall()
+    assert r8 == [(10.0,)]  # the plain run from session S
+    assert r15 == [(0,)]  # session T's memray run has no artifacts; S's memray run is superseded

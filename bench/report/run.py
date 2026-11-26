@@ -35,7 +35,7 @@ def _select(con, session: str | None) -> None:
     con.execute(
         "create or replace temp table sel_ids as select id from run r "
         "where session = coalesce(cast(? as varchar), "
-        "(select max(session) from run r2 where r2.bench = r.bench))",
+        "(select max(session) from run r2 where r2.bench = r.bench and r2.memray = r.memray))",
         [session],
     )
     con.execute(SQL["setup"])
@@ -47,7 +47,8 @@ def _select(con, session: str | None) -> None:
 
 
 def export(con, out_dir: Path, session: str | None = None) -> list[Path]:
-    """Write every result as `<R>.parquet` and `<R>.csv`; the latest session per bench by default."""
+    """Write every result as `<R>.parquet` and `<R>.csv`; by default the latest session per bench,
+    with and without memray (a `--memray` session never hides the plain runs)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     _select(con, session)
     written = []

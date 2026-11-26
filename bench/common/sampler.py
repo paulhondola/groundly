@@ -238,10 +238,17 @@ class PowerSession:
     """
 
     def __init__(self) -> None:
-        self.note: str | None = None
+        self._note: str | None = None
+        self._restarts = 0
         self._samples: list[tuple[float, dict]] = []  # (end time, compact sample)
         self._stop = threading.Event()
         self._idle: float | None = None
+
+    @property
+    def note(self) -> str | None:
+        """Why rows are missing or incomplete, for the run's `sampler_note`."""
+        restarted = f"powermetrics restarted {self._restarts}x after exiting mid-run (gaps ~1.5 s)"
+        return "; ".join(n for n in (self._note, self._restarts and restarted) if n) or None
 
     def __enter__(self) -> Self:
         if not sudo_ok():
@@ -249,18 +256,29 @@ class PowerSession:
         import tempfile
 
         self._err = tempfile.TemporaryFile()
-        self._launch = time.time()
-        self._proc = subprocess.Popen(
-            POWERMETRICS, stdout=subprocess.PIPE, stderr=self._err, start_new_session=True
-        )
+        self._spawn()
         self._reader = threading.Thread(target=self._read, daemon=True)
         self._reader.start()
         return self
 
+    def _spawn(self) -> None:
+        self._launch = time.time()
+        self._proc = subprocess.Popen(
+            POWERMETRICS, stdout=subprocess.PIPE, stderr=self._err, start_new_session=True
+        )
+
     def _read(self) -> None:
+        """Read samples until exit; respawn powermetrics if it dies mid-run (its tasks sampler can
+        crash when a process exits under it), unless it died before writing a single sample."""
+        while not self._drain() and not self._stop.is_set():
+            self._proc.wait()
+            self._restarts += 1
+            self._spawn()
+
+    def _drain(self) -> bool:
+        """Samples from the current powermetrics until EOF or stop; True when the session must end."""
         assert self._proc.stdout is not None
-        fd, buf, clock = self._proc.stdout.fileno(), b"", self._launch
-        gpu_seen = False
+        fd, buf, clock, got = self._proc.stdout.fileno(), b"", self._launch, 0
         while not self._stop.is_set():
             chunk = os.read(fd, 1 << 16)
             if not chunk:
@@ -268,12 +286,24 @@ class PowerSession:
             *docs, buf = (buf + chunk).split(b"\0")
             for s in parse_plists(b"\0".join(docs)):
                 clock += s.get("elapsed_ns", 0) / 1e9
-                c = _compact(s)
-                gpu_seen = gpu_seen or any("gputime_ms_per_s" in t for t in c["tasks"])
-                self._samples.append((clock, c))
-                if not gpu_seen and self.note is None:
-                    self.note = "per-process GPU time not reported by powermetrics on this macOS"
-        self._proc.stdout.close()  # powermetrics gets SIGPIPE on its next write and exits
+                self._keep(clock, s)
+                got += 1
+        else:
+            self._proc.stdout.close()  # powermetrics gets SIGPIPE on its next write and exits
+            return True
+        for s in parse_plists(buf):  # a last whole document at EOF; a partial one is dropped
+            self._keep(clock + s.get("elapsed_ns", 0) / 1e9, s)
+            got += 1
+        self._proc.stdout.close()
+        if not got:
+            self._note = f"powermetrics exited before its first sample (rc {self._proc.wait()})"
+        return not got
+
+    def _keep(self, clock: float, sample: dict) -> None:
+        c = _compact(sample)
+        self._samples.append((clock, c))
+        if self._note is None and not any("gputime_ms_per_s" in t for t in c["tasks"]):
+            self._note = "per-process GPU time not reported by powermetrics on this macOS"
 
     def alive(self) -> bool:
         return self._proc.poll() is None
@@ -286,7 +316,7 @@ class PowerSession:
         vals = [r["combined_mw"] for r in system if r["combined_mw"] is not None]
         self._idle = statistics.fmean(vals) if vals else None
         if self._idle is None:
-            self.note = "no powermetrics samples during the idle baseline"
+            self._note = "no powermetrics samples during the idle baseline"
         return self._idle
 
     def slice(self, t_start: float, t_end: float, pids: set[int]) -> tuple[list[dict], list[dict]]:
@@ -295,8 +325,8 @@ class PowerSession:
             (t, s) for t, s in list(self._samples)
             if t_start <= t - s["elapsed_ns"] / 2e9 <= t_end
         ]  # fmt: skip
-        if not self.alive() and self.note is None:
-            self.note = f"powermetrics exited (rc {self._proc.returncode})"
+        if not self.alive() and self._note is None:
+            self._note = f"powermetrics exited (rc {self._proc.returncode})"
         return power_rows([s for _, s in picked], t_start, pids, [t for t, _ in picked])
 
     def __exit__(self, *exc) -> None:

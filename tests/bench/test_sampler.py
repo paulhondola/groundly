@@ -79,7 +79,7 @@ def test_power_session_records_while_alive():
 
     with sampler.PowerSession() as power:
         t = time.time()
-        time.sleep(3)
+        time.sleep(4)  # ~1.5 s to the first sample (sudo + one interval), then 2 Hz
         assert power.alive()
         system, _ = power.slice(t - 1, time.time() + 1, set())
     assert len(system) >= 4
@@ -104,3 +104,19 @@ def test_sudo_ok_refuses_when_listing_allows_but_running_needs_a_password(tmp_pa
     # Like `(ALL) ALL` with no cached `sudo -v`: `sudo -n -l` says yes, running asks for a password.
     _fake_sudo(tmp_path, monkeypatch, '[ "$2" = "-l" ] && exit 0\nexit 1\n')
     assert not sampler.sudo_ok()
+
+
+def test_power_session_restarts_powermetrics_when_it_dies(tmp_path, monkeypatch):
+    # powermetrics can crash mid-run ("task <name> is invalid" in its tasks sampler); a fake that
+    # writes the captured samples and exits stands in for one that dies every 0.3 s.
+    _fake_sudo(
+        tmp_path, monkeypatch, f'cat "{Path(__file__).parent / "powermetrics.plist"}"\nsleep 0.3\n'
+    )
+    import time
+
+    with sampler.PowerSession() as power:
+        time.sleep(1.5)
+        assert power.alive()
+        system, _ = power.slice(0, time.time() + 60, set())
+    assert len(system) > 2  # more than the one launch's two samples
+    assert "powermetrics restarted" in (power.note or "")
