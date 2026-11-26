@@ -1,36 +1,54 @@
-"""PDFs through MinerU2.5 two-step extraction on MLX, one rendered page at a time.
+"""MinerU2.5 two-step extraction on MLX, one rendered page at a time.
 
 Needs the optional `bench` extra. Each page's blocks are joined in reading order as
-Markdown; `extract` turns that Markdown into a one-page document so every chunk cites
-its page."""
+Markdown and become a one-page document, so every chunk cites its page."""
 
 import sys
-import time
-from io import BytesIO
+from collections.abc import Iterator
 from pathlib import Path
 
 import pypdfium2 as pdfium
+from PIL import Image
 
-from groundly.ingestion import extract_worker
+from bench.stacks import caps
+from bench.stacks.markdown_page import markdown_page
+from groundly.ingestion.formats import IMAGE_SUFFIXES
 
-SUFFIXES = frozenset({".pdf"})
+SUFFIXES = frozenset({".pdf"}) | IMAGE_SUFFIXES
 MODEL = "opendatalab/MinerU2.5-Pro-2605-1.2B"
 RENDER_SCALE = 2
+MAX_TOKENS = 8192
+# The MLX backend drops the finish reason, so a length stop is read back from the text:
+# a block re-encoding to within this fraction of the cap stopped on it.
+# ponytail: heuristic; a real slide block is a few hundred tokens, far below the line.
+_CAP_FRACTION = 0.95
 # Running page furniture, not course content.
 _SKIPPED = frozenset({"header", "footer", "page_number", "aside_text"})
 _HEADINGS = frozenset({"title", "doc_title", "paragraph_title"})
-# Per-page extraction time of the last page_texts call, read by the page-mode runner.
-last_ms: dict[int, float] = {}
 _client = None
 
 
 def _get_client():
     global _client
     if _client is None:
-        from mineru_vl_utils import MinerUClient
+        from dataclasses import replace
 
-        _client = MinerUClient(backend="mlx-engine", model_path=MODEL, use_tqdm=False)
+        from mineru_vl_utils import MinerUClient
+        from mineru_vl_utils.mineru_client import _build_default_sampling_params
+
+        # MinerU's own per-block-type defaults, each capped; a dict passed in replaces them
+        params = {
+            k: replace(v, max_new_tokens=MAX_TOKENS)
+            for k, v in _build_default_sampling_params("mlx-engine").items()
+        }
+        _client = MinerUClient(
+            backend="mlx-engine", model_path=MODEL, use_tqdm=False, sampling_params=params
+        )
     return _client
+
+
+def _token_count(text: str) -> int:
+    return len(_get_client().client.processor.tokenizer.encode(text, add_special_tokens=False))
 
 
 def _markdown(blocks) -> str:
@@ -43,46 +61,27 @@ def _markdown(blocks) -> str:
     return "\n\n".join(parts)
 
 
-def _page_markdown(pdf: pdfium.PdfDocument, n: int) -> str:
-    page = pdf[n - 1]
-    try:
-        image = page.render(scale=RENDER_SCALE).to_pil().convert("RGB")
-    finally:
-        page.close()
-    return _markdown(_get_client().two_step_extract(image))
+def _page(image: Image.Image, n: int):
+    blocks = _get_client().two_step_extract(image)
+    if any(_token_count(b.get("content") or "") >= MAX_TOKENS * _CAP_FRACTION for b in blocks):
+        caps.hit(n)
+    return n, markdown_page(_markdown(blocks), n)
 
 
-def page_texts(path: Path, pages: list[int], ocr_lang: str | None) -> dict[int, str]:
-    last_ms.clear()
+def read(path: Path, pages: list[int] | None, ocr_lang: str | None) -> Iterator:
+    if path.suffix.lower() in IMAGE_SUFFIXES:
+        with Image.open(path) as img:
+            yield _page(img.convert("RGB"), 1)
+        return
     pdf = pdfium.PdfDocument(path)
     try:
-        texts = {}
-        for n in pages:
-            start = time.perf_counter()
-            texts[n] = _page_markdown(pdf, n)
-            last_ms[n] = (time.perf_counter() - start) * 1000
-        return texts
-    finally:
-        pdf.close()
-
-
-def _markdown_document(markdown: str, n: int):
-    from docling.datamodel.base_models import DocumentStream, InputFormat
-    from docling.document_converter import DocumentConverter
-
-    stream = DocumentStream(name=f"page-{n}.md", stream=BytesIO(markdown.encode()))
-    return DocumentConverter(allowed_formats=[InputFormat.MD]).convert(stream).document
-
-
-def extract(path: Path, ocr_lang: str | None) -> dict:
-    pdf = pdfium.PdfDocument(path)
-    try:
-        chunks = []
-        for n in range(1, len(pdf) + 1):
-            markdown = _page_markdown(pdf, n)
-            if markdown.strip():
-                chunks += extract_worker.chunk_document(_markdown_document(markdown, n), page=n)
-        return {"pages": len(pdf), "chunks": chunks}
+        for n in sorted(pages) if pages else range(1, len(pdf) + 1):
+            page = pdf[n - 1]
+            try:
+                image = page.render(scale=RENDER_SCALE).to_pil().convert("RGB")
+            finally:
+                page.close()
+            yield _page(image, n)
     finally:
         pdf.close()
 
