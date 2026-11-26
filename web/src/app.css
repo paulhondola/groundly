@@ -1,6 +1,21 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Geist ships with the page (OFL 1.1, licence beside the files) so it renders offline. */
+@font-face {
+  font-family: "Geist";
+  src: url("/static/fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/static/fonts/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 :root {
   --background: oklch(0.99 0.002 250);
   --foreground: oklch(0.16 0.015 255);
@@ -27,33 +42,39 @@
   --status-correct: oklch(0.55 0.16 155);
   --status-wrong: oklch(0.577 0.215 27);
   --status-awaiting: oklch(0.68 0.15 75);
+  --status-empty: oklch(0.7 0.01 250);
+  --subtle-foreground: oklch(0.52 0.015 255);
+  --well: oklch(0.975 0.004 250);
 }
 
 .dark {
-  --background: oklch(0.145 0.012 255);
-  --foreground: oklch(0.96 0.006 250);
-  --card: oklch(0.185 0.014 255);
-  --card-foreground: oklch(0.96 0.006 250);
-  --popover: oklch(0.185 0.014 255);
-  --popover-foreground: oklch(0.96 0.006 250);
-  --primary: oklch(0.92 0.01 250);
-  --primary-foreground: oklch(0.17 0.015 255);
-  --secondary: oklch(0.24 0.016 255);
-  --secondary-foreground: oklch(0.96 0.006 250);
-  --muted: oklch(0.23 0.014 255);
-  --muted-foreground: oklch(0.7 0.015 250);
-  --accent: oklch(0.26 0.02 250);
-  --accent-foreground: oklch(0.96 0.006 250);
-  --destructive: oklch(0.64 0.21 25);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.28 0.014 255);
-  --input: oklch(0.28 0.014 255);
-  --ring: oklch(0.68 0.14 245);
-  --status-mastered: oklch(0.68 0.15 155);
-  --status-progress: oklch(0.7 0.14 245);
-  --status-correct: oklch(0.68 0.15 155);
-  --status-wrong: oklch(0.66 0.2 25);
-  --status-awaiting: oklch(0.76 0.14 75);
+  --background: #0b0d10;
+  --foreground: #e7eaee;
+  --card: #12151a;
+  --card-foreground: #e7eaee;
+  --popover: #12151a;
+  --popover-foreground: #e7eaee;
+  --primary: #e7eaee;
+  --primary-foreground: #0b0d10;
+  --secondary: #1a1e25;
+  --secondary-foreground: #e7eaee;
+  --muted: #1a1e25;
+  --muted-foreground: #a6adba;
+  --subtle-foreground: #8b93a1;
+  --accent: #1a1e25;
+  --accent-foreground: #e7eaee;
+  --destructive: #f5a88e;
+  --destructive-foreground: #0b0d10;
+  --border: #1f242c;
+  --input: #1f242c;
+  --ring: #8b93a1;
+  --well: #0e1014;
+  --status-mastered: #3fcf8e;
+  --status-progress: #a6adba;
+  --status-correct: #3fcf8e;
+  --status-wrong: #f5a88e;
+  --status-awaiting: #c9ced6;
+  --status-empty: #4a525e;
 }
 
 @theme inline {
@@ -76,12 +97,17 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-well: var(--well);
+  --color-mastered: var(--status-mastered);
+  --color-missed: var(--status-wrong);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-sans:
+    "Geist", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 @layer base {
@@ -94,57 +120,38 @@
   }
 }
 
-@keyframes border-beam-spin {
-  0% {
-    background-position: 0% 50%;
+/* The one moving text treatment: a host is working. Still under reduced motion. */
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
   }
-  50% {
-    background-position: 100% 50%;
-  }
-  100% {
-    background-position: 0% 50%;
+  to {
+    background-position: 0 0;
   }
 }
 
 @layer components {
-  .border-beam {
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    pointer-events: none;
-  }
-
-  .border-beam::before {
-    content: "";
-    position: absolute;
-    inset: -1px;
-    border-radius: inherit;
-    padding: 1.5px;
+  .shimmer {
     background: linear-gradient(
       90deg,
-      transparent 0%,
-      var(--status-progress) 35%,
-      var(--ring) 50%,
-      var(--status-progress) 65%,
-      transparent 100%
+      var(--subtle-foreground) 0%,
+      var(--subtle-foreground) 35%,
+      var(--foreground) 50%,
+      var(--subtle-foreground) 65%,
+      var(--subtle-foreground) 100%
     );
-    background-size: 200% 100%;
-    animation: border-beam-spin 3s linear infinite;
-    -webkit-mask:
-      linear-gradient(#fff 0 0) content-box,
-      linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask:
-      linear-gradient(#fff 0 0) content-box,
-      linear-gradient(#fff 0 0);
-    mask-composite: exclude;
-    pointer-events: none;
+    background-size: 250% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: shimmer 2.4s linear infinite;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .border-beam::before {
+  .shimmer {
     animation: none;
-    background-position: 50% 50%;
+    background: none;
+    color: var(--muted-foreground);
   }
 }

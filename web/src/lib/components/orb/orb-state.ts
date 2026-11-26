@@ -1,29 +1,12 @@
 import type { RunKind, RunPhase } from "../../api/client";
+import type { OrbMode } from "./orb";
 
-export type OrbState =
-  | "working"
-  | "searching"
-  | "solving"
-  | "listening"
-  | "connecting"
-  | "weaving"
-  | "composing"
-  | "breathing"
-  | "shaping";
-
-export type OrbSize = 20 | 32 | 64;
-
-export function orbStateFor(phase: RunPhase, kind: RunKind): OrbState {
+/** A page run's phase on the orb: a run that is starting is a host attaching. */
+export function orbModeForRun(phase: RunPhase): OrbMode {
   if (phase === "starting") {
-    return "connecting";
+    return "listening";
   }
-  if (phase === "reading") {
-    return "searching";
-  }
-  if (phase === "writing") {
-    return kind === "grade" ? "solving" : "composing";
-  }
-  return "working";
+  return phase === "reading" ? "reading" : "writing";
 }
 
 export function phaseLabelFor(phase: RunPhase, kind: RunKind, activeTool?: string | null): string {

@@ -10,6 +10,8 @@ export const queryKeys = {
   attempt: (subject: string, attemptId: number) =>
     ["subject", subject, "attempts", attemptId] as const,
   remote: () => ["remote"] as const,
+  activity: () => ["activity"] as const,
+  exportInfo: (subject: string) => ["subject", subject, "export"] as const,
 };
 
 export function treeQueryOptions(subject: string) {

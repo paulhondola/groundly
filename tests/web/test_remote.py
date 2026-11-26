@@ -366,6 +366,7 @@ def test_socket_perimeter_pairing_multi_device_and_revocation(monkeypatch, tmp_p
         shell_test = phone.get("/s/PDSS/test")
         shell_attempt = phone.get("/s/NOPE/attempts/1")
         shell_pair = phone.get("/pair")
+        shell_connections = phone.get("/connections")
         assert (
             shell_root.status_code
             == shell_pdss.status_code
@@ -373,6 +374,7 @@ def test_socket_perimeter_pairing_multi_device_and_revocation(monkeypatch, tmp_p
             == shell_test.status_code
             == shell_attempt.status_code
             == shell_pair.status_code
+            == shell_connections.status_code
             == 200
         )
         assert shell_pdss.text == shell_nope.text == shell_test.text == shell_attempt.text
