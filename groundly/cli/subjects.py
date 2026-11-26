@@ -45,6 +45,7 @@ def index(
     ] = False,
 ) -> None:
     """Index course materials: hash-skip idempotent, per-file progress, resumable."""
+    from groundly.core import activity
     from groundly.core.logs import setup_logging
     from groundly.core.manifest import validate_ocr_lang
     from groundly.core.subject import Subject
@@ -107,18 +108,27 @@ def index(
         # during the directory walk, the slowest silent part of a large run.
         task = progress.add_task("discovering files…", total=1)
 
+        finished = discovered = 0
+
         def on_discovered(total: int) -> None:
+            nonlocal discovered
+            discovered = total
             progress.update(
                 task,
                 description="nothing to index" if total == 0 else "indexing…",
                 total=total,
             )
+            activity.record("index", "index_start", subject=subject, detail={"files": total})
 
         def on_event(path: Path, stage: str) -> None:
+            nonlocal finished
             if stage in ("extracting", "embedding"):
                 progress.update(task, description=f"{_visible(path.name)}: {stage}…")
             elif stage in set(Status):
                 progress.advance(task)
+                finished += 1
+                detail = {"n": finished, "of": discovered, "file": path.name, "status": str(stage)}
+                activity.record("index", "index_file", subject=subject, detail=detail)
 
         try:
             results = pipeline.index_paths(
@@ -130,6 +140,7 @@ def index(
                 retry_failed=retry_failed,
             )
         except (RuntimeError, ValueError) as exc:
+            activity.record("index", "index_failed", subject=subject, detail={"reason": str(exc)})
             _fail(str(exc))
 
     for r in results:
@@ -141,6 +152,9 @@ def index(
     indexed = sum(r.status == Status.INDEXED for r in results)
     failed = sum(r.status in (Status.EXTRACTION_FAILED, Status.ERROR) for r in results)
     console.print(f"{indexed} indexed, {len(results) - indexed - failed} skipped, {failed} failed")
+    activity.record(
+        "index", "index_done", subject=subject, detail={"indexed": indexed, "failed": failed}
+    )
 
     if failed:
         raise typer.Exit(code=1)

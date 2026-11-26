@@ -1,10 +1,23 @@
 """CLI: `groundly mcp` verb — thin stdio-runner wrapper (P4 v1)."""
 
+import pytest
 from typer.testing import CliRunner
 
 from groundly.cli import app
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _activity_registration_stays_in_the_test(monkeypatch):
+    """The verbs register activity logging on the shared server and, for stdio, an exit hook;
+    keep both from outliving the test (the hook would write to the real ~/.groundly)."""
+    from groundly.mcp.server import mcp
+
+    exits = []
+    monkeypatch.setattr(mcp, "middleware", list(mcp.middleware))
+    monkeypatch.setattr("atexit.register", lambda *a, **kw: exits.append(a))
+    return exits
 
 
 def test_mcp_verb_registered_and_runs_the_server(monkeypatch):
@@ -57,3 +70,19 @@ def test_mcp_debug_accepted_in_stdio_mode(monkeypatch):
     result = runner.invoke(app, ["mcp", "--debug"])
     assert result.exit_code == 0, result.output
     assert calls == [{}]
+
+
+@pytest.mark.parametrize(("args", "source"), [([], "mcp_stdio"), (["--http"], "mcp_http")])
+def test_mcp_verb_logs_activity(
+    monkeypatch, _activity_registration_stays_in_the_test, args, source
+):
+    from fastmcp import FastMCP
+
+    from groundly.mcp.activity import ActivityMiddleware
+    from groundly.mcp.server import mcp
+
+    monkeypatch.setattr(FastMCP, "run", lambda self, **kw: None)
+    assert runner.invoke(app, ["mcp", *args]).exit_code == 0
+    assert [m.source for m in mcp.middleware if isinstance(m, ActivityMiddleware)] == [source]
+    exits = _activity_registration_stays_in_the_test
+    assert exits == ([] if args else [(exits[0][0], "mcp_stdio", "session_end")])

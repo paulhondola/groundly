@@ -823,3 +823,49 @@ def test_ascii_stdout_replaces_non_ascii_instead_of_crashing(home):
     # replacing is a property of the stream: nothing stored changed
     assert subject.load_manifest().title == "Programare în C — curs"
     assert SubjectStore(subject.store_db_path).list_materials()[0]["filename"] == "curs_în_C.pdf"
+
+
+def _activity_rows():
+    import json
+    import sqlite3
+
+    from groundly.core.paths import activity_db_path
+
+    conn = sqlite3.connect(activity_db_path())
+    try:
+        found = conn.execute("SELECT source, subject, event, detail FROM events ORDER BY id")
+        return [(src, s, e, json.loads(d)) for src, s, e, d in found]
+    finally:
+        conn.close()
+
+
+def test_index_logs_its_progress_to_the_activity_log(monkeypatch, tmp_path):
+    a, b = tmp_path / "a.md", tmp_path / "b.pdf"
+
+    def fake_index_paths(subject, paths, on_event=None, on_discovered=None, **_):
+        on_discovered(2)
+        on_event(a, "extracting")
+        on_event(a, Status.INDEXED)
+        on_event(b, Status.EXTRACTION_FAILED)
+        return [FileResult(a, Status.INDEXED, chunks=1), FileResult(b, Status.EXTRACTION_FAILED)]
+
+    monkeypatch.setattr(pipeline, "index_paths", fake_index_paths)
+    runner.invoke(app, ["index", "PDSS", str(tmp_path)])
+    assert _activity_rows() == [
+        ("index", "PDSS", "index_start", {"files": 2}),
+        ("index", "PDSS", "index_file", {"n": 1, "of": 2, "file": "a.md", "status": "indexed"}),
+        ("index", "PDSS", "index_file",
+         {"n": 2, "of": 2, "file": "b.pdf", "status": "extraction_failed"}),
+        ("index", "PDSS", "index_done", {"indexed": 1, "failed": 1}),
+    ]  # fmt: skip
+
+
+def test_index_logs_a_failed_run(monkeypatch, tmp_path):
+    def fake_index_paths(subject, paths, on_event=None, on_discovered=None, **_):
+        on_discovered(1)
+        raise RuntimeError("store is locked")
+
+    monkeypatch.setattr(pipeline, "index_paths", fake_index_paths)
+    result = runner.invoke(app, ["index", "PDSS", str(tmp_path)])
+    assert result.exit_code != 0
+    assert _activity_rows()[-1] == ("index", "PDSS", "index_failed", {"reason": "store is locked"})

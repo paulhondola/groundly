@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+  "/api/activity": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Activity */
+    get: operations["getActivity"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/auth": {
     parameters: {
       query?: never;
@@ -192,6 +209,57 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/subjects/{subject}/export": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Export */
+    get: operations["exportSubject"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/subjects/{subject}/export/info": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Export Info */
+    get: operations["exportInfo"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/subjects/{subject}/questions/{id}/check": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Check */
+    post: operations["checkAnswer"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/subjects/{subject}/runs": {
     parameters: {
       query?: never;
@@ -250,6 +318,73 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /**
+     * ActivityHost
+     * @description One live MCP host: who it is, how it connects, and what the orb shows for it. `done` is
+     *     not a state: the page shows it briefly when `last_done_at` moves on.
+     */
+    ActivityHost: {
+      /** Client */
+      client: string | null;
+      /** Last Call At */
+      last_call_at: string | null;
+      /** Last Done At */
+      last_done_at: string | null;
+      /**
+       * Orb
+       * @enum {string}
+       */
+      orb: "listening" | "reading" | "mapping" | "writing";
+      /** Started At */
+      started_at: string;
+      /** Subject */
+      subject: string | null;
+      /**
+       * Transport
+       * @enum {string}
+       */
+      transport: "stdio" | "http";
+    };
+    /**
+     * ActivityIndexing
+     * @description One `groundly index` run still going.
+     */
+    ActivityIndexing: {
+      /** Current File */
+      current_file: string | null;
+      /** Done */
+      done: number;
+      /** Started At */
+      started_at: string;
+      /** Subject */
+      subject: string;
+      /** Total */
+      total: number;
+    };
+    /**
+     * ActivityRecent
+     * @description One recent result: a map built, questions written, answers graded or files indexed.
+     */
+    ActivityRecent: {
+      /** At */
+      at: string;
+      /** Subject */
+      subject: string | null;
+      /** Text */
+      text: string;
+    };
+    /**
+     * ActivityResponse
+     * @description What Groundly's processes are doing, read from activity.db by GET /api/activity.
+     */
+    ActivityResponse: {
+      /** Hosts */
+      hosts: components["schemas"]["ActivityHost"][];
+      /** Indexing */
+      indexing: components["schemas"]["ActivityIndexing"][];
+      /** Recent */
+      recent: components["schemas"]["ActivityRecent"][];
+    };
     /**
      * AttemptAnswer
      * @description One graded or awaiting answer in an attempt result.
@@ -393,6 +528,19 @@ export interface components {
       tailscale_enabled: boolean;
     };
     /**
+     * CheckAnswerResponse
+     * @description One choice answer graded before submit: whether it is right, the key, and the
+     *     question's cited sources. Nothing is recorded.
+     */
+    CheckAnswerResponse: {
+      /** Correct */
+      correct: boolean;
+      /** Key */
+      key: number[];
+      /** Sources */
+      sources: components["schemas"]["SourceItem"][];
+    };
+    /**
      * DrawTestResponse
      * @description Drawn test payload returned by GET /api/subjects/{subject}/test.
      */
@@ -430,6 +578,19 @@ export interface components {
       detail?: string | null;
       /** Error */
       error: string;
+    };
+    /**
+     * ExportInfoResponse
+     * @description What a subject's bundle would hold: its file name and the on-disk bytes of store.db
+     *     and of the materials it ships (the zip itself is compressed, so smaller).
+     */
+    ExportInfoResponse: {
+      /** Filename */
+      filename: string;
+      /** Materials Bytes */
+      materials_bytes: number;
+      /** Store Bytes */
+      store_bytes: number;
     };
     /** HTTPValidationError */
     HTTPValidationError: {
@@ -597,10 +758,18 @@ export interface components {
       error?: string | null;
       /** Has Tree */
       has_tree: boolean;
+      /** Last Test At */
+      last_test_at?: string | null;
+      /** Leaves */
+      leaves?: number | null;
+      /** Leaves Mastered */
+      leaves_mastered?: number | null;
       /** Subject */
       subject: string;
       /** Title */
       title: string;
+      /** Topics */
+      topics?: number | null;
     };
     /**
      * SubmitAttemptResponse
@@ -702,6 +871,53 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  getActivity: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ActivityResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
   getAuthStatus: {
     parameters: {
       query?: never;
@@ -1542,6 +1758,271 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  exportSubject: {
+    parameters: {
+      query?: {
+        materials?: boolean;
+      };
+      header?: never;
+      path: {
+        subject: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The subject's bundle. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/zip": unknown;
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  exportInfo: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        subject: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExportInfoResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  checkAnswer: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        subject: string;
+        id: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          /** Selected */
+          selected: number[];
+        };
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CheckAnswerResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
         headers: {
           [name: string]: unknown;
         };

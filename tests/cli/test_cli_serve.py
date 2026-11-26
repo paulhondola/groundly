@@ -41,6 +41,13 @@ def home(monkeypatch, tmp_path):
     return home_dir
 
 
+@pytest.fixture(autouse=True)
+def _activity_registration_stays_in_the_test(monkeypatch):
+    from groundly.mcp.server import mcp
+
+    monkeypatch.setattr(mcp, "middleware", list(mcp.middleware))
+
+
 def _patch(monkeypatch, probe_free=True):
     import uvicorn
 
@@ -412,3 +419,21 @@ def test_handle_exit_shuts_down_runner_once_before_graceful_wait(monkeypatch):
     server.handle_exit(signal.SIGTERM, None)
     assert calls == ["shutdown"]
     assert server.should_exit is True
+
+
+def test_start_logs_its_mcp_sessions_as_http(monkeypatch):
+    from groundly.mcp.activity import ActivityMiddleware
+    from groundly.mcp.server import mcp
+
+    _patch(monkeypatch)
+    assert runner.invoke(app, ["start"]).exit_code == 0
+    assert [m.source for m in mcp.middleware if isinstance(m, ActivityMiddleware)] == ["mcp_http"]
+
+
+def test_serve_logs_no_mcp_activity(monkeypatch):
+    from groundly.mcp.activity import ActivityMiddleware
+    from groundly.mcp.server import mcp
+
+    _patch(monkeypatch)
+    assert runner.invoke(app, ["serve"]).exit_code == 0
+    assert not [m for m in mcp.middleware if isinstance(m, ActivityMiddleware)]

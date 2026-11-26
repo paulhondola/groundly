@@ -1,4 +1,4 @@
-import type { DrawnQuestion } from "../api/client";
+import type { CheckResult, DrawnQuestion } from "../api/client";
 
 export type AnswerMap = Record<number, string | number[]>;
 
@@ -8,6 +8,14 @@ export interface StoredTest {
   questions: DrawnQuestion[];
   answers: AnswerMap;
   current: number;
+  /** Choice answers already checked. A checked answer is locked: the server does not enforce
+   * it, so the page keeps the lock here, where a reload finds it again. */
+  checked?: Record<number, CheckResult>;
+}
+
+/** "A", "B", … for an option's place in the order the student sees. */
+export function optionLetter(index: number): string {
+  return String.fromCharCode(65 + (index % 26));
 }
 
 export function storageKey(subject: string, topicId: number | null): string {

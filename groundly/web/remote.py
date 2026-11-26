@@ -10,7 +10,6 @@ import os
 import re
 import secrets
 import sqlite3
-import stat
 import threading
 import time
 from collections import deque
@@ -27,7 +26,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from groundly.core.paths import remote_db_path
+from groundly.core.paths import owner_only, remote_db_path
 from groundly.web.tailscale import TailscaleInfo
 
 SESSION_COOKIE = "groundly_session"
@@ -131,9 +130,7 @@ class RemoteStore:
             os.close(fd)
             os.chmod(self._db_path, 0o600)
         else:
-            mode = stat.S_IMODE(os.stat(self._db_path).st_mode)
-            if mode & 0o077:
-                os.chmod(self._db_path, 0o600)
+            owner_only(self._db_path)
 
         conn = sqlite3.connect(self._db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
@@ -469,7 +466,7 @@ class _SocketPerimeterMiddleware:
             return
 
         shell = method == "GET" and (
-            path in {"/", "/pair"} or _SUBJECT_SHELL_RE.fullmatch(path) is not None
+            path in {"/", "/pair", "/connections"} or _SUBJECT_SHELL_RE.fullmatch(path) is not None
         )
         session_token = Request(scope).cookies.get(SESSION_COOKIE)
         if session_token:

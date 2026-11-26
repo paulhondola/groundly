@@ -1,6 +1,193 @@
 {
   "components": {
     "schemas": {
+      "ActivityHost": {
+        "description": "One live MCP host: who it is, how it connects, and what the orb shows for it. `done` is\nnot a state: the page shows it briefly when `last_done_at` moves on.",
+        "properties": {
+          "client": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client"
+          },
+          "last_call_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Call At"
+          },
+          "last_done_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Done At"
+          },
+          "orb": {
+            "enum": [
+              "listening",
+              "reading",
+              "mapping",
+              "writing"
+            ],
+            "title": "Orb",
+            "type": "string"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "transport": {
+            "enum": [
+              "stdio",
+              "http"
+            ],
+            "title": "Transport",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client",
+          "transport",
+          "started_at",
+          "last_call_at",
+          "subject",
+          "orb",
+          "last_done_at"
+        ],
+        "title": "ActivityHost",
+        "type": "object"
+      },
+      "ActivityIndexing": {
+        "description": "One `groundly index` run still going.",
+        "properties": {
+          "current_file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current File"
+          },
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "subject",
+          "done",
+          "total",
+          "current_file",
+          "started_at"
+        ],
+        "title": "ActivityIndexing",
+        "type": "object"
+      },
+      "ActivityRecent": {
+        "description": "One recent result: a map built, questions written, answers graded or files indexed.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "subject",
+          "text"
+        ],
+        "title": "ActivityRecent",
+        "type": "object"
+      },
+      "ActivityResponse": {
+        "description": "What Groundly's processes are doing, read from activity.db by GET /api/activity.",
+        "properties": {
+          "hosts": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityHost"
+            },
+            "title": "Hosts",
+            "type": "array"
+          },
+          "indexing": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityIndexing"
+            },
+            "title": "Indexing",
+            "type": "array"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityRecent"
+            },
+            "title": "Recent",
+            "type": "array"
+          }
+        },
+        "required": [
+          "hosts",
+          "indexing",
+          "recent"
+        ],
+        "title": "ActivityResponse",
+        "type": "object"
+      },
       "AttemptAnswer": {
         "description": "One graded or awaiting answer in an attempt result.",
         "properties": {
@@ -389,6 +576,36 @@
         "title": "AuthStatusResponse",
         "type": "object"
       },
+      "CheckAnswerResponse": {
+        "description": "One choice answer graded before submit: whether it is right, the key, and the\nquestion's cited sources. Nothing is recorded.",
+        "properties": {
+          "correct": {
+            "title": "Correct",
+            "type": "boolean"
+          },
+          "key": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Key",
+            "type": "array"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceItem"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "correct",
+          "key",
+          "sources"
+        ],
+        "title": "CheckAnswerResponse",
+        "type": "object"
+      },
       "DrawTestResponse": {
         "description": "Drawn test payload returned by GET /api/subjects/{subject}/test.",
         "properties": {
@@ -483,6 +700,30 @@
           "error"
         ],
         "title": "ErrorResponse",
+        "type": "object"
+      },
+      "ExportInfoResponse": {
+        "description": "What a subject's bundle would hold: its file name and the on-disk bytes of store.db\nand of the materials it ships (the zip itself is compressed, so smaller).",
+        "properties": {
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "materials_bytes": {
+            "title": "Materials Bytes",
+            "type": "integer"
+          },
+          "store_bytes": {
+            "title": "Store Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "filename",
+          "store_bytes",
+          "materials_bytes"
+        ],
+        "title": "ExportInfoResponse",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -936,6 +1177,39 @@
             "title": "Has Tree",
             "type": "boolean"
           },
+          "last_test_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Test At"
+          },
+          "leaves": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leaves"
+          },
+          "leaves_mastered": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leaves Mastered"
+          },
           "subject": {
             "title": "Subject",
             "type": "string"
@@ -943,6 +1217,17 @@
           "title": {
             "title": "Title",
             "type": "string"
+          },
+          "topics": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topics"
           }
         },
         "required": [
@@ -1192,6 +1477,54 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/activity": {
+      "get": {
+        "operationId": "getActivity",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": " Activity"
+      }
+    },
     "/api/auth": {
       "get": {
         "operationId": "getAuthStatus",
@@ -2233,6 +2566,342 @@
           }
         },
         "summary": " Result"
+      }
+    },
+    "/api/subjects/{subject}/export": {
+      "get": {
+        "operationId": "exportSubject",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "subject",
+            "required": true,
+            "schema": {
+              "title": "Subject",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "materials",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Materials",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/zip": {}
+            },
+            "description": "The subject's bundle."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": " Export"
+      }
+    },
+    "/api/subjects/{subject}/export/info": {
+      "get": {
+        "operationId": "exportInfo",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "subject",
+            "required": true,
+            "schema": {
+              "title": "Subject",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportInfoResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": " Export Info"
+      }
+    },
+    "/api/subjects/{subject}/questions/{id}/check": {
+      "post": {
+        "operationId": "checkAnswer",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "subject",
+            "required": true,
+            "schema": {
+              "title": "Subject",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "Strict request body for POST /api/subjects/{subject}/questions/{id}/check.",
+                "properties": {
+                  "selected": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "title": "Selected",
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "selected"
+                ],
+                "title": "CheckAnswerRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckAnswerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": " Check"
       }
     },
     "/api/subjects/{subject}/runs": {

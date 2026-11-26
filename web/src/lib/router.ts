@@ -3,6 +3,7 @@ import { createRouter } from "sv-router";
 import AttemptResultRoute from "./routes/AttemptResultRoute.svelte";
 import SubjectTestRoute from "./routes/SubjectTestRoute.svelte";
 import SubjectTreeRoute from "./routes/SubjectTreeRoute.svelte";
+import ConnectionsView from "./views/ConnectionsView.svelte";
 import NotFoundView from "./views/NotFoundView.svelte";
 import SubjectsView from "./views/SubjectsView.svelte";
 
@@ -78,6 +79,7 @@ let redirectHome: (() => Promise<unknown>) | null = null;
 const router = createRouter({
   "/": SubjectsView,
   "/pair": SubjectsView,
+  "/connections": ConnectionsView,
   "/s/:subject": SubjectTreeRoute,
   "/s/:subject/test": SubjectTestRoute,
   "/s/:subject/attempts/:id": AttemptResultRoute,

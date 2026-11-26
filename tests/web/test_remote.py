@@ -366,6 +366,7 @@ def test_socket_perimeter_pairing_multi_device_and_revocation(monkeypatch, tmp_p
         shell_test = phone.get("/s/PDSS/test")
         shell_attempt = phone.get("/s/NOPE/attempts/1")
         shell_pair = phone.get("/pair")
+        shell_connections = phone.get("/connections")
         assert (
             shell_root.status_code
             == shell_pdss.status_code
@@ -373,6 +374,7 @@ def test_socket_perimeter_pairing_multi_device_and_revocation(monkeypatch, tmp_p
             == shell_test.status_code
             == shell_attempt.status_code
             == shell_pair.status_code
+            == shell_connections.status_code
             == 200
         )
         assert shell_pdss.text == shell_nope.text == shell_test.text == shell_attempt.text
@@ -905,3 +907,50 @@ def test_perimeter_restricts_head_to_static_only(monkeypatch, tmp_path):
         assert phone.head("/static/page.css").status_code == 200
         for path in ("/", "/pair", "/s/PDSS", "/api/auth"):
             assert phone.head(path).status_code == 401
+
+
+def test_a_paired_phone_may_export_and_an_unpaired_one_may_not(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    _seed_pdss(tmp_path / "home")
+    ts_info = TailscaleInfo(ipv4="100.101.102.103", dns_name="macbook.tail1234.ts.net")
+    runtime = RemoteRuntime(ts_info, 8765)
+    app = create_app(remote=runtime)
+    ts_origin = {"Origin": "http://macbook.tail1234.ts.net:8765"}
+
+    def phone_client(ip):
+        return TestClient(
+            _socket_wrapper(app, ts_info.ipv4, ip), base_url="http://macbook.tail1234.ts.net:8765"
+        )
+
+    with phone_client("100.64.0.10") as phone, phone_client("100.64.0.11") as stranger:
+        for path in ("/api/subjects/PDSS/export/info", "/api/subjects/PDSS/export"):
+            assert stranger.get(path).status_code == 401
+        token = runtime.pairing_url.split("#", 1)[1]
+        assert phone.post("/api/pair", json={"token": token}, headers=ts_origin).status_code == 200
+        assert phone.get("/api/subjects/PDSS/export/info").status_code == 200
+        # Plain-HTTP Tailscale gets no Sec-Fetch-Site from the phone's browser.
+        r = phone.get("/api/subjects/PDSS/export?materials=false")
+        assert r.status_code == 200 and r.headers["content-type"] == "application/zip"
+
+
+def test_a_paired_phone_may_read_activity_and_an_unpaired_one_may_not(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("GROUNDLY_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    ts_info = TailscaleInfo(ipv4="100.101.102.103", dns_name="macbook.tail1234.ts.net")
+    runtime = RemoteRuntime(ts_info, 8765)
+    app = create_app(remote=runtime)
+    ts_origin = {"Origin": "http://macbook.tail1234.ts.net:8765"}
+
+    def phone_client(ip):
+        return TestClient(
+            _socket_wrapper(app, ts_info.ipv4, ip), base_url="http://macbook.tail1234.ts.net:8765"
+        )
+
+    with phone_client("100.64.0.10") as phone, phone_client("100.64.0.11") as stranger:
+        assert stranger.get("/api/activity").status_code == 401
+        token = runtime.pairing_url.split("#", 1)[1]
+        assert phone.post("/api/pair", json={"token": token}, headers=ts_origin).status_code == 200
+        assert phone.get("/api/activity").json() == {"hosts": [], "indexing": [], "recent": []}

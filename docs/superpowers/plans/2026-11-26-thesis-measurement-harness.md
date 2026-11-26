@@ -56,16 +56,21 @@
 ```python
 duckdb = pytest.importorskip("duckdb")
 
+
 def test_connect_creates_every_table(tmp_path):
     con = store.connect(tmp_path / "b.duckdb")
-    names = {r[0] for r in con.execute("select table_name from information_schema.tables").fetchall()}
+    names = {
+        r[0] for r in con.execute("select table_name from information_schema.tables").fetchall()
+    }
     assert {"meta", "session", "session_package", "run", *store.TABLES} <= names
+
 
 def test_newer_schema_is_refused(tmp_path):
     p = tmp_path / "b.duckdb"
     store.connect(p).execute("update meta set schema_version = 99").close()
     with pytest.raises(SystemExit, match="schema v99, this bench knows v1"):
         store.connect(p)
+
 
 def test_write_run_is_one_transaction(tmp_path):
     con = store.connect(tmp_path / "b.duckdb")
@@ -75,6 +80,7 @@ def test_write_run_is_one_transaction(tmp_path):
     assert con.execute("select count(*) from run").fetchone() == (0,)
     rid = store.write_run(con, RUN, {"page": [PAGE], "page_text": [PAGE_TEXT]})
     assert con.execute("select run from page").fetchall() == [(rid,)]
+
 
 def test_a_second_writer_gets_a_plain_error(tmp_path):
     p = tmp_path / "b.duckdb"
@@ -131,13 +137,17 @@ def test_parse_ioreg_reads_in_use_memory():
     assert sampler.parse_ioreg(IOREG_SAMPLE) == 1037664256
     assert sampler.parse_ioreg("nothing here") is None
 
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="libproc")
 def test_footprint_of_this_process_is_positive():
     assert sampler.footprint_bytes(os.getpid()) > 0
 
+
 def test_sampler_sees_a_child_allocate_and_burn_cpu():
     child = subprocess.Popen([sys.executable, "-c", ALLOC_200MB_AND_SPIN_1S])
-    s = sampler.ProcSampler(child.pid); s.start(); child.wait()
+    s = sampler.ProcSampler(child.pid)
+    s.start()
+    child.wait()
     rows = s.stop()
     assert max(r["rss_mb"] for r in rows) >= 200
     assert rows[-1]["cpu_s"] >= rows[0]["cpu_s"]

@@ -1,7 +1,10 @@
 <script lang="ts">
   import { createMutation, createQuery, useQueryClient } from "@tanstack/svelte-query";
+  import Check from "@lucide/svelte/icons/check";
+  import X from "@lucide/svelte/icons/x";
   import { ApiError, type SubmittedAnswer, apiClient, pageURL, unwrap } from "../api/client";
   import { queryKeys, treeQueryOptions } from "../api/queries";
+  import SourceItem from "../components/SourceItem.svelte";
   import Button from "../components/ui/Button.svelte";
   import Card from "../components/ui/Card.svelte";
   import { cn } from "../components/ui/utils";
@@ -12,6 +15,7 @@
     generateAttemptToken,
     isAnswered,
     loadTest,
+    optionLetter,
     saveTest,
     shouldIgnoreShortcut,
     shuffled,
@@ -62,7 +66,34 @@
     test ? test.questions.filter((q) => isAnswered(q, test?.answers[q.id])).length : 0,
   );
   const unansweredCount = $derived(total - answeredCount);
-  const progressPercent = $derived(total > 0 ? Math.round((answeredCount / total) * 100) : 0);
+  const checkResult = $derived(
+    test && currentQuestion ? (test.checked?.[currentQuestion.id] ?? null) : null,
+  );
+  const checkedResults = $derived(test ? Object.values(test.checked ?? {}) : []);
+  const correctCount = $derived(checkedResults.filter((r) => r.correct).length);
+  const keyLetters = $derived(
+    checkResult && currentQuestion
+      ? currentQuestion.options
+          .map((o, i) => (checkResult.key.includes(o.id) ? optionLetter(i) : null))
+          .filter((l) => l !== null)
+      : [],
+  );
+  const canCheck = $derived(
+    Boolean(
+      test &&
+        currentQuestion &&
+        currentQuestion.kind !== "open" &&
+        !checkResult &&
+        isAnswered(currentQuestion, test.answers[currentQuestion.id]),
+    ),
+  );
+
+  const checkable = $derived(
+    Boolean(currentQuestion && currentQuestion.kind !== "open" && !checkResult),
+  );
+
+  let checking = $state(false);
+  let checkError = $state<string | null>(null);
 
   let persister: ReturnType<typeof createTestPersister> | null = null;
   let sessionSeq = 0;
@@ -131,6 +162,8 @@
     loading = true;
     loadError = null;
     submitError = null;
+    checkError = null;
+    checking = false;
     confirming = false;
     sending = false;
     test = null;
@@ -194,6 +227,7 @@
     test.current = index;
     confirming = false;
     submitError = null;
+    checkError = null;
     store();
   }
 
@@ -207,8 +241,8 @@
   }
 
   function toggleOption(questionId: number, optionId: number, kind: "single" | "multiple"): void {
-    if (!test) {
-      return;
+    if (!test || test.checked?.[questionId]) {
+      return; // a checked answer is locked
     }
     if (kind === "single") {
       test.answers[questionId] = [optionId];
@@ -224,6 +258,40 @@
     }
     confirming = false;
     store();
+  }
+
+  async function check(): Promise<void> {
+    const q = currentQuestion;
+    if (!test || !q || q.kind === "open" || test.checked?.[q.id] || checking) {
+      return;
+    }
+    const selected = test.answers[q.id];
+    if (!Array.isArray(selected) || selected.length === 0) {
+      return;
+    }
+    const seq = sessionSeq;
+    checking = true;
+    checkError = null;
+    try {
+      const result = unwrap(
+        await apiClient.POST("/api/subjects/{subject}/questions/{id}/check", {
+          params: { path: { subject, id: q.id } },
+          body: { selected },
+        }),
+      );
+      if (seq === sessionSeq && test) {
+        test.checked = { ...test.checked, [q.id]: result };
+        store();
+      }
+    } catch (err) {
+      if (seq === sessionSeq) {
+        checkError = err instanceof Error ? err.message : "the answer could not be checked";
+      }
+    } finally {
+      if (seq === sessionSeq) {
+        checking = false;
+      }
+    }
   }
 
   function submit(): void {
@@ -293,24 +361,31 @@
 
 <svelte:window onkeydown={handleWindowKeydown} />
 
-<div class="mx-auto max-w-3xl space-y-6">
-  <div class="space-y-1">
-    <a
+<div class="mx-auto max-w-[760px] space-y-7">
+  <div class="flex items-center gap-3">
+    <Button
+      variant="outline"
+      size="icon"
       href={pageURL(subject)}
-      class="back inline-flex items-center text-xs font-medium text-muted-foreground hover:text-foreground"
+      aria-label="Leave the test, back to the map"
+      class="back shrink-0 text-muted-foreground"
     >
-      ← Back to the map
-    </a>
+      <X size={16} aria-hidden="true" />
+    </Button>
     {#if courseTitle}
-      <h1 class="text-2xl font-semibold tracking-tight text-foreground">{courseTitle}</h1>
-      <p class="text-sm text-muted-foreground">{scopeTitle}</p>
+      <div class="flex min-w-0 flex-col gap-0.5">
+        <h1 class="truncate text-[15px] font-medium text-foreground">{scopeTitle}</h1>
+        <p class="truncate font-mono text-xs text-subtle-foreground">
+          {courseTitle}{total > 0 ? " · " + total + (total === 1 ? " question" : " questions") : ""}
+        </p>
+      </div>
     {/if}
   </div>
 
   {#if isLoading}
     <p class="text-sm text-muted-foreground">Drawing test…</p>
   {:else if displayError}
-    <Card class="border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
+    <Card class="border-destructive/40 p-4 text-sm text-destructive" role="alert">
       {displayError}
     </Card>
   {:else if !test || test.questions.length === 0}
@@ -322,139 +397,223 @@
     </Card>
   {:else if currentQuestion}
     <div class="space-y-3">
-      <div class="flex items-center justify-between text-xs text-muted-foreground">
+      <div class="flex flex-wrap justify-between gap-2 text-[13px] text-muted-foreground">
         <span class="counter">Question {test.current + 1} of {total}</span>
-        <span>{answeredCount} of {total} answered</span>
+        <span>
+          {answeredCount} of {total} answered{checkedResults.length > 0
+            ? " · " + correctCount + " correct · " + (checkedResults.length - correctCount) + " missed"
+            : ""}
+        </span>
       </div>
-      <div class="h-1.5 w-full overflow-hidden rounded-full bg-muted" aria-hidden="true">
-        <div
-          class="h-full rounded-full bg-primary transition-all"
-          style={`width:${progressPercent}%`}
-        ></div>
-      </div>
-
-      <nav aria-label="Questions" class="dots flex flex-wrap gap-1.5 pt-1">
+      <nav
+        aria-label="Questions"
+        class="dots grid gap-1.5"
+        style={`grid-template-columns:repeat(${total},minmax(0,1fr))`}
+      >
         {#each test.questions as q, i (q.id)}
           {@const done = isAnswered(q, test.answers[q.id])}
+          {@const result = test.checked?.[q.id]}
           <button
             type="button"
-            aria-label={"Question " + (i + 1) + (done ? ", answered" : "")}
+            aria-label={"Question " +
+              (i + 1) +
+              (result ? (result.correct ? ", correct" : ", missed") : done ? ", answered" : "")}
             aria-current={i === test.current ? "step" : undefined}
             onclick={() => go(i)}
-            class={cn(
-              "dot inline-flex h-8 min-w-8 items-center justify-center rounded-md border px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              i === test.current
-                ? "border-primary bg-primary text-primary-foreground"
-                : done
-                  ? "answered border-ring/40 bg-accent text-accent-foreground"
-                  : "border-border bg-card text-muted-foreground hover:text-foreground",
-            )}
+            class="dot group flex h-6 items-center rounded focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           >
-            {i + 1}
+            <span
+              class={cn(
+                "h-1.5 w-full rounded-[3px] transition-colors",
+                result
+                  ? result.correct
+                    ? "answered bg-mastered"
+                    : "answered bg-missed"
+                  : i === test.current
+                    ? "bg-foreground/60"
+                    : done
+                      ? "answered bg-foreground/35"
+                      : "bg-border group-hover:bg-ring/40",
+              )}
+            ></span>
           </button>
         {/each}
       </nav>
     </div>
 
     {#if submitError}
-      <Card
-        class="notice bad border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive"
-        role="alert"
-      >
+      <Card class="notice bad border-destructive/40 p-4 text-sm text-destructive" role="alert">
         {submitError}
       </Card>
     {/if}
 
-    <Card class="p-6">
-      <fieldset class="question space-y-4">
-        <legend class="text-base font-medium leading-relaxed text-foreground">
-          {currentQuestion.stem}
-        </legend>
+    <fieldset class="question space-y-6" disabled={checkResult !== null}>
+      <legend class="mb-6 text-2xl leading-snug font-semibold tracking-[-0.01em] text-foreground">
+        {currentQuestion.stem}
+      </legend>
 
-        {#if currentQuestion.code}
-          <pre
-            class="code overflow-x-auto rounded-lg border border-border bg-muted/60 p-4 font-mono text-xs leading-relaxed text-foreground"
-          >{currentQuestion.code}</pre>
+      {#if currentQuestion.code}
+        <pre
+          class="code overflow-x-auto rounded-xl border border-border bg-muted p-4 font-mono text-[13px] leading-relaxed text-foreground"
+        >{currentQuestion.code}</pre>
+      {/if}
+
+      {#if currentQuestion.kind === "open"}
+        <textarea
+          maxlength="4000"
+          rows="6"
+          aria-label="Your answer"
+          value={typeof test.answers[currentQuestion.id] === "string"
+            ? (test.answers[currentQuestion.id] as string)
+            : ""}
+          oninput={(event) => setOpenAnswer(currentQuestion.id, event.currentTarget.value)}
+          class="w-full rounded-xl border border-border bg-card p-4 text-[15px] text-foreground placeholder:text-subtle-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          placeholder="Write your answer…"
+        ></textarea>
+        <p class="text-xs text-subtle-foreground">
+          Written answers are graded after you submit, by your agent.
+        </p>
+      {:else}
+        {@const selectedList = Array.isArray(test.answers[currentQuestion.id])
+          ? (test.answers[currentQuestion.id] as number[])
+          : []}
+        {#if currentQuestion.kind === "multiple"}
+          <p class="text-[13px] text-muted-foreground">Choose every answer that applies.</p>
         {/if}
-
-        {#if currentQuestion.kind === "open"}
-          <textarea
-            maxlength="4000"
-            rows="6"
-            aria-label="Your answer"
-            value={typeof test.answers[currentQuestion.id] === "string"
-              ? (test.answers[currentQuestion.id] as string)
-              : ""}
-            oninput={(event) => setOpenAnswer(currentQuestion.id, event.currentTarget.value)}
-            class="w-full rounded-lg border border-input bg-background p-3 text-sm text-foreground shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            placeholder="Write your answer…"
-          ></textarea>
-        {:else}
-          {@const selectedList = Array.isArray(test.answers[currentQuestion.id])
-            ? (test.answers[currentQuestion.id] as number[])
-            : []}
-          {#if currentQuestion.kind === "multiple"}
-            <p class="text-xs text-muted-foreground">Choose every answer that applies.</p>
-          {/if}
-          <div class="space-y-2">
-            {#each currentQuestion.options as o, idx (o.id)}
-              {@const checked = selectedList.includes(o.id)}
-              <label
+        <div class="space-y-2.5">
+          {#each currentQuestion.options as o, idx (o.id)}
+            {@const picked = selectedList.includes(o.id)}
+            {@const isKey = checkResult?.key.includes(o.id) ?? false}
+            <label
+              class={cn(
+                "option flex min-h-14 items-center gap-3.5 rounded-xl border px-4 py-3 text-[15px] leading-snug transition-colors has-[input:focus-visible]:ring-2 has-[input:focus-visible]:ring-ring",
+                checkResult
+                  ? isKey
+                    ? picked
+                      ? "border-mastered/60 bg-mastered/[0.08]"
+                      : "border-dashed border-mastered/60"
+                    : picked
+                      ? "border-missed/60 bg-missed/[0.07]"
+                      : "border-border bg-card opacity-70"
+                  : picked
+                    ? "cursor-pointer border-foreground bg-card"
+                    : "cursor-pointer border-border bg-card hover:border-ring/40",
+              )}
+            >
+              <input
+                type={currentQuestion.kind === "single" ? "radio" : "checkbox"}
+                name={"q" + currentQuestion.id}
+                checked={picked}
+                onchange={() => {
+                  if (currentQuestion.kind !== "open") {
+                    toggleOption(currentQuestion.id, o.id, currentQuestion.kind);
+                  }
+                }}
+                class="sr-only"
+              />
+              <span
+                aria-hidden="true"
                 class={cn(
-                  "option flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm transition-colors",
-                  checked
-                    ? "border-primary bg-accent/60"
-                    : "border-border bg-background hover:bg-muted/40",
+                  "grid size-7 shrink-0 place-items-center rounded-lg font-mono text-xs",
+                  checkResult && isKey
+                    ? picked
+                      ? "bg-mastered text-background"
+                      : "border border-mastered text-mastered"
+                    : checkResult && picked
+                      ? "bg-missed text-background"
+                      : picked
+                        ? "bg-foreground text-background"
+                        : "bg-secondary text-muted-foreground",
                 )}
               >
-                <input
-                  type={currentQuestion.kind === "single" ? "radio" : "checkbox"}
-                  name={"q" + currentQuestion.id}
-                  {checked}
-                  onchange={() => {
-                    if (currentQuestion.kind !== "open") {
-                      toggleOption(currentQuestion.id, o.id, currentQuestion.kind);
-                    }
-                  }}
-                  class="mt-0.5 h-4 w-4 accent-primary"
-                />
-                <span class="flex-1 leading-relaxed text-foreground">{o.text}</span>
-                {#if idx < 9}
-                  <kbd
-                    class="hidden rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground sm:inline-block"
-                  >
-                    {idx + 1}
-                  </kbd>
-                {/if}
-              </label>
-            {/each}
-          </div>
-        {/if}
-      </fieldset>
-    </Card>
+                {optionLetter(idx)}
+              </span>
+              <span class="flex-1 text-foreground">
+                {o.text}{#if checkResult && picked}<span class="sr-only"> (your answer)</span>{/if}
+              </span>
+              {#if checkResult && isKey}
+                <Check size={18} class="shrink-0 text-mastered" aria-label="Correct answer" />
+              {/if}
+            </label>
+          {/each}
+        </div>
+      {/if}
+    </fieldset>
 
-    <div class="actions flex items-center justify-between gap-3">
+    {#if checkError}
+      <p class="text-sm text-destructive" role="alert">{checkError}</p>
+    {/if}
+
+    {#if checkResult}
+      <div
+        role="status"
+        class={cn(
+          "space-y-3 rounded-xl border bg-card p-[18px]",
+          checkResult.correct ? "border-mastered/35" : "border-missed/35",
+        )}
+      >
+        <p class={cn("text-[15px] font-medium", checkResult.correct ? "text-mastered" : "text-missed")}>
+          {#if checkResult.correct}
+            Correct
+          {:else}
+            Not quite. The {keyLetters.length === 1 ? "answer is" : "answers are"}
+            {keyLetters.join(", ")}.
+          {/if}
+        </p>
+        {#if checkResult.sources.length > 0}
+          <p class="text-[13px] text-muted-foreground">What your course says:</p>
+          <ul class="divide-y divide-border overflow-hidden rounded-[10px] border border-border" role="list">
+            {#each checkResult.sources as src (src.chunk_id)}
+              <SourceItem {subject} {src} open />
+            {/each}
+          </ul>
+        {/if}
+      </div>
+    {/if}
+
+    <div class="actions flex flex-wrap items-center justify-between gap-3">
       <Button
         variant="outline"
+        size="lg"
         disabled={test.current === 0}
         onclick={() => test && go(test.current - 1)}
       >
         Back
       </Button>
-      {#if test.current < total - 1}
-        <Button class="primary" onclick={() => test && go(test.current + 1)}>Next</Button>
-      {:else}
-        <Button class="primary" disabled={sending} onclick={() => submit()}>
-          {sending ? "Submitting…" : "Submit"}
-        </Button>
-      {/if}
+      <div class="flex flex-wrap items-center gap-2">
+        {#if test.current < total - 1}
+          <Button
+            variant={checkable ? "outline" : "default"}
+            size="lg"
+            class={checkable ? "" : "primary"}
+            onclick={() => test && go(test.current + 1)}
+          >
+            {checkResult ? "Next question" : "Next"}
+          </Button>
+        {:else}
+          <Button
+            variant={checkable ? "outline" : "default"}
+            size="lg"
+            class={checkable ? "" : "primary"}
+            disabled={sending}
+            onclick={() => submit()}
+          >
+            {sending ? "Submitting…" : "Submit"}
+          </Button>
+        {/if}
+        {#if checkable}
+          <Button size="lg" class="primary" disabled={!canCheck || checking} onclick={() => void check()}>
+            {checking ? "Checking…" : "Check answer"}
+          </Button>
+        {/if}
+      </div>
     </div>
 
     {#if confirming && unansweredCount > 0}
       <div
         role="alertdialog"
         aria-label="Confirm submit"
-        class="notice wait flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--status-awaiting)]/40 bg-[color-mix(in_oklab,var(--status-awaiting)_10%,transparent)] p-4 text-sm"
+        class="notice wait flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4 text-sm"
       >
         <p class="text-foreground">
           {unansweredCount}

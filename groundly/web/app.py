@@ -13,9 +13,12 @@ addressed by id and its file must resolve inside the subject's materials dir.
 import asyncio
 import atexit
 import json
+import os
 import sqlite3
+import tempfile
+import time
 from collections.abc import Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -24,12 +27,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware import Middleware
 from starlette.routing import Route
 from starlette.types import ASGIApp
 
 from groundly.agents import quiz
+from groundly.core import activity, bundle
 from groundly.core.paths import discover_subjects, remote_db_path
 from groundly.core.progress import ProgressStore
 from groundly.core.store import SubjectStore
@@ -47,11 +52,15 @@ from groundly.web.remote import (
 )
 from groundly.web.runs import Runner
 from groundly.web.schemas import (
+    ActivityResponse,
     AttemptResultResponse,
     AttemptSummary,
     AuthStatusResponse,
+    CheckAnswerRequest,
+    CheckAnswerResponse,
     DrawTestResponse,
     ErrorResponse,
+    ExportInfoResponse,
     PairDeviceRequest,
     PairDeviceResponse,
     RemoteInfoResponse,
@@ -105,6 +114,23 @@ def _open_subject(name: str) -> Subject | None:
     return subject if subject.exists() else None
 
 
+def _topic_title(name: str, topic_id: int) -> str | None:
+    """A topic's title for the activity feed, or None when the subject or topic is gone."""
+    opened = _open_subject(name)
+    if opened is None:
+        return None
+    try:
+        stack = SubjectStore(opened.store_db_path).tree(with_sources=False)
+    except (sqlite3.DatabaseError, RuntimeError):
+        return None
+    while stack:
+        node = stack.pop()
+        if node["id"] == topic_id:
+            return node["title"]
+        stack.extend(node["subtopics"])
+    return None
+
+
 def _read(subject: Subject, reader: Callable[[SubjectStore], T]) -> T | JSONResponse:
     """Run a store read. A damaged or incomplete store answers with its own message."""
     try:
@@ -124,6 +150,32 @@ def _stored_pdf(subject: Subject, filename: object) -> Path | None:
 
 def _error(error: str, detail: str, status_code: int = 400) -> JSONResponse:
     return JSONResponse({"error": error, "detail": detail}, status_code=status_code)
+
+
+def _exportable(name: str) -> Subject | JSONResponse:
+    """The subject when its bundle can be built: export info and the download agree."""
+    opened = _open_subject(name)
+    if opened is None:
+        return _error("unknown_subject", f"unknown subject {name!r}", 404)
+    try:
+        opened.load_manifest()
+    except (OSError, ValueError) as e:  # pydantic's ValidationError is a ValueError
+        return _error("manifest_invalid", f"manifest.json is corrupt or unreadable: {e}", 409)
+    return opened
+
+
+_EXPORT_PREFIX = "groundly-export-"
+_STALE_EXPORT_SECONDS = 3600
+
+
+def _sweep_stale_exports() -> None:
+    """Delete bundles a stopped server never got to delete. A download in flight holds its file
+    open, and an hour is longer than building one takes."""
+    cutoff = time.time() - _STALE_EXPORT_SECONDS
+    for f in Path(tempfile.gettempdir()).glob(f"{_EXPORT_PREFIX}*.groundly"):
+        with suppress(OSError):  # another user's file in a shared /tmp, or already gone
+            if f.lstat().st_mtime < cutoff:
+                f.unlink()
 
 
 def _quiz(
@@ -315,6 +367,10 @@ def create_app(
     def _pair_page() -> HTMLResponse:
         return _html()
 
+    @app.get("/connections", include_in_schema=False)
+    def _connections_page() -> HTMLResponse:
+        return _html()
+
     app.mount("/static", StaticFiles(directory=_WEB / "static"), name="static")
 
     @app.get("/s/{subject}", include_in_schema=False)
@@ -371,7 +427,15 @@ def create_app(
                 "has_tree": False,
             }
             try:
-                entry["has_tree"] = bool(SubjectStore(subject.store_db_path).topic_ids())
+                store = SubjectStore(subject.store_db_path)
+                entry["has_tree"] = bool(store.topic_ids())
+                # ponytail: every listing reads each subject's tree and answers; cache per
+                # store.db/progress.db mtime if subjects reach the hundreds.
+                try:
+                    card = quiz.subject_card(store, ProgressStore(subject.progress_db_path))
+                except (sqlite3.DatabaseError, RuntimeError):
+                    card = quiz.subject_card(store, None)  # unreadable progress: counts only
+                entry.update(card)
             except (sqlite3.DatabaseError, RuntimeError) as e:
                 entry["error"] = str(e)
             out.append(entry)
@@ -455,6 +519,113 @@ def create_app(
             return {"id": attempt_id}
 
         return await run_in_threadpool(_quiz, subject, submit)
+
+    @app.post(
+        "/api/subjects/{subject}/questions/{id}/check",
+        response_model=CheckAnswerResponse,
+        responses=_protected_responses(400, 403, 404, 415),
+        openapi_extra=_json_body_schema(CheckAnswerRequest),
+        operation_id="checkAnswer",
+    )
+    async def _check(
+        subject: str,
+        id: int,
+        body: object = Depends(_require_page_json("an answer is checked from this page only")),
+    ) -> Any:
+        try:
+            payload = CheckAnswerRequest.model_validate(body)
+        except ValidationError:
+            return _error("invalid_body", "expected {selected}")
+        opened = _open_subject(subject)
+        if opened is None:
+            return _error("unknown_subject", f"unknown subject {subject!r}", 404)
+
+        def check(store: SubjectStore, _progress: ProgressStore) -> Any:
+            # ponytail: the lock on a checked answer lives in the page; a hand-made call could
+            # check, then submit another choice. One user, the student; a server lock would
+            # need per-test state and a write before submit.
+            try:
+                result = quiz.check_answer(store, id, payload.selected)
+            except quiz.QuizError as e:
+                if e.reason != "unknown_question":
+                    raise
+                return _error(e.reason, e.detail, 404)
+            for src in result["sources"]:
+                src["pdf"] = _stored_pdf(opened, src["filename"]) is not None
+            return result
+
+        return await run_in_threadpool(_quiz, subject, check, opened)
+
+    # Export reads store.db, the manifest and materials/ only: progress.db, remote.db and
+    # activity.db never enter a bundle. Paired devices may export (decision 53); the
+    # Tailscale perimeter already requires their session on these routes.
+    @app.get(
+        "/api/activity",
+        response_model=ActivityResponse,
+        responses=_protected_responses(),
+        operation_id="getActivity",
+    )
+    def _activity() -> Any:
+        return activity.snapshot(topic_title=_topic_title)
+
+    @app.get(
+        "/api/subjects/{subject}/export/info",
+        response_model=ExportInfoResponse,
+        responses=_protected_responses(404, 409),
+        operation_id="exportInfo",
+    )
+    def _export_info(subject: str) -> Any:
+        opened = _exportable(subject)
+        if isinstance(opened, JSONResponse):
+            return opened
+        try:
+            materials = bundle.material_files(opened)
+        except (sqlite3.DatabaseError, RuntimeError) as e:
+            return _error("store_error", str(e), 500)
+        return {
+            "filename": f"{subject}.groundly",
+            "store_bytes": opened.store_db_path.stat().st_size,
+            "materials_bytes": sum(f.stat().st_size for f in materials),
+        }
+
+    @app.get(
+        "/api/subjects/{subject}/export",
+        response_class=FileResponse,
+        responses={
+            200: {"content": {"application/zip": {}}, "description": "The subject's bundle."},
+            **_protected_responses(403, 404, 409),
+        },
+        operation_id="exportSubject",
+    )
+    def _export(request: Request, subject: str, materials: bool = True) -> Any:
+        # A GET any site can trigger: refuse other sites' requests before building anything.
+        # Browsers send Sec-Fetch-Site to loopback. Without it (curl, or the plain-HTTP Tailscale
+        # socket, where the SameSite=Strict session cookie keeps other sites out) it is allowed.
+        if request.headers.get("sec-fetch-site", "none") not in ("same-origin", "none"):
+            return _error("forbidden", "a bundle is downloaded from this page only", 403)
+        opened = _exportable(subject)
+        if isinstance(opened, JSONResponse):
+            return opened
+        _sweep_stale_exports()
+        # ponytail: the whole bundle is built before the first byte is sent; stream the zip as
+        # it is written if a large materials folder makes the wait hurt.
+        fd, name = tempfile.mkstemp(prefix=_EXPORT_PREFIX, suffix=".groundly")
+        os.close(fd)
+        path = Path(name)
+        try:
+            bundle.export_subject(opened, path, include_materials=materials)
+        except (sqlite3.DatabaseError, RuntimeError) as e:
+            path.unlink(missing_ok=True)
+            return _error("store_error", str(e), 500)
+        except BaseException:
+            path.unlink(missing_ok=True)
+            raise
+        return FileResponse(
+            path,
+            media_type="application/zip",
+            filename=f"{subject}.groundly",
+            background=BackgroundTask(path.unlink, missing_ok=True),
+        )
 
     @app.get(
         "/api/subjects/{subject}/attempts",

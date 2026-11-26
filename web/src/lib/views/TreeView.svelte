@@ -1,16 +1,18 @@
 <script lang="ts">
   import { createQuery } from "@tanstack/svelte-query";
+  import Search from "@lucide/svelte/icons/search";
+  import X from "@lucide/svelte/icons/x";
   import { tick } from "svelte";
   import { type TopicNode, apiClient, pageURL, testQuery, unwrap } from "../api/client";
   import { queryKeys, treeQueryOptions } from "../api/queries";
-  import MasteryBadge from "../components/MasteryBadge.svelte";
+  import { progressLine, progressRatio } from "../components/MasteryBadge.svelte";
+  import MasteryRing from "../components/MasteryRing.svelte";
   import SourceItem from "../components/SourceItem.svelte";
-  import LiquidMetalButton from "../components/effects/LiquidMetalButton.svelte";
-  import Badge from "../components/ui/Badge.svelte";
+  import StatusDot from "../components/StatusDot.svelte";
   import Button from "../components/ui/Button.svelte";
   import Card from "../components/ui/Card.svelte";
-  import Input from "../components/ui/Input.svelte";
   import Select from "../components/ui/Select.svelte";
+  import CopyField from "../components/CopyField.svelte";
   import { cn } from "../components/ui/utils";
   import { runStore } from "../run.svelte";
   import {
@@ -125,32 +127,61 @@
   }
 </script>
 
-<div class="space-y-6">
-  <div class="flex flex-wrap items-start justify-between gap-4">
-    <div class="space-y-1">
-      <a
-        href="/"
-        class="back inline-flex items-center text-xs font-medium text-muted-foreground hover:text-foreground"
-      >
+<div class="space-y-7">
+  <div class="flex flex-wrap items-end justify-between gap-4">
+    <div class="min-w-0 space-y-2.5">
+      <a href="/" class="back text-[13px] text-muted-foreground hover:text-foreground">
         ← All subjects
       </a>
-      <h1 class="text-2xl font-semibold tracking-tight text-foreground">{title || subject}</h1>
+      <h1 class="text-[32px] leading-tight font-semibold tracking-[-0.02em] break-words text-foreground">
+        {title || subject}
+      </h1>
       {#if title}
-        <p class="font-mono text-xs text-muted-foreground">{subject}</p>
+        <p class="font-mono text-xs text-subtle-foreground">{subject}</p>
+      {/if}
+      {#if tree.length > 0}
+        <div class="flex flex-wrap items-center gap-4 text-[13px] text-muted-foreground">
+          <span class="flex items-center gap-1.5">
+            <StatusDot state="mastered" />Mastered
+          </span>
+          <span class="flex items-center gap-1.5">
+            <StatusDot state="in_progress" />Learning
+          </span>
+          <span class="flex items-center gap-1.5"><StatusDot state="not_started" />Not tested</span>
+        </div>
       {/if}
     </div>
 
-    {#if hasAnyQuestions}
-      <Button href={pageURL(subject, "/test?n=10")} class="primary">
-        Test the whole course
+    <div class="flex w-full flex-wrap gap-2 sm:w-auto">
+      {#if tree.length > 0}
+        <label
+          class="flex h-10 min-w-0 basis-full items-center gap-2 rounded-[10px] border border-border bg-card px-3 focus-within:ring-2 focus-within:ring-ring sm:w-72 sm:basis-auto"
+        >
+          <Search size={16} class="shrink-0 text-subtle-foreground" aria-hidden="true" />
+          <input
+            type="search"
+            bind:value={query}
+            aria-label="Filter topics"
+            placeholder="Filter topics or summaries"
+            class="min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-subtle-foreground focus:outline-none"
+          />
+        </label>
+      {/if}
+      <Button variant="outline" size="lg" href={"/connections?subject=" + encodeURIComponent(subject)}>
+        Share
       </Button>
-    {/if}
+      {#if hasAnyQuestions}
+        <Button size="lg" href={pageURL(subject, "/test?n=10")} class="primary">
+          Test the whole course
+        </Button>
+      {/if}
+    </div>
   </div>
 
   {#if treeQuery.isPending}
     <p class="text-sm text-muted-foreground">Loading topic map…</p>
   {:else if error}
-    <Card class="border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive" role="alert">
+    <Card class="border-destructive/40 p-4 text-sm text-destructive" role="alert">
       {error}
     </Card>
   {:else if tree.length === 0}
@@ -170,59 +201,52 @@
       </p>
     </Card>
   {:else}
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div class="w-full max-w-sm">
-        <Input
-          type="search"
-          bind:value={query}
-          aria-label="Filter topics"
-          placeholder="Filter topics or summaries…"
-        />
-      </div>
-      {#if query.trim() !== ""}
-        <p class="text-xs text-muted-foreground">
-          Showing {visibleTree.length} of {tree.length} topics
-        </p>
-      {/if}
-    </div>
+    {#if query.trim() !== ""}
+      <p class="-mt-3 text-xs text-muted-foreground">
+        Showing {visibleTree.length} of {tree.length} topics
+      </p>
+    {/if}
 
-    <div class="layout grid gap-6 md:grid-cols-[minmax(0,1fr)_22rem] md:items-start">
-      <div class="space-y-6">
+    <div class="layout flex flex-wrap items-start gap-6">
+      <div class="min-w-0 flex-[999_1_560px] space-y-3">
         {#if visibleTree.length === 0}
           <Card class="p-6 text-sm text-muted-foreground">
             No topics match "{query.trim()}".
           </Card>
         {:else}
           <!-- role="list": Safari drops list semantics from list-style: none -->
-          <ul class="tree space-y-4" role="list">
+          <ul class="tree space-y-3" role="list">
             {#each visibleTree as topic (topic.id)}
-              <li class="topic rounded-xl border border-border bg-card p-4 shadow-xs">
+              <li
+                class={cn(
+                  "topic space-y-3.5 rounded-[14px] border p-5 transition-colors",
+                  selectedTopicId === topic.id
+                    ? "border-ring/50 bg-accent/50 shadow-[0_0_0_4px_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
+                    : "border-border bg-card",
+                )}
+              >
                 <button
                   type="button"
                   aria-pressed={selectedTopicId === topic.id}
                   onclick={(event) => void openTopic(topic, event)}
                   class={cn(
-                    "node big flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    topic.sources.length === 0 ? "nosrc border-dashed" : "border-transparent",
-                    selectedTopicId === topic.id
-                      ? "bg-accent text-accent-foreground"
-                      : "hover:bg-accent/60",
+                    "node big flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-card focus-visible:outline-none",
+                    topic.sources.length === 0 && "nosrc",
                   )}
                 >
-                  <span class="font-semibold text-foreground">{topic.title}</span>
-                  <span class="flex flex-wrap items-center gap-2">
+                  <span class="text-base font-medium text-foreground">{topic.title}</span>
+                  <span class="text-xs text-subtle-foreground">
                     {#if topic.sources.length === 0}
-                      <Badge variant="outline" class="border-dashed">sources removed</Badge>
-                    {/if}
-                    {#if topic.progress && topic.progress.state !== "not_started"}
-                      <MasteryBadge progress={topic.progress} showBar />
+                      sources removed
+                    {:else}
+                      {progressLine(topic.progress)}
                     {/if}
                   </span>
                 </button>
 
                 {#if topic.subtopics.length > 0}
                   <ul
-                    class="chips mt-3 flex flex-wrap gap-2"
+                    class="chips flex flex-wrap gap-2"
                     role="list"
                     aria-label={"Subtopics of " + topic.title}
                   >
@@ -231,21 +255,21 @@
                         <button
                           type="button"
                           aria-pressed={selectedTopicId === sub.id}
+                          title={progressLine(sub.progress)}
                           onclick={(event) => void openTopic(sub, event)}
                           class={cn(
-                            "node chip inline-flex flex-wrap items-center gap-2 rounded-lg border px-3 py-1.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                            sub.sources.length === 0 ? "nosrc border-dashed" : "border-border",
+                            "node chip inline-flex min-h-9 items-center gap-2 rounded-[10px] border px-3 py-1.5 text-left text-sm text-foreground transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                            sub.sources.length === 0 ? "nosrc border-dashed" : "",
                             selectedTopicId === sub.id
-                              ? "border-ring bg-accent text-accent-foreground"
-                              : "bg-background hover:bg-accent/60",
+                              ? "border-foreground/60 bg-accent"
+                              : "border-border bg-background hover:border-ring/40 hover:bg-accent",
                           )}
                         >
+                          <StatusDot state={sub.progress?.state} />
                           <span>{sub.title}</span>
+                          <span class="sr-only">, {progressLine(sub.progress)}</span>
                           {#if sub.sources.length === 0}
-                            <Badge variant="outline" class="border-dashed">sources removed</Badge>
-                          {/if}
-                          {#if sub.progress && sub.progress.state !== "not_started"}
-                            <MasteryBadge progress={sub.progress} />
+                            <span class="text-xs text-subtle-foreground">sources removed</span>
                           {/if}
                         </button>
                       </li>
@@ -258,23 +282,27 @@
         {/if}
 
         {#if attempts.length > 0}
-          <section class="space-y-3" aria-label="Past tests">
-            <h2 class="text-lg font-semibold text-foreground">Past tests</h2>
-            <ul class="history space-y-2" role="list">
+          <section class="space-y-3 pt-5" aria-label="Past tests">
+            <h2 class="text-[13px] font-medium tracking-[0.08em] text-subtle-foreground uppercase">
+              Past tests
+            </h2>
+            <ul class="history divide-y divide-border overflow-hidden rounded-[14px] border border-border bg-card" role="list">
               {#each attempts as a (a.id)}
-                <li class="rounded-lg border border-border bg-card px-4 py-2.5 text-sm">
+                <li>
                   <a
                     href={pageURL(subject, "/attempts/" + Number(a.id))}
-                    class="font-medium text-primary underline decoration-border underline-offset-4 hover:decoration-primary"
+                    class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-sm hover:bg-accent/60"
                   >
-                    {a.submitted_at} · {a.scope_title || "Whole course"}
+                    <span class="text-foreground">
+                      {a.scope_title || "Whole course"}
+                      <span class="ml-2 font-mono text-xs text-subtle-foreground">{a.submitted_at}</span>
+                    </span>
+                    <span class="text-muted-foreground">
+                      {a.score.correct} / {a.score.graded} correct{a.provisional
+                        ? ", awaiting review"
+                        : ""}
+                    </span>
                   </a>
-                  <span class="text-muted-foreground">
-                    {" — "}
-                    {a.score.correct} / {a.score.graded} correct{a.provisional
-                      ? ", awaiting review"
-                      : ""}
-                  </span>
                 </li>
               {/each}
             </ul>
@@ -288,78 +316,94 @@
         aria-label="Topic details"
         onkeydown={handlePanelKeydown}
         class={cn(
-          "panel rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm md:sticky md:top-20 md:max-h-[calc(100vh-6rem)] md:overflow-y-auto",
+          "panel min-w-0 flex-[1_1_360px] rounded-[14px] border border-border bg-card p-6 text-card-foreground md:sticky md:top-24 md:max-h-[calc(100vh-7rem)] md:max-w-[420px] md:overflow-y-auto",
           selectedTopic
-            ? "open max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:z-40 max-md:max-h-[82vh] max-md:overflow-y-auto max-md:rounded-b-none max-md:shadow-xl"
+            ? "open max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:z-40 max-md:max-h-[82vh] max-md:overflow-y-auto max-md:rounded-b-none max-md:shadow-2xl"
             : "max-md:hidden",
         )}
       >
         {#if selectedTopic}
-          <div class="space-y-4">
+          <div class="space-y-5">
             <div class="panel-head flex items-start justify-between gap-3">
-              <h2 bind:this={panelHeadingEl} class="text-lg font-semibold text-foreground">
+              <h2
+                bind:this={panelHeadingEl}
+                class="text-xl leading-snug font-semibold tracking-[-0.01em] text-foreground focus:outline-none"
+              >
                 {selectedTopic.title}
               </h2>
-              <Button variant="ghost" size="sm" class="close" onclick={closePanel}>
-                Close
+              <Button
+                variant="ghost"
+                size="icon"
+                class="close shrink-0 text-muted-foreground"
+                aria-label="Close panel"
+                onclick={closePanel}
+              >
+                <X size={16} aria-hidden="true" />
               </Button>
             </div>
 
-            <MasteryBadge progress={selectedTopic.progress} showBar />
+            <div class="flex items-center gap-3.5">
+              <MasteryRing ratio={progressRatio(selectedTopic.progress) / 100} size={44} label={progressLine(selectedTopic.progress)} />
+              <div class="flex flex-col gap-0.5">
+                <span class="text-[15px] text-foreground">{progressLine(selectedTopic.progress)}</span>
+                <span class="text-[13px] text-muted-foreground">
+                  {selectedQuestionCount}
+                  {selectedQuestionCount === 1 ? " question" : " questions"} in the bank
+                </span>
+              </div>
+            </div>
 
             {#if selectedQuestionCount > 0}
-              <div class="space-y-2">
-                <p class="text-sm text-foreground">
-                  {selectedQuestionCount}
-                  {selectedQuestionCount === 1 ? " question" : " questions"}
-                </p>
-                <div class="start flex flex-wrap items-center gap-2">
-                  <label class="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>Questions</span>
-                    <Select bind:value={selectedCount}>
-                      {#each chooserOptions(selectedQuestionCount) as opt (opt.value)}
-                        <option value={opt.value} disabled={opt.disabled}>{opt.value}</option>
-                      {/each}
-                    </Select>
-                  </label>
-                  <Button
-                    href={pageURL(subject, testQuery(selectedTopic.id, Number(selectedCount)))}
-                    size="sm"
-                    class="primary"
-                  >
-                    Start test
-                  </Button>
-                </div>
+              <div class="start flex gap-2">
+                <label
+                  class="flex h-11 items-center gap-2 rounded-[10px] border border-border bg-background pl-3 text-[13px] text-muted-foreground"
+                >
+                  <span>Questions</span>
+                  <Select bind:value={selectedCount} class="h-10 border-0 bg-transparent shadow-none">
+                    {#each chooserOptions(selectedQuestionCount) as opt (opt.value)}
+                      <option value={opt.value} disabled={opt.disabled}>{opt.value}</option>
+                    {/each}
+                  </Select>
+                </label>
+                <Button
+                  href={pageURL(subject, testQuery(selectedTopic.id, Number(selectedCount)))}
+                  size="lg"
+                  class="primary flex-1"
+                >
+                  Start test
+                </Button>
               </div>
             {/if}
 
             {#if selectedWriteInfo}
-              <LiquidMetalButton
-                label={selectedWriteInfo.label}
+              <Button
+                variant="outline"
+                size="lg"
+                class="w-full"
                 disabled={runStore.busy}
                 onclick={() =>
                   void runStore.start(subject, {
                     kind: "write",
                     topic_id: selectedTopic.id,
                   })}
-              />
+              >
+                {selectedWriteInfo.label}
+              </Button>
             {:else if selectedQuestionCount === 0}
-              <p class="notice rounded-lg border border-border bg-muted/40 p-3 text-xs leading-relaxed">
-                Say to your agent:
-                <code class="font-mono text-foreground">
-                  {writePrompt(selectedTopic.title, subject)}
-                </code>
-              </p>
+              <div class="notice space-y-2 rounded-xl border border-border bg-well p-4 text-[13px] text-muted-foreground">
+                <p>Say to your agent:</p>
+                <CopyField text={writePrompt(selectedTopic.title, subject)} label="Copy prompt" />
+              </div>
             {/if}
 
             {#if selectedTopic.summary}
-              <p class="summary text-sm leading-relaxed text-foreground">
+              <p class="summary text-sm leading-relaxed text-foreground/85">
                 {selectedTopic.summary}
               </p>
             {/if}
 
-            <div class="space-y-2">
-              <h3 class="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+            <div class="space-y-2.5">
+              <h3 class="text-xs font-medium tracking-[0.08em] text-subtle-foreground uppercase">
                 Sources
               </h3>
               {#if selectedSources.length === 0}
@@ -367,7 +411,7 @@
                   sources removed — ask your agent to update the map
                 </p>
               {:else}
-                <ul class="space-y-2.5" role="list">
+                <ul class="divide-y divide-border overflow-hidden rounded-[10px] border border-border" role="list">
                   {#each selectedSources as src (src.chunk_id)}
                     <SourceItem {subject} {src} />
                   {/each}

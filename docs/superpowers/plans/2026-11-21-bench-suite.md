@@ -51,10 +51,12 @@ def test_peak_sums_the_process_tree(tmp_path):
     assert m.returncode == 0
     assert m.peak_rss_mb >= 280
 
+
 def test_short_lived_children_do_not_crash_the_sampler():
     # parent spawns 50 children that exit immediately, one every 20 ms
     m = run([sys.executable, "-c", SPAWN_50_SHORT_CHILDREN], interval=0.01)
     assert m.returncode == 0
+
 
 def test_nonzero_exit_is_reported():
     assert run([sys.executable, "-c", "raise SystemExit(3)"]).returncode == 3
@@ -109,20 +111,24 @@ def test_append_writes_one_line_per_row(tmp_path):
     append("index", ROW, results_dir=tmp_path)
     assert len((tmp_path / "index.jsonl").read_text().splitlines()) == 2
 
+
 def test_table_reports_median_spread_and_ratio():
     rows = rows_for("main", [240, 236, 238]) + rows_for("router", [200, 204, 198])
     out = table(rows, baseline="main", metric="wall_s", gate=0.85)
     assert "238.0" in out and "200.0" in out and "0.84" in out and "PASS" in out
 
+
 def test_failed_runs_are_dropped_and_counted():
     rows = rows_for("main", [240, 238]) + [row("main", 10, returncode=1)]
     assert "1 failed run dropped" in table(rows, "main", "wall_s", None)
+
 
 def test_only_the_latest_session_holding_the_baseline_is_compared():
     old = rows_for("router", [150], session="S1")
     new = rows_for("main", [240]) + rows_for("router", [200])  # session "S2"
     out = table(old + new, "main", "wall_s", None)
     assert "150" not in out
+
 
 def test_mixed_machines_or_manifests_refuse():
     rows = rows_for("main", [240]) + rows_for("router", [200], machine="Other")
@@ -171,20 +177,22 @@ git commit -m "feat(bench): result rows and same-session comparison table"
 ```python
 def test_page_lang():
     assert page_lang("Algoritmul este folosit pentru sortare și căutare") == "ro"
-    assert page_lang("Algoritmul este folosit pentru sortare") == "ro"   # no diacritics
+    assert page_lang("Algoritmul este folosit pentru sortare") == "ro"  # no diacritics
     assert page_lang("The algorithm is used for sorting and search") == "en"
     assert page_lang("x = 3; y = 4;") == "?"
 
+
 def test_sample_is_deterministic_and_refs_are_ocr_pages():
-    rows = synthetic_census()          # every (kind, lang, deck) combination, 50 pages each
+    rows = synthetic_census()  # every (kind, lang, deck) combination, 50 pages each
     a, b = sample(rows, seed=0), sample(rows, seed=0)
     assert a == b and len(a) == 200
     refs = [p for p in a if p["ref"]]
     assert len(refs) == 40 and {p["kind"] for p in refs} <= {"mixed", "image"}
     assert sum(p["lang"] == "ro" for p in refs) == 20
 
+
 def test_load_manifest_fails_loudly_on_changed_file(tmp_path):
-    pdf = make_pdf(tmp_path / "a.pdf")             # one-page pypdfium2-written PDF
+    pdf = make_pdf(tmp_path / "a.pdf")  # one-page pypdfium2-written PDF
     write_manifest(census([("s", pdf)]), tmp_path / "m.json")
     pdf.write_bytes(pdf.read_bytes() + b"%")
     with pytest.raises(ValueError, match="a.pdf"):
@@ -231,17 +239,20 @@ git commit -m "feat(bench): page census, language tag, stratified manifest"
 def test_markup_is_not_words():
     assert words("## Titlu\n<!-- image -->\n[link](http://x)") == Counter({"titlu": 1, "link": 1})
 
+
 def test_word_f1():
     assert word_f1("alpha beta gamma", "alpha beta gamma") == 1.0
     assert word_f1("alpha beta gamma delta", "alpha beta") == pytest.approx(2 / 3)
+
 
 def test_cedilla_shows_up_unless_folded():
     assert diacritic_recall("știință", "ştiinţă", fold=False) == 0.0
     assert diacritic_recall("știință", "ştiinţă", fold=True) == 1.0
     assert diacritic_recall("plain", "plain", fold=False) is None
 
+
 def test_missing_page_counts_as_failed(tmp_path):
-    m = manifest_with_pages(tmp_path, 2)          # two text pages of a tiny generated PDF
+    m = manifest_with_pages(tmp_path, 2)  # two text pages of a tiny generated PDF
     out = score(m, [output_for(m["pages"][0])], reference_dir=tmp_path)
     assert out["failed_pages"] == 1 and out["scored_pages"] == 2
 ```
@@ -386,17 +397,30 @@ git commit -m "feat(bench): MinerU2.5 MLX stack behind an optional bench extra"
 def test_schedule_alternates():
     assert schedule(["a", "b"], 2) == [("a", 0), ("b", 0), ("a", 1), ("b", 1)]
 
+
 def test_scratch_home_holds_only_the_models_link(tmp_path):
-    models = tmp_path / "models"; models.mkdir()
+    models = tmp_path / "models"
+    models.mkdir()
     home = scratch_home(models)
     assert [p.name for p in home.iterdir()] == ["models"]
     assert (home / "models").resolve() == models.resolve()
 
+
 def test_worker_argv_plain_and_memray(tmp_path):
     assert worker_argv("x", None) == [sys.executable, "-m", "bench.stacks.x", "--serve"]
     assert worker_argv("x", tmp_path / "w.bin") == [
-        sys.executable, "-m", "memray", "run", "-q", "-o", str(tmp_path / "w.bin"),
-        "-m", "bench.stacks.x", "--serve"]
+        sys.executable,
+        "-m",
+        "memray",
+        "run",
+        "-q",
+        "-o",
+        str(tmp_path / "w.bin"),
+        "-m",
+        "bench.stacks.x",
+        "--serve",
+    ]
+
 
 def test_store_stats_reads_chunks_and_failures(tmp_path):
     # schema via groundly's SubjectStore, rows by raw SQL (ruling R4): 1 indexed material with
@@ -442,7 +466,10 @@ git commit -m "feat(bench): interleaved index runs of stacks through the real pi
 
 ```python
 def test_metrics_exact_and_within_one():
-    labelled = [{"query": "q1", "file": "a.pdf", "page": 5}, {"query": "q2", "file": "b.pdf", "page": 2}]
+    labelled = [
+        {"query": "q1", "file": "a.pdf", "page": 5},
+        {"query": "q2", "file": "b.pdf", "page": 2},
+    ]
     hits = [[("a.pdf", 6), ("a.pdf", 5)], [("c.pdf", 2)]]
     m = metrics(labelled, hits)
     assert m["hit_exact@8"] == 0.5 and m["hit_within1@8"] == 0.5 and m["mrr_within1@8"] == 0.5

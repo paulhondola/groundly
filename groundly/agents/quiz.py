@@ -102,6 +102,26 @@ def mastery(
     return out
 
 
+def subject_card(store: SubjectStore, progress: ProgressStore | None) -> dict:
+    """What a subject's card on the page shows: top-level topics, leaves (subtopics plus
+    topics with none), leaves mastered by the same rule as the topic map, and the newest
+    test's time. Empty for a subject with no map; `progress=None` (unreadable) costs only
+    the progress fields."""
+    tree = store.tree(with_sources=False)
+    if not tree:
+        return {}
+    leaves = _leaves_in_order(tree)
+    card = {"topics": len(tree), "leaves": len(leaves), "leaves_mastered": 0}
+    if progress is None:
+        return card
+    states = mastery(store, progress, tree)
+    card["leaves_mastered"] = sum(states[leaf]["state"] == "mastered" for leaf in leaves)
+    attempts = progress.attempts()
+    if attempts:
+        card["last_test_at"] = attempts[0]["submitted_at"]
+    return card
+
+
 def scope_leaves(store: SubjectStore, topic_id: int | None) -> list[int]:
     """The leaves a scope covers: a topic's subtopics, or the topic itself; every leaf for None."""
     tree = store.tree(with_sources=False)
@@ -190,6 +210,22 @@ def _grade(q: dict, answer: dict) -> AnswerWrite:
     return AnswerWrite(
         q["id"], q["topic_id"], q["kind"], sorted(chosen), bool(chosen) and chosen == key
     )
+
+
+def check_answer(store: SubjectStore, question_id: int, selected: list[int]) -> dict:
+    """One choice answer graded before its test is submitted: whether it is right, the key,
+    and the question's cited sources. Grades through `_grade`, so a check and a submit of
+    the same choice agree; writes nothing, so the answer counts only once submitted."""
+    found = store.questions(ids=[question_id]) if is_id(question_id) else []
+    if not found:
+        raise QuizError("unknown_question", _REMOVED)
+    (q,) = found
+    graded = _grade(q, {"selected": selected})
+    return {
+        "correct": bool(graded.correct),
+        "key": [o["id"] for o in q["options"] if o["correct"]],
+        "sources": q["sources"],
+    }
 
 
 def submit_attempt(

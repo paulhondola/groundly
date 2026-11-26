@@ -36,6 +36,18 @@ class BundleError(RuntimeError):
     """Every failure names its specific cause; the CLI maps this to _fail."""
 
 
+def material_files(subj) -> list[Path]:
+    """The materials a bundle ships: only files store.db records as indexed. A materials/
+    file with no row (copied before a failed embed) is an un-indexed original and must not
+    leak (security.md §5)."""
+    conn = store.connect(subj.store_db_path)
+    try:
+        indexed = {r["filename"] for r in conn.execute("SELECT filename FROM materials")}
+    finally:
+        conn.close()
+    return [f for f in sorted(subj.materials_dir.rglob("*")) if f.is_file() and f.name in indexed]
+
+
 def export_subject(
     subj,
     out_path: Path,
@@ -46,7 +58,6 @@ def export_subject(
     conn = store.connect(subj.store_db_path)
     try:
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")  # flush WAL sidecars before zipping
-        indexed = {r["filename"] for r in conn.execute("SELECT filename FROM materials")}
     finally:
         conn.close()
 
@@ -55,11 +66,8 @@ def export_subject(
         (subj.store_db_path, "store.db"),
     ]
     if include_materials:
-        # Ship only files store.db records as indexed: a materials/ file with no row (copied
-        # before a failed embed) is an un-indexed original and must not leak (security.md §5).
-        for f in sorted(subj.materials_dir.rglob("*")):
-            if f.is_file() and f.name in indexed:
-                entries.append((f, f"materials/{f.relative_to(subj.materials_dir).as_posix()}"))
+        for f in material_files(subj):
+            entries.append((f, f"materials/{f.relative_to(subj.materials_dir).as_posix()}"))
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for src, arcname in entries:
             zf.write(src, arcname)

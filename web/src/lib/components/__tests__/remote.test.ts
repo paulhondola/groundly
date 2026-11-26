@@ -3,7 +3,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import QueryHarness from "../../views/__tests__/QueryHarness.svelte";
 import QrCode from "../QrCode.svelte";
-import RemoteDialog from "../RemoteDialog.svelte";
+import DevicesCard from "../DevicesCard.svelte";
 
 function requestPathname(input: RequestInfo | URL): string {
   if (input instanceof Request) {
@@ -58,7 +58,7 @@ describe("QrCode", () => {
   });
 });
 
-describe("RemoteDialog", () => {
+describe("DevicesCard", () => {
   const originalFetch = globalThis.fetch;
   let container: HTMLDivElement;
 
@@ -73,7 +73,7 @@ describe("RemoteDialog", () => {
     vi.restoreAllMocks();
   });
 
-  it("toggles open, displays paired devices from GET /api/remote, and revokes single or all devices", async () => {
+  it("displays paired devices from GET /api/remote, and revokes single or all devices", async () => {
     const qc = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -127,27 +127,14 @@ describe("RemoteDialog", () => {
       target: container,
       props: {
         client: qc,
-        component: RemoteDialog,
-        props: { pairedCount: 1 },
+        component: DevicesCard,
       },
     });
-    flushSync();
-
-    // Closed initially — does not fetch /api/remote until opened
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
-    expect(calls).toHaveLength(0);
-
-    const trigger = Array.from(container.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("Devices"),
-    );
-    expect(trigger).toBeDefined();
-    trigger?.click();
     flushSync();
 
     await vi.waitFor(() => {
       expect(container.textContent).toContain("iPhone · Safari");
     });
-    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
     expect(container.querySelector('svg[role="img"]')).not.toBeNull();
     expect(container.textContent).toContain("100.64.0.10");
 
@@ -192,15 +179,10 @@ describe("RemoteDialog", () => {
       expect(container.textContent).not.toContain("iPad · Safari");
     });
 
-    // Toggle closed
-    trigger?.click();
-    flushSync();
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
-
     void unmount(instance);
   });
 
-  it("renders inactive Tailscale message while still listing existing devices, and closes on Escape", async () => {
+  it("renders inactive Tailscale message while still listing existing devices", async () => {
     const qc = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -232,16 +214,9 @@ describe("RemoteDialog", () => {
       target: container,
       props: {
         client: qc,
-        component: RemoteDialog,
-        props: { pairedCount: 1 },
+        component: DevicesCard,
       },
     });
-    flushSync();
-
-    const trigger = Array.from(container.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("Devices"),
-    );
-    trigger?.click();
     flushSync();
 
     await vi.waitFor(() => {
@@ -249,10 +224,6 @@ describe("RemoteDialog", () => {
     });
     expect(container.textContent).toContain("Tailscale remote access is inactive");
     expect(container.querySelector('svg[role="img"]')).toBeNull();
-
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    flushSync();
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
 
     void unmount(instance);
   });
@@ -322,16 +293,9 @@ describe("RemoteDialog", () => {
       target: container,
       props: {
         client: qc,
-        component: RemoteDialog,
-        props: { pairedCount: 2 },
+        component: DevicesCard,
       },
     });
-    flushSync();
-
-    const trigger = Array.from(container.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("Devices"),
-    );
-    trigger?.click();
     flushSync();
 
     await vi.waitFor(() => {
@@ -386,7 +350,7 @@ describe("RemoteDialog", () => {
     void unmount(instance);
   });
 
-  it("refetches /api/remote immediately when re-opened within QueryClient staleTime", async () => {
+  it("refetches /api/remote on mount within QueryClient staleTime, so the QR is never stale", async () => {
     const qc = new QueryClient({
       defaultOptions: {
         queries: { retry: false, staleTime: 10_000 },
@@ -411,39 +375,29 @@ describe("RemoteDialog", () => {
       return Promise.resolve(jsonResponse({}));
     }) as unknown as typeof fetch;
 
-    const instance = mount(QueryHarness, {
+    const first = mount(QueryHarness, {
       target: container,
-      props: {
-        client: qc,
-        component: RemoteDialog,
-        props: { pairedCount: 0 },
-      },
+      props: { client: qc, component: DevicesCard },
     });
     flushSync();
-
-    const trigger = Array.from(container.querySelectorAll("button")).find((b) =>
-      b.textContent?.includes("Devices"),
-    );
-    trigger?.click();
-    flushSync();
-
     await vi.waitFor(() => {
       expect(container.textContent).toContain("tok1");
     });
     expect(remoteCalls).toBe(1);
+    await unmount(first);
 
-    // Close and rotate token on server, then re-open immediately within 10 s staleTime.
-    trigger?.click();
-    flushSync();
+    // The token rotates on the server; coming back within 10 s staleTime still refetches.
     pairingUrl = "http://macbook.tail1234.ts.net:8765/pair#tok2";
-    trigger?.click();
+    const second = mount(QueryHarness, {
+      target: container,
+      props: { client: qc, component: DevicesCard },
+    });
     flushSync();
-
     await vi.waitFor(() => {
       expect(container.textContent).toContain("tok2");
     });
     expect(remoteCalls).toBe(2);
 
-    void unmount(instance);
+    void unmount(second);
   });
 });

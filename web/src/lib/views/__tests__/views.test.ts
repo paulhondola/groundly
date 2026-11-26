@@ -463,10 +463,22 @@ describe("SubjectsView", () => {
       if (pathname === "/api/subjects") {
         return Promise.resolve(
           jsonResponse([
-            { subject: "PDSS", title: "Parallel Systems", has_tree: true, error: null },
+            {
+              subject: "PDSS",
+              title: "Parallel Systems",
+              has_tree: true,
+              error: null,
+              topics: 3,
+              leaves: 5,
+              leaves_mastered: 2,
+              last_test_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+            },
             { subject: "OS", title: "", has_tree: false, error: null },
           ]),
         );
+      }
+      if (pathname === "/api/activity") {
+        return Promise.resolve(jsonResponse({ hosts: [], indexing: [], recent: [] }));
       }
       return Promise.resolve(jsonResponse([]));
     });
@@ -483,9 +495,14 @@ describe("SubjectsView", () => {
 
     expect(document.title).toBe("Groundly");
     expect(container.textContent).toContain("PDSS");
-    expect(container.textContent).toContain("topic map ready");
-    expect(container.textContent).toContain("OS");
-    expect(container.textContent).toContain("no map yet");
+    const text = container.textContent?.replace(/\s+/g, " ") ?? "";
+    expect(text).toContain("Ready to study");
+    expect(text).toContain("3 topics");
+    expect(text).toContain("2 of 5 mastered");
+    expect(text).toContain("Last test 2 d ago");
+    expect(container.querySelector('svg[aria-label="2 of 5 mastered"]')).not.toBeNull();
+    expect(text).toContain("Indexed, no map yet");
+    expect(text).toContain("Map my OS course.");
     expect(container.querySelector('a[href="/s/PDSS"]')).not.toBeNull();
     expect(qc.getQueryData(queryKeys.subjects())).toHaveLength(2);
 
