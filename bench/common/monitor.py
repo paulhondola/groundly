@@ -1,8 +1,9 @@
-"""Wall time and peak process-tree RSS of one command.
+"""One measured command: wall time, return code, and its samplers' rows.
 
-Peak RSS is the largest sum of `rss` over the command and all its descendants at
-one sampling instant, so a parent plus worker children counts together. A
-process that exits between listing and reading is skipped, never fatal.
+`ProcSampler` samples the command's process tree for the whole run; peak RSS is the largest
+tree-summed RSS among its rows. With a `PowerSession`, the run also takes the power and
+per-task rows inside its own time window, tasks filtered to every pid the tree ever had.
+A sampler that could not read leaves its rows empty and says why in `sampler_note`.
 
 With `memray_out`, the command runs under `memray run --follow-fork`: forked
 children are traced, an `exec`'d process (the extraction worker) is not.
@@ -13,9 +14,10 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
-import psutil
+from bench.common.sampler import PowerSession, ProcSampler
 
 
 @dataclass(frozen=True)
@@ -23,20 +25,10 @@ class Measurement:
     wall_s: float
     peak_rss_mb: float
     returncode: int
-
-
-def _tree_rss(root: psutil.Process) -> int:
-    total = 0
-    try:
-        procs = [root, *root.children(recursive=True)]
-    except psutil.Error:
-        return 0
-    for p in procs:
-        try:
-            total += p.memory_info().rss
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-    return total
+    started_at: datetime
+    ended_at: datetime
+    samples: dict[str, list[dict]]  # sample_proc, sample_power, sample_task
+    sampler_note: str | None
 
 
 def _command(cmd: list[str], memray_out: Path | None, memray_python: Path | None) -> list[str]:
@@ -54,14 +46,32 @@ def run(
     interval: float = 0.1,
     memray_out: Path | None = None,
     memray_python: Path | None = None,
+    power: PowerSession | None = None,
 ) -> Measurement:
     cmd = _command(cmd, memray_out, memray_python)
+    started_at, t_start = datetime.now(UTC), time.time()
     start = time.perf_counter()
     proc = subprocess.Popen(cmd, env=env, cwd=cwd)
-    root = psutil.Process(proc.pid)
-    peak = 0
-    while proc.poll() is None:
-        peak = max(peak, _tree_rss(root))
-        time.sleep(interval)
+    sampler = ProcSampler(proc.pid, interval)
+    sampler.start()
+    proc.wait()
     wall = time.perf_counter() - start
-    return Measurement(wall, peak / (1024 * 1024), proc.returncode)
+    proc_rows = sampler.stop()
+    ended_at, t_end = datetime.now(UTC), time.time()
+    notes = [sampler.note]
+    power_rows: list[dict] = []
+    task_rows: list[dict] = []
+    if power is not None:
+        if not power.alive():
+            notes.append("powermetrics not running")
+        power_rows, task_rows = power.slice(t_start, t_end, sampler.pids | {proc.pid})
+        notes.append(power.note)
+    return Measurement(
+        wall_s=wall,
+        peak_rss_mb=max((r["rss_mb"] for r in proc_rows), default=0.0),
+        returncode=proc.returncode,
+        started_at=started_at,
+        ended_at=ended_at,
+        samples={"sample_proc": proc_rows, "sample_power": power_rows, "sample_task": task_rows},
+        sampler_note="; ".join(dict.fromkeys(n for n in notes if n)) or None,
+    )
