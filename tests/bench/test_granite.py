@@ -56,16 +56,17 @@ def install(monkeypatch):
 PDF = Path("lec.pdf")
 
 
-def test_reads_every_page_in_page_range_batches(install):
-    stub = install(StubConverter(20))
-    assert [n for n, _ in granite.read(PDF, None, None)] == list(range(1, 21))
-    assert stub.calls == [(1, 16), (17, 20)]
+def test_reads_every_page_one_conversion_at_a_time(install):
+    # a finished page is handed on before the next starts, so no page waits on a batch
+    stub = install(StubConverter(4))
+    assert [n for n, _ in granite.read(PDF, None, None)] == [1, 2, 3, 4]
+    assert stub.calls == [(1, 1), (2, 2), (3, 3), (4, 4)]
 
 
-def test_requested_pages_are_read_in_contiguous_runs(install):
+def test_requested_pages_are_read_one_at_a_time_in_order(install):
     stub = install(StubConverter(20))
     assert [n for n, _ in granite.read(PDF, [9, 5, 6], None)] == [5, 6, 9]
-    assert stub.calls == [(5, 6), (9, 9)]
+    assert stub.calls == [(5, 5), (6, 6), (9, 9)]
 
 
 def test_a_page_stopped_by_the_token_limit_is_counted(install):
@@ -77,7 +78,7 @@ def test_a_page_stopped_by_the_token_limit_is_counted(install):
 def test_a_range_numbered_from_one_maps_back_to_its_pages(install):
     install(StubConverter(20, from_one=True))
     got = [(n, doc.export_to_markdown()) for n, doc in granite.read(PDF, [5, 6, 18], None)]
-    assert got == [(5, "read by docling 1"), (6, "read by docling 2"), (18, "read by docling 1")]
+    assert got == [(5, "read by docling 1"), (6, "read by docling 1"), (18, "read by docling 1")]
 
 
 def test_ocr_lang_is_ignored_without_error(install):

@@ -83,6 +83,16 @@ def test_furniture_blocks_are_dropped_and_titles_become_headings(tmp_path, stub)
     assert "# Graphs" in md and "A graph is a pair." in md and "Running head" not in md
 
 
+def test_a_table_block_becomes_a_table_not_html_text(tmp_path, stub):
+    html = "<table><tr><td>alpha</td><td>beta</td></tr><tr><td>gamma | x</td><td>delta</td></tr></table>"
+    stub(blocks=[{"type": "table", "content": html}])
+    ((_, doc),) = mineru.read(pdf(tmp_path, 1), None, None)
+    md = doc.export_to_markdown()
+    assert len(doc.tables) == 1
+    assert "<t" not in md and "&lt;" not in md
+    assert all(w in md for w in ("alpha", "beta", "gamma", "delta"))
+
+
 def test_a_page_that_hits_the_token_cap_is_yielded_and_counted(tmp_path, stub, monkeypatch):
     monkeypatch.setattr(mineru, "MAX_TOKENS", 10)
     stub(long_on=2)

@@ -5,6 +5,7 @@ Markdown and become a one-page document, so every chunk cites its page."""
 
 import sys
 from collections.abc import Iterator
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pypdfium2 as pdfium
@@ -51,12 +52,57 @@ def _token_count(text: str) -> int:
     return len(_get_client().client.processor.tokenizer.encode(text, add_special_tokens=False))
 
 
+class _Cells(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.rows: list[list[str]] = []
+        self._cell: list[str] | None = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "tr":
+            self.rows.append([])
+        elif tag in ("td", "th"):
+            self._cell = []
+
+    def handle_endtag(self, tag):
+        if tag in ("td", "th") and self._cell is not None:
+            if not self.rows:
+                self.rows.append([])
+            self.rows[-1].append(" ".join("".join(self._cell).split()))
+            self._cell = None
+
+    def handle_data(self, data):
+        if self._cell is not None:
+            self._cell.append(data)
+
+
+def _table_markdown(html: str) -> str:
+    """MinerU's table HTML as a Markdown pipe table, so docling reads cells, not tag text.
+
+    A literal `|` becomes `&#124;`: docling's Markdown reader splits cells on `\\|` too.
+    Spans are not expanded: a row keeps the cells it has, padded to the widest row."""
+    parser = _Cells()
+    parser.feed(html)
+    rows = [r for r in parser.rows if r]
+    if not rows:
+        return ""
+    width = max(len(r) for r in rows)
+    lines = [
+        "| " + " | ".join(c.replace("|", "&#124;") for c in r + [""] * (width - len(r))) + " |"
+        for r in rows
+    ]
+    lines.insert(1, "|" + " --- |" * width)
+    return "\n".join(lines)
+
+
 def _markdown(blocks) -> str:
     parts = []
     for block in blocks:
         text = (block.get("content") or "").strip()
         if not text or block["type"] in _SKIPPED:
             continue
+        if block["type"] == "table" and "<t" in text:
+            text = _table_markdown(text)
         parts.append(f"# {text}" if block["type"] in _HEADINGS else text)
     return "\n\n".join(parts)
 

@@ -1,6 +1,7 @@
-"""granite-docling 258M on MLX through docling's VlmPipeline, read page by page in the
-product's batch shape. Needs the optional `bench` extra; `ocr_lang` has no meaning for a
-VLM and is ignored."""
+"""granite-docling 258M on MLX through docling's VlmPipeline, one page per conversion, so a
+finished page is handed on at once and none waits on a batch (a capped page can take a
+minute). Needs the `bench` dependency group; `ocr_lang` has no meaning for a VLM and is
+ignored."""
 
 import functools
 import sys
@@ -8,7 +9,6 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from bench.stacks import caps
-from groundly.ingestion.extract_worker import PAGE_BATCH, _page_runs
 from groundly.ingestion.formats import IMAGE_SUFFIXES
 
 SUFFIXES = frozenset({".pdf"}) | IMAGE_SUFFIXES
@@ -46,28 +46,26 @@ def _count_caps(result) -> None:
 def read(path: Path, pages: list[int] | None, ocr_lang: str | None) -> Iterator:
     converter = _converter()
 
-    def convert(start: int, end: int):
-        result = converter.convert(path, page_range=(start, end))
+    def convert(n: int):
+        result = converter.convert(path, page_range=(n, n))
         _count_caps(result)
-        return result
-
-    def split(result, start: int, end: int):
         doc = result.document
-        # docling 2.115's VlmPipeline numbers a range's pages from 1; map them back
-        shift = start - 1 if doc.pages and min(doc.pages) < start else 0
-        for n in range(start, end + 1):
-            if n - shift in doc.pages:
-                yield n, doc.filter(page_nrs={n - shift})
+        # docling 2.115's VlmPipeline numbers a range's pages from 1; map it back
+        src = n if n in doc.pages else 1
+        return result, (doc.filter(page_nrs={src}) if src in doc.pages else None)
+
+    def one(n: int, converted) -> Iterator:
+        if converted[1] is not None:
+            yield n, converted[1]
 
     if pages is not None:
-        for start, end in _page_runs(pages):
-            yield from split(convert(start, end), start, end)
+        for n in sorted(pages):
+            yield from one(n, convert(n))
         return
-    first = convert(1, PAGE_BATCH)
-    total = first.input.page_count
-    yield from split(first, 1, PAGE_BATCH)
-    for start in range(PAGE_BATCH + 1, total + 1, PAGE_BATCH):
-        yield from split(convert(start, min(start + PAGE_BATCH - 1, total)), start, total)
+    first = convert(1)
+    yield from one(1, first)
+    for n in range(2, first[0].input.page_count + 1):
+        yield from one(n, convert(n))
 
 
 if __name__ == "__main__":
