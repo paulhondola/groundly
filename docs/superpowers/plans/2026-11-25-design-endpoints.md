@@ -295,8 +295,12 @@ def test_no_course_text_reaches_the_log(...): ...  # after search/submit_questio
 - [ ] **Step 12: Write the failing route tests** in `tests/web/test_app.py`:
 
 ```python
-def test_activity_route_reads_the_log(client, home): ...  # record a stdio session_start for os.getpid() + questions_accepted with topic_id -> hosts[0]["orb"] == "listening", recent text uses the topic title
-def test_activity_route_without_a_log_is_empty_and_creates_none(client, home): ...  # Review Focus 3 at the route
+def test_activity_route_reads_the_log(
+    client, home
+): ...  # record a stdio session_start for os.getpid() + questions_accepted with topic_id -> hosts[0]["orb"] == "listening", recent text uses the topic title
+def test_activity_route_without_a_log_is_empty_and_creates_none(
+    client, home
+): ...  # Review Focus 3 at the route
 ```
 
 Paired/unpaired Tailscale access to `/api/activity` in `tests/web/test_tailscale.py`, as in Task 3.
