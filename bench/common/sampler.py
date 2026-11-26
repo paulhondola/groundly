@@ -159,11 +159,12 @@ _TASK_KEYS = ("pid", "name", "cputime_ms_per_s", "gputime_ms_per_s", "energy_imp
 
 
 def sudo_ok() -> bool:
-    """True when sudo runs without a prompt in this shell (a cached `sudo -v` or a sudoers rule)."""
+    """True when sudo runs powermetrics without a prompt (a cached `sudo -v`, or a sudoers rule
+    that may allow powermetrics and nothing else). Runs it for one 1 ms sample: `sudo -n -l`
+    answers "allowed", not "allowed without a password"."""
+    cmd = [*POWERMETRICS[:3], "--samplers", "cpu_power", "-i", "1", "-n", "1"]
     try:
-        return (
-            subprocess.run(["sudo", "-n", "true"], capture_output=True, check=False).returncode == 0
-        )
+        return subprocess.run(cmd, capture_output=True, check=False).returncode == 0
     except OSError:
         return False
 

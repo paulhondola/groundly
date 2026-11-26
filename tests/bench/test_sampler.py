@@ -83,3 +83,24 @@ def test_power_session_records_while_alive():
         assert power.alive()
         system, _ = power.slice(t - 1, time.time() + 1, set())
     assert len(system) >= 4
+
+
+def _fake_sudo(tmp_path, monkeypatch, script):
+    fake = tmp_path / "sudo"
+    fake.write_text("#!/bin/sh\n" + script)
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+
+
+def test_sudo_ok_accepts_a_rule_limited_to_powermetrics(tmp_path, monkeypatch):
+    # Like a NOPASSWD rule for powermetrics alone: any other command is refused.
+    _fake_sudo(
+        tmp_path, monkeypatch, '[ "$1 $2" = "-n /usr/bin/powermetrics" ] && exit 0\nexit 1\n'
+    )
+    assert sampler.sudo_ok()
+
+
+def test_sudo_ok_refuses_when_listing_allows_but_running_needs_a_password(tmp_path, monkeypatch):
+    # Like `(ALL) ALL` with no cached `sudo -v`: `sudo -n -l` says yes, running asks for a password.
+    _fake_sudo(tmp_path, monkeypatch, '[ "$2" = "-l" ] && exit 0\nexit 1\n')
+    assert not sampler.sudo_ok()
