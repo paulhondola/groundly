@@ -1,5 +1,7 @@
 import pytest
 
+pytest.importorskip("duckdb")  # bench group only; CI installs `--extra dev`
+
 from bench.common.compare import table
 
 

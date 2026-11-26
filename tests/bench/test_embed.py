@@ -8,6 +8,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytest.importorskip("duckdb")  # bench group only; CI installs `--extra dev`
+
 from bench.embed.run import agreement_rows
 
 ROOT = Path(__file__).parents[2]

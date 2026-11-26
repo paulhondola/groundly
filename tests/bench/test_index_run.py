@@ -2,6 +2,10 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import pytest
+
+pytest.importorskip("duckdb")  # bench group only; CI installs `--extra dev`
+
 from bench.index.run import (
     file_seconds,
     ingestion_settings,
