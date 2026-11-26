@@ -103,6 +103,22 @@ uv run python -m bench.common.compare retrieval --baseline docling --metric hit_
 
 The bench runs labelled queries against an indexed home, such as one left behind by `index --keep-homes`, in a measured child: one warm-up search (`load_s`) loads the models, then each query is timed. It prints `hit_exact@8`, `hit_within1@8` and `mrr_within1@8`, and stores `query` and `query_hit` rows.
 
+## Report: thesis results R1–R15
+
+```bash
+uv run python -m bench.report.run [--session S]
+```
+
+Writes `bench/results/export/R<n>.parquet`, a `.csv` twin and a `.png` figure for each result, from each bench's latest session (or one `--session`). The queries are named blocks in `bench/report/queries.sql`; R1's 95% CIs are a percentile bootstrap of the page mean. Energy is the trapezoid integral of combined power over the run's samples minus its idle baseline × wall time; CPU % is Δcpu_s / Δt_s. Accuracy results (R1–R3) use each arm's first run, since extraction is deterministic. memray runs feed only R15. No export reads `page_text`.
+
+| Result | What |
+|---|---|
+| R1–R3 | word F1 / precision / recall per engine × cell with CIs; per-page F1 spread; cost (s/page, J/page) vs F1 |
+| R4–R7 | per-page latency and model load; memory over time and peaks; CPU, GPU, power and energy per item; capped pages, failed items, timeouts |
+| R8–R9 | index time per subject and arm with its extract / embed / other split; retrieval hit@8 |
+| R10–R14 | torch vs MLX: throughput and load, `search` p50/p95, resources and J per 1,000 chunks, agreement, hit@8 |
+| R15 | memray peak heap per process (flamegraphs beside the captures) |
+
 ## Ship rule
 
 Written before any VLM run. A stack ("docling, with the VLM on image pages") replaces the product's reader only if all of these hold in one session:

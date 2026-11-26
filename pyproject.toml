@@ -49,6 +49,7 @@ groundly = "groundly.cli:app"
 # install cannot pull MinerU. MinerU2.5 drafts and scores reference pages.
 bench = [
     "duckdb==2.0.1",
+    "matplotlib==3.11.2",
     "mineru-vl-utils[mlx]==2.0.9",
 ]
 
