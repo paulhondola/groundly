@@ -170,3 +170,122 @@ def write_run(con: duckdb.DuckDBPyConnection, run: dict, children: dict[str, lis
         con.execute("rollback")
         raise
     return rid
+
+
+def _legacy_run(r: dict) -> dict:
+    m = r.get("metrics", {})
+    return {
+        "session": r["session"],
+        "bench": r["bench"],
+        "arm": r["arm"],
+        "subject": r.get("subject"),
+        "run_no": r.get("run"),
+        "returncode": r.get("returncode"),
+        "wall_s": m.get("wall_s"),
+        "load_s": m.get("load_s"),
+        "memray": bool(r.get("memray", False)),
+        "timeout_s": r.get("timeout_s"),
+        "manifest_version": r.get("manifest_version"),
+        "sampler_note": "imported",
+    }
+
+
+def _legacy_files(r: dict) -> list[dict]:
+    failed = {f["filename"]: f["error"] for f in r.get("failed", [])}
+    rows = [
+        {"filename": f["file"], "extract_s": f["extract_s"], "embed_s": f["embed_s"],
+         "status": "failed" if f["file"] in failed else "ok", "error": failed.get(f["file"])}
+        for f in r.get("per_file", [])
+    ]  # fmt: skip
+    seen = {f["filename"] for f in rows}
+    rows += [
+        {"filename": name, "status": "failed", "error": err}
+        for name, err in failed.items()
+        if name not in seen
+    ]
+    return rows
+
+
+def _legacy_pages(path: Path, manifest: dict | None) -> tuple[list[dict], list[dict]]:
+    import json
+
+    info = {(p["sha256"], p["page"]): p for p in (manifest or {}).get("pages", [])}
+    pages, texts = [], []
+    for line in path.read_text().splitlines():
+        r = json.loads(line)
+        if "meta" in r:
+            continue
+        p = info.get((r["sha256"], r["page"]), {})
+        pages.append(
+            {"sha256": r["sha256"], "page": r["page"], "kind": p.get("kind"), "lang": p.get("lang"),
+             "ref": p.get("ref"), "ms": r.get("ms"), "capped": r.get("capped"),
+             "error": r.get("error")}
+        )  # fmt: skip
+        texts.append({"sha256": r["sha256"], "page": r["page"], "text": r.get("text", "")})
+    return pages, texts
+
+
+def import_jsonl(
+    con: duckdb.DuckDBPyConnection, results_dir: Path, manifest: dict | None = None
+) -> dict[str, int]:
+    """Load the pre-store JSONL results once; a session already in the store is skipped whole.
+
+    Only raw facts come across: run rows, per-file rows and page rows (kind/lang/ref from the
+    manifest; scores left NULL for `rescore`). The JSONL files stay as the archive of the old
+    aggregate metrics, which have no raw rows behind them.
+    """
+    import json
+    from datetime import datetime
+
+    counts = {"run": 0, "file": 0, "page": 0, "page_text": 0}
+    rows = [
+        json.loads(line)
+        for bench in ("extract", "index", "retrieval")
+        if (results_dir / f"{bench}.jsonl").is_file()
+        for line in (results_dir / f"{bench}.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    known = {s for (s,) in con.execute("select id from session").fetchall()}
+    for r in rows:
+        sid = r["session"]
+        if sid in known:
+            continue
+        if not con.execute("select 1 from session where id = ?", [sid]).fetchone():
+            ensure_session(
+                con,
+                {"id": sid, "started_at": datetime.strptime(sid, "%Y%m%dT%H%M%SZ"),
+                 "machine": r.get("machine"),
+                 "os": "darwin" if "macOS" in (r.get("machine") or "") else None,
+                 "git_sha": r.get("sha"), "note": "imported from JSONL",
+                 "packages": r.get("versions", {})},
+            )  # fmt: skip
+        children: dict[str, list[dict]] = (
+            {"file": _legacy_files(r)} if r["bench"] == "index" else {}
+        )
+        pages_file = results_dir / "pages" / f"{sid}-{r['arm']}.jsonl"
+        if r["bench"] == "extract" and pages_file.is_file():
+            children["page"], children["page_text"] = _legacy_pages(pages_file, manifest)
+        write_run(con, _legacy_run(r), children)
+        counts["run"] += 1
+        for table, rs in children.items():
+            counts[table] += len(rs)
+    return counts
+
+
+def main() -> None:
+    import argparse
+
+    from bench.common.corpus import load_manifest
+
+    ap = argparse.ArgumentParser(prog="python -m bench.common.store")
+    ap.add_argument("command", choices=["import-jsonl"])
+    args = ap.parse_args()
+    if args.command == "import-jsonl":
+        manifest = load_manifest(Path(__file__).parents[1] / "corpus" / "manifest.json")
+        con = connect()
+        print(import_jsonl(con, RESULTS_DIR, manifest))
+        con.close()
+
+
+if __name__ == "__main__":
+    main()
