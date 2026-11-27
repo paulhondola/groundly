@@ -147,6 +147,10 @@ def _run(
                 runner = getattr(getattr(self.config.app, "state", None), "runner", None)
                 if runner is not None and not self.should_exit:
                     threading.Thread(target=runner.shutdown, daemon=True).start()
+                # uvicorn re-raises SIGTERM with the default handler once shut down, which ends
+                # the process before the finally below; a stdio forward goes local from here.
+                if announce:
+                    startfile.remove()
                 super().handle_exit(sig, frame)
 
         config = uvicorn.Config(

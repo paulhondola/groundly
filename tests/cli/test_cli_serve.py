@@ -154,6 +154,29 @@ def test_start_announces_itself_while_serving_and_cleans_up(monkeypatch):
     assert not startfile.path().exists()
 
 
+def test_start_withdraws_its_runfile_as_shutdown_begins(monkeypatch):
+    # uvicorn re-raises SIGTERM with the default handler after a graceful shutdown, which ends
+    # the process before any finally or atexit runs; shutdown's start is the last sure point.
+    import signal
+
+    import uvicorn
+
+    from groundly.core import startfile
+
+    _patch(monkeypatch)
+    monkeypatch.setattr("atexit.register", lambda *a, **kw: None)
+    seen = []
+
+    def fake_run(self, sockets=None):
+        seen.append(startfile.path().exists())
+        self.handle_exit(signal.SIGTERM, None)
+        seen.append(startfile.path().exists())
+
+    monkeypatch.setattr(uvicorn.Server, "run", fake_run)
+    assert runner.invoke(app, ["start"]).exit_code == 0
+    assert seen == [True, False]
+
+
 def test_serve_writes_no_runfile(monkeypatch):
     from groundly.core import startfile
 
