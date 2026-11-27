@@ -54,6 +54,7 @@ from PIL import Image
 
 STATIC = Path(__file__).parents[2] / "groundly" / "web" / "static"
 
+
 def test_manifest_is_standalone_dark_and_its_icons_exist():
     m = json.loads((STATIC / "manifest.webmanifest").read_text())
     assert m["name"] == m["short_name"] == "Groundly"
@@ -66,14 +67,17 @@ def test_manifest_is_standalone_dark_and_its_icons_exist():
         sizes[icon["sizes"]] = Image.open(STATIC / icon["src"].removeprefix("/static/")).size
     assert sizes == {"192x192": (192, 192), "512x512": (512, 512)}
 
+
 def test_touch_icon_is_an_opaque_full_bleed_square():
     img = Image.open(STATIC / "apple-touch-icon.png").convert("RGBA")
     assert img.size == (180, 180)
     for xy in [(0, 0), (179, 0), (0, 179), (179, 179)]:
         assert img.getpixel(xy) == (0x10, 0x13, 0x18, 255)
 
+
 def test_ico_holds_16_and_32():
     assert Image.open(STATIC / "favicon.ico").info["sizes"] == {(16, 16), (32, 32)}
+
 
 def test_served_svgs_carry_no_provenance_blob():
     for name in ("favicon.svg", "groundly-mark-light.svg", "groundly-mark-dark.svg"):
@@ -143,13 +147,27 @@ In `tests/web/test_app.py::test_page_routes_serve_html_under_a_self_only_csp` ad
 ```
 In `test_page_assets_are_served_with_their_own_types` add:
 ```python
-    assert client.get("/static/manifest.webmanifest").headers["content-type"].startswith("application/manifest+json")
-    assert client.get("/static/favicon.ico").headers["content-type"] in ("image/x-icon", "image/vnd.microsoft.icon")
+assert (
+    client.get("/static/manifest.webmanifest")
+    .headers["content-type"]
+    .startswith("application/manifest+json")
+)
+assert client.get("/static/favicon.ico").headers["content-type"] in (
+    "image/x-icon",
+    "image/vnd.microsoft.icon",
+)
 ```
 In `tests/web/test_remote.py::test_perimeter_restricts_head_to_static_only`, inside the `phone` block (unpaired), add:
 ```python
-        for name in ("manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png", "favicon.ico", "favicon.svg"):
-            assert phone.get(f"/static/{name}").status_code == 200
+for name in (
+    "manifest.webmanifest",
+    "icon-192.png",
+    "icon-512.png",
+    "apple-touch-icon.png",
+    "favicon.ico",
+    "favicon.svg",
+):
+    assert phone.get(f"/static/{name}").status_code == 200
 ```
 New `web/src/lib/components/__tests__/brand.test.ts` (mount pattern as in `source-item.test.ts`): mount `Brand`, assert two `img` elements — `src` ending `/static/groundly-mark-light.svg` with class `dark:hidden`, and `/static/groundly-mark-dark.svg` with classes `hidden` and `dark:block`; both `alt=""`; no `claude-code.svg` in `container.innerHTML`.
 
