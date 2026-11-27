@@ -25,7 +25,7 @@ The storage backbone for [`overview.md`](overview.md). SQLite (WAL) per subject;
 |---|---|---|
 | materials | filename, sha-256, status (`indexed`/`extraction_failed`), page count | unique hash per subject = duplicate rejection |
 | chunks | material FK, page ref, **heading path**, text, token count | the citation unit; ids are never reused, so a stored citation can't come to mean a different chunk; heading path from the slide-title rule on text-layer slide pages, docling's layout model elsewhere |
-| vectors | sqlite-vec virtual table, bge-m3 dense (1024-d) | exact KNN (brute force — an upgrade over approximate HNSW) |
+| vectors | sqlite-vec virtual table, bge-m3 dense (1024-d) plus the chunk's `material_id` (metadata column) | exact KNN (brute force — an upgrade over approximate HNSW), scoped to one material by that column |
 | sparse_terms | inverted index of bge-m3 learned sparse weights | same forward pass as dense |
 | chunks_fts | FTS5 index over chunk text | BM25 channel |
 | topics | parent FK (null = big topic), position, title, summary | the topic tree, exactly two levels; ids are never reused, so progress can key on them later; a parent's deletion cascades to its subtopics |
@@ -34,9 +34,9 @@ The storage backbone for [`overview.md`](overview.md). SQLite (WAL) per subject;
 | question_citations | question FK, chunk FK, both cascade | 1 to 5 per question; a trigger deletes a question when its last citation goes |
 | topic_citations | topic FK, chunk FK, rank, both `ON DELETE CASCADE` | a node's sources, chosen by the topic gate; removing a material drops its citations and leaves the node, flagged in the page, with no sources |
 
-The two tree tables sit in the base schema. The question tables arrived at `user_version = 2` (decision 44); `connect()` upgrades a version-1 store in place under the write lock, adding only the empty question tables, and refuses one that already holds an object named like them. Titles and summaries are host-written text, never a citation target; only `topic_citations` rows, which point at verbatim chunks, are citations.
+The two tree tables sit in the base schema. The question tables arrived at `user_version = 2` (decision 44); `connect()` upgrades a version-1 store in place under the write lock, adding the empty question tables, and refuses one that already holds an object named like them. Titles and summaries are host-written text, never a citation target; only `topic_citations` rows, which point at verbatim chunks, are citations.
 
-**Schema version 2 (decision 44).** The question tables are the one in-place upgrade: opening a version-1 `store.db` creates them, empty, under the write lock, and touches no existing row. An imported version-1 bundle is upgraded the same way, and one that already holds an object of the same name is refused.
+**Schema version 3 (decisions 44, 56).** Two in-place upgrades, run together in one transaction under the write lock when an older `store.db` is opened: version 1 gains the empty question tables, and versions 1 and 2 have `vectors` rebuilt from their own rows with each chunk's `material_id` (a vector with no chunk is dropped). An imported older bundle is upgraded the same way; one that already holds an object named like the question tables, or lacks a table the upgrade reads, is refused.
 
 ## progress.db (never exported)
 
