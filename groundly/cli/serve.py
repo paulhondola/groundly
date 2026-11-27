@@ -187,8 +187,16 @@ def serve(port: _PORT = 8765, tailscale: _TAILSCALE = None) -> None:
 
 
 @app.command()
-def start(port: _PORT = 8765, tailscale: _TAILSCALE = None) -> None:
+def start(
+    port: _PORT = 8765,
+    tailscale: _TAILSCALE = None,
+    http: Annotated[
+        bool,
+        typer.Option("--http", help="Print the URL connect command, for hosts that need one."),
+    ] = False,
+) -> None:
     """Serve the page and the MCP tools (at /mcp) from one process, for every host session."""
+    from groundly.cli.skill import CONNECT_COMMAND
     from groundly.mcp.activity import ActivityMiddleware
     from groundly.mcp.server import mcp
     from groundly.web.app import HOSTS, create_app
@@ -203,7 +211,14 @@ def start(port: _PORT = 8765, tailscale: _TAILSCALE = None) -> None:
     lines = [
         _page_line(port),
         f"MCP:  {mcp_url}",
-        f"Connect Claude Code: claude mcp add --scope user --transport http groundly {mcp_url}",
+        # A stdio host forwards the model tools here while this runs (decision 54), and still
+        # works when it does not; a URL host fails without it.
+        "Connect Claude Code: "
+        + (
+            f"claude mcp add --scope user --transport http groundly {mcp_url}"
+            if http
+            else CONNECT_COMMAND
+        ),
     ]
     if remote is not None:
         lines.extend(_remote_lines(remote))

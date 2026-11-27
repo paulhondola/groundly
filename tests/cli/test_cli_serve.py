@@ -120,9 +120,23 @@ def test_start_binds_loopback_opens_page_and_prints_both_urls(monkeypatch):
     # one unwrapped line, so it pastes as a command at any terminal width
     # a page run shares this process's model load through its own /mcp
     assert runs[0]["app"].state.runner.mcp_url == "http://127.0.0.1:8765/mcp"
-    connect = "claude mcp add --scope user --transport http groundly http://127.0.0.1:8765/mcp"
-    assert connect in result.output.splitlines()[-1]
+    # stdio is the default connection: it forwards the model tools here while `start` runs
+    assert "claude mcp add --scope user groundly -- groundly mcp" in result.output.splitlines()[-1]
+    assert "--transport http" not in result.output
     assert "http://127.0.0.1:8765/" in result.output  # fallback when *.localhost won't resolve
+
+
+def test_start_http_prints_the_url_connect_command(monkeypatch):
+    # For a host that connects by URL instead of spawning a process.
+    from groundly.cli.app import console
+
+    runs, _ = _patch(monkeypatch)
+    monkeypatch.setattr(console, "width", 60)
+    result = runner.invoke(app, ["start", "--http", "--port", "9123"])
+    assert result.exit_code == 0, result.output
+    assert runs[0]["app"].state.runner.mcp_url == "http://127.0.0.1:9123/mcp"
+    connect = "claude mcp add --scope user --transport http groundly http://127.0.0.1:9123/mcp"
+    assert connect in result.output.splitlines()[-1]
 
 
 def _seen_while_serving(monkeypatch) -> list:

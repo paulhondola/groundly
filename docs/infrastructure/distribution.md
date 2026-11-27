@@ -21,7 +21,7 @@ Install [`uv`](https://docs.astral.sh/uv/) first if absent. Python ≥3.11 is pr
 
 Connect your host first, then install the skills that map a course, write questions and grade (`groundly skill install`, which installs into `~/.agents/skills/` and any present host among `~/.claude/skills/`, `~/.codex/skills/` and `~/.gemini/config/skills/`; see [`../guides/mcp-hosts.md`](../guides/mcp-hosts.md)). `groundly serve` shows the tree on loopback.
 
-stdio servers are spawned and killed by the host — there is no daemon to manage. Students running several host sessions run `groundly start` and point them all at `http://127.0.0.1:8765/mcp` (streamable HTTP, `127.0.0.1` only), so the models load once and the page is served alongside (decision 45). Hosts left on stdio share that load too: while `start` runs, each `groundly mcp` forwards the tools that need the models to it, and serves them itself when `start` is not running (decision 54).
+stdio servers are spawned and killed by the host — there is no daemon to manage. Students running several host sessions run `groundly start`, so the models load once and the page is served alongside (decisions 45, 54). Hosts stay registered over stdio and share that load: while `start` runs, each `groundly mcp` forwards the tools that need the models to it, and serves them itself when `start` is not running (decision 54). A host that can only connect by URL points at `http://127.0.0.1:8765/mcp` (streamable HTTP, `127.0.0.1` only; `groundly start --http` prints the command) and needs `start` running.
 
 ## Requirements
 

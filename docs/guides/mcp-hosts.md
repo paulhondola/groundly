@@ -109,13 +109,19 @@ Each stdio connection spawns its own Groundly. While `groundly start` runs, each
 groundly start                   # page at http://groundly.localhost:8765/, MCP at http://127.0.0.1:8765/mcp
 ```
 
-It binds 127.0.0.1 only, opens the page, and prints the connect command:
+It binds 127.0.0.1 only, opens the page, and prints the connect command, the same stdio one as above:
+
+```sh
+claude mcp add --scope user groundly -- groundly mcp
+```
+
+Hosts registered over stdio need no change, and keep working when `start` is stopped. A host that can only connect by URL gets that command from `groundly start --http`:
 
 ```sh
 claude mcp add --scope user --transport http groundly http://127.0.0.1:8765/mcp
 ```
 
-Hosts registered over stdio need no change. A host you connect by URL instead must keep `start` running while you work: its tools fail while it is stopped. If the page's `groundly.localhost` address does not open, use the printed `127.0.0.1` one. The MCP URL uses the IP on purpose: Claude Code looks names up through the operating system, which on some Linux setups asks outside DNS about `*.localhost`.
+Such a host must keep `start` running while you work: its tools fail while it is stopped. Register one way or the other, not both: two entries named `groundly` make the host pick one. If the page's `groundly.localhost` address does not open, use the printed `127.0.0.1` one. The MCP URL uses the IP on purpose: Claude Code looks names up through the operating system, which on some Linux setups asks outside DNS about `*.localhost`.
 
 ## HTTP transport (`groundly mcp --http`)
 

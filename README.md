@@ -63,7 +63,7 @@ groundly serve --tailscale
 
 Scan the one-time QR code printed in the terminal or shown under **Devices** on the desktop study page. The paired browser can open the map, read cited passages, take tests, and see grading updates. You can revoke devices from the desktop page. MCP stays available only on the Groundly computer.
 
-If you use several MCP sessions, `groundly start` serves the browser app and a shared MCP endpoint at `http://127.0.0.1:8765/mcp` from one process. It also accepts `--tailscale` for the browser app.
+If you use several MCP sessions, run `groundly start`: it serves the browser app, and while it runs every stdio-registered session sends its searches and submissions to it, so the models load once. Hosts that can only connect by URL use its endpoint at `http://127.0.0.1:8765/mcp` (`groundly start --http` prints that command). It also accepts `--tailscale` for the browser app.
 
 ## Share a course
 
