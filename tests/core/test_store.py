@@ -36,8 +36,8 @@ def _add_material(conn, filename="lec1.pdf", sha="a" * 64, n_chunks=2):
             )
             cid = c.lastrowid
             conn.execute(
-                "INSERT INTO vectors (rowid, embedding) VALUES (?, ?)",
-                (cid, sqlite_vec.serialize_float32([0.1] * EMBEDDING_DIM)),
+                "INSERT INTO vectors (rowid, embedding, material_id) VALUES (?, ?, ?)",
+                (cid, sqlite_vec.serialize_float32([0.1] * EMBEDDING_DIM), mid),
             )
             conn.execute(
                 "INSERT INTO sparse_terms (token_id, chunk_id, weight) VALUES (7, ?, 0.5)", (cid,)
@@ -132,6 +132,30 @@ def test_add_indexed_streams_vectors_from_lazy_iterable(db, tmp_path):
     ]
 
 
+def _misfiled_vectors(conn) -> int:
+    """Vectors whose material_id is not their chunk's material."""
+    return conn.execute(
+        "SELECT count(*) FROM vectors v JOIN chunks c ON c.id = v.rowid "
+        "WHERE v.material_id IS NOT c.material_id"
+    ).fetchone()[0]
+
+
+def test_every_vector_is_filed_under_its_chunks_material(db, tmp_path):
+    from groundly.ingestion.extract import ChunkData
+
+    s = SubjectStore(tmp_path / "store.db")
+    for name, sha in (("a.pdf", "a" * 64), ("b.pdf", "b" * 64)):
+        chunks = [ChunkData(f"{name} {i}", "Intro", i + 1, 5) for i in range(2)]
+        s.add_indexed(name, sha, 2, chunks, (([0.1] * EMBEDDING_DIM, {1: 0.5}) for _ in chunks))
+
+    assert db.execute("SELECT count(DISTINCT material_id) FROM vectors").fetchone()[0] == 2
+    assert _misfiled_vectors(db) == 0
+
+
+def test_a_fresh_store_is_version_3():
+    assert store.STORE_USER_VERSION == 3
+
+
 def test_find_materials_by_filename_or_sha_prefix(db, tmp_path):
     _add_material(db, "lec1.pdf", "a" * 64)
     _add_material(db, "lec2.pdf", "b" * 64)
@@ -163,8 +187,8 @@ def _add_chunk(conn, material_id, text, vec, sparse, page=1, heading_path="Intro
         (material_id, page, heading_path, text, 10),
     ).lastrowid
     conn.execute(
-        "INSERT INTO vectors (rowid, embedding) VALUES (?, ?)",
-        (cid, sqlite_vec.serialize_float32(vec)),
+        "INSERT INTO vectors (rowid, embedding, material_id) VALUES (?, ?, ?)",
+        (cid, sqlite_vec.serialize_float32(vec), material_id),
     )
     for token_id, weight in sparse.items():
         conn.execute(
@@ -614,8 +638,29 @@ def test_a_deleted_topic_takes_its_questions_with_it(bank):
     assert s.questions() == [] and _counts(s) == {}
 
 
-def _downgrade_to_v1(path):
+def _raw(path):
     conn = sqlite3.connect(path)
+    conn.enable_load_extension(True)
+    sqlite_vec.load(conn)
+    return conn
+
+
+def _downgrade_to_v2(path):
+    """Give `vectors` its version-2 shape: no material_id column."""
+    conn = _raw(path)
+    conn.executescript(
+        "CREATE TEMP TABLE old AS SELECT rowid AS id, embedding FROM vectors;"
+        "DROP TABLE vectors;"
+        f"CREATE VIRTUAL TABLE vectors USING vec0(embedding float[{EMBEDDING_DIM}]);"
+        "INSERT INTO vectors (rowid, embedding) SELECT id, embedding FROM temp.old;"
+        "PRAGMA user_version = 2;"
+    )
+    conn.close()
+
+
+def _downgrade_to_v1(path):
+    _downgrade_to_v2(path)
+    conn = _raw(path)
     conn.executescript(
         "DROP TRIGGER question_citations_ad; DROP TABLE question_citations;"
         "DROP TABLE question_options; DROP TABLE questions; PRAGMA user_version = 1;"
@@ -623,30 +668,75 @@ def _downgrade_to_v1(path):
     conn.close()
 
 
+def _vectors(conn) -> list[tuple]:
+    return [tuple(r) for r in conn.execute("SELECT rowid, embedding FROM vectors ORDER BY rowid")]
+
+
 def test_a_version_1_store_is_upgraded_in_place_keeping_its_rows(bank, db, tmp_path):
     s = bank["store"]
-    before = (s.list_materials()[0]["filename"], s.tree())
+    before = (s.list_materials()[0]["filename"], s.tree(), _vectors(db))
     db.close()
     _downgrade_to_v1(tmp_path / "store.db")
 
     assert _counts(s) == {}
     conn = s.connect()
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == store.STORE_USER_VERSION
         assert store.programs(conn) == store.shipped_programs()
+        assert store.schema_problem(conn) is None
+        assert _misfiled_vectors(conn) == 0
+        after = (s.list_materials()[0]["filename"], s.tree(), _vectors(conn))
     finally:
         conn.close()
-    assert (s.list_materials()[0]["filename"], s.tree()) == before
+    assert after == before
     assert s.add_questions(bank["leaf"], [_single([bank["c1"]])])
 
 
-def test_the_upgrade_leaves_a_store_another_process_already_upgraded(tmp_path):
+def test_a_version_2_store_is_upgraded_keeping_every_vector_and_result(db, tmp_path, two_materials):
+    s = SubjectStore(tmp_path / "store.db")
+    q = [1.0] + [0.0] * (EMBEDDING_DIM - 1)
+    mid = two_materials["lec_id"]
+    before = (s.dense_search(q, k=10), s.dense_search(q, k=10, material_id=mid), _vectors(db))
+    db.close()
+    _downgrade_to_v2(tmp_path / "store.db")
+
+    conn = s.connect()
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == store.STORE_USER_VERSION
+        assert store.schema_problem(conn) is None
+        assert _misfiled_vectors(conn) == 0
+        vectors_after = _vectors(conn)
+    finally:
+        conn.close()
+    after = (s.dense_search(q, k=10), s.dense_search(q, k=10, material_id=mid), vectors_after)
+    assert after == before
+
+
+def test_the_upgrade_drops_a_vector_with_no_chunk(db, tmp_path, two_materials):
+    kept = _vectors(db)
+    db.close()
     path = tmp_path / "store.db"
-    store.create_store(path)
+    _downgrade_to_v2(path)
+    raw = _raw(path)
+    with raw:
+        raw.execute(
+            "INSERT INTO vectors (rowid, embedding) VALUES (999999, ?)",
+            (sqlite_vec.serialize_float32([0.5] * EMBEDDING_DIM),),
+        )
+    raw.close()
+
     conn = store.connect(path)
-    store._upgrade(conn)  # a second opener that read version 1 before the first one committed
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
-    conn.close()
+    try:
+        assert _vectors(conn) == kept
+    finally:
+        conn.close()
+
+
+def test_the_upgrade_leaves_a_store_another_process_already_upgraded(db, tmp_path, two_materials):
+    before = _vectors(db)
+    store._upgrade(db)  # a second opener that read an old version before the first one committed
+    assert db.execute("PRAGMA user_version").fetchone()[0] == store.STORE_USER_VERSION
+    assert _vectors(db) == before
 
 
 # --- writers re-check under the write lock --------------------------------------------

@@ -166,6 +166,17 @@ def test_import_pin_mismatch_confirm_yes_reembeds(tmp_path, monkeypatch, stub_em
     subj = Subject("PDSS_B")
     assert subj.load_manifest().embedding.hf_revision == HF_REVISION
     assert _row_counts(subj.store_db_path)["vectors"] == 2
+    conn = store.connect(subj.store_db_path)
+    try:
+        assert (
+            conn.execute(
+                "SELECT count(*) FROM vectors v JOIN chunks c ON c.id = v.rowid "
+                "WHERE v.material_id IS NOT c.material_id"
+            ).fetchone()[0]
+            == 0
+        )
+    finally:
+        conn.close()
 
 
 def test_import_pin_mismatch_confirm_no_installs_nothing(tmp_path, monkeypatch):

@@ -15,7 +15,7 @@ import sqlite_vec
 
 from groundly.core.manifest import EMBEDDING_DIM
 
-STORE_USER_VERSION = 2
+STORE_USER_VERSION = 3
 
 # What a stored topic tree may cost: the gate refuses a submission over these and import
 # refuses a bundle over them, so a hostile bundle cannot make `tree()` outgrow memory.
@@ -87,6 +87,11 @@ class QuestionConflictError(Exception):
         self.index, self.reason = index, reason
 
 
+# rowid = chunks.id. vec0 has no FK support, so removal deletes by material_id, which
+# also scopes a KNN to one material. The upgrade creates it from this same text, so an
+# upgraded store matches a fresh one exactly.
+_VECTORS_DDL = f"CREATE VIRTUAL TABLE vectors USING vec0(embedding float[{EMBEDDING_DIM}], material_id integer)"
+
 _BASE_SCHEMA = f"""
 CREATE TABLE materials (
     id INTEGER PRIMARY KEY,
@@ -109,8 +114,7 @@ CREATE TABLE chunks (
 );
 CREATE INDEX idx_chunks_material ON chunks(material_id);
 
--- rowid = chunks.id; vec0 has no FK support, deletion is explicit in remove_material
-CREATE VIRTUAL TABLE vectors USING vec0(embedding float[{EMBEDDING_DIM}]);
+{_VECTORS_DDL};
 
 CREATE TABLE sparse_terms (
     token_id INTEGER NOT NULL,
@@ -220,7 +224,7 @@ def connect(path: Path, create: bool = False) -> sqlite3.Connection:
             f"{path.name} has schema version {version}, newer than this groundly "
             f"understands (max {STORE_USER_VERSION}) — upgrade groundly"
         )
-    if version == 1:
+    if 0 < version < STORE_USER_VERSION:  # 0 is a file create_store is about to fill
         try:
             _upgrade(conn)
         except sqlite3.OperationalError as exc:
@@ -233,13 +237,37 @@ def connect(path: Path, create: bool = False) -> sqlite3.Connection:
     return conn
 
 
+# Rebuilds `vectors` with its chunk's material_id beside each embedding. The copy lives in
+# the temp schema, so no `vectors_`-prefixed object (an extension's name) lands in the file;
+# a vector whose chunk is gone has no material and is dropped.
+_VECTORS_REBUILD = (
+    (
+        "CREATE TEMP TABLE upgrade_vectors AS SELECT v.rowid AS id, v.embedding AS embedding, "
+        "c.material_id AS material_id FROM vectors v JOIN chunks c ON c.id = v.rowid"
+    ),
+    "DROP TABLE vectors",
+    _VECTORS_DDL,
+    (
+        "INSERT INTO vectors (rowid, embedding, material_id) "
+        "SELECT id, embedding, material_id FROM temp.upgrade_vectors"
+    ),
+    "DROP TABLE temp.upgrade_vectors",
+)
+
+
 def _upgrade(conn: sqlite3.Connection) -> None:
-    """Give a version-1 store the question tables, touching no existing row. The version is
-    read again under the write lock: another process may have upgraded while this one waited."""
+    """Bring an older store to this schema in one transaction: version 1 gains the empty
+    question tables, and versions 1 and 2 have `vectors` rebuilt from its own rows. The
+    version is read again under the write lock: another process may have upgraded while this
+    one waited."""
     conn.execute("BEGIN IMMEDIATE")
     try:
-        if conn.execute("PRAGMA user_version").fetchone()[0] == 1:
-            for statement in _statements(_QUESTION_SCHEMA):
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if 0 < version < STORE_USER_VERSION:
+            if version == 1:
+                for statement in _statements(_QUESTION_SCHEMA):
+                    conn.execute(statement)
+            for statement in _VECTORS_REBUILD:
                 conn.execute(statement)
             conn.execute(f"PRAGMA user_version = {STORE_USER_VERSION}")
         conn.execute("COMMIT")
@@ -378,13 +406,9 @@ class SubjectStore:
 
     def remove_material(self, material_id: int) -> None:
         """One transaction. FTS syncs via the chunks_ad trigger; sparse_terms via FK
-        cascade; vectors (vec0, no FK) deleted explicitly by chunk rowid."""
+        cascade; vectors (vec0, no FK) deleted explicitly by material_id."""
         with self._open() as conn, conn:
-            chunk_ids = [
-                r["id"]
-                for r in conn.execute("SELECT id FROM chunks WHERE material_id = ?", (material_id,))
-            ]
-            conn.executemany("DELETE FROM vectors WHERE rowid = ?", [(cid,) for cid in chunk_ids])
+            conn.execute("DELETE FROM vectors WHERE material_id = ?", (material_id,))
             conn.execute("DELETE FROM chunks WHERE material_id = ?", (material_id,))
             conn.execute("DELETE FROM materials WHERE id = ?", (material_id,))
 
@@ -400,26 +424,14 @@ class SubjectStore:
         self, embedding: list[float], k: int, material_id: int | None = None
     ) -> list[int]:
         """Exact KNN over the dense channel (sqlite-vec brute force). Chunk ids
-        nearest-first.
-
-        Scoped to one material, the vec0 KNN cannot help (it takes no material
-        predicate without a metadata column, i.e. a schema change), so that material's
-        vectors are ranked by exact L2 distance — vec0's metric — in a plain scan. One
-        material's chunks are few."""
-        query = sqlite_vec.serialize_float32(embedding)
+        nearest-first; `material_id` scopes the KNN through vec0's metadata column."""
+        sql = "SELECT rowid FROM vectors WHERE embedding MATCH ? AND k = ?"
+        params: tuple = (sqlite_vec.serialize_float32(embedding), k)
+        if material_id is not None:
+            sql += " AND material_id = ?"
+            params += (material_id,)
         with self._open() as conn:
-            if material_id is None:
-                rows = conn.execute(
-                    "SELECT rowid FROM vectors WHERE embedding MATCH ? AND k = ? ORDER BY distance",
-                    (query, k),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT rowid FROM vectors "
-                    "WHERE rowid IN (SELECT id FROM chunks WHERE material_id = ?) "
-                    "ORDER BY vec_distance_l2(embedding, ?) LIMIT ?",
-                    (material_id, query, k),
-                ).fetchall()
+            rows = conn.execute(sql + " ORDER BY distance", params).fetchall()
             return [r["rowid"] for r in rows]
 
     def sparse_search(
@@ -531,11 +543,12 @@ class SubjectStore:
                     (material_id, chunk.page, chunk.heading_path, chunk.text, chunk.token_count),
                 ).lastrowid
                 conn.execute(
-                    "INSERT INTO vectors (rowid, embedding) VALUES (?, ?)",
+                    "INSERT INTO vectors (rowid, embedding, material_id) VALUES (?, ?, ?)",
                     (
                         cid,
                         # pyrefly: ignore[bad-argument-type] -- stub says list[float]; it unpacks any sequence, numpy rows included
                         sqlite_vec.serialize_float32(vec),
+                        material_id,
                     ),
                 )
                 conn.executemany(

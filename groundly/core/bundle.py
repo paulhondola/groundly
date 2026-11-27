@@ -471,15 +471,15 @@ def re_embed(store_db_path: Path, embedder, on_step: OnStep | None = None) -> No
         with conn:
             conn.execute("DELETE FROM vectors")
             conn.execute("DELETE FROM sparse_terms")
-            rows = conn.execute("SELECT id, text FROM chunks ORDER BY id").fetchall()
+            rows = conn.execute("SELECT id, material_id, text FROM chunks ORDER BY id").fetchall()
             total = len(rows)
             for i in range(0, total, _REEMBED_BATCH):
                 batch = rows[i : i + _REEMBED_BATCH]
                 dense, sparse = embedder.encode([r["text"] for r in batch])
                 for row, vec, weights in zip(batch, dense, sparse, strict=True):
                     conn.execute(
-                        "INSERT INTO vectors (rowid, embedding) VALUES (?, ?)",
-                        (row["id"], sqlite_vec.serialize_float32(vec)),
+                        "INSERT INTO vectors (rowid, embedding, material_id) VALUES (?, ?, ?)",
+                        (row["id"], sqlite_vec.serialize_float32(vec), row["material_id"]),
                     )
                     conn.executemany(
                         "INSERT INTO sparse_terms (token_id, chunk_id, weight) VALUES (?, ?, ?)",
