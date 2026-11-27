@@ -45,6 +45,7 @@ The page still shows the borrowed Claude Code logo (`groundly/web/static/claude-
 
 - **Android over plain HTTP:** Chrome only honours `standalone` for an installed app, which needs HTTPS. Over the Tailscale HTTP address the home-screen shortcut opens in a normal tab; it should still use the manifest icon. Needs checking on a real Android phone.
 - **iPhone sign-in:** a home-screen app keeps its own cookie jar, copied from Safari when the icon is added. Sessions last 30 days (`SESSION_TTL_S`, fixed). When one expires, re-pair in Safari and re-add the icon; the pairing QR never opens inside the standalone app.
+- **iPhone source links:** a source PDF opens with `target="_blank"`, which in standalone mode leaves the app's cookie jar. If that view has no valid session it shows `401 unpaired` instead of the PDF. Unverified; check on a real iPhone.
 
 ## Left to the builder
 
