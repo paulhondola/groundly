@@ -153,13 +153,16 @@ def check_store_shape(store_db_path: Path) -> None:
     a row outside a field's fixed shape. A filename is joined to the materials dir, so it must
     stay one path component. Free text (`error`, chunk text, heading paths, and any other
     character the filesystem allows in a filename) is made inert where it is shown. This is
-    the first open, so a version-1 store is upgraded here."""
+    the first open, so an older store is upgraded here."""
     try:
         conn = store.connect(store_db_path)
     except store.SchemaUpgradeError as exc:
-        raise BundleError(
-            "bundle store.db could not be upgraded — it holds tables groundly did not write"
-        ) from exc
+        reason = (
+            "it lacks a table groundly writes"
+            if "no such table" in str(exc)
+            else "it holds tables groundly did not write"
+        )
+        raise BundleError(f"bundle store.db could not be upgraded — {reason}") from exc
     try:
         if store.programs(conn) != store.shipped_programs():
             raise BundleError("bundle store.db holds views or triggers groundly does not ship")
@@ -178,6 +181,15 @@ def check_store_shape(store_db_path: Path) -> None:
         ).fetchone()
         if row:
             raise BundleError(f"bundle chunk {row['id']!r} has a page that is not a number")
+        row = conn.execute(
+            "SELECT v.rowid AS id FROM vectors v JOIN chunks c ON c.id = v.rowid "
+            "WHERE v.material_id IS NOT c.material_id LIMIT 1"
+        ).fetchone()
+        if row:
+            raise BundleError(
+                f"bundle vector {row['id']!r} is filed under a different material than its "
+                "chunk — rejected"
+            )
     finally:
         conn.close()
 

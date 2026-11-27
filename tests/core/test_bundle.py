@@ -7,6 +7,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+import sqlite_vec
 from typer.testing import CliRunner
 
 from groundly.cli import app
@@ -992,6 +993,8 @@ def _edit_bundled_store(bundle_path, scratch, *statements):
     def edit(contents):
         db.write_bytes(contents["store.db"])
         conn = sqlite3.connect(db)
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
         try:
             conn.executescript(";".join(statements))
         finally:
@@ -1008,7 +1011,15 @@ def _shipped_trigger_sql():
     return sql
 
 
+_VECTORS_TO_V2 = (
+    "CREATE TEMP TABLE old AS SELECT rowid AS id, embedding FROM vectors",
+    "DROP TABLE vectors",
+    f"CREATE VIRTUAL TABLE vectors USING vec0(embedding float[{EMBEDDING_DIM}])",
+    "INSERT INTO vectors (rowid, embedding) SELECT id, embedding FROM temp.old",
+)
+
 _DOWNGRADE = (
+    *_VECTORS_TO_V2,
     "DROP TRIGGER question_citations_ad",
     "DROP TABLE question_citations",
     "DROP TABLE question_options",
@@ -1150,6 +1161,65 @@ def test_a_version_1_bundle_is_upgraded_on_import(tmp_path, monkeypatch):
         conn.close()
 
 
+def _misfiled_vectors(store_db_path) -> int:
+    conn = store.connect(store_db_path)
+    try:
+        return conn.execute(
+            "SELECT count(*) FROM vectors v JOIN chunks c ON c.id = v.rowid "
+            "WHERE v.material_id IS NOT c.material_id"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+
+def test_a_version_2_bundle_is_upgraded_on_import(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed("PDSS")
+    counts_a = _row_counts(subject_dir("PDSS") / "store.db")
+    bundle_path = _export(tmp_path)
+    _edit_bundled_store(bundle_path, tmp_path, *_VECTORS_TO_V2, "PRAGMA user_version = 2")
+    _use_home(monkeypatch, tmp_path / "b")
+
+    result = runner.invoke(app, ["import", str(bundle_path)])
+
+    assert result.exit_code == 0, result.output
+    path = Subject("PDSS").store_db_path
+    assert _row_counts(path) == counts_a and _misfiled_vectors(path) == 0
+    conn = store.connect(path)
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == store.STORE_USER_VERSION
+    finally:
+        conn.close()
+
+
+def test_a_version_2_bundle_without_a_vectors_table_is_refused(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed("PDSS")
+    bundle_path = _export(tmp_path)
+    _edit_bundled_store(bundle_path, tmp_path, "DROP TABLE vectors", "PRAGMA user_version = 2")
+    _use_home(monkeypatch, tmp_path / "b")
+
+    result = runner.invoke(app, ["import", str(bundle_path)])
+
+    _assert_refused(result, "could not be upgraded", "lacks a table groundly writes")
+
+
+def test_a_bundle_with_a_vector_filed_under_another_material_is_refused(tmp_path, monkeypatch):
+    _use_home(monkeypatch, tmp_path / "a")
+    init_subject("PDSS")
+    _seed("PDSS")
+    _seed("PDSS", filename="other.pdf", content=b"other bytes", sha256="b" * 64)
+    bundle_path = _export(tmp_path)
+    _edit_bundled_store(bundle_path, tmp_path, "UPDATE vectors SET material_id = 2 WHERE rowid = 1")
+    _use_home(monkeypatch, tmp_path / "b")
+
+    result = runner.invoke(app, ["import", str(bundle_path)])
+
+    _assert_refused(result, "bundle vector 1", "filed under a different material than its chunk")
+
+
 def test_a_version_1_bundle_with_its_own_questions_table_is_refused(tmp_path, monkeypatch):
     _use_home(monkeypatch, tmp_path / "a")
     init_subject("PDSS")
@@ -1263,6 +1333,8 @@ def test_a_locked_version_1_store_names_the_lock_not_a_foreign_table(tmp_path):
     path = tmp_path / "store.db"
     store.create_store(path)
     raw = sqlite3.connect(path)
+    raw.enable_load_extension(True)
+    sqlite_vec.load(raw)
     raw.executescript(";".join(_DOWNGRADE))
     raw.close()
     holder = sqlite3.connect(path, timeout=0)

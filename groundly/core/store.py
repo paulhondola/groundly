@@ -229,7 +229,7 @@ def connect(path: Path, create: bool = False) -> sqlite3.Connection:
             _upgrade(conn)
         except sqlite3.OperationalError as exc:
             conn.close()
-            if "already exists" not in str(exc):
+            if "already exists" not in str(exc) and "no such table" not in str(exc):
                 raise  # a lock or I/O failure keeps its own message
             raise SchemaUpgradeError(
                 f"{path.name} could not be upgraded to schema {STORE_USER_VERSION} — {exc}"
