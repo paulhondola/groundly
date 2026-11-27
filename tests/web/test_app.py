@@ -690,7 +690,13 @@ def _leaf(client):
 
 
 def test_runs_reports_availability_and_no_run(client, seeded, fake_claude, monkeypatch):
-    assert client.get("/api/runs").json() == {
+    available = client.get("/api/runs").json()
+    providers = available.pop("providers")
+    assert [provider["id"] for provider in providers] == ["claude"]
+    assert {"id": "sonnet", "label": "Sonnet", "efforts": ["low", "medium", "high"]} in (
+        providers[0]["models"]
+    )
+    assert available == {
         "available": True,
         "reason": None,
         "target": runs.TARGET_QUESTIONS,
@@ -699,10 +705,29 @@ def test_runs_reports_availability_and_no_run(client, seeded, fake_claude, monke
     monkeypatch.setenv("PATH", "/nonexistent")
     assert client.get("/api/runs").json() == {
         "available": False,
+        "providers": [],
         "reason": "no_host",
         "target": runs.TARGET_QUESTIONS,
         "run": None,
     }
+
+
+@pytest.mark.parametrize(
+    ("selection", "status", "reason"),
+    [
+        ({"provider": "custom"}, 400, "invalid_body"),
+        ({"provider": "claude", "model": "/tmp/model"}, 400, "invalid_selection"),
+        ({"provider": "claude", "effort": "high"}, 400, "invalid_selection"),
+        ({"provider": "codex"}, 503, "provider_unavailable"),
+    ],
+)
+def test_invalid_run_selection_never_spawns(client, seeded, fake_claude, selection, status, reason):
+    result = _runs_post(
+        client, {"kind": "write", "topic_id": _leaf(client), "selection": selection}
+    )
+    assert result.status_code == status
+    assert result.json()["error"] == reason
+    assert fake_claude.calls() == []
 
 
 def test_write_on_a_thin_leaf_starts_one_run_whose_prompt_names_only_the_id(
@@ -722,6 +747,26 @@ def test_write_on_a_thin_leaf_starts_one_run_whose_prompt_names_only_the_id(
     prompt = fake_claude.prompt()
     assert f"topic id {leaf}" in prompt and '"PDSS"' in prompt
     assert "script" not in prompt and "ignore previous" not in prompt
+
+
+def test_map_starts_only_for_an_indexed_subject_without_a_tree(client, seeded, fake_claude):
+    from tests.web.conftest import INIT
+
+    body = {"kind": "map", "selection": {"provider": "claude"}}
+    assert _runs_post(client, body).json()["error"] == "map_already_exists"
+    Subject("empty").initialize()
+    assert _runs_post(client, body, subject="empty").json()["error"] == "nothing_to_map"
+    assert fake_claude.calls() == []
+    Subject("unmapped").initialize()
+    _index("unmapped", "lec.pdf", "a" * 64)
+    fake_claude.script([{**INIT, "tools": ["mcp__groundly__outline"]}, success("All done.")])
+    start = _runs_post(client, body, subject="unmapped")
+    assert start.status_code == 202 and start.json()["topic_id"] is None
+    run = wait_until_ended(_run_view(client))
+    assert run["error"]["reason"] == "no_map_written"
+    argv = fake_claude.calls()[0]["argv"]
+    assert "--page-map-subject" in argv[argv.index("--mcp-config") + 1]
+    assert '"unmapped"' in fake_claude.prompt()
 
 
 def _two_level():
@@ -794,7 +839,7 @@ def test_grade_starts_only_when_answers_await_review(client, seeded, fake_claude
     [
         ({}, {"kind": "grade"}, 403, "forbidden"),
         ({"Origin": "http://evil.example"}, {"kind": "grade"}, 403, "forbidden"),
-        (ORIGIN, {"kind": "map"}, 400, "invalid_body"),
+        (ORIGIN, {"kind": "map", "topic_id": 1}, 400, "invalid_body"),
         (ORIGIN, {"kind": "write"}, 400, "invalid_body"),
         (ORIGIN, {"kind": "write", "topic_id": "7"}, 400, "invalid_body"),
         (ORIGIN, {"kind": "write", "topic_id": True}, 400, "invalid_body"),
@@ -925,7 +970,7 @@ def test_strict_run_request_rejects_bad_ids_and_non_dict_stop(client, seeded, fa
     ):
         r = _runs_post(client, bad)
         assert (r.status_code, r.json()["error"]) == (400, "invalid_body")
-        assert r.json()["detail"] == 'expected {kind: "write", topic_id} or {kind: "grade"}'
+        assert r.json()["detail"] == "expected a valid run kind, topic scope, and agent selection"
     r = client.post("/api/runs/stop", json=["stop"], headers=ORIGIN)
     assert (r.status_code, r.json()["error"]) == (400, "invalid_body")
     assert fake_claude.calls() == []

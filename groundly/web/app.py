@@ -50,6 +50,7 @@ from groundly.web.remote import (
     qr_matrix,
     remote_db_error,
 )
+from groundly.web.run_providers import discover_providers
 from groundly.web.runs import Runner
 from groundly.web.schemas import (
     ActivityResponse,
@@ -177,6 +178,12 @@ def _sweep_stale_exports() -> None:
         with suppress(OSError):  # another user's file in a shared /tmp, or already gone
             if f.lstat().st_mtime < cutoff:
                 f.unlink()
+
+
+def _has_indexed_material(store: SubjectStore) -> bool:
+    return any(
+        row["status"] == "indexed" and row["chunk_count"] > 0 for row in store.list_materials()
+    )
 
 
 def _quiz(
@@ -430,6 +437,8 @@ def create_app(
             try:
                 store = SubjectStore(subject.store_db_path)
                 entry["has_tree"] = bool(store.topic_ids())
+                if not entry["has_tree"] and _has_indexed_material(store):
+                    entry["can_map"] = True
                 # ponytail: every listing reads each subject's tree and answers; cache per
                 # store.db/progress.db mtime if subjects reach the hundreds.
                 try:
@@ -666,9 +675,10 @@ def create_app(
         operation_id="getRuns",
     )
     def _runs(request: Request) -> dict[str, Any]:
-        _, reason = runs.availability()
+        providers, reason = discover_providers()
         return {
             "available": reason is None,
+            "providers": providers,
             "reason": reason,
             "target": runs.TARGET_QUESTIONS,
             "run": request.app.state.runner.view(),
@@ -773,7 +783,7 @@ def create_app(
         "/api/subjects/{subject}/runs",
         status_code=202,
         response_model=RunSnapshot,
-        responses=_protected_responses(400, 403, 404, 409, 413, 415),
+        responses=_protected_responses(400, 403, 404, 409, 413, 415, 503),
         openapi_extra=_json_body_schema(StartRunRequest),
         operation_id="startRun",
     )
@@ -782,11 +792,13 @@ def create_app(
         request: Request,
         body: object = Depends(_require_page_json("a run is started from this page only")),
     ) -> Any:
-        """Start one of the two chores. The body carries ids only; the prompt is Groundly's own."""
+        """Start a fixed course chore with the selected local agent."""
         try:
             payload = StartRunRequest.model_validate(body)
         except ValidationError:
-            return _error("invalid_body", 'expected {kind: "write", topic_id} or {kind: "grade"}')
+            return _error(
+                "invalid_body", "expected a valid run kind, topic scope, and agent selection"
+            )
         active_runner: Runner = request.app.state.runner
 
         def start(store: SubjectStore, progress: ProgressStore) -> Any:
@@ -799,6 +811,11 @@ def create_app(
                     detail = f"every topic in scope has {runs.TARGET_QUESTIONS} or more questions"
                     return _error("nothing_to_write", detail)
                 big = leaves != [topic_id]
+            elif payload.kind == "map":
+                if store.topic_ids():
+                    return _error("map_already_exists", "this subject already has a map", 409)
+                if not _has_indexed_material(store):
+                    return _error("nothing_to_map", "index course materials before mapping")
             elif not quiz.pending_reviews(store, progress)["awaiting"]:
                 return _error("nothing_to_grade", "no written answer is awaiting review")
             try:
@@ -807,6 +824,7 @@ def create_app(
                     subject,
                     topic_id,
                     runs.build_prompt(payload.kind, subject, topic_id, big),
+                    selection=payload.selection,
                 )
             except runs.RunError as e:
                 return _error(e.reason, e.detail, e.status)

@@ -8,7 +8,7 @@ There is no infrastructure cost and **Groundly spends no money**: it holds no AP
 | `search`, `get_page` | **$0** — retrieval only | the whole query path |
 | Verification (quizzes, planned) | **$0** — local re-retrieval | the host's own tokens write the questions |
 | Import/export | **$0** | — |
-| Page chores (Write questions, Grade now) | the student's plan: each click is one Claude Code run on the student's login (decision 46) | Groundly's tools only, no personal setup loaded (measured $0.077 against $0.27 for the same task with the full setup); `ANTHROPIC_MODEL` set when starting Groundly picks a cheaper model |
+| Page chores (Create topic map, Write questions, Grade now) | Each click starts one run on the student's existing Claude Code plan (decisions 46 and 55) | The switcher selects the model and effort. Runs use Groundly's tools only. A prior Claude Code measurement was $0.077 against $0.27 for the same task with the full setup. |
 
 ## Principles
 

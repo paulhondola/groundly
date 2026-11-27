@@ -1,6 +1,7 @@
 import type { QueryClient } from "@tanstack/svelte-query";
 import {
   ApiError,
+  type ProviderInfo,
   type RunSnapshot,
   type RunsInfo,
   type StartRunBody,
@@ -41,6 +42,8 @@ function parseEventJSON<T>(raw: string): T | null {
 
 export function createRunStore(qc: QueryClient = queryClient) {
   let available = $state(false);
+  let providers = $state<ProviderInfo[]>([]);
+  let startError = $state<string | null>(null);
   let reason = $state<string | null>(null);
   let target = $state(0);
   let run = $state<RunSnapshot | null>(null);
@@ -87,6 +90,9 @@ export function createRunStore(qc: QueryClient = queryClient) {
     }
     closeStream();
     notifyEnd(settled.id, settled.subject);
+    if (settled.kind === "map") {
+      void qc.invalidateQueries({ queryKey: queryKeys.subjects() });
+    }
   }
 
   function openStream(): void {
@@ -174,6 +180,7 @@ export function createRunStore(qc: QueryClient = queryClient) {
       };
       if (data.refresh) {
         void qc.invalidateQueries({ queryKey: queryKeys.subject(run.subject) });
+        if (run.kind === "map") void qc.invalidateQueries({ queryKey: queryKeys.subjects() });
       }
     });
 
@@ -217,6 +224,7 @@ export function createRunStore(qc: QueryClient = queryClient) {
       return;
     }
     available = info.available;
+    providers = info.providers ?? [];
     reason = info.reason;
     target = info.target;
     const current = info.run;
@@ -271,6 +279,7 @@ export function createRunStore(qc: QueryClient = queryClient) {
       message = null;
     }
     available = info.available;
+    providers = info.providers ?? [];
     reason = info.reason;
     target = info.target;
     const incoming = info.run;
@@ -322,13 +331,15 @@ export function createRunStore(qc: QueryClient = queryClient) {
     return info;
   }
 
-  async function start(subject: string, body: StartRunBody): Promise<void> {
+  async function start(subject: string, body: StartRunBody): Promise<RunSnapshot | null> {
+    if (busy) return null;
     stateSeq += 1;
     starting = true;
     watched = null;
     endedRunId = null;
     streamErrors = 0;
     message = null;
+    startError = null;
     dismissed = false;
     closeStream();
     try {
@@ -346,12 +357,19 @@ export function createRunStore(qc: QueryClient = queryClient) {
       } else {
         applySettled(started);
       }
+      return started;
     } catch (err) {
       const detail = err instanceof Error ? err.message : "unknown error";
       message = "Could not start: " + detail;
-      if (err instanceof ApiError && err.status === 409) {
-        await attach();
+      if (err instanceof ApiError) {
+        startError = err.code;
+        if (err.code === "map_already_exists") {
+          void qc.invalidateQueries({ queryKey: queryKeys.subjects() });
+          void qc.invalidateQueries({ queryKey: queryKeys.subject(subject) });
+        }
+        if (err.status === 409) await attach();
       }
+      return null;
     } finally {
       starting = false;
     }
@@ -419,6 +437,12 @@ export function createRunStore(qc: QueryClient = queryClient) {
   return {
     get available() {
       return available;
+    },
+    get providers() {
+      return providers;
+    },
+    get startError() {
+      return startError;
     },
     get reason() {
       return reason;

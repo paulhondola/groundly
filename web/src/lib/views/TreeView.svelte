@@ -13,6 +13,7 @@
   import Card from "../components/ui/Card.svelte";
   import Select from "../components/ui/Select.svelte";
   import CopyField from "../components/CopyField.svelte";
+  import RunAction from "../components/RunAction.svelte";
   import { cn } from "../components/ui/utils";
   import { runStore } from "../run.svelte";
   import {
@@ -67,6 +68,9 @@
   const selectedQuestionCount = $derived(selectedTopic?.progress?.questions ?? 0);
   const selectedWriteInfo = $derived(
     selectedTopic ? writeButtonInfo(runStore.available, runStore.target, selectedTopic) : null,
+  );
+  const canRequestQuestions = $derived(
+    selectedTopic ? Boolean(writeButtonInfo(true, runStore.target || 10, selectedTopic)) : false,
   );
   const selectedSources = $derived(selectedTopic ? dedupeSources(selectedTopic.sources) : []);
 
@@ -376,20 +380,16 @@
             {/if}
 
             {#if selectedWriteInfo}
-              <Button
-                variant="outline"
-                size="lg"
-                class="w-full"
-                disabled={runStore.busy}
-                onclick={() =>
-                  void runStore.start(subject, {
-                    kind: "write",
-                    topic_id: selectedTopic.id,
-                  })}
-              >
-                {selectedWriteInfo.label}
-              </Button>
-            {:else if selectedQuestionCount === 0}
+              {#key selectedTopic.id}
+                <RunAction
+                  {subject}
+                  kind="write"
+                  topicId={selectedTopic.id}
+                  label={selectedWriteInfo.label}
+                  scopeLabel={selectedTopic.title}
+                />
+              {/key}
+            {:else if canRequestQuestions}
               <div class="notice space-y-2 rounded-xl border border-border bg-well p-4 text-[13px] text-muted-foreground">
                 <p>Say to your agent:</p>
                 <CopyField text={writePrompt(selectedTopic.title, subject)} label="Copy prompt" />

@@ -3,9 +3,10 @@
   import { type AnswerState, apiClient, pageURL, unwrap } from "../api/client";
   import { queryKeys, treeQueryOptions } from "../api/queries";
   import MasteryBadge from "../components/MasteryBadge.svelte";
+  import CopyField from "../components/CopyField.svelte";
+  import RunAction from "../components/RunAction.svelte";
   import SourceItem from "../components/SourceItem.svelte";
   import Badge, { type BadgeVariant } from "../components/ui/Badge.svelte";
-  import Button from "../components/ui/Button.svelte";
   import Card from "../components/ui/Card.svelte";
   import { cn } from "../components/ui/utils";
   import { runStore } from "../run.svelte";
@@ -125,12 +126,9 @@
             provisional, {result.score.awaiting} awaiting review
           </p>
           {#if canGrade}
-            <Button
-              disabled={runStore.busy}
-              onclick={() => void runStore.start(subject, { kind: "grade" })}
-            >
-              Grade now
-            </Button>
+            <RunAction {subject} kind="grade" label="Grade now" scopeLabel={courseTitle} />
+          {:else}
+            <CopyField text={"Grade my written answers for " + subject + "."} label="Copy prompt" />
           {/if}
         </div>
       {/if}

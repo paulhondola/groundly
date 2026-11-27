@@ -233,7 +233,7 @@ def review_answers(subject: str, reviews: list[dict] | None = None) -> dict:
 
 
 @mcp.tool
-def submit_tree(subject: str, tree: list[dict]) -> dict:
+def submit_tree(subject: str, tree: list[dict], if_unmapped: bool = False) -> dict:
     """Call this once you have drafted a course map for `subject` from `outline` (and
     `search`). `tree` is a list of big topics, each `{"title", "summary", "subtopics"}`
     with an optional `"id"` copied from `outline` to keep an existing topic; a subtopic
@@ -241,14 +241,15 @@ def submit_tree(subject: str, tree: list[dict]) -> dict:
     chooses each topic's sources itself — you do not cite any. It checks that every topic
     is in this course, not that a summary is true. A title is at most 200 characters, a
     summary 500, and a tree 1000 topics in all. Nothing is stored unless every topic
-    passes: a rejection comes back as `accepted: false` with a reason per topic (a normal
+    passes. Set `if_unmapped` to true to preserve any existing tree. A rejection comes
+    back as `accepted: false` with a reason per topic (a normal
     result, not an error) — fix those and submit again. No LLM call, no provider needed."""
     from groundly.agents.topics import submit_tree as submit_tree_fn
     from groundly.core.store import SubjectStore
 
     store = SubjectStore(_subject_or_error(subject, ToolError).store_db_path)
     with _tool_errors(removed="a material"):
-        return submit_tree_fn(store, tree)
+        return submit_tree_fn(store, tree, if_unmapped=if_unmapped)
 
 
 @mcp.tool
@@ -295,7 +296,7 @@ def remove_questions(subject: str, question_ids: list[int]) -> dict:
     return {"removed": question_ids}
 
 
-def _parse_citation_uri(uri: str) -> tuple[str, str, int | None]:
+def parse_citation_uri(uri: str) -> tuple[str, str, int | None]:
     """Inverse of `_citation_uri`: (subject, filename, page or None). Anything `search`
     could not have produced is a ToolError; the filename only ever reaches SQL."""
     base, has_frag, frag = uri.partition("#")
@@ -321,7 +322,7 @@ def get_page(uri: str) -> list[dict]:
     Verbatim chunk text only, never file bytes or summaries."""
     from groundly.core.store import SubjectStore
 
-    subject, filename, page = _parse_citation_uri(uri)
+    subject, filename, page = parse_citation_uri(uri)
     store = SubjectStore(_subject_or_error(subject, ToolError).store_db_path)
     rows = store.material_chunks(filename) if page is None else store.page_chunks(filename, page)
     return [

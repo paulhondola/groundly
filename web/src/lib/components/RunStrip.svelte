@@ -1,5 +1,7 @@
 <script lang="ts">
   import { createRunStore, runStore } from "../run.svelte";
+  import { pageURL } from "../api/client";
+  import { selectionLabel } from "../run-selection.svelte";
   import Check from "@lucide/svelte/icons/check";
   import Orb from "./orb/Orb.svelte";
   import { orbModeForRun, phaseLabelFor } from "./orb/orb-state";
@@ -14,6 +16,7 @@
   const KIND_WORDS = {
     write: "Writing questions",
     grade: "Grading written answers",
+    map: "Creating a topic map",
   } as const;
 
   let { store = runStore, class: className = "" }: Props = $props();
@@ -65,6 +68,11 @@
         {/if}
         <div class="flex min-w-0 flex-col gap-0.5">
           <h2 class="truncate text-sm font-medium text-foreground">{heading}</h2>
+          {#if activeRun?.selection}
+            <span class="break-words text-xs text-muted-foreground">
+              {selectionLabel(activeRun.selection, store.providers.find((p) => p.id === activeRun.selection.provider))}
+            </span>
+          {/if}
           {#if working}
             <span class="shimmer truncate text-xs">{phaseLabel}</span>
           {/if}
@@ -82,6 +90,9 @@
             {store.stopping ? "Stopping…" : "Stop"}
           </Button>
         {:else if !working}
+          {#if activeRun?.kind === "map" && (activeRun.map_written || activeRun.error?.reason === "map_already_exists")}
+            <Button variant="outline" size="sm" href={pageURL(activeRun.subject)}>Open topic map</Button>
+          {/if}
           <Button variant="ghost" size="sm" onclick={() => store.dismiss()}>
             Dismiss
           </Button>

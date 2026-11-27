@@ -739,6 +739,32 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "ModelInfo": {
+        "properties": {
+          "efforts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Efforts",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "efforts"
+        ],
+        "title": "ModelInfo",
+        "type": "object"
+      },
       "PairDeviceResponse": {
         "description": "Confirmation returned by POST /api/pair once the session cookie is set.",
         "properties": {
@@ -781,6 +807,54 @@
           "last_seen_at"
         ],
         "title": "PairedDevice",
+        "type": "object"
+      },
+      "ProviderInfo": {
+        "properties": {
+          "default_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Model"
+          },
+          "id": {
+            "enum": [
+              "claude",
+              "codex"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "models": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ModelInfo"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Models"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "models"
+        ],
+        "title": "ProviderInfo",
         "type": "object"
       },
       "QuestionOption": {
@@ -901,6 +975,46 @@
         "title": "RunErrorDetail",
         "type": "object"
       },
+      "RunSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effort"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "provider": {
+            "enum": [
+              "claude",
+              "codex"
+            ],
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "title": "RunSelection",
+        "type": "object"
+      },
       "RunSnapshot": {
         "description": "In-memory state snapshot of the current or most recent headless page run.",
         "properties": {
@@ -932,10 +1046,16 @@
           "kind": {
             "enum": [
               "write",
-              "grade"
+              "grade",
+              "map"
             ],
             "title": "Kind",
             "type": "string"
+          },
+          "map_written": {
+            "default": false,
+            "title": "Map Written",
+            "type": "boolean"
           },
           "phase": {
             "anyOf": [
@@ -953,6 +1073,9 @@
               }
             ],
             "title": "Phase"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/RunSelection"
           },
           "started_at": {
             "title": "Started At",
@@ -1026,6 +1149,7 @@
           "kind",
           "subject",
           "topic_id",
+          "selection",
           "status",
           "phase",
           "active_tool",
@@ -1045,6 +1169,13 @@
           "available": {
             "title": "Available",
             "type": "boolean"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderInfo"
+            },
+            "title": "Providers",
+            "type": "array"
           },
           "reason": {
             "anyOf": [
@@ -1074,6 +1205,7 @@
         },
         "required": [
           "available",
+          "providers",
           "reason",
           "target",
           "run"
@@ -1162,6 +1294,17 @@
       "SubjectSummary": {
         "description": "One subject entry returned by GET /api/subjects.",
         "properties": {
+          "can_map": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Can Map"
+          },
           "error": {
             "anyOf": [
               {
@@ -2906,7 +3049,7 @@
     },
     "/api/subjects/{subject}/runs": {
       "post": {
-        "description": "Start one of the two chores. The body carries ids only; the prompt is Groundly's own.",
+        "description": "Start a fixed course chore with the selected local agent.",
         "operationId": "startRun",
         "parameters": [
           {
@@ -2923,15 +3066,23 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": false,
                 "description": "Strict request body for POST /api/subjects/{subject}/runs.",
                 "properties": {
                   "kind": {
                     "enum": [
                       "write",
-                      "grade"
+                      "grade",
+                      "map"
                     ],
                     "title": "Kind",
                     "type": "string"
+                  },
+                  "selection": {
+                    "$ref": "#/components/schemas/RunSelection",
+                    "default": {
+                      "provider": "claude"
+                    }
                   },
                   "topic_id": {
                     "anyOf": [

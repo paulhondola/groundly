@@ -1,9 +1,11 @@
 """stdio forwarding: the three model tools go to a running `start`, everything else stays local,
 and nothing is retried locally once a call may have reached `start`."""
 
+import asyncio
 import json
 import os
 import subprocess
+import sys
 import threading
 import time
 
@@ -60,7 +62,7 @@ def local():
         return [{"from": "local"}]
 
     @server.tool
-    def submit_tree(subject: str, tree: list[dict]) -> dict:
+    def submit_tree(subject: str, tree: list[dict], if_unmapped: bool = False) -> dict:
         calls.append("submit_tree")
         return {"accepted": True, "from": "local"}
 
@@ -144,6 +146,107 @@ async def test_other_tools_stay_local(local, serve):
     _announce(serve(_fake_start()))
     result = await _call(local, "outline", {"subject": "bia"})
     assert result.structured_content == {"from": "local"}
+
+
+async def test_scoped_map_forces_first_map_when_forwarded_and_logs_commit(serve):
+    from groundly.core import activity
+    from groundly.mcp.activity import ActivityMiddleware
+    from groundly.mcp.page_map import create_page_map_server
+
+    remote = FastMCP("groundly", version=VERSION)
+    remote.add_middleware(ActivityMiddleware("mcp_http"))
+    received = []
+
+    @remote.tool
+    def submit_tree(subject: str, tree: list[dict], if_unmapped: bool = False) -> dict:
+        received.append(if_unmapped)
+        return {"accepted": True}
+
+    _announce(serve(remote))
+    scoped = create_page_map_server("bia")
+    scoped.add_middleware(ActivityMiddleware("mcp_stdio", page_run=True))
+    scoped.add_middleware(ForwardMiddleware(page_run=True))
+    args = {"subject": "bia", "tree": [{"title": "Example"}], "if_unmapped": False}
+    result = await _call(scoped, "submit_tree", args)
+    assert result.structured_content == {"accepted": True}
+    assert received == [True]
+    recent = activity.snapshot()["recent"]
+    assert len(recent) == 1
+    assert recent[0]["subject"] == "bia"
+    public = FastMCP("groundly")
+    public.add_middleware(ActivityMiddleware("mcp_stdio"))
+    public.add_middleware(ForwardMiddleware())
+
+    @public.tool(name="submit_tree")
+    def must_forward(subject: str, tree: list[dict], if_unmapped: bool = False) -> dict:
+        raise AssertionError("the conditional write should use start")
+
+    result = await _call(public, "submit_tree", {**args, "subject": "other", "if_unmapped": True})
+    assert result.structured_content == {"accepted": True}
+    assert received == [True, True]
+    events = activity.snapshot()["recent"]
+    assert [event["subject"] for event in events] == ["other", "bia"]
+    (external,) = [host for host in activity.snapshot()["hosts"] if host["subject"] == "other"]
+    assert external["client"] != "Groundly page run"
+
+
+async def test_same_version_start_without_first_map_condition_is_skipped(local, serve):
+    _announce(serve(_fake_start()))
+    result = await _call(local, "submit_tree", {"subject": "bia", "tree": [], "if_unmapped": True})
+    assert result.structured_content == {"accepted": True, "from": "local"}
+    assert local.calls == ["submit_tree"]
+
+
+async def test_start_reports_a_first_map_that_commits_after_its_caller_exits(serve):
+    from groundly.core import activity
+    from groundly.mcp.activity import ActivityMiddleware
+
+    remote = FastMCP("groundly", version=VERSION)
+    remote.add_middleware(ActivityMiddleware("mcp_http"))
+    entered, release = threading.Event(), threading.Event()
+
+    @remote.tool
+    def submit_tree(subject: str, tree: list[dict], if_unmapped: bool = False) -> dict:
+        entered.set()
+        if not release.wait(5):
+            raise TimeoutError
+        return {"accepted": True}
+
+    _announce(serve(remote))
+    caller = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        """
+from fastmcp import Client
+from groundly.mcp.forward import ForwardMiddleware
+from groundly.mcp.page_map import create_page_map_server
+import asyncio
+
+async def run():
+    scoped = create_page_map_server("bia")
+    scoped.add_middleware(ForwardMiddleware(page_run=True))
+    async with Client(scoped) as client:
+        await client.call_tool("submit_tree", {"subject": "bia", "tree": [{"title": "Locks"}]})
+
+asyncio.run(run())
+""",
+    )
+    try:
+        assert await asyncio.to_thread(entered.wait, 4)
+        caller.kill()
+        await caller.wait()
+        assert activity.snapshot()["recent"] == []
+        release.set()
+        for _ in range(100):
+            if activity.snapshot()["recent"]:
+                break
+            await asyncio.sleep(0.02)
+        assert [event["subject"] for event in activity.snapshot()["recent"]] == ["bia"]
+    finally:
+        release.set()
+        if caller.returncode is None:
+            caller.kill()
+            await caller.wait()
 
 
 async def test_no_runfile_runs_locally(local):

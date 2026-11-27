@@ -32,6 +32,7 @@ class SubjectSummary(BaseModel):
     subject: str
     title: str
     has_tree: bool
+    can_map: bool | None = None
     error: str | None = None
     topics: int | None = None
     leaves: int | None = None
@@ -284,13 +285,36 @@ class RunErrorDetail(BaseModel):
     detail: str
 
 
+class RunSelection(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+
+    provider: Literal["claude", "codex"]
+    model: str | None = None
+    effort: str | None = None
+
+
+class ModelInfo(BaseModel):
+    id: str
+    label: str
+    efforts: list[str]
+
+
+class ProviderInfo(BaseModel):
+    id: Literal["claude", "codex"]
+    label: str
+    models: list[ModelInfo] | None
+    default_model: str | None = None
+
+
 class RunSnapshot(BaseModel):
     """In-memory state snapshot of the current or most recent headless page run."""
 
     id: int
-    kind: Literal["write", "grade"]
+    kind: Literal["write", "grade", "map"]
     subject: str
     topic_id: int | None
+    selection: RunSelection
+    map_written: bool = False
     status: Literal["running", "done", "failed", "stopped"]
     phase: Literal["starting", "thinking", "reading", "writing"] | None
     active_tool: str | None
@@ -306,6 +330,7 @@ class RunsInfoResponse(BaseModel):
     """Host availability and active run snapshot returned by GET /api/runs."""
 
     available: bool
+    providers: list[ProviderInfo]
     reason: str | None
     target: int
     run: RunSnapshot | None
@@ -314,17 +339,18 @@ class RunsInfoResponse(BaseModel):
 class StartRunRequest(BaseModel):
     """Strict request body for POST /api/subjects/{subject}/runs."""
 
-    model_config = ConfigDict(strict=True)
+    model_config = ConfigDict(strict=True, extra="forbid")
 
-    kind: Literal["write", "grade"]
+    kind: Literal["write", "grade", "map"]
     topic_id: SqliteId | None = None
+    selection: RunSelection = RunSelection(provider="claude")
 
     @model_validator(mode="after")
     def _validate_scope(self) -> "StartRunRequest":
         if self.kind == "write" and self.topic_id is None:
             raise ValueError('topic_id is required when kind is "write"')
-        if self.kind == "grade" and self.topic_id is not None:
-            raise ValueError('topic_id must not be provided when kind is "grade"')
+        if self.kind != "write" and self.topic_id is not None:
+            raise ValueError("topic_id is only valid for writing questions")
         return self
 
 

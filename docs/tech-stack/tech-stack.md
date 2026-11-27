@@ -29,7 +29,7 @@ The engine is not part of the embedding pin. An engine must stay within the tole
 
 ## No LLM client
 
-**Groundly constructs no LLM client and holds no key** (decision 37). The student's AI subscription (Claude Code, Claude Desktop, Codex) is the only model in the loop, and it reaches Groundly through MCP. `groundly/llm/` holds only the local bge-m3 embedder and reranker. The page may start the student's own Claude Code for two chores (decision 46); that is the student's binary on the student's login, not a client of Groundly's, and Groundly passes it no key and no model.
+**Groundly constructs no LLM client and holds no key** (decision 37). The student's AI subscription (Claude Code, Claude Desktop, Codex) is the only model in the loop, and it reaches Groundly through MCP. `groundly/llm/` holds only the local bge-m3 embedder and reranker. The page may start the student's own Claude Code to create a topic map, write questions, or grade answers (decisions 46 and 55). That CLI uses the student's existing login. Groundly passes a validated model or effort override when selected and holds no credential.
 
 1. **Index, search, verification and import/export need nothing but the local models.**
 2. **No subscription-OAuth piggybacking** — ToS-fragile, and unnecessary: the host already holds the session.

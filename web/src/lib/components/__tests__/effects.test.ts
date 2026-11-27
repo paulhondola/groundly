@@ -41,6 +41,8 @@ class MockEventSource {
 
 function makeSnapshot(overrides: Partial<RunSnapshot> = {}): RunSnapshot {
   return {
+    selection: { provider: "claude" },
+    map_written: false,
     id: 1,
     kind: "write",
     subject: "PDSS",

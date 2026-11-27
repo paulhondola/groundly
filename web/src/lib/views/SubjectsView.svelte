@@ -6,6 +6,7 @@
   import { queryKeys } from "../api/queries";
   import CopyField from "../components/CopyField.svelte";
   import MasteryRing from "../components/MasteryRing.svelte";
+  import RunAction from "../components/RunAction.svelte";
   import Orb from "../components/orb/Orb.svelte";
   import Card from "../components/ui/Card.svelte";
   import { runStore } from "../run.svelte";
@@ -18,6 +19,7 @@
   const activity = useActivity();
 
   let filter = $state("");
+  let seenActivity: string | undefined;
 
   const subjects = $derived(subjectsQuery.data ?? []);
   const error = $derived(
@@ -40,12 +42,31 @@
   const unmapped = $derived(visible.filter((s) => !s.has_tree || s.error));
   const mappedCount = $derived(subjects.filter((s) => s.has_tree).length);
   const mapping = $derived(
-    new Set(activity.hosts.filter((h) => h.orb === "mapping").map((h) => h.subject)),
+    new Set([
+      ...activity.hosts.filter((h) => h.orb === "mapping").map((h) => h.subject),
+      ...(runStore.run?.kind === "map" && runStore.run.status === "running"
+        ? [runStore.run.subject]
+        : []),
+    ]),
+  );
+  const completedMap = $derived(
+    runStore.watchedRun?.kind === "map" && runStore.watchedRun.status !== "running"
+      ? ready.find((s) => s.subject === runStore.watchedRun?.subject)
+      : undefined,
   );
 
   $effect(() => {
     document.title = "Groundly";
     void runStore.attach();
+  });
+
+  $effect(() => {
+    const latest = activity.recent[0];
+    const signature = latest && latest.at + latest.subject + latest.text;
+    if (signature && signature !== seenActivity) {
+      seenActivity = signature;
+      void subjectsQuery.refetch();
+    }
   });
 </script>
 
@@ -92,6 +113,12 @@
   {:else if visible.length === 0}
     <p class="text-sm text-muted-foreground">No subjects match "{filter.trim()}".</p>
   {:else}
+    {#if completedMap && !runStore.dismissed && !runStore.watchedRun?.map_written}
+      <a
+        href={pageURL(completedMap.subject)}
+        class="inline-flex rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      >Open topic map</a>
+    {/if}
     {#if ready.length > 0}
       <section class="space-y-3.5" aria-labelledby="ready-heading">
         <h2
@@ -168,6 +195,11 @@
               {:else if mapping.has(s.subject)}
                 <p class="shimmer text-[13px]">Grouping pages into topics…</p>
               {:else}
+                {#if s.can_map && runStore.available}
+                  <RunAction subject={s.subject} kind="map" label="Create topic map" scopeLabel={s.title || s.subject} />
+                {:else if !s.can_map}
+                  <p class="text-xs text-muted-foreground">Index course materials to create a topic map.</p>
+                {/if}
                 <CopyField text={"Map my " + s.subject + " course."} label="Copy prompt" />
                 <span class="text-xs text-subtle-foreground">
                   Paste into your MCP host (needs <code class="font-mono">groundly skill install</code>)

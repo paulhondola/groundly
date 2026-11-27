@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from groundly.web import runs
+from groundly.web import run_providers, runs
+from groundly.web.schemas import RunSelection
 from tests.web.conftest import INIT as FAKE_INIT
 from tests.web.conftest import (
     gone,
@@ -32,13 +33,55 @@ def test_python_dash_m_groundly_runs_the_cli():
 
 
 def test_availability_names_why_no_run_can_start(monkeypatch):
-    monkeypatch.setattr(runs.shutil, "which", lambda name: None)
-    assert runs.availability() == (None, "no_host")
-    monkeypatch.setattr(runs.shutil, "which", lambda name: "/bin/claude")
+    monkeypatch.setattr(run_providers.shutil, "which", lambda name: None)
+    assert run_providers.availability() == (None, "no_host")
+    monkeypatch.setattr(run_providers.shutil, "which", lambda name: "/bin/claude")
     monkeypatch.setattr(runs.sys, "platform", "win32")
-    assert runs.availability() == (None, "unsupported_platform")
+    assert run_providers.availability() == (None, "unsupported_platform")
     monkeypatch.setattr(runs.sys, "platform", "darwin")
-    assert runs.availability() == ("/bin/claude", None)
+    assert run_providers.availability() == ("/bin/claude", None)
+
+
+def test_launch_records_and_passes_the_selected_model_and_effort(fake_claude):
+    selection = RunSelection(provider="claude", model="sonnet", effort="high")
+    runner = runs.Runner()
+    run = runner.start("write", "PDSS", 7, "the prompt", selection=selection)
+    assert run["selection"] == selection.model_dump()
+    assert wait_until_ended(runner.view)["selection"] == run["selection"]
+    (call,) = fake_claude.calls()
+    argv = call["argv"]
+    assert argv[argv.index("--model") + 1] == "sonnet"
+    assert argv[argv.index("--effort") + 1] == "high"
+
+
+def test_launch_rechecks_the_executable_and_selection(fake_claude, monkeypatch):
+    exe = fake_claude.root / "bin" / "claude"
+    monkeypatch.setattr(
+        run_providers.shutil, "which", lambda name: str(exe) if name == "claude" else None
+    )
+    assert [provider.id for provider in run_providers.discover_providers()[0]] == ["claude"]
+    runner = runs.Runner()
+    unsupported = RunSelection(provider="claude", model="haiku", effort="high")
+    with pytest.raises(runs.RunError) as error:
+        runner.start("write", "PDSS", 7, "the prompt", selection=unsupported)
+    assert error.value.reason == "invalid_selection"
+
+    exe.write_text("#!/bin/sh\nprintf 'unrelated executable\\n'\n")
+    with pytest.raises(runs.RunError) as error:
+        runner.start("write", "PDSS", 7, "the prompt")
+    assert error.value.status == 503
+    exe.unlink()
+    with pytest.raises(runs.RunError) as error:
+        runner.start("write", "PDSS", 7, "the prompt")
+    assert error.value.status == 503
+    assert fake_claude.calls() == []
+
+
+def test_discovery_requires_permission_mode_support(fake_claude):
+    exe = fake_claude.root / "bin" / "claude"
+    exe.write_text(exe.read_text().replace("--permission-mode", ""))
+    providers, reason = run_providers.discover_providers()
+    assert providers == [] and reason == "incompatible_host"
 
 
 def test_mcp_config_is_the_running_mcp_or_this_installations_stdio():
@@ -278,7 +321,7 @@ def test_a_second_start_while_running_raises_run_in_progress(fake_claude):
 
 
 def test_no_claude_on_path_raises_no_host(monkeypatch):
-    monkeypatch.setattr(runs.shutil, "which", lambda name: None)
+    monkeypatch.setattr(run_providers.shutil, "which", lambda name: None)
     with pytest.raises(runs.RunError) as e:
         _start(runs.Runner())
     assert (e.value.reason, e.value.status) == ("no_host", 503)

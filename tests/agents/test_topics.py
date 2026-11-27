@@ -70,6 +70,34 @@ def _node(title=ON_TOPIC, summary="Why threads wait on each other forever", **ex
     return {"title": title, "summary": summary, **extra}
 
 
+def test_first_map_does_not_replace_a_map_saved_during_retrieval(store, retrievable_subject):
+    other = SubjectStore(subject_dir(retrievable_subject) / "store.db")
+    winner = []
+
+    def save_other_map(_query, _text):
+        if not winner:
+            other.replace_tree([TopicWrite(None, "Existing map", "Already saved", [1])])
+            winner.extend(other.tree())
+        return 3.0
+
+    result = submit_tree(
+        store,
+        [_node()],
+        embedder=_Embedder(),
+        reranker=_FnReranker(save_other_map),
+        if_unmapped=True,
+    )
+    assert result["accepted"] is False
+    assert result["rejections"][0]["reason"] == "map_already_exists"
+    assert store.tree() == winner
+
+
+def test_existing_map_takes_precedence_over_first_map_validation(store):
+    store.replace_tree([TopicWrite(None, "Existing map", "Already saved", [1])])
+    result = submit_tree(store, [], embedder=_Forbidden(), reranker=_Forbidden(), if_unmapped=True)
+    assert result["rejections"][0]["reason"] == "map_already_exists"
+
+
 def _submit(store, tree, reranker=None):
     return submit_tree(
         store, tree, embedder=_Embedder(), reranker=reranker or _FnReranker(_by_query)

@@ -12,7 +12,6 @@ import asyncio
 import contextlib
 import json
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -24,6 +23,8 @@ from importlib.resources import files
 
 from groundly.agents.quiz import MASTERY_WINDOW
 from groundly.core.paths import groundly_home
+from groundly.web.run_providers import RunError, resolve_provider
+from groundly.web.schemas import RunSelection
 
 TARGET_QUESTIONS = MASTERY_WINDOW  # a subtopic is filled to the mastery window
 RUN_TIMEOUT_S = 20 * 60
@@ -33,41 +34,36 @@ MAX_STREAM_CHARS = 2000
 DELTA_COALESCE_S = 0.04
 SUBSCRIBER_QUEUE_MAX = 256
 SSE_KEEPALIVE_S = 15.0
+_DEFAULT_SELECTION = RunSelection(provider="claude")
 
 WRITE_TOOLS = tuple(
     f"mcp__groundly__{name}"
     for name in ("list_subjects", "progress", "topic", "search", "get_page", "submit_questions")
 )
 GRADE_TOOLS = ("mcp__groundly__review_answers", "mcp__groundly__get_page")
-_TOOLS = {"write": WRITE_TOOLS, "grade": GRADE_TOOLS}
-_SKILLS = {"write": "groundly-questions", "grade": "groundly-grade"}
+MAP_TOOLS = tuple(
+    f"mcp__groundly__{name}"
+    for name in (
+        "outline",
+        "get_page",
+        "search",
+        "submit_tree",
+    )
+)
+_TOOLS = {"write": WRITE_TOOLS, "grade": GRADE_TOOLS, "map": MAP_TOOLS}
+_SKILLS = {"write": "groundly-questions", "grade": "groundly-grade", "map": "groundly-map"}
 
 
-class RunError(Exception):
-    """A run that cannot start, with the reason and status the page route answers with."""
-
-    def __init__(self, reason: str, detail: str, status: int) -> None:
-        super().__init__(detail)
-        self.reason, self.detail, self.status = reason, detail, status
-
-
-def availability() -> tuple[str | None, str | None]:
-    """The `claude` to run, or why there is none. Resolved per call: PATH may change."""
-    if sys.platform == "win32":
-        # an npm-installed claude is claude.cmd, which Python runs through cmd.exe
-        return None, "unsupported_platform"
-    path = shutil.which("claude")
-    return (path, None) if path else (None, "no_host")
-
-
-def mcp_config(mcp_url: str | None) -> dict:
+def mcp_config(mcp_url: str | None, *, map_subject: str | None = None) -> dict:
     """Groundly only: the running process's /mcp under `start`, else this installation's stdio."""
-    if mcp_url:
+    if mcp_url and map_subject is None:
         # The header labels the run's own card on the page (groundly/mcp/activity.py).
         server = {"type": "http", "url": mcp_url, "headers": {"X-Groundly-Page-Run": "1"}}
     else:
         # -P: the run directory never lands on sys.path, so nothing there shadows groundly
         server = {"command": sys.executable, "args": ["-P", "-m", "groundly", "mcp"]}
+        if map_subject is not None:
+            server["args"].extend(["--page-map-subject", map_subject])
     return {"mcpServers": {"groundly": server}}
 
 
@@ -90,11 +86,19 @@ _GRADE = (
     'Follow the groundly-grade skill for subject "{subject}": review every written answer awaiting'
     " review, calling `review_answers` until `remaining` is 0."
 )
+_MAP = (
+    'Create the first topic map for subject "{subject}" using the packaged groundly-map skill. '
+    'Start directly with outline for "{subject}". Skip the interactive connection and '
+    "subject checks, indexing, subagents, and remapping. Use only the supplied tools. "
+    "If outline shows a map or submit_tree returns map_already_exists, stop."
+)
 
 
 def build_prompt(kind: str, subject: str, topic_id: int | None, big: bool) -> str:
     """The fixed prompt for a flow. `subject` is a validated subject name, `topic_id` an int."""
-    if kind == "grade":
+    if kind == "map":
+        template = _MAP
+    elif kind == "grade":
         template = _GRADE
     else:
         template = _WRITE_BIG if big else _WRITE_LEAF
@@ -106,15 +110,23 @@ def _skill_path(kind: str) -> str:
     return str(files("groundly").joinpath("skills", _SKILLS[kind], "SKILL.md"))
 
 
-def build_argv(claude: str, kind: str, prompt: str, mcp_url: str | None) -> list[str]:
+def build_argv(
+    claude: str,
+    kind: str,
+    prompt: str,
+    mcp_url: str | None,
+    selection: RunSelection | None = None,
+    *,
+    map_subject: str | None = None,
+) -> list[str]:
     """The isolated run: none of the student's settings, no built-in tools, this flow's tools."""
-    return [
+    argv = [
         claude,
         "-p",
         prompt,
         "--strict-mcp-config",
         "--mcp-config",
-        json.dumps(mcp_config(mcp_url)),
+        json.dumps(mcp_config(mcp_url, map_subject=map_subject)),
         "--setting-sources",
         "",
         "--tools",
@@ -131,9 +143,15 @@ def build_argv(claude: str, kind: str, prompt: str, mcp_url: str | None) -> list
         "--include-partial-messages",
         "--no-session-persistence",
     ]
+    if selection is not None:
+        if selection.model is not None:
+            argv.extend(["--model", selection.model])
+        if selection.effort is not None:
+            argv.extend(["--effort", selection.effort])
+    return argv
 
 
-def check_init(event: dict) -> tuple[str, str] | None:
+def check_init(event: dict, *, allowed: tuple[str, ...] | None = None) -> tuple[str, str] | None:
     """None when the run holds only Groundly's tools and a connected Groundly server; else the
     failure reason and what appeared. Checked rather than assumed: another `claude` build may
     honour the isolation flags differently, or report them in another shape."""
@@ -144,7 +162,11 @@ def check_init(event: dict) -> tuple[str, str] | None:
         and all(isinstance(s, dict) for s in servers)
     ):
         return "isolation_failed", "the run's init event did not list its tools and MCP servers"
-    extra = [str(t) for t in tools if not str(t).startswith("mcp__groundly__")]
+    extra = [
+        str(t)
+        for t in tools
+        if not str(t).startswith("mcp__groundly__") or (allowed is not None and t not in allowed)
+    ]
     if extra:
         return "isolation_failed", "the run had tools other than Groundly's: " + ", ".join(extra)
     others = [s.get("name") for s in servers if s.get("name") != "groundly"]
@@ -181,6 +203,8 @@ _USE_WORDS = {
     "progress": "Checking question counts",
     "list_subjects": "Checking the subject",
     "topic": "Reading the topic",
+    "outline": "Reading the course outline",
+    "submit_tree": "Submitting the topic map",
 }
 
 
@@ -190,6 +214,8 @@ class Steps:
     def __init__(self) -> None:
         self._names: dict[str, str] = {}
         self._last: str | None = None
+        self.map_written = False
+        self.map_conflict = False
 
     def _emit(self, step: str | None, out: list[tuple[str, bool]], refresh: bool) -> None:
         if step and (refresh or step != self._last):
@@ -222,6 +248,18 @@ class Steps:
         if name == "review_answers" and "recorded" in data:
             recorded = _count(data.get("recorded"))
             return f"{recorded} verdicts recorded", recorded > 0
+        if name == "submit_tree":
+            if data.get("accepted") is True:
+                self.map_written = True
+                return "Topic map stored", True
+            rejections = data.get("rejections")
+            if isinstance(rejections, list) and any(
+                isinstance(item, dict) and item.get("reason") == "map_already_exists"
+                for item in rejections
+            ):
+                self.map_conflict = True
+                return "A topic map already exists", True
+            return "Topic map needs changes", False
         return None, False
 
     def feed_items(self, event: dict) -> list[tuple[str, bool]]:
@@ -266,6 +304,8 @@ def _tool_phase(name: str, tool_input: dict | None = None) -> tuple[str, str | N
     """Map a stripped Groundly tool name (and optional input) to (phase, active_tool)."""
     if name == "submit_questions":
         return "writing", "Drafting questions"
+    if name == "submit_tree":
+        return "writing", "Submitting the topic map"
     if name == "review_answers":
         reviews = (tool_input or {}).get("reviews")
         return ("writing" if reviews else "reading"), "Reviewing answers"
@@ -404,10 +444,6 @@ def summary_of(event: dict) -> tuple[str | None, tuple[str, str] | None]:
     return text, None
 
 
-_UNAVAILABLE = {
-    "no_host": "Claude Code (`claude`) is not on PATH",
-    "unsupported_platform": "page runs need macOS or Linux",
-}
 _MAX_LINE_BYTES = 1_000_000  # a longer line is read in pieces, none of which parses
 _STDERR_TAIL = 500
 
@@ -466,7 +502,12 @@ class Runner:
         if self._run is None:
             return None
         error = self._run["error"]
-        return {**self._run, "steps": list(self._run["steps"]), "error": error and dict(error)}
+        return {
+            **self._run,
+            "selection": dict(self._run["selection"]),
+            "steps": list(self._run["steps"]),
+            "error": error and dict(error),
+        }
 
     def subscribe(
         self, loop: asyncio.AbstractEventLoop
@@ -668,11 +709,16 @@ class Runner:
         self._subscribers.clear()
         return True
 
-    def start(self, kind: str, subject: str, topic_id: int | None, prompt: str) -> dict:
-        claude, reason = availability()
-        if reason:
-            raise RunError(reason, _UNAVAILABLE[reason], 503)
-        assert claude is not None  # availability() gives a path whenever it gives no reason
+    def start(
+        self,
+        kind: str,
+        subject: str,
+        topic_id: int | None,
+        prompt: str,
+        *,
+        selection: RunSelection = _DEFAULT_SELECTION,
+    ) -> dict:
+        provider = resolve_provider(selection)
         with self._lock:
             # The process, not the status: after its result event claude may still be exiting.
             if self._live_locked():
@@ -686,13 +732,25 @@ class Runner:
             stderr = tempfile.TemporaryFile()  # noqa: SIM115 - outlives this block
             try:
                 proc = subprocess.Popen(
-                    build_argv(claude, kind, prompt, self.mcp_url),
+                    build_argv(
+                        provider.executable,
+                        kind,
+                        prompt,
+                        self.mcp_url,
+                        provider.selection,
+                        map_subject=subject if kind == "map" else None,
+                    ),
                     cwd=run_dir,
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
                     stderr=stderr,
                     start_new_session=True,  # its own process group, so Stop reaches children
                 )
+            except OSError as exc:
+                stderr.close()
+                raise RunError(
+                    "host_start_failed", f"Could not start Claude Code: {exc.strerror}", 503
+                ) from exc
             except BaseException:
                 stderr.close()
                 raise
@@ -701,6 +759,8 @@ class Runner:
                 "kind": kind,
                 "subject": subject,
                 "topic_id": topic_id,
+                "selection": provider.selection.model_dump(),
+                "map_written": False,
                 "status": "running",
                 "phase": "starting",
                 "active_tool": None,
@@ -758,7 +818,8 @@ class Runner:
                         # The init event must come first and list the run's tools; anything else
                         # before it is a run whose isolation cannot be shown.
                         is_init = event.get("type") == "system" and event.get("subtype") == "init"
-                        fault = check_init(event) if is_init else None
+                        allowed = MAP_TOOLS if run["kind"] == "map" else None
+                        fault = check_init(event, allowed=allowed) if is_init else None
                         if is_init and fault is None:
                             checked = True
                             phase_ev = tracker.on_init()
@@ -785,6 +846,7 @@ class Runner:
                     with self._lock:
                         if self._run is run and run["status"] == "running":
                             if event.get("type") == "user":
+                                run["map_written"] = steps.map_written
                                 self._apply_steps_locked(run, step_items)
                                 self._apply_tracker_events_locked(run, tracker_events)
                             else:
@@ -792,6 +854,16 @@ class Runner:
                                 self._apply_steps_locked(run, step_items)
                             if event.get("type") == "result":
                                 summary, error = summary_of(event)
+                                if run["kind"] == "map" and not error and not steps.map_written:
+                                    error = (
+                                        ("map_already_exists", "This subject already has a map.")
+                                        if steps.map_conflict
+                                        else (
+                                            "no_map_written",
+                                            "The agent ended without storing a topic map.",
+                                        )
+                                    )
+                                    summary = None
                                 self._settle_locked(
                                     run,
                                     "failed" if error else "done",

@@ -77,6 +77,10 @@ class StaleTopicError(Exception):
     after the caller read the ids. Raised before anything is written."""
 
 
+class FirstMapConflict(Exception):
+    """A first-map write found an existing tree inside the write transaction."""
+
+
 class QuestionConflictError(Exception):
     """Question `index` of an `add_questions` batch repeats a stem on its topic, or would pass
     the topic's limit (`reason` is `duplicate_question` or `bank_full`): another session may
@@ -793,7 +797,7 @@ class SubjectStore:
                 node["subtopics"] = children.get(node["id"], [])
         return children.get(None, [])
 
-    def replace_tree(self, tree: list[TopicWrite]) -> None:
+    def replace_tree(self, tree: list[TopicWrite], *, if_unmapped: bool = False) -> None:
         """One transaction. Every submitted node is written (update by id, else insert)
         before any other topic is deleted, so a subtopic moved out of a dropped parent
         survives the parent's cascade. A kept id that is gone, or a topic holding questions
@@ -802,6 +806,8 @@ class SubjectStore:
         with self._open() as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
             existing = {r["id"] for r in conn.execute("SELECT id FROM topics")}
+            if if_unmapped and existing:
+                raise FirstMapConflict
             kept: set[int] = set()
 
             def write(nodes: list[TopicWrite], parent_id: int | None) -> None:
