@@ -100,9 +100,15 @@ def _run(
     port: int,
     lines: list[str],
     remote: "RemoteRuntime | None" = None,
+    announce: bool = False,
 ) -> None:
-    """Bind sockets, print `lines`, open the page and serve `asgi_app`."""
+    """Bind sockets, print `lines`, open the page and serve `asgi_app`. With `announce`, name
+    this process in start.json while it serves, so a stdio `groundly mcp` forwards to it."""
+    import atexit
+
     import uvicorn
+
+    from groundly.core import startfile
 
     hosts = ["127.0.0.1"]
     if remote is not None:
@@ -121,6 +127,9 @@ def _run(
             where = f"port {port}" if bound_host == "127.0.0.1" else f"{bound_host}:{port}"
             _fail(f"cannot bind {where}: {e.strerror}")
 
+        if announce:
+            startfile.write(port)
+            atexit.register(startfile.remove)  # for an exit that skips the finally
         for line in lines:
             console.print(line, highlight=False, soft_wrap=True)  # a wrapped command will not paste
         _open_browser(f"http://groundly.localhost:{port}/")
@@ -150,6 +159,8 @@ def _run(
         )
         _PageServer(config).run(sockets=sockets)
     finally:
+        if announce:
+            startfile.remove()
         for sock in sockets:
             sock.close()
 
@@ -192,4 +203,5 @@ def start(port: _PORT = 8765, tailscale: _TAILSCALE = None) -> None:
     ]
     if remote is not None:
         lines.extend(_remote_lines(remote))
-    _run(create_app(mcp_app, mcp_url=mcp_url, remote=remote), port, lines, remote=remote)
+    app = create_app(mcp_app, mcp_url=mcp_url, remote=remote)
+    _run(app, port, lines, remote=remote, announce=True)

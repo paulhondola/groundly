@@ -125,6 +125,44 @@ def test_start_binds_loopback_opens_page_and_prints_both_urls(monkeypatch):
     assert "http://127.0.0.1:8765/" in result.output  # fallback when *.localhost won't resolve
 
 
+def _seen_while_serving(monkeypatch) -> list:
+    """Patch the server so each run records what start.json says while it serves."""
+    import uvicorn
+
+    from groundly.core import startfile
+
+    seen: list = []
+    _patch(monkeypatch)
+    monkeypatch.setattr(
+        uvicorn.Server, "run", lambda self, sockets=None: seen.append(startfile.read())
+    )
+    monkeypatch.setattr("atexit.register", lambda *a, **kw: None)
+    return seen
+
+
+def test_start_announces_itself_while_serving_and_cleans_up(monkeypatch):
+    import os
+    from importlib.metadata import version
+
+    from groundly.core import startfile
+    from groundly.core.startfile import StartInfo
+
+    seen = _seen_while_serving(monkeypatch)
+    result = runner.invoke(app, ["start", "--port", "9123"])
+    assert result.exit_code == 0, result.output
+    assert seen == [StartInfo(os.getpid(), 9123, version("groundly"))]
+    assert not startfile.path().exists()
+
+
+def test_serve_writes_no_runfile(monkeypatch):
+    from groundly.core import startfile
+
+    seen = _seen_while_serving(monkeypatch)
+    assert runner.invoke(app, ["serve"]).exit_code == 0
+    assert seen == [None]
+    assert not startfile.path().exists()
+
+
 def test_serve_port_flag(monkeypatch):
     runs, opened = _patch(monkeypatch)
     result = runner.invoke(app, ["serve", "--port", "9123"])
