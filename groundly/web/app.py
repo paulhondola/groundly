@@ -84,7 +84,8 @@ _PAGE = (_WEB / "page.html").read_text(encoding="utf-8")
 # HTML responses only: the browser's own PDF viewer needs the PDF response left unrestricted.
 _CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; "
-    "font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    "font-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; "
+    "frame-ancestors 'none'"
 )
 
 # 20 answers of at most 4000 characters, with room for option ids and JSON escapes.

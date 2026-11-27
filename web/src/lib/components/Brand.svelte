@@ -15,6 +15,7 @@
     className,
   )}
 >
-  <img src="/static/claude-code.svg" alt="" class="h-6 w-6 shrink-0" />
+  <img src="/static/groundly-mark-light.svg" alt="" class="h-6 w-6 shrink-0 dark:hidden" />
+  <img src="/static/groundly-mark-dark.svg" alt="" class="hidden h-6 w-6 shrink-0 dark:block" />
   <span>Groundly</span>
 </a>

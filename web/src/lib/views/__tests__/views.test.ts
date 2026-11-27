@@ -1077,7 +1077,31 @@ describe("createThemeStore", () => {
   afterEach(() => {
     localStorage.clear();
     document.documentElement.classList.remove("dark");
+    document.head.querySelector('meta[name="theme-color"]')?.remove();
     vi.unstubAllGlobals();
+  });
+
+  it("keeps the theme-color meta on the page background so the phone status bar matches", () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation(() => ({
+        matches: false,
+        media: "(prefers-color-scheme: dark)",
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      })),
+    );
+    const meta = document.createElement("meta");
+    meta.name = "theme-color";
+    meta.content = "#0b0d10";
+    document.head.appendChild(meta);
+
+    const store = createThemeStore();
+    expect(meta.content).toBe("#fbfcfd");
+    store.setMode("dark");
+    expect(meta.content).toBe("#0b0d10");
+    store.setMode("light");
+    expect(meta.content).toBe("#fbfcfd");
   });
 
   it("persists mode, toggles dark class, and reacts to system preference changes", () => {

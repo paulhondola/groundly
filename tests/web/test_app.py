@@ -104,6 +104,19 @@ def test_page_routes_serve_html_under_a_self_only_csp(client, seeded):
         assert directives["form-action"] == "'none'"
         assert directives["frame-ancestors"] == "'none'"
         assert "/static/page.js" in r.text and "/static/page.css" in r.text
+        assert directives["manifest-src"] == "'self'"
+        for tag in (
+            '<link rel="icon" href="/static/favicon.ico" sizes="32x32">',
+            '<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">',
+            '<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">',
+            '<link rel="manifest" href="/static/manifest.webmanifest">',
+            '<meta name="apple-mobile-web-app-capable" content="yes">',
+            '<meta name="apple-mobile-web-app-title" content="Groundly">',
+            '<meta name="mobile-web-app-capable" content="yes">',
+            '<meta name="theme-color" content="#0b0d10">',
+        ):
+            assert tag in r.text
+        assert "claude-code.svg" not in r.text
 
 
 def test_page_assets_are_served_with_their_own_types(client, seeded):
@@ -111,6 +124,10 @@ def test_page_assets_are_served_with_their_own_types(client, seeded):
     assert css.status_code == js.status_code == 200
     assert css.headers["content-type"].startswith("text/css")
     assert "javascript" in js.headers["content-type"]
+    manifest = client.get("/static/manifest.webmanifest").headers["content-type"]
+    assert manifest.startswith("application/manifest+json")
+    ico = client.get("/static/favicon.ico").headers["content-type"]
+    assert ico in ("image/x-icon", "image/vnd.microsoft.icon")
     assert client.get("/static/../app.py").status_code == 404
 
 
