@@ -10,6 +10,7 @@ from groundly.core.store import (
     MAX_SUMMARY_CHARS,
     MAX_TITLE_CHARS,
     MAX_TREE_NODES,
+    FirstMapConflict,
     SubjectStore,
     TopicWrite,
 )
@@ -188,20 +189,39 @@ def _label(node, index: int) -> str:
     return title.strip() if isinstance(title, str) and title.strip() else f"#{index + 1}"
 
 
-def submit_tree(store: SubjectStore, tree: list[dict], *, embedder=None, reranker=None) -> dict:
+def _first_map_conflict() -> dict:
+    return {
+        "accepted": False,
+        "rejections": [_rejection([], "map_already_exists", "this subject already has a map")],
+    }
+
+
+def submit_tree(
+    store: SubjectStore,
+    tree: list[dict],
+    *,
+    embedder=None,
+    reranker=None,
+    if_unmapped: bool = False,
+) -> dict:
     """Store `tree` if every node passes, else store nothing and report every failing node.
 
     Structural checks run first and skip the search. Then each node is retrieved on its
     title and summary with the reranker always on (whatever `retrieval.rerank` says), and
     its sources are the hits scoring at least TOPIC_RELEVANCE_CUTOFF."""
-    bank = store.question_ids_by_topic()
-    titles = {
-        n["id"]: n["title"]
-        for big in store.tree(with_sources=False)
-        for n in (big, *big["subtopics"])
-    }
-    held = {topic_id: (titles[topic_id], ids) for topic_id, ids in bank.items()}
-    rejections = _structural_rejections(tree, store.topic_ids(), held)
+    if if_unmapped:
+        if store.topic_ids():
+            return _first_map_conflict()
+        rejections = _structural_rejections(tree, set(), {})
+    else:
+        bank = store.question_ids_by_topic()
+        titles = {
+            n["id"]: n["title"]
+            for big in store.tree(with_sources=False)
+            for n in (big, *big["subtopics"])
+        }
+        held = {topic_id: (titles[topic_id], ids) for topic_id, ids in bank.items()}
+        rejections = _structural_rejections(tree, store.topic_ids(), held)
     if rejections:
         return {"accepted": False, "rejections": rejections}
 
@@ -254,5 +274,8 @@ def submit_tree(store: SubjectStore, tree: list[dict], *, embedder=None, reranke
     writes = convert(tree, [])
     if rejections:
         return {"accepted": False, "rejections": rejections}
-    store.replace_tree(writes)
+    try:
+        store.replace_tree(writes, if_unmapped=if_unmapped)
+    except FirstMapConflict:
+        return _first_map_conflict()
     return {"accepted": True, "tree": _tree_view(store.tree())}

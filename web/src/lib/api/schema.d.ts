@@ -271,7 +271,7 @@ export interface paths {
     put?: never;
     /**
      * Start Run
-     * @description Start one of the two chores. The body carries ids only; the prompt is Groundly's own.
+     * @description Start a fixed course chore with the selected local agent.
      */
     post: operations["startRun"];
     delete?: never;
@@ -597,6 +597,15 @@ export interface components {
       /** Detail */
       detail?: components["schemas"]["ValidationError"][];
     };
+    /** ModelInfo */
+    ModelInfo: {
+      /** Efforts */
+      efforts: string[];
+      /** Id */
+      id: string;
+      /** Label */
+      label: string;
+    };
     /**
      * PairDeviceResponse
      * @description Confirmation returned by POST /api/pair once the session cookie is set.
@@ -621,6 +630,20 @@ export interface components {
       last_seen_at: number;
       /** Peer Ip */
       peer_ip: string;
+    };
+    /** ProviderInfo */
+    ProviderInfo: {
+      /** Default Model */
+      default_model?: string | null;
+      /**
+       * Id
+       * @enum {string}
+       */
+      id: "claude" | "codex";
+      /** Label */
+      label: string;
+      /** Models */
+      models: components["schemas"]["ModelInfo"][] | null;
     };
     /**
      * QuestionOption
@@ -672,6 +695,18 @@ export interface components {
       /** Reason */
       reason: string;
     };
+    /** RunSelection */
+    RunSelection: {
+      /** Effort */
+      effort?: string | null;
+      /** Model */
+      model?: string | null;
+      /**
+       * Provider
+       * @enum {string}
+       */
+      provider: "claude" | "codex";
+    };
     /**
      * RunSnapshot
      * @description In-memory state snapshot of the current or most recent headless page run.
@@ -686,9 +721,15 @@ export interface components {
        * Kind
        * @enum {string}
        */
-      kind: "write" | "grade";
+      kind: "write" | "grade" | "map";
+      /**
+       * Map Written
+       * @default false
+       */
+      map_written: boolean;
       /** Phase */
       phase: ("starting" | "thinking" | "reading" | "writing") | null;
+      selection: components["schemas"]["RunSelection"];
       /** Started At */
       started_at: string;
       /**
@@ -716,6 +757,8 @@ export interface components {
     RunsInfoResponse: {
       /** Available */
       available: boolean;
+      /** Providers */
+      providers: components["schemas"]["ProviderInfo"][];
       /** Reason */
       reason: string | null;
       run: components["schemas"]["RunSnapshot"] | null;
@@ -754,6 +797,8 @@ export interface components {
      * @description One subject entry returned by GET /api/subjects.
      */
     SubjectSummary: {
+      /** Can Map */
+      can_map?: boolean | null;
       /** Error */
       error?: string | null;
       /** Has Tree */
@@ -2075,7 +2120,13 @@ export interface operations {
            * Kind
            * @enum {string}
            */
-          kind: "write" | "grade";
+          kind: "write" | "grade" | "map";
+          /**
+           * @default {
+           *       "provider": "claude"
+           *     }
+           */
+          selection?: components["schemas"]["RunSelection"];
           /** Topic Id */
           topic_id?: number | null;
         };

@@ -306,6 +306,28 @@ async def test_outline_tool_returns_materials_for_a_subject(retrievable_subject)
     assert result.data["tree"] == []
 
 
+async def test_page_map_scope_has_only_four_tools_and_preserves_the_first_map(retrievable_subject):
+    from groundly.mcp.page_map import create_page_map_server
+
+    args = {"subject": "TEST", "tree": _TREE, "if_unmapped": False}
+    async with Client(create_page_map_server("TEST")) as client:
+        assert {tool.name for tool in await client.list_tools()} == {
+            "outline",
+            "get_page",
+            "search",
+            "submit_tree",
+        }
+        assert not await client.list_resource_templates()
+        with pytest.raises(ToolError, match="can only access the selected subject"):
+            await client.call_tool("get_page", {"uri": "groundly://OTHER/lec.pdf#page=1"})
+        with pytest.raises(ToolError, match="unavailable"):
+            await client.call_tool("remove_questions", {"subject": "TEST", "question_ids": [1]})
+        first = await client.call_tool("submit_tree", args)
+        second = await client.call_tool("submit_tree", args)
+    assert first.structured_content["accepted"] is True
+    assert second.structured_content["rejections"][0]["reason"] == "map_already_exists"
+
+
 async def test_submit_tree_tool_stores_an_accepted_tree(retrievable_subject):
     async with Client(mcp) as client:
         result = await client.call_tool("submit_tree", {"subject": "TEST", "tree": _TREE})

@@ -691,6 +691,7 @@ async def test_active_stream_closes_on_session_invalidation(monkeypatch, tmp_pat
         "kind": "write",
         "subject": "PDSS",
         "topic_id": 7,
+        "selection": {"provider": "claude", "model": None, "effort": None},
         "status": "running",
         "phase": "thinking",
         "active_tool": None,

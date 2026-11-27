@@ -9,6 +9,8 @@ Turn a subject's indexed materials into a topic tree of exactly two levels: big 
 
 ## Before you start
 
+For a Groundly page run, the prompt already names the single indexed subject and the page provides the MCP connection. Start at step 3. Map it yourself using the supplied tools. Stop if a map exists or a submission returns `map_already_exists`. If the outline exceeds what the host can read, report that clearly so the student can use the copied prompt in their chat. Finish with the result in the page run.
+
 1. **Check the connection.** If the `outline` and `submit_tree` tools are not available, tell the student to connect Groundly (`claude mcp add --scope user groundly -- groundly mcp` in Claude Code, `codex mcp add groundly -- groundly mcp` in Codex, or `"groundly": {"command": "groundly", "args": ["mcp"]}` under `mcpServers` in `~/.gemini/config/mcp_config.json` in Antigravity), then restart their agent. Stop there.
 2. **Check the subject.** Call `list_subjects` and match the student's wording against `subject` or `title`. If the subject is not listed, ask for the folder holding the materials and run `groundly index <subject> <path>`. A listed subject still needs `groundly index` when the student added materials since. Wait for indexing to finish before mapping.
 

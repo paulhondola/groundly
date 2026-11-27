@@ -119,3 +119,10 @@
 - [ ] **Run the full gates.** At the root run `uv run pytest`, `uv run ruff check .`, `uv run ruff format --check .`, `uv run pyrefly check`, `uv run lint-imports`, and `uv run python -m groundly.web.openapi --check`. In `web/`, run `pnpm run gen:api`, `pnpm run check`, `pnpm test`, and `pnpm run build`. Confirm generated artifacts are committed and reproducible. Run `graphify update .` for the code changes.
 - [ ] **Smoke each enabled provider.** On a disposable indexed course under the student's logged-in CLI, create the first map, write a thin topic's questions, take a test, and grade a written answer. Repeat a run with the remembered selection after reload. Record the CLI versions, the supported platforms tested, and whether both `serve` and `start` routes pass.
 - [ ] **Review and commit.** Run the repo's spec-guardian and security-reviewer checks with particular attention to CLI startup, the read/write boundary, pairing, the first-map race, and preserved question-citation guarantees. Resolve material findings and commit the release docs and remaining verification changes.
+
+## Implementation evidence
+
+- macOS with Claude Code 2.1.318 and a disposable synthetic course. A scoped MCP run stored the first map, a Sonnet run at Low effort wrote ten questions, and a grading run recorded one verdict from a submitted test. A second map launched in Chrome against `groundly start` and committed through the forwarded gate.
+- Chrome at 375 px confirmed the first launch, keyboard selection and dismissal, reduced-motion provider expansion with a synthetic second option, and settings surviving reload.
+- Codex CLI 0.172.0 advertises an ephemeral exec mode. Its generated App Server protocol exposes the MCP server inventory, and `thread/start` can add dynamic tools. The inspected interfaces provided no check for the full effective tool inventory before a turn. The shipped discovery list therefore contains Claude Code.
+- The live smoke used synthetic course material on macOS. The full-size apd run and a Linux provider smoke remain release checks.

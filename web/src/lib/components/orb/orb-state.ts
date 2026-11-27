@@ -20,6 +20,7 @@ export function phaseLabelFor(phase: RunPhase, kind: RunKind, activeTool?: strin
     return "Reading course";
   }
   if (phase === "writing") {
+    if (kind === "map") return "Grouping topics";
     return kind === "grade" ? "Recording verdicts" : "Drafting questions";
   }
   return "Thinking";

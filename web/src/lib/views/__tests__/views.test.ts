@@ -451,6 +451,96 @@ describe("SubjectsView", () => {
     vi.restoreAllMocks();
   });
 
+  it("confirms the first map launch and sends a subsequent action with the saved settings", async () => {
+    queryClient.removeQueries({ queryKey: queryKeys.subjects() });
+    const posted: unknown[] = [];
+    let savedMap = false;
+    globalThis.fetch = vi.fn().mockImplementation(async (request: Request) => {
+      const path = requestPathname(request);
+      if (path === "/api/runs") {
+        return jsonResponse({
+          available: true,
+          providers: [
+            {
+              id: "claude",
+              label: "Claude Code",
+              models: [{ id: "sonnet", label: "Sonnet", efforts: ["high"] }],
+            },
+            { id: "codex", label: "Codex", models: [] },
+          ],
+          reason: null,
+          run: null,
+          target: 10,
+        });
+      }
+      if (path.endsWith("/runs") && request.method === "POST") {
+        const body = await request.json();
+        posted.push(body);
+        savedMap = true;
+        return jsonResponse(
+          {
+            id: posted.length,
+            kind: "map",
+            subject: path.split("/")[3],
+            selection: body.selection,
+            status: "done",
+            summary: "Topic map created.",
+            map_written: true,
+          },
+          202,
+        );
+      }
+      if (path === "/api/subjects") {
+        return jsonResponse([
+          { subject: "one", title: "First course", has_tree: savedMap, can_map: !savedMap },
+          { subject: "two", title: "Second course", has_tree: false, can_map: true },
+          { subject: "empty", title: "Empty course", has_tree: false },
+        ]);
+      }
+      return jsonResponse({ hosts: [], indexing: [], recent: [] });
+    }) as typeof fetch;
+    const instance = mount(QueryHarness, {
+      target: container,
+      props: { client: queryClient, component: SubjectsView, props: {} },
+    });
+    function click(text: string, root: ParentNode = document) {
+      const button = Array.from(root.querySelectorAll("button")).find((candidate) =>
+        candidate.textContent?.trim().startsWith(text),
+      );
+      expect(button).toBeTruthy();
+      button?.click();
+      flushSync();
+    }
+    await vi.waitFor(() => {
+      expect(container.textContent?.match(/Create topic map/g)).toHaveLength(2);
+    });
+    click("Create topic map", container);
+    expect(posted).toHaveLength(0);
+    await vi.waitFor(() =>
+      expect(document.querySelector('[aria-label="Agent configuration"]')).toBeTruthy(),
+    );
+    click("Provider");
+    expect(document.querySelector('[aria-label="Providers"]')?.textContent).toContain("Codex");
+    click("Model");
+    click("Sonnet");
+    click("Effort");
+    click("High");
+    click("Run");
+    await vi.waitFor(() => {
+      expect(posted).toHaveLength(1);
+      expect(container.textContent?.match(/Create topic map/g)).toHaveLength(1);
+    });
+    const expected = {
+      kind: "map",
+      selection: { provider: "claude", model: "sonnet", effort: "high" },
+    };
+    expect(posted[0]).toEqual(expected);
+    click("Create topic map", container);
+    await vi.waitFor(() => expect(posted[1]).toEqual(expected));
+    void unmount(instance);
+    queryClient.removeQueries({ queryKey: queryKeys.subjects() });
+  });
+
   it("renders subjects from GET /api/subjects and caches them in QueryClient", async () => {
     const qc = createTestQueryClient();
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {

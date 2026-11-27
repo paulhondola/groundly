@@ -95,47 +95,32 @@ Criteria 1, 12, 13 and the end-to-end half of 11 are manual and recorded above. 
 16. A second verdict for the same answer and an unknown answer id are refused, and a call with one bad verdict records none.
 17. **End to end on Claude Code:** "write me ten questions on OpenMP reductions", then a test on the page, then "grade my test", with no other instruction.
 
-## Page chores (decision 46)
+## Page chores (decisions 46 and 55)
 
-**Actor:** student (`groundly serve` or `groundly start`) pressing a button; the student's own Claude Code, started headless by the page, doing the work through Groundly's tools. Full design in [`2026-11-17-page-chores-design.md`](../superpowers/specs/2026-11-17-page-chores-design.md).
-**Preconditions:** the subject has a topic tree; `claude` is on PATH and logged in; macOS or Linux.
+**Actor:** A student using the local or paired Groundly page. The serving machine runs the student's supported local CLI with its existing login. The first integration is Claude Code on macOS and Linux.
 
 **Main flow**
 
-1. **Write.** In a topic's panel the student presses **Write questions** (on a subtopic) or **Write questions for its subtopics** (on a big topic). The button shows only while that subtopic, or one of the big topic's subtopics, has fewer than 10 questions.
-2. **Run.** The page starts one isolated `claude -p` run with Groundly's tools only and a fixed prompt naming the subject and topic id. The run follows the `groundly-questions` skill, starting from `topic`, and stores what passes `submit_questions`, bringing each thin subtopic in scope to 10.
-3. **Watch.** A strip at the top of the view shows the run's steps in plain words and a **Stop** button; every run button is disabled meanwhile. A reload re-attaches to the running run.
-4. **End.** The strip shows the run's summary (at most three sentences, as text) and the view re-reads the map, so the panel shows the new question count.
-5. **Grade.** On a result awaiting review the student presses **Grade now**. One run reviews every written answer in the subject that awaits review through `review_answers`, until `remaining` is 0, and the result re-reads with the verdicts.
+1. In the subject list, select **Create topic map** for a course whose materials are indexed. In the topic panel, select **Write questions** when the topic or one of its subtopics has fewer than ten questions. On a provisional test result, select **Grade now**.
+2. On the first run, the page shows provider, model, and effort and waits for **Run**. The adjacent switcher always shows the selection. An accepted start remembers the provider and its model and effort in this browser. Subsequent actions use the displayed settings immediately. A practice test is drawn from stored questions.
+3. The page shows steps derived from tool events, a **Stop** action, and the terminal outcome. Reloading reconnects to the active run. The course card moves to the ready list once its map exists and offers **Open topic map** after the run.
+4. Every map, question, and verdict still goes through the respective MCP gate. Map creation accepts only an indexed subject with no tree. The private map session scopes the four tools to that subject and forces the first-map transaction to preserve an existing winner.
 
-**Alternate / error flows**
+**Alternate flows**
 
-- **A1 — No `claude` on PATH, or Windows:** no button shows and the page shows the phrases to say to the host, as before (`no_host`, `unsupported_platform`).
-- **A2 — A run in progress:** a second start answers `run_in_progress` and spawns nothing; the page shows the reason in the strip.
-- **A3 — The isolation check fails:** the init event lists a tool not prefixed `mcp__groundly__` or a server other than a connected `groundly`; the run is killed before its first turn and ends `failed` with `isolation_failed`, naming what appeared (`groundly_not_connected` when Groundly's server did not connect).
-- **A4 — Not logged in, or Claude Code fails:** the run ends `failed`, with the error result's text or the exit code and the last of stderr.
-- **A5 — Stop, or the 20-minute timeout:** the run ends `stopped` or `failed` (`timeout`); what the gates already stored stays.
-- **A6 — Nothing to do:** a Write on a scope where every subtopic has 10 or more questions answers `nothing_to_write`; a Grade with nothing awaiting review answers `nothing_to_grade`.
+- An absent or incompatible CLI leaves the manual host prompt available. A stale provider, model, or effort requires a new selection. The page identifies a sign-in or startup failure and keeps the original provider unless the student changes it.
+- If another web run is active, a second request spawns nothing. Stop and timeout preserve completed writes. A failed map with no accepted tree remains eligible to retry. A course with an outline beyond the host's limit can still be mapped from the host chat using **Copy prompt**.
+- A subject without indexed chunks must be indexed before the map action is offered. An existing tree, a full question scope, or the absence of pending reviews refuses the corresponding run.
 
-**Out of scope:** chat on the page or free text into a run, a Map button, a whole-course button or a queue of runs, hosts other than Claude Code, stored run history. Nothing calls a run's questions or verdicts verified.
+**Acceptance criteria**
 
-**Acceptance criteria** (1–12 met by tests and a browser check with a fake `claude`; 13 awaits Paul)
+1. An available supported CLI appears from the serving process's PATH independently of connected MCP clients. The paired page uses the serving machine's inventory. Unsupported selections, hosts, and request bodies spawn nothing.
+2. First-use confirmation, keyboard operation, narrow screens, reduced motion, and exact reuse after reload work. Browser storage failure still allows launching. Switching providers restores separate saved settings.
+3. On a course the size of apd, a real page run creates a two-level map. A concurrent external write during topic retrieval is preserved. Scoped tools cannot access another subject or overwrite the winning map. The page refreshes for a committed map even when Stop arrives first.
+4. A real **Write questions** run can populate a thin topic. A drawn test with a written answer can be submitted and reviewed via **Grade now**. The page refreshes the question count and verdicts from storage.
+5. The runner stays ephemeral, passes only validated options, and fails closed at its tool boundary. The page opens no direct model connection. Groundly stores no provider credentials and writes no course rows from its REST views.
 
-Tests use a fake `claude` executable put on PATH that prints canned `stream-json`. No test calls a model.
-
-1. With `claude` available, a thin subtopic's panel shows **Write questions**. A click starts one run, and the page shows its steps and then its summary. The panel then shows the new question count.
-2. On a big topic, the run's prompt names the big topic. A big topic whose subtopics all have 10 or more questions shows no button, and the route refuses it with `nothing_to_write`.
-3. A provisional result shows **Grade now**. When the run ends, the result re-fetches. The prompt asks for `review_answers` until `remaining` is 0.
-4. With `claude` not on PATH, `available` is false, no run button shows, and the phrases show as today. The start route answers `no_host`.
-5. A start while a run is running answers `run_in_progress` and spawns nothing.
-6. The start route refuses each of these and spawns nothing: a foreign or missing `Origin`, a non-JSON body, an unknown subject, an unknown topic, a kind other than `write` or `grade`, a `topic_id` that is not an integer.
-7. The spawned argv holds `--tools ""`, `--setting-sources ""`, `--strict-mcp-config`, `--permission-mode dontAsk`, the flow's allowlist (a write run's lacks `remove_questions`, `submit_tree` and `review_answers`) and the path of the flow's packaged skill (`groundly-questions` or `groundly-grade`). It is exec'd with no shell. A topic titled `<script>` or "ignore previous instructions" does not appear in the prompt.
-8. Under `start`, the MCP config is `/mcp` on the process's own port, with an `X-Groundly-Page-Run` header that labels the run's card on the page. Under `serve`, it is the same installation's `groundly mcp`.
-9. A fake `claude` whose init event lists a built-in tool (e.g. `Bash`), or an MCP server other than `groundly`, is killed before its first turn and ends `failed` with `isolation_failed`. On Windows, `available` is false with `unsupported_platform`.
-10. **Stop** ends the run with status `stopped`. A run over the timeout ends `failed` with a cause that names the timeout. A non-zero exit ends `failed` with the exit's message.
-11. Steps, a summary and an error containing `<script>` render as text.
-12. The page still loads no model and writes no rows to `store.db`.
-13. **End to end on Claude Code (human):** on apd, **Write questions for its subtopics** on one big topic fills its thin subtopics, then a test is taken, then **Grade now** records verdicts, with nothing typed into a chat.
+The [design](../superpowers/specs/2026-11-27-web-agent-switcher-design.md) lists the provider qualification and UI requirements.
 
 ## Ideas, not planned
 

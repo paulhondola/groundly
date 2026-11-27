@@ -1,5 +1,5 @@
 import createClient from "openapi-fetch";
-import type { components, paths } from "./schema.d.ts";
+import type { components, operations, paths } from "./schema.d.ts";
 
 export type SourceItem = components["schemas"]["SourceItem"];
 export type TopicProgress = components["schemas"]["TopicProgress"];
@@ -18,7 +18,9 @@ export type RunKind = RunSnapshot["kind"];
 export type ThoughtChannel = RunSnapshot["thought_channel"];
 export type RunSnapshot = components["schemas"]["RunSnapshot"];
 export type RunsInfo = components["schemas"]["RunsInfoResponse"];
-export type StartRunBody = { kind: "write"; topic_id: number } | { kind: "grade" };
+export type StartRunBody = operations["startRun"]["requestBody"]["content"]["application/json"];
+export type ProviderInfo = components["schemas"]["ProviderInfo"];
+export type RunSelection = components["schemas"]["RunSelection"];
 
 export class ApiError extends Error {
   readonly status: number;

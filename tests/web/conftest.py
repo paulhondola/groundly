@@ -10,6 +10,14 @@ import pytest
 
 _FAKE = """#!{python}
 import json, os, subprocess, sys, time
+if sys.argv[1:] == ["--version"]:
+    print("2.1.318 (Claude Code)")
+    sys.exit(0)
+if sys.argv[1:] == ["--help"]:
+    print("\\n".join(("--model", "--effort", "--print", "--mcp-config", "--strict-mcp-config",
+        "--setting-sources", "--tools", "--allowedTools", "--no-session-persistence",
+        "--include-partial-messages", "--permission-mode", "--output-format", "--verbose")))
+    sys.exit(0)
 with open(os.environ["FAKE_CLAUDE_ARGV"], "a") as f:
     f.write(json.dumps({{"argv": sys.argv, "cwd": os.getcwd()}}) + "\\n")
 if os.environ.get("FAKE_CLAUDE_PIDS"):
