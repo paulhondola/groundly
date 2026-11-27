@@ -112,6 +112,8 @@ def test_page_routes_serve_html_under_a_self_only_csp(client, seeded):
             '<link rel="manifest" href="/static/manifest.webmanifest">',
             '<meta name="apple-mobile-web-app-capable" content="yes">',
             '<meta name="apple-mobile-web-app-title" content="Groundly">',
+            '<meta name="mobile-web-app-capable" content="yes">',
+            '<meta name="theme-color" content="#0b0d10">',
         ):
             assert tag in r.text
         assert "claude-code.svg" not in r.text

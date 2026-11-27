@@ -15,8 +15,26 @@ def test_manifest_is_standalone_dark_and_its_icons_exist():
     sizes = {}
     for icon in m["icons"]:
         assert icon["src"].startswith("/static/") and icon["type"] == "image/png"
-        sizes[icon["sizes"]] = Image.open(STATIC / icon["src"].removeprefix("/static/")).size
-    assert sizes == {"192x192": (192, 192), "512x512": (512, 512)}
+        size = Image.open(STATIC / icon["src"].removeprefix("/static/")).size
+        sizes[icon.get("purpose", "any"), icon["sizes"]] = size
+    assert sizes == {
+        ("any", "192x192"): (192, 192),
+        ("any", "512x512"): (512, 512),
+        ("maskable", "512x512"): (512, 512),
+    }
+
+
+def test_maskable_icon_is_full_bleed_and_the_mark_stays_in_the_safe_zone():
+    img = Image.open(STATIC / "icon-maskable-512.png").convert("RGB")
+    bg = (0x10, 0x13, 0x18)
+    assert img.getpixel((0, 0)) == bg and img.getpixel((511, 511)) == bg
+    # Android masks may cut anything outside the central circle of radius 40%.
+    r2 = (0.4 * 512) ** 2
+    px = img.load()
+    for y in range(512):
+        for x in range(512):
+            if px[x, y] != bg:
+                assert (x - 255.5) ** 2 + (y - 255.5) ** 2 <= r2, (x, y)
 
 
 def test_touch_icon_is_an_opaque_full_bleed_square():

@@ -3,6 +3,9 @@ export type ResolvedTheme = "light" | "dark";
 
 const STORAGE_KEY = "groundly-theme";
 
+// Page backgrounds from app.css (`--background`), so the phone status bar matches the page.
+const THEME_COLOR: Record<ResolvedTheme, string> = { light: "#fbfcfd", dark: "#0b0d10" };
+
 function readStoredMode(): ThemeMode {
   if (typeof window === "undefined") {
     return "system";
@@ -39,6 +42,9 @@ export function createThemeStore() {
       return;
     }
     document.documentElement.classList.toggle("dark", next === "dark");
+    document.head
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute("content", THEME_COLOR[next]);
   }
 
   applyDocumentClass(

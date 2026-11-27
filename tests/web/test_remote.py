@@ -912,6 +912,9 @@ def test_perimeter_restricts_head_to_static_only(monkeypatch, tmp_path):
             "apple-touch-icon.png",
             "favicon.ico",
             "favicon.svg",
+            "icon-maskable-512.png",
+            "groundly-mark-light.svg",
+            "groundly-mark-dark.svg",
         ):
             assert phone.get(f"/static/{name}").status_code == 200
         for path in ("/", "/pair", "/s/PDSS", "/api/auth"):

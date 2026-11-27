@@ -39,6 +39,8 @@ The page still shows the borrowed Claude Code logo (`groundly/web/static/claude-
 
 - Home-screen tile: **dark** (`#101318`, matches favicon) on both platforms. *(Claude's call; user did not pick.)*
 - Standalone mode: on (`display: standalone` in the manifest, `apple-mobile-web-app-capable` + `apple-mobile-web-app-title` meta), `theme_color`/`background_color` `#101318`.
+- Android also gets `icon-maskable-512.png` (`purpose: maskable`): full-bleed tile, mark scaled to 80% so it stays inside the 40% safe-zone circle.
+- Status bar: `<meta name="theme-color">` starts at the dark page background `#0b0d10`; the theme store sets it to the resolved page background (`#fbfcfd` light, `#0b0d10` dark). `mobile-web-app-capable` sits beside the iOS meta so Chrome doesn't warn.
 - Header mark: `groundly-mark-dark.svg` (light strokes) in dark theme, `groundly-mark-light.svg` in light theme, swapped with Tailwind `dark:` classes on two `<img>` tags.
 
 ## Known limits
