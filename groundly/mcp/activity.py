@@ -7,6 +7,7 @@ from fastmcp.server.middleware import Middleware
 
 from groundly.core import activity
 from groundly.core.paths import validate_subject_name
+from groundly.mcp.forward import FORWARD_HEADER
 
 
 def _accepted(tool: str, args: dict, result: dict) -> tuple[str, dict] | None:
@@ -53,6 +54,15 @@ def _subject(args: dict) -> str | None:
     return subject
 
 
+def _forwarded(context) -> bool:
+    """A stdio server forwarded this call and logged it under its own pid already. Display only:
+    any local client could send the header to keep its calls off the page."""
+    ctx = context.fastmcp_context
+    rc = ctx.request_context if ctx else None
+    request = getattr(rc, "request", None)
+    return request is not None and FORWARD_HEADER in request.headers
+
+
 class ActivityMiddleware(Middleware):
     def __init__(self, source: str) -> None:
         self.source = source
@@ -77,15 +87,21 @@ class ActivityMiddleware(Middleware):
         activity.record(self.source, event, client=client, session=session, **kw)
 
     async def on_initialize(self, context, call_next):
+        if _forwarded(context):
+            return await call_next(context)
         info = getattr(getattr(context.message, "params", None), "client_info", None)
         self._log("session_start", context, client=_name(info))
         return await call_next(context)
 
     async def on_discover(self, context, call_next):
+        if _forwarded(context):
+            return await call_next(context)
         self._log("session_start", context)
         return await call_next(context)
 
     async def on_call_tool(self, context, call_next):
+        if _forwarded(context):
+            return await call_next(context)
         name = context.message.name
         tool = name if name in activity.TOOL_ORB else "unknown"
         args = context.message.arguments or {}

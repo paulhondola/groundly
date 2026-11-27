@@ -1087,6 +1087,22 @@ def test_activity_labels_a_page_runs_requests_apart_from_the_hosts(activity_log,
     assert {c for e, _, c, _ in activity_log() if e == "tool_call"} == {client}
 
 
+@pytest.mark.parametrize(
+    ("headers", "events"),
+    [({}, ["tool_call", "tool_end"]), ({"X-Groundly-Forwarded": "1"}, [])],
+)
+def test_activity_skips_forwarded_requests(activity_log, headers, events):
+    # A stdio server that forwarded the call has logged it under its own pid already.
+    from groundly.core import activity
+    from groundly.mcp.activity import ActivityMiddleware
+
+    activity.record("mcp_stdio", "session_start")  # the log exists even when nothing is added
+    (mw,) = [m for m in mcp.middleware if isinstance(m, ActivityMiddleware)]
+    mw.source = "mcp_http"
+    _http_tool_call(headers)
+    assert [e for e, *_ in activity_log() if e != "session_start"] == events
+
+
 def test_activity_keeps_a_session_id_only_where_the_protocol_has_one(activity_log):
     import sqlite3
 

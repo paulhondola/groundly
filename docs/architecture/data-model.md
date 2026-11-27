@@ -14,6 +14,7 @@ The storage backbone for [`overview.md`](overview.md). SQLite (WAL) per subject;
     store.db                 # the knowledge base            → EXPORTED
     progress.db              # the student's private state   → NEVER EXPORTED
   activity.db                # what hosts and index runs are doing → NEVER EXPORTED
+  start.json                 # a running `groundly start`'s pid, port, version (decision 54) → NEVER EXPORTED
 ```
 
 `list_subjects` = a scan of `~/.groundly/*/manifest.json`. No registry database.
