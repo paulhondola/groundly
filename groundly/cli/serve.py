@@ -100,9 +100,15 @@ def _run(
     port: int,
     lines: list[str],
     remote: "RemoteRuntime | None" = None,
+    announce: bool = False,
 ) -> None:
-    """Bind sockets, print `lines`, open the page and serve `asgi_app`."""
+    """Bind sockets, print `lines`, open the page and serve `asgi_app`. With `announce`, name
+    this process in start.json while it serves, so a stdio `groundly mcp` forwards to it."""
+    import atexit
+
     import uvicorn
+
+    from groundly.core import startfile
 
     hosts = ["127.0.0.1"]
     if remote is not None:
@@ -121,6 +127,9 @@ def _run(
             where = f"port {port}" if bound_host == "127.0.0.1" else f"{bound_host}:{port}"
             _fail(f"cannot bind {where}: {e.strerror}")
 
+        if announce:
+            startfile.write(port)
+            atexit.register(startfile.remove)  # for an exit that skips the finally
         for line in lines:
             console.print(line, highlight=False, soft_wrap=True)  # a wrapped command will not paste
         _open_browser(f"http://groundly.localhost:{port}/")
@@ -138,6 +147,10 @@ def _run(
                 runner = getattr(getattr(self.config.app, "state", None), "runner", None)
                 if runner is not None and not self.should_exit:
                     threading.Thread(target=runner.shutdown, daemon=True).start()
+                # uvicorn re-raises SIGTERM with the default handler once shut down, which ends
+                # the process before the finally below; a stdio forward goes local from here.
+                if announce:
+                    startfile.remove()
                 super().handle_exit(sig, frame)
 
         config = uvicorn.Config(
@@ -150,6 +163,8 @@ def _run(
         )
         _PageServer(config).run(sockets=sockets)
     finally:
+        if announce:
+            startfile.remove()
         for sock in sockets:
             sock.close()
 
@@ -172,8 +187,16 @@ def serve(port: _PORT = 8765, tailscale: _TAILSCALE = None) -> None:
 
 
 @app.command()
-def start(port: _PORT = 8765, tailscale: _TAILSCALE = None) -> None:
+def start(
+    port: _PORT = 8765,
+    tailscale: _TAILSCALE = None,
+    http: Annotated[
+        bool,
+        typer.Option("--http", help="Print the URL connect command, for hosts that need one."),
+    ] = False,
+) -> None:
     """Serve the page and the MCP tools (at /mcp) from one process, for every host session."""
+    from groundly.cli.skill import CONNECT_COMMAND
     from groundly.mcp.activity import ActivityMiddleware
     from groundly.mcp.server import mcp
     from groundly.web.app import HOSTS, create_app
@@ -188,8 +211,16 @@ def start(port: _PORT = 8765, tailscale: _TAILSCALE = None) -> None:
     lines = [
         _page_line(port),
         f"MCP:  {mcp_url}",
-        f"Connect Claude Code: claude mcp add --scope user --transport http groundly {mcp_url}",
+        # A stdio host forwards the model tools here while this runs (decision 54), and still
+        # works when it does not; a URL host fails without it.
+        "Connect Claude Code: "
+        + (
+            f"claude mcp add --scope user --transport http groundly {mcp_url}"
+            if http
+            else CONNECT_COMMAND
+        ),
     ]
     if remote is not None:
         lines.extend(_remote_lines(remote))
-    _run(create_app(mcp_app, mcp_url=mcp_url, remote=remote), port, lines, remote=remote)
+    app = create_app(mcp_app, mcp_url=mcp_url, remote=remote)
+    _run(app, port, lines, remote=remote, announce=True)

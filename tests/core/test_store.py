@@ -680,6 +680,31 @@ def test_replace_tree_refuses_to_subdivide_a_topic_that_gained_questions(bank):
     assert s.tree() == before
 
 
+def test_add_questions_rechecks_stems_under_the_write_lock_and_writes_nothing(bank):
+    # The gate checks stems before its slow re-retrieval; another session may have written
+    # the same stem since, so the write checks again and names the offending question.
+    s = bank["store"]
+    s.add_questions(bank["leaf"], [_single([bank["c1"]])])
+    again = _single([bank["c1"]], "  what does a DEADLOCK need? ")
+    with pytest.raises(store.QuestionConflictError) as conflict:
+        s.add_questions(bank["leaf"], [_single([bank["c1"]], "new one"), again])
+    assert (conflict.value.index, conflict.value.reason) == (1, "duplicate_question")
+    with pytest.raises(store.QuestionConflictError) as conflict:
+        s.add_questions(bank["lone"], [_single([bank["c1"]], "x"), _single([bank["c1"]], "X ")])
+    assert (conflict.value.index, conflict.value.reason) == (1, "duplicate_question")
+    assert _counts(s) == {bank["leaf"]: 1}
+
+
+def test_add_questions_rechecks_the_topic_limit_under_the_write_lock(bank, monkeypatch):
+    monkeypatch.setattr(store, "MAX_QUESTIONS_PER_TOPIC", 2)
+    s = bank["store"]
+    s.add_questions(bank["leaf"], [_single([bank["c1"]], "one")])
+    with pytest.raises(store.QuestionConflictError) as conflict:
+        s.add_questions(bank["leaf"], [_single([bank["c1"]], "two"), _single([bank["c1"]], "3")])
+    assert (conflict.value.index, conflict.value.reason) == (1, "bank_full")
+    assert _counts(s) == {bank["leaf"]: 1}
+
+
 def test_add_questions_refuses_a_topic_that_gained_subtopics_or_was_removed(bank):
     s = bank["store"]
     with pytest.raises(StaleTopicError, match="no longer a topic without subtopics"):

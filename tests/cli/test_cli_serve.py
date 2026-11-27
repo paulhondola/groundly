@@ -120,9 +120,84 @@ def test_start_binds_loopback_opens_page_and_prints_both_urls(monkeypatch):
     # one unwrapped line, so it pastes as a command at any terminal width
     # a page run shares this process's model load through its own /mcp
     assert runs[0]["app"].state.runner.mcp_url == "http://127.0.0.1:8765/mcp"
-    connect = "claude mcp add --scope user --transport http groundly http://127.0.0.1:8765/mcp"
-    assert connect in result.output.splitlines()[-1]
+    # stdio is the default connection: it forwards the model tools here while `start` runs
+    assert "claude mcp add --scope user groundly -- groundly mcp" in result.output.splitlines()[-1]
+    assert "--transport http" not in result.output
     assert "http://127.0.0.1:8765/" in result.output  # fallback when *.localhost won't resolve
+
+
+def test_start_http_prints_the_url_connect_command(monkeypatch):
+    # For a host that connects by URL instead of spawning a process.
+    from groundly.cli.app import console
+
+    runs, _ = _patch(monkeypatch)
+    monkeypatch.setattr(console, "width", 60)
+    result = runner.invoke(app, ["start", "--http", "--port", "9123"])
+    assert result.exit_code == 0, result.output
+    assert runs[0]["app"].state.runner.mcp_url == "http://127.0.0.1:9123/mcp"
+    connect = "claude mcp add --scope user --transport http groundly http://127.0.0.1:9123/mcp"
+    assert connect in result.output.splitlines()[-1]
+
+
+def _seen_while_serving(monkeypatch) -> list:
+    """Patch the server so each run records what start.json says while it serves."""
+    import uvicorn
+
+    from groundly.core import startfile
+
+    seen: list = []
+    _patch(monkeypatch)
+    monkeypatch.setattr(
+        uvicorn.Server, "run", lambda self, sockets=None: seen.append(startfile.read())
+    )
+    monkeypatch.setattr("atexit.register", lambda *a, **kw: None)
+    return seen
+
+
+def test_start_announces_itself_while_serving_and_cleans_up(monkeypatch):
+    import os
+    from importlib.metadata import version
+
+    from groundly.core import startfile
+    from groundly.core.startfile import StartInfo
+
+    seen = _seen_while_serving(monkeypatch)
+    result = runner.invoke(app, ["start", "--port", "9123"])
+    assert result.exit_code == 0, result.output
+    assert seen == [StartInfo(os.getpid(), 9123, version("groundly"))]
+    assert not startfile.path().exists()
+
+
+def test_start_withdraws_its_runfile_as_shutdown_begins(monkeypatch):
+    # uvicorn re-raises SIGTERM with the default handler after a graceful shutdown, which ends
+    # the process before any finally or atexit runs; shutdown's start is the last sure point.
+    import signal
+
+    import uvicorn
+
+    from groundly.core import startfile
+
+    _patch(monkeypatch)
+    monkeypatch.setattr("atexit.register", lambda *a, **kw: None)
+    seen = []
+
+    def fake_run(self, sockets=None):
+        seen.append(startfile.path().exists())
+        self.handle_exit(signal.SIGTERM, None)
+        seen.append(startfile.path().exists())
+
+    monkeypatch.setattr(uvicorn.Server, "run", fake_run)
+    assert runner.invoke(app, ["start"]).exit_code == 0
+    assert seen == [True, False]
+
+
+def test_serve_writes_no_runfile(monkeypatch):
+    from groundly.core import startfile
+
+    seen = _seen_while_serving(monkeypatch)
+    assert runner.invoke(app, ["serve"]).exit_code == 0
+    assert seen == [None]
+    assert not startfile.path().exists()
 
 
 def test_serve_port_flag(monkeypatch):

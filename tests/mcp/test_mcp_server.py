@@ -1046,6 +1046,114 @@ async def test_activity_logs_only_valid_subject_names_and_known_tools(activity_l
     assert calls == [(None, {"tool": "search"}), ("TEST", {"tool": "unknown"})]
 
 
+def _http_tool_call(headers: dict) -> None:
+    """One 2026-07-28 request, shaped as Claude Code sends it, to `/mcp` over real HTTP."""
+    from starlette.testclient import TestClient
+
+    meta = {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientInfo": {"name": "claude-code", "version": "2"},
+        "io.modelcontextprotocol/clientCapabilities": {},
+    }
+    body = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "list_subjects", "arguments": {}, "_meta": meta},
+    }
+    base = {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+        "mcp-protocol-version": "2026-07-28",
+        "mcp-method": "tools/call",
+        "mcp-name": "list_subjects",
+    }
+    with TestClient(mcp.http_app(path="/mcp"), base_url="http://127.0.0.1:8765") as http:
+        assert http.post("/mcp", json=body, headers={**base, **headers}).status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("headers", "client"),
+    [({}, "claude-code"), ({"X-Groundly-Page-Run": "1"}, "Groundly page run")],
+)
+def test_activity_labels_a_page_runs_requests_apart_from_the_hosts(activity_log, headers, client):
+    # A page run's `claude` names itself as the student's own sessions do; only the header
+    # its MCP config adds tells its card apart.
+    from groundly.mcp.activity import ActivityMiddleware
+
+    (mw,) = [m for m in mcp.middleware if isinstance(m, ActivityMiddleware)]
+    mw.source = "mcp_http"
+    _http_tool_call(headers)
+    assert {c for e, _, c, _ in activity_log() if e == "tool_call"} == {client}
+
+
+@pytest.mark.parametrize(
+    ("headers", "events"),
+    [({}, ["tool_call", "tool_end"]), ({"X-Groundly-Forwarded": "1"}, [])],
+)
+def test_activity_skips_forwarded_requests(activity_log, headers, events):
+    # A stdio server that forwarded the call has logged it under its own pid already.
+    from groundly.core import activity
+    from groundly.mcp.activity import ActivityMiddleware
+
+    activity.record("mcp_stdio", "session_start")  # the log exists even when nothing is added
+    (mw,) = [m for m in mcp.middleware if isinstance(m, ActivityMiddleware)]
+    mw.source = "mcp_http"
+    _http_tool_call(headers)
+    assert [e for e, *_ in activity_log() if e != "session_start"] == events
+
+
+def test_activity_keeps_a_session_id_only_where_the_protocol_has_one(activity_log):
+    import sqlite3
+
+    from starlette.testclient import TestClient
+
+    from groundly.core.paths import activity_db_path
+    from groundly.mcp.activity import ActivityMiddleware
+
+    (mw,) = [m for m in mcp.middleware if isinstance(m, ActivityMiddleware)]
+    mw.source = "mcp_http"
+    accept = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+    init = {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "codex-mcp-client", "version": "0.172.0"},
+        },
+    }
+    call = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "list_subjects", "arguments": {}},
+    }
+    with TestClient(mcp.http_app(path="/mcp"), base_url="http://127.0.0.1:8765") as http:
+        r = http.post("/mcp", json=init, headers=accept)
+        sid = r.headers["mcp-session-id"]
+        headers = {**accept, "mcp-session-id": sid, "mcp-protocol-version": "2025-06-18"}
+        initialized = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+        assert http.post("/mcp", json=initialized, headers=headers).status_code == 202
+        assert http.post("/mcp", json=call, headers=headers).status_code == 200
+    _http_tool_call({})
+    conn = sqlite3.connect(activity_db_path())
+    try:
+        rows = conn.execute("SELECT client, session FROM events ORDER BY id").fetchall()
+    finally:
+        conn.close()
+    assert {s for c, s in rows if c == "codex-mcp-client"} == {sid}
+    assert {s for c, s in rows if c == "claude-code"} == {None}
+
+
+async def test_server_reports_groundlys_own_version():
+    from importlib.metadata import version
+
+    async with Client(mcp, mode="legacy") as client:
+        assert client.initialize_result.serverInfo.version == version("groundly")
+
+
 def test_activity_client_names_are_capped():
     from groundly.mcp.activity import _name
 

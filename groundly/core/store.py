@@ -77,6 +77,16 @@ class StaleTopicError(Exception):
     after the caller read the ids. Raised before anything is written."""
 
 
+class QuestionConflictError(Exception):
+    """Question `index` of an `add_questions` batch repeats a stem on its topic, or would pass
+    the topic's limit (`reason` is `duplicate_question` or `bank_full`): another session may
+    have written since the gate looked. Raised before anything is written."""
+
+    def __init__(self, index: int, reason: str) -> None:
+        super().__init__(f"question {index}: {reason}")
+        self.index, self.reason = index, reason
+
+
 _BASE_SCHEMA = f"""
 CREATE TABLE materials (
     id INTEGER PRIMARY KEY,
@@ -583,7 +593,9 @@ class SubjectStore:
     def add_questions(self, topic_id: int, questions: list[QuestionWrite]) -> list[int]:
         """One transaction; returns the new ids in the order given. The topic is checked
         again under the write lock: a re-map may have given it subtopics or removed it since
-        the gate looked, and then StaleTopicError is raised and nothing is written."""
+        the gate looked, and then StaleTopicError is raised and nothing is written. So are its
+        stems and its limit, since another session may have filled it: QuestionConflictError
+        names the first question that no longer fits, and nothing is written."""
         ids: list[int] = []
         with self._open() as conn, conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -593,6 +605,17 @@ class SubjectStore:
                 (topic_id,),
             ).fetchone():
                 raise StaleTopicError(f"topic {topic_id} is no longer a topic without subtopics")
+            stored = [
+                r["stem"]
+                for r in conn.execute("SELECT stem FROM questions WHERE topic_id = ?", (topic_id,))
+            ]
+            stems = {text_key(s) for s in stored}
+            for index, q in enumerate(questions):
+                if text_key(q.stem) in stems:
+                    raise QuestionConflictError(index, "duplicate_question")
+                if len(stored) + index >= MAX_QUESTIONS_PER_TOPIC:
+                    raise QuestionConflictError(index, "bank_full")
+                stems.add(text_key(q.stem))
             for q in questions:
                 question_id = conn.execute(
                     "INSERT INTO questions (topic_id, kind, stem, code, reference_answer) "

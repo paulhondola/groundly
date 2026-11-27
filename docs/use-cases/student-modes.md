@@ -130,7 +130,7 @@ Tests use a fake `claude` executable put on PATH that prints canned `stream-json
 5. A start while a run is running answers `run_in_progress` and spawns nothing.
 6. The start route refuses each of these and spawns nothing: a foreign or missing `Origin`, a non-JSON body, an unknown subject, an unknown topic, a kind other than `write` or `grade`, a `topic_id` that is not an integer.
 7. The spawned argv holds `--tools ""`, `--setting-sources ""`, `--strict-mcp-config`, `--permission-mode dontAsk`, the flow's allowlist (a write run's lacks `remove_questions`, `submit_tree` and `review_answers`) and the path of the flow's packaged skill (`groundly-questions` or `groundly-grade`). It is exec'd with no shell. A topic titled `<script>` or "ignore previous instructions" does not appear in the prompt.
-8. Under `start`, the MCP config is `/mcp` on the process's own port. Under `serve`, it is the same installation's `groundly mcp`.
+8. Under `start`, the MCP config is `/mcp` on the process's own port, with an `X-Groundly-Page-Run` header that labels the run's card on the page. Under `serve`, it is the same installation's `groundly mcp`.
 9. A fake `claude` whose init event lists a built-in tool (e.g. `Bash`), or an MCP server other than `groundly`, is killed before its first turn and ends `failed` with `isolation_failed`. On Windows, `available` is false with `unsupported_platform`.
 10. **Stop** ends the run with status `stopped`. A run over the timeout ends `failed` with a cause that names the timeout. A non-zero exit ends `failed` with the exit's message.
 11. Steps, a summary and an error containing `<script>` render as text.

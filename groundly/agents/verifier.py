@@ -16,6 +16,7 @@ from groundly.core.store import (
     MAX_REFERENCE_CHARS,
     MAX_STEM_CHARS,
     QUESTION_SHAPES,
+    QuestionConflictError,
     QuestionWrite,
     SubjectStore,
     text_key,
@@ -38,6 +39,12 @@ REJECTION_REASONS = (
 
 MAX_QUESTIONS_PER_CALL = 50
 VERIFY_TOP_K = 20  # re-retrieval pool checked for membership of a cited chunk id
+
+
+_BANK_DETAIL = {
+    "duplicate_question": "this topic already has a question with the same stem",
+    "bank_full": f"this topic already holds {MAX_QUESTIONS_PER_TOPIC} questions, the limit",
+}
 
 
 class _Reject(Exception):
@@ -190,14 +197,9 @@ def submit_questions(
         try:
             question = _structure(raw)
             if text_key(question.stem) in stems:
-                raise _Reject(
-                    "duplicate_question", "this topic already has a question with the same stem"
-                )
+                raise _Reject("duplicate_question", _BANK_DETAIL["duplicate_question"])
             if stored + len(passed) >= MAX_QUESTIONS_PER_TOPIC:
-                raise _Reject(
-                    "bank_full",
-                    f"this topic already holds {MAX_QUESTIONS_PER_TOPIC} questions, the limit",
-                )
+                raise _Reject("bank_full", _BANK_DETAIL["bank_full"])
             resolved = {row["chunk_id"] for row in store.chunk_details(question.chunk_ids)}
             missing = [cid for cid in question.chunk_ids if cid not in resolved]
             if missing:
@@ -220,8 +222,18 @@ def submit_questions(
         stems.add(text_key(question.stem))
         passed.append((index, question))
 
-    ids = store.add_questions(topic_id, [q for _, q in passed]) if passed else []
+    # The checks above ran before the slow re-retrieval; the write repeats the bank's under
+    # its lock, and a question another session has since made a duplicate or pushed past the
+    # limit is rejected here, the rest written. Each retry drops one, so this ends.
+    while True:
+        try:
+            ids = store.add_questions(topic_id, [q for _, q in passed]) if passed else []
+            break
+        except QuestionConflictError as conflict:
+            index, _ = passed.pop(conflict.index)
+            reason = conflict.reason
+            rejected.append({"index": index, "reason": reason, "detail": _BANK_DETAIL[reason]})
     return {
         "accepted": [{"index": index, "id": qid} for (index, _), qid in zip(passed, ids)],
-        "rejected": rejected,
+        "rejected": sorted(rejected, key=lambda r: r["index"]),
     }

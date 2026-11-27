@@ -43,7 +43,13 @@ def test_availability_names_why_no_run_can_start(monkeypatch):
 
 def test_mcp_config_is_the_running_mcp_or_this_installations_stdio():
     assert runs.mcp_config("http://127.0.0.1:8765/mcp") == {
-        "mcpServers": {"groundly": {"type": "http", "url": "http://127.0.0.1:8765/mcp"}}
+        "mcpServers": {
+            "groundly": {
+                "type": "http",
+                "url": "http://127.0.0.1:8765/mcp",
+                "headers": {"X-Groundly-Page-Run": "1"},
+            }
+        }
     }
     assert runs.mcp_config(None) == {
         "mcpServers": {

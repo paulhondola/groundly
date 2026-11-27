@@ -24,6 +24,8 @@ SOURCES = ("mcp_stdio", "mcp_http", "index")
 ACTIVITY_USER_VERSION = 1
 RETENTION_SECONDS = 7 * 86400
 HTTP_LIVE_SECONDS = 600
+# A discover with no tool call: a `claude mcp list` probe, or a host that has not been asked yet.
+UNUSED_HTTP_LIVE_SECONDS = 60
 LINGER_SECONDS = 5
 RECENT_LIMIT = 20
 
@@ -220,11 +222,11 @@ def snapshot(
 
     # ponytail: pid reuse can make a dead stdio host look alive until the 7-day prune; add a
     # start-time check if it shows up.
-    def live(source: str, pid: int, last_at: float) -> bool:
+    def live(source: str, pid: int, last_at: float, window: float = HTTP_LIVE_SECONDS) -> bool:
         alive = pid_alive is None or pid_alive(pid)
         if source == "mcp_http" or pid_alive is None:
             # An HTTP server outlives its hosts: recency says the host, the pid the server.
-            return alive and now - last_at <= HTTP_LIVE_SECONDS
+            return alive and now - last_at <= window
         return alive
 
     hosts: dict[tuple, dict] = {}
@@ -261,9 +263,9 @@ def snapshot(
             elif event in ("index_done", "index_failed"):
                 runs.pop(pid, None)
             continue
-        # stdio: one host per process. http: per client name, since 2026-07-28 requests each
-        # carry a fresh session id.
-        key = (source, pid, client if source == "mcp_http" else None)
+        # stdio: one host per process. http: one per handshake-era session, else per client
+        # name, since a 2026-07-28 request has no session (the middleware logs none).
+        key = (source, pid, client, session) if source == "mcp_http" else (source, pid)
         if event == "session_end":
             hosts.pop(key, None)
             continue
@@ -291,7 +293,9 @@ def snapshot(
         _log.warning("activity log: skipped %d malformed row(s)", skipped)
     out_hosts = []
     for h in hosts.values():
-        if not live(h["source"], h["pid"], h["last"]):
+        unused = h["source"] == "mcp_http" and h["last_call"] is None
+        window = UNUSED_HTTP_LIVE_SECONDS if unused else HTTP_LIVE_SECONDS
+        if not live(h["source"], h["pid"], h["last"], window):
             continue
         if h["open"]:
             orb = TOOL_ORB.get(h["open"][-1], "reading")

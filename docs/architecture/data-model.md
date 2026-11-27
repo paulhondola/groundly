@@ -14,6 +14,7 @@ The storage backbone for [`overview.md`](overview.md). SQLite (WAL) per subject;
     store.db                 # the knowledge base            → EXPORTED
     progress.db              # the student's private state   → NEVER EXPORTED
   activity.db                # what hosts and index runs are doing → NEVER EXPORTED
+  start.json                 # a running `groundly start`'s pid, port, version (decision 54) → NEVER EXPORTED
 ```
 
 `list_subjects` = a scan of `~/.groundly/*/manifest.json`. No registry database.
@@ -43,7 +44,7 @@ Two tables at `PRAGMA user_version = 2` (decision 44): `attempts` (one per submi
 
 ## activity.db (never exported)
 
-One machine-wide table, `events` (`at`, `pid`, `source` in `mcp_stdio`/`mcp_http`/`index`, `session`, `client`, `subject`, `event`, a small JSON `detail`), at `PRAGMA user_version = 1`, mode `0600` (tightened back on write if loosened), created on first write (decision 53). The MCP middleware and `groundly index` append to it, best-effort; the page reads it for the host card, the orb, indexing progress and recent results. It holds no course text: valid subject names, Groundly's own tool names, counts, file names, an index run's failure message and the host's self-reported name (capped). Rows older than 7 days are pruned when a session or index run starts. Export and import never read it.
+One machine-wide table, `events` (`at`, `pid`, `source` in `mcp_stdio`/`mcp_http`/`index`, `session`, `client`, `subject`, `event`, a small JSON `detail`), at `PRAGMA user_version = 1`, mode `0600` (tightened back on write if loosened), created on first write (decision 53). The MCP middleware and `groundly index` append to it, best-effort; the page reads it for the host card, the orb, indexing progress and recent results. It holds no course text: valid subject names, Groundly's own tool names, counts, file names, an index run's failure message and the host's self-reported name (capped), or `Groundly page run` for a page run's requests. Rows older than 7 days are pruned when a session or index run starts. Export and import never read it.
 
 ## manifest.json — the interchange contract
 
@@ -75,5 +76,6 @@ Semantics: vectors transfer **as-is only on exact embedding match** (model + rev
 
 - Unique `(subject) file sha-256` — duplicate rejection.
 - Stored questions must carry 1 to 5 chunk id FKs that resolve — enforced at the question gate, by FK, and by the trigger that deletes a question with its last citation.
+- One stem per topic (compared trimmed and case-folded, which SQLite's ASCII-only `lower()` cannot express) and at most 200 questions per topic: app code, checked by the question gate and again by `add_questions` under its `BEGIN IMMEDIATE` write lock, the only place a question is inserted.
 - Topic sources are `topic_citations` FKs to chunks; the topic gate writes only ids it got back from its own search. `AUTOINCREMENT` on `chunks.id` and `topics.id` keeps a deleted id from being reused, so a stored citation can never come to mean a different chunk.
 - `PRAGMA user_version` checked on open; refuse to write to a newer schema than the tool understands.

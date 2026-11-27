@@ -73,7 +73,7 @@ Everything needs only the local models: no path of Groundly's reaches a provider
 | Mode | Process | Lifecycle |
 |---|---|---|
 | CLI verbs | `groundly index/search/import/export/...` | one-shot, core in-process, exits |
-| MCP stdio | `groundly mcp` | **spawned and killed by the host agent** |
+| MCP stdio | `groundly mcp` | **spawned and killed by the host agent**; sends `search`, `submit_tree` and `submit_questions` to a running `groundly start` (found through `start.json`) and serves them itself when there is none (decision 54) |
 | Optional HTTP | `groundly mcp --http` | user-run; MCP over Streamable HTTP; binds **127.0.0.1 only**; exists so multiple hosts share one bge-m3 load |
 | Page + HTTP MCP | `groundly start` | user-run; one process on port 8765 by default. The page and `/mcp` listen on loopback. When Tailscale is enabled, paired devices can also open the page on its Tailscale IPv4 address. MCP stays on loopback and host sessions share one model load (decisions 45, 52) |
 | Topic-tree page | `groundly serve` | user-run; FastAPI on uvicorn (`docs_url=None`), loopback by default with an optional paired Tailscale listener (decision 52), all subjects from one process, reads per request, serving the committed Svelte 5 SPA (`groundly/web/static/page.{js,css}`); **loads no model and writes no rows to `store.db`**; it saves submitted attempts to `progress.db` through `agents/quiz.py` and manages device sessions in the private, machine-wide `remote.db`; it may start and stream one page run (below) |
