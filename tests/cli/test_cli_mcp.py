@@ -33,6 +33,28 @@ def test_mcp_verb_registered_and_runs_the_server(monkeypatch):
     assert calls == [True]
 
 
+def _middleware_after(args, monkeypatch) -> list[str]:
+    from fastmcp import FastMCP
+
+    from groundly.mcp.server import mcp
+
+    monkeypatch.setattr(FastMCP, "run", lambda self, **kw: None)
+    assert runner.invoke(app, args).exit_code == 0
+    return [type(m).__name__ for m in mcp.middleware]
+
+
+def test_stdio_mcp_forwards_model_tools(monkeypatch):
+    # Activity outside forwarding: the stdio server logs a forwarded call itself.
+    names = _middleware_after(["mcp"], monkeypatch)
+    assert names[-2:] == ["ActivityMiddleware", "ForwardMiddleware"]
+
+
+def test_http_mcp_does_not_forward(monkeypatch):
+    names = _middleware_after(["mcp", "--http"], monkeypatch)
+    assert "ForwardMiddleware" not in names
+    assert names[-1] == "ActivityMiddleware"
+
+
 def test_mcp_http_binds_loopback_with_origin_protection(monkeypatch):
     """`--http` passes the exact production kwargs to run(): loopback host and DNS-rebinding
     protection (tests/mcp/test_mcp_server.py exercises the ASGI app itself)."""

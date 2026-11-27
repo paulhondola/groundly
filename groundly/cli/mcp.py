@@ -48,6 +48,10 @@ def mcp(
 
     mcp_server.add_middleware(ActivityMiddleware("mcp_http" if http else "mcp_stdio"))
     if not http:
+        from groundly.mcp.forward import ForwardMiddleware
+
+        # Inside activity, so this process logs a forwarded call and `start` skips it.
+        mcp_server.add_middleware(ForwardMiddleware())
         atexit.register(activity.record, "mcp_stdio", "session_end")
         mcp_server.run()
         return
