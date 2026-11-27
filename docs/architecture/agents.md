@@ -53,6 +53,8 @@ A source cannot be invented or be a real-but-wrong slide, because the host never
 3. **Citations resolve** — 1 to 5 chunk ids, each naming a chunk in this subject; unresolvable ids are named in the rejection. The `question_citations` FK enforces it a second time, and a question that loses its last citation is deleted by a trigger.
 4. **Answerable by re-retrieval** — re-retrieving the stem, its code and the correct options (or the reference answer) must surface at least one cited chunk within `VERIFY_TOP_K` (20).
 
+The write is one transaction that repeats the stem and limit checks under the write lock (`QuestionConflictError`, raised before anything is written): another session may have stored the same stem or filled the topic during the re-retrieval. That question is rejected with the same reason (`duplicate_question` or `bank_full`) and the rest are written, so two hosts filling one topic at once never store a stem twice or pass 200. As for a tree, a re-map that gave the topic subtopics or removed it meanwhile fails the write (`StaleTopicError`).
+
 **The gate shows a question is well formed and about its cited chunks, not that its answer key is right**: that needs a model Groundly does not have, so nothing may call a key verified. The page may reveal a choice question's key before its test is submitted (decision 53's check route): that reads the stored key and writes nothing, and the answer counts only with the submitted attempt. A wrong question leaves the bank through `remove_questions`. Verification is **zero-key**: it touches only the local embedder.
 
 A re-map cannot strand questions: `submit_tree` rejects, before any search, a tree that leaves out or subdivides a topic holding questions (`topic_has_questions`).

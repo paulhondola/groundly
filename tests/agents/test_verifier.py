@@ -8,7 +8,7 @@ from groundly.agents import verifier as verifier_mod
 from groundly.agents.verifier import REJECTION_REASONS, submit_questions
 from groundly.core.manifest import EMBEDDING_DIM
 from groundly.core.paths import subject_dir
-from groundly.core.store import SubjectStore, TopicWrite
+from groundly.core.store import QuestionWrite, SubjectStore, TopicWrite
 
 
 def _counts(store) -> dict[int, int]:
@@ -276,6 +276,42 @@ def test_items_past_the_topic_limit_are_bank_full(gate, monkeypatch):
     result = _submit(store, leaf, [SINGLE, MULTIPLE])
     assert [a["index"] for a in result["accepted"]] == [0]
     assert [(r["index"], r["reason"]) for r in result["rejected"]] == [(1, "bank_full")]
+
+
+class _RacingEmbedder(AlignedEmbedder):
+    """Another session's write landing while this gate is mid-retrieval: after the gate has
+    read the topic's stems and count, before its own write takes the lock."""
+
+    def __init__(self, store, leaf, stems):
+        aligned = _chunk1_embedder()
+        super().__init__(aligned.dense, aligned.sparse)
+        self.store, self.leaf, self.stems = store, leaf, list(stems)
+
+    def encode(self, texts):
+        if self.stems:
+            stem = self.stems.pop(0)
+            q = QuestionWrite("single", stem, None, None, [("a", True), ("b", False)], [1])
+            self.store.add_questions(self.leaf, [q])
+        return super().encode(texts)
+
+
+def test_a_duplicate_stored_by_a_concurrent_session_is_rejected_not_stored_twice(gate):
+    store, leaf, _ = gate
+    racing = _RacingEmbedder(store, leaf, [SINGLE["stem"]])
+    result = submit_questions(store, leaf, [SINGLE, OPEN], embedder=racing)
+    assert [a["index"] for a in result["accepted"]] == [1]
+    assert [(r["index"], r["reason"]) for r in result["rejected"]] == [(0, "duplicate_question")]
+    assert sorted(store.question_stems(leaf)) == sorted([SINGLE["stem"], OPEN["stem"]])
+
+
+def test_a_bank_filled_by_a_concurrent_session_is_bank_full(gate, monkeypatch):
+    monkeypatch.setattr("groundly.core.store.MAX_QUESTIONS_PER_TOPIC", 2)
+    store, leaf, _ = gate
+    racing = _RacingEmbedder(store, leaf, ["Someone else's question?"])
+    result = submit_questions(store, leaf, [SINGLE, OPEN], embedder=racing)
+    assert [a["index"] for a in result["accepted"]] == [0]
+    assert [(r["index"], r["reason"]) for r in result["rejected"]] == [(1, "bank_full")]
+    assert _counts(store) == {leaf: 2}
 
 
 class _NoModel:
