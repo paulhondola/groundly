@@ -5,6 +5,7 @@ fast and bge-m3/torch load on first use.
 """
 
 from contextlib import contextmanager
+from importlib.metadata import version as _package_version
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ResourceError, ToolError
@@ -22,7 +23,7 @@ and page."""
 Never rank one tool above another here: a host pointed at a tool it was not given falls
 back to answering from memory (decision 31)."""
 
-mcp = FastMCP("groundly", instructions=SERVER_INSTRUCTIONS)
+mcp = FastMCP("groundly", instructions=SERVER_INSTRUCTIONS, version=_package_version("groundly"))
 
 
 def _citation_uri(subject: str, filename: str, page: int | None) -> str:

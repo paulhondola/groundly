@@ -63,7 +63,8 @@ def availability() -> tuple[str | None, str | None]:
 def mcp_config(mcp_url: str | None) -> dict:
     """Groundly only: the running process's /mcp under `start`, else this installation's stdio."""
     if mcp_url:
-        server = {"type": "http", "url": mcp_url}
+        # The header labels the run's own card on the page (groundly/mcp/activity.py).
+        server = {"type": "http", "url": mcp_url, "headers": {"X-Groundly-Page-Run": "1"}}
     else:
         # -P: the run directory never lands on sys.path, so nothing there shadows groundly
         server = {"command": sys.executable, "args": ["-P", "-m", "groundly", "mcp"]}

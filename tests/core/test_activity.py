@@ -60,29 +60,39 @@ def test_stdio_host_is_live_while_its_pid_is(db):
 
 
 def test_http_host_expires_after_ten_minutes(db):
-    rec(db, "mcp_http", "session_start", T0, session="s1", client="codex")
-    rec(
-        db,
-        "mcp_http",
-        "tool_call",
-        T0 + 10,
-        session="s2",
-        client="codex",
-        detail={"tool": "search"},
-    )
-    rec(
-        db, "mcp_http", "tool_end", T0 + 11, session="s3", client="codex", detail={"tool": "search"}
-    )
+    rec(db, "mcp_http", "session_start", T0, client="claude-code")
+    rec(db, "mcp_http", "tool_call", T0 + 10, client="claude-code", detail={"tool": "search"})
+    rec(db, "mcp_http", "tool_end", T0 + 11, client="claude-code", detail={"tool": "search"})
     assert snap(db, T0 + 11 + activity.HTTP_LIVE_SECONDS)["hosts"]
     assert snap(db, T0 + 12 + activity.HTTP_LIVE_SECONDS)["hosts"] == []
 
 
-def test_http_hosts_are_one_per_client_whatever_the_session_ids(db):
-    # 2026-07-28 requests each get a new session id; only the client name is stable.
-    for i, client in enumerate(["claude-code", "codex", "claude-code"]):
-        rec(db, "mcp_http", "tool_call", T0 + i, session=f"s{i}", client=client,
+def test_http_host_that_never_called_a_tool_expires_after_a_minute(db):
+    # `claude mcp list` probes /mcp with a discover and leaves; nothing tells it from a host
+    # that connected and is idle, so neither holds a card for the full window.
+    rec(db, "mcp_http", "session_start", T0, client="claude-code")
+    assert snap(db, T0 + activity.UNUSED_HTTP_LIVE_SECONDS)["hosts"]
+    assert snap(db, T0 + 1 + activity.UNUSED_HTTP_LIVE_SECONDS)["hosts"] == []
+
+
+def test_stdio_host_that_never_called_a_tool_stays_while_its_pid_lives(db):
+    rec(db, "mcp_stdio", "session_start", T0, client="claude-code")
+    assert snap(db, T0 + 1 + activity.HTTP_LIVE_SECONDS)["hosts"]
+
+
+def test_sessionless_http_hosts_are_one_per_client(db):
+    # 2026-07-28 requests carry no session, so only the client name is stable.
+    for i, client in enumerate(["claude-code", "other", "claude-code"]):
+        rec(db, "mcp_http", "tool_call", T0 + i, client=client, detail={"tool": "search"})
+    assert sorted(h["client"] for h in snap(db, T0 + 3)["hosts"]) == ["claude-code", "other"]
+
+
+def test_handshake_era_http_sessions_are_one_host_each(db):
+    # Codex holds an `mcp-session-id` for its whole life, so two of its sessions are two hosts.
+    for i, session in enumerate(["a", "b", "a"]):
+        rec(db, "mcp_http", "tool_call", T0 + i, session=session, client="codex-mcp-client",
             detail={"tool": "search"})  # fmt: skip
-    assert sorted(h["client"] for h in snap(db, T0 + 3)["hosts"]) == ["claude-code", "codex"]
+    assert [h["client"] for h in snap(db, T0 + 3)["hosts"]] == ["codex-mcp-client"] * 2
 
 
 def test_session_end_removes_the_host(db):

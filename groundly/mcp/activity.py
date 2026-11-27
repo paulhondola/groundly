@@ -25,6 +25,14 @@ def _accepted(tool: str, args: dict, result: dict) -> tuple[str, dict] | None:
 
 
 _CLIENT_INFO = "io.modelcontextprotocol/clientInfo"
+# A page run's `claude` reports the same client name as the student's own sessions, and
+# 2026-07-28 requests carry no session, so its MCP config adds this header (web/runs.py).
+# Display only: any local client could send it.
+PAGE_RUN_HEADER = "x-groundly-page-run"
+PAGE_RUN_CLIENT = "Groundly page run"
+# The last handshake-era revision: up to it a connection keeps one session id for its life
+# (Codex); from 2026-07-28 every request gets a fresh one (Claude Code), which names nothing.
+_LAST_HANDSHAKE_ERA = "2025-11-25"
 
 
 def _name(info) -> str | None:
@@ -50,8 +58,8 @@ class ActivityMiddleware(Middleware):
         self.source = source
 
     def _log(self, event: str, context, *, client: str | None = None, **kw) -> None:
-        """A 2026-07-28 request names its client in `_meta` and gets a fresh session id each
-        time; a handshake-era one names it once, kept on its session's client params."""
+        """A 2026-07-28 request names its client in `_meta` and has no session; a handshake-era
+        one names it once, kept on its session's client params, and keeps its session id."""
         ctx = context.fastmcp_context
         rc = ctx.request_context if ctx else None
         session = None
@@ -60,7 +68,12 @@ class ActivityMiddleware(Middleware):
             if info is None:
                 info = getattr(getattr(rc.session, "client_params", None), "client_info", None)
             client = client or _name(info)
-            session = ctx.session_id if self.source == "mcp_http" else None
+            if self.source == "mcp_http":
+                if rc.protocol_version <= _LAST_HANDSHAKE_ERA:
+                    session = ctx.session_id
+                request = getattr(rc, "request", None)
+                if request is not None and PAGE_RUN_HEADER in request.headers:
+                    client = PAGE_RUN_CLIENT
         activity.record(self.source, event, client=client, session=session, **kw)
 
     async def on_initialize(self, context, call_next):
