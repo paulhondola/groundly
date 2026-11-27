@@ -23,6 +23,9 @@ from groundly.core import startfile
 FORWARDED_TOOLS = frozenset({"search", "submit_tree", "submit_questions"})
 FORWARD_HEADER = "x-groundly-forwarded"
 STOPPED_MESSAGE = "groundly start stopped during the call — retry it"
+# A `start` that accepts connections but never answers (stopped with Ctrl-Z) is not reachable;
+# only the handshake is bounded, the call itself keeps no read timeout.
+HANDSHAKE_TIMEOUT = 5.0
 
 _log = logging.getLogger(__name__)
 
@@ -51,7 +54,7 @@ class ForwardMiddleware(Middleware):
             headers={FORWARD_HEADER: "1"},
             httpx_client_factory=_no_read_timeout,
         )
-        client = Client(transport)
+        client = Client(transport, init_timeout=HANDSHAKE_TIMEOUT)
         try:
             await client.__aenter__()
         except Exception as exc:  # noqa: BLE001 - nothing was sent: serve it here

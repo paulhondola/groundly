@@ -213,3 +213,17 @@ async def test_windows_never_forwards(local, serve, monkeypatch):
     monkeypatch.setattr(startfile, "_WINDOWS", True)
     result = await _call(local, "search", SEARCH)
     assert result.structured_content == {"result": [{"from": "local"}]}
+
+
+async def test_unresponsive_start_runs_locally(local, monkeypatch):
+    # A stopped `start` (Ctrl-Z) still accepts connections but never answers the handshake;
+    # nothing was sent, so the call is served here instead of hanging.
+    import socket
+
+    monkeypatch.setattr("groundly.mcp.forward.HANDSHAKE_TIMEOUT", 0.5)
+    with socket.socket() as mute:
+        mute.bind(("127.0.0.1", 0))
+        mute.listen()
+        _announce(mute.getsockname()[1])
+        result = await _call(local, "search", SEARCH)
+    assert result.structured_content == {"result": [{"from": "local"}]}

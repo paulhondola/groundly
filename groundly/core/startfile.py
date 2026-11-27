@@ -1,11 +1,13 @@
 """start.json: a running `groundly start` announces its pid, port and version here, so a stdio
-`groundly mcp` can forward model calls to it. Only the student's own account can write their home,
-so the port it names is their `start`'s, never another local user's. Private local state: no
+`groundly mcp` can forward model calls to it. It is trusted only as a small regular file owned by
+this account that no one else can write, so the port it names is the student's own `start`'s even
+when GROUNDLY_HOME sits in a directory another account can write into. Private local state: no
 course text, outside `subjects/`, never exported. Windows neither writes nor trusts it (no pid
 liveness check there)."""
 
 import json
 import os
+import stat
 import tempfile
 from dataclasses import dataclass
 from importlib.metadata import version
@@ -52,17 +54,41 @@ def write(port: int) -> None:
         raise
 
 
-def _load() -> StartInfo | None:
+_MAX_BYTES = 4096
+_MAX_PID = 2**31 - 1
+
+
+def _text() -> str | None:
+    """The file's text when it is a small regular file of this account's that no one else can
+    write: GROUNDLY_HOME may point at a directory another account can write into."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
     try:
-        data = json.loads(path().read_text())
-    except (OSError, ValueError):
+        fd = os.open(path(), flags)
+    except OSError:
+        return None
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o022:
+            return None
+        raw = f.read(_MAX_BYTES + 1)
+    return raw.decode("utf-8", "replace") if len(raw) <= _MAX_BYTES else None
+
+
+def _load() -> StartInfo | None:
+    text = _text()
+    if text is None:
+        return None
+    try:
+        data = json.loads(text)
+    except ValueError:
         return None
     if not isinstance(data, dict):
         return None
     pid, port, ver = data.get("pid"), data.get("port"), data.get("version")
     if type(pid) is not int or type(port) is not int or not isinstance(ver, str):
         return None
-    if not 1 <= port <= 65535:
+    # pid 0 and -1 name a group (os.kill succeeds on them); a huge one overflows.
+    if not 1 <= port <= 65535 or not 1 <= pid <= _MAX_PID:
         return None
     return StartInfo(pid, port, ver)
 

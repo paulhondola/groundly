@@ -103,7 +103,7 @@ Then run `groundly skill install` (it installs the three skills to `~/.gemini/co
 
 ## Several sessions: `groundly start`
 
-Each stdio connection spawns its own Groundly, and each loads the models on its first search. When several Claude Code sessions use Groundly at once (say, one per subject), run one process for all of them instead:
+Each stdio connection spawns its own Groundly. While `groundly start` runs, each of those sends the tools that need the models (`search`, `submit_tree`, `submit_questions`) to it, so the models load once however many sessions and hosts are open; without `start`, each loads them on its first search (decision 54). When several sessions use Groundly at once (say, one per subject), run it:
 
 ```sh
 groundly start                   # page at http://groundly.localhost:8765/, MCP at http://127.0.0.1:8765/mcp
@@ -115,7 +115,7 @@ It binds 127.0.0.1 only, opens the page, and prints the connect command:
 claude mcp add --scope user --transport http groundly http://127.0.0.1:8765/mcp
 ```
 
-Keep it running while you work; the tools fail while it is stopped. If the page's `groundly.localhost` address does not open, use the printed `127.0.0.1` one. The MCP URL uses the IP on purpose: Claude Code looks names up through the operating system, which on some Linux setups asks outside DNS about `*.localhost`.
+Hosts registered over stdio need no change. A host you connect by URL instead must keep `start` running while you work: its tools fail while it is stopped. If the page's `groundly.localhost` address does not open, use the printed `127.0.0.1` one. The MCP URL uses the IP on purpose: Claude Code looks names up through the operating system, which on some Linux setups asks outside DNS about `*.localhost`.
 
 ## HTTP transport (`groundly mcp --http`)
 
